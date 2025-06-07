@@ -11,7 +11,7 @@ import base64
 # Initialize the Dash app with Bootstrap
 app = dash.Dash(
     __name__,
-    suppress_callback_exceptions=True,
+    # suppress_callback_exceptions=True,
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
     external_stylesheets=[
         dbc.themes.BOOTSTRAP,
@@ -80,6 +80,23 @@ app.layout = html.Div(
             is_open=False,
             style={"position": "fixed", "top": 66, "right": 10, "width": 350},
             duration=1500,  # Duration in milliseconds (0.5 seconds)
+        ),
+        # Store for config file name
+        dcc.Store(id="config-file-name", data=""),
+        # Modal for viewing config JSON
+        dbc.Modal(
+            [
+                dbc.ModalHeader("Current Configuration JSON"),
+                dbc.ModalBody(
+                    html.Pre(id="config-json-view", style={"maxHeight": "60vh", "overflowY": "auto"})
+                ),
+                dbc.ModalFooter(
+                    dbc.Button("Close", id="close-config-json-modal", className="ml-auto")
+                ),
+            ],
+            id="config-json-modal",
+            is_open=False,
+            size="lg",
         ),
         # Add Reactor Modal
         dbc.Modal(
@@ -292,26 +309,8 @@ app.layout = html.Div(
                                 dbc.CardHeader("Edit Network"),
                                 dbc.CardBody(
                                     [
-                                        dcc.Upload(
-                                            id="upload-config",
-                                            children=html.Div(
-                                                [
-                                                    "Drop or ",
-                                                    html.A("Select a Config File"),
-                                                ]
-                                            ),
-                                            style={
-                                                "width": "100%",
-                                                "height": "60px",
-                                                "lineHeight": "60px",
-                                                "borderWidth": "1px",
-                                                "borderStyle": "dashed",
-                                                "borderRadius": "5px",
-                                                "textAlign": "center",
-                                                "margin": "10px 0",
-                                            },
-                                            multiple=False,
-                                        ),
+                                        # Conditional display: upload or file name + X
+                                        html.Div(id="config-upload-area"),
                                         dbc.Button(
                                             "Add Reactor",
                                             id="open-reactor-modal",
@@ -324,16 +323,6 @@ app.layout = html.Div(
                                             color="primary",
                                             className="mb-2 w-100",
                                         ),
-                                    ]
-                                ),
-                            ],
-                            className="mb-3",
-                        ),
-                        dbc.Card(
-                            [
-                                dbc.CardHeader("Simulate"),
-                                dbc.CardBody(
-                                    [
                                         dbc.Button(
                                             "Run Simulation",
                                             id="run-simulation",
@@ -451,6 +440,12 @@ app.layout = html.Div(
         html.Div(
             id="initialization-trigger", children="init", style={"display": "none"}
         ),
+        # Add hidden dummy elements for dynamic callback IDs
+        html.Div([
+            html.Button("✕", id="delete-config-file", style={"display": "none"}),
+            html.Span("", id="config-file-name-span", style={"display": "none"}),
+            dcc.Upload(id="upload-config", style={"display": "none"}),
+        ], style={"display": "none"}),
     ]
 )
 
@@ -611,29 +606,112 @@ def add_mfc(n_clicks, mfc_id, source, target, flow_rate, config):
     return config, True, f"Added MFC {mfc_id} from {source} to {target}"
 
 
-# Callback to handle file upload
+# Callback to render the config upload area
+@app.callback(
+    Output("config-upload-area", "children"),
+    [Input("config-file-name", "data")],
+)
+def render_config_upload_area(file_name):
+    if file_name:
+        return html.Div([
+            html.Span(
+                file_name,
+                id="config-file-name-span",
+                style={"cursor": "pointer", "fontWeight": "bold", "marginRight": 10},
+                n_clicks=0,
+            ),
+            html.Button(
+                "✕",
+                id="delete-config-file",
+                n_clicks=0,
+                style={"color": "red", "border": "none", "background": "none", "fontSize": 18, "cursor": "pointer"}
+            ),
+        ], style={"display": "flex", "alignItems": "center", "marginBottom": 10})
+    else:
+        return dcc.Upload(
+            id="upload-config",
+            children=html.Div([
+                "Drop or ", html.A("Select Config File")
+            ]),
+            style={
+                "width": "100%",
+                "height": "60px",
+                "lineHeight": "60px",
+                "borderWidth": "1px",
+                "borderStyle": "dashed",
+                "borderRadius": "5px",
+                "textAlign": "center",
+                "margin": "10px 0",
+            },
+            multiple=False,
+        )
+
+
+# Callback to handle config upload and delete
 @app.callback(
     [
         Output("current-config", "data"),
+        Output("config-file-name", "data"),
         Output("notification-toast", "is_open"),
         Output("notification-toast", "children"),
     ],
-    Input("upload-config", "contents"),
-    State("upload-config", "filename"),
+    [
+        Input("upload-config", "contents"),
+        Input("delete-config-file", "n_clicks"),
+    ],
+    [
+        State("upload-config", "filename"),
+    ],
+    prevent_initial_call=True,
 )
-def update_config(contents, filename):
-    if contents is None:
-        return initial_config, False, ""
+def handle_config_upload_delete(upload_contents, delete_n_clicks, upload_filename):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
 
-    # Parse the uploaded file
-    content_type, content_string = contents.split(",")
-    try:
-        decoded_string = base64.b64decode(content_string).decode("utf-8")
-        decoded = json.loads(decoded_string)
-        return decoded, True, f"✅ Configuration loaded from {filename}"
-    except Exception as e:
-        print(f"Error processing uploaded file: {e}")
-        return dash.no_update, True, f"🔴 Error: Could not parse file {filename}."
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    if trigger == "upload-config" and upload_contents:
+        content_type, content_string = upload_contents.split(",")
+        try:
+            decoded_string = base64.b64decode(content_string).decode('utf-8')
+            decoded = json.loads(decoded_string)
+            return decoded, upload_filename, True, f"✅ Configuration loaded from {upload_filename}"
+        except Exception as e:
+            print(f"Error processing uploaded file: {e}")
+            return dash.no_update, "", True, f"🔴 Error: Could not parse file {upload_filename}."
+    elif trigger == "delete-config-file" and delete_n_clicks:
+        return initial_config, "", True, "Config file removed."
+    else:
+        raise dash.exceptions.PreventUpdate
+
+
+# Callback to open/close the config JSON modal
+@app.callback(
+    Output("config-json-modal", "is_open"),
+    [Input("config-file-name-span", "n_clicks"), Input("close-config-json-modal", "n_clicks")],
+    [State("config-json-modal", "is_open")],
+    prevent_initial_call=True,
+)
+def toggle_config_json_modal(open_click, close_click, is_open):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return is_open
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger == "config-file-name-span" and open_click:
+        return True
+    elif trigger == "close-config-json-modal" and close_click:
+        return False
+    return is_open
+
+
+# Callback to show the config JSON in the modal
+@app.callback(
+    Output("config-json-view", "children"),
+    Input("current-config", "data"),
+)
+def show_config_json(config):
+    return json.dumps(config, indent=2)
 
 
 # Callback to update the graph
