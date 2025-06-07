@@ -69,7 +69,6 @@ app.layout = html.Div(
         dbc.Toast(
             id="notification-toast",
             is_open=False,
-            dismissable=True,
             style={"position": "fixed", "top": 66, "right": 10, "width": 350},
             duration=500,  # Duration in milliseconds (0.5 seconds)
         ),
@@ -164,7 +163,6 @@ app.layout = html.Div(
         Output("current-config", "data"),
         Output("notification-toast", "is_open"),
         Output("notification-toast", "children"),
-        Output("notification-toast", "header"),
     ],
     Input("upload-config", "contents"),
     State("upload-config", "filename"),
@@ -176,7 +174,7 @@ def update_config(contents, filename):
     # Parse the uploaded file
     content_type, content_string = contents.split(",")
     decoded = json.loads(content_string)
-    return decoded, True, f"Configuration loaded from {filename}", "Success"
+    return decoded, True, f"Configuration loaded from {filename}"
 
 
 # Callback to update the graph
@@ -185,13 +183,12 @@ def update_config(contents, filename):
         Output("reactor-graph", "elements"),
         Output("notification-toast", "is_open", allow_duplicate=True),
         Output("notification-toast", "children", allow_duplicate=True),
-        Output("notification-toast", "header", allow_duplicate=True),
     ],
     Input("current-config", "data"),
     prevent_initial_call=True,
 )
 def update_graph(config):
-    return config_to_cyto_elements(config), True, "Graph updated", "Success"
+    return config_to_cyto_elements(config), True, "Graph updated"
 
 
 # Callback to show properties of selected element
@@ -200,7 +197,6 @@ def update_graph(config):
         Output("properties-panel", "children"),
         Output("notification-toast", "is_open", allow_duplicate=True),
         Output("notification-toast", "children", allow_duplicate=True),
-        Output("notification-toast", "header", allow_duplicate=True),
     ],
     Input("reactor-graph", "selectedNodeData"),
     Input("reactor-graph", "selectedEdgeData"),
@@ -217,8 +213,7 @@ def show_properties(node_data, edge_data):
                 ]
             ),
             True,
-            f"Viewing properties of {data['type']} {data['id']}",
-            "Info",
+            f"Viewing properties of {data['type']} {data['id']}",  # toast message
         )
     elif edge_data:
         data = edge_data[0]
@@ -230,10 +225,9 @@ def show_properties(node_data, edge_data):
                 ]
             ),
             True,
-            f"Viewing properties of {data['type']} {data['id']}",
-            "Info",
+            f"Viewing properties of {data['type']} {data['id']}",  # toast message
         )
-    return html.Div("Select a node or edge to view properties"), False, "", ""
+    return html.Div("Select a node or edge to view properties"), False, ""
 
 
 # Callback to run simulation and update plots
@@ -244,7 +238,6 @@ def show_properties(node_data, edge_data):
         Output("species-plot", "figure"),
         Output("notification-toast", "is_open", allow_duplicate=True),
         Output("notification-toast", "children", allow_duplicate=True),
-        Output("notification-toast", "header", allow_duplicate=True),
     ],
     Input("run-simulation", "n_clicks"),
     State("current-config", "data"),
@@ -300,11 +293,10 @@ def run_simulation(n_clicks, config):
             press_fig,
             species_fig,
             True,
-            "Simulation completed successfully",
-            "Success",
+            "Simulation completed successfully",  # toast message
         )
     except Exception as e:
-        return {}, {}, {}, True, str(e), "Error"
+        return {}, {}, {}, True, str(e)
 
 
 def run_server(debug: bool = False) -> None:
