@@ -70,7 +70,7 @@ app.layout = html.Div(
             id="notification-toast",
             is_open=False,
             style={"position": "fixed", "top": 66, "right": 10, "width": 350},
-            duration=1000,  # Duration in milliseconds (0.5 seconds)
+            duration=1500,  # Duration in milliseconds (0.5 seconds)
         ),
         # Add Reactor Modal
         dbc.Modal(
@@ -151,9 +151,17 @@ app.layout = html.Div(
                 dbc.ModalFooter(
                     [
                         dbc.Button(
-                            "Cancel", id="close-reactor-modal", className="ml-auto"
+                            "Cancel",
+                            id="close-reactor-modal",
+                            color="secondary",
+                            className="ml-auto",
                         ),
-                        dbc.Button("Add Reactor", id="add-reactor", color="primary"),
+                        dbc.Button(
+                            "Add Reactor",
+                            id="add-reactor",
+                            color="primary",
+                            disabled=True,
+                        ),
                     ]
                 ),
             ],
@@ -220,8 +228,15 @@ app.layout = html.Div(
                 ),
                 dbc.ModalFooter(
                     [
-                        dbc.Button("Cancel", id="close-mfc-modal", className="ml-auto"),
-                        dbc.Button("Add MFC", id="add-mfc", color="primary"),
+                        dbc.Button(
+                            "Cancel",
+                            id="close-mfc-modal",
+                            color="secondary",
+                            className="ml-auto",
+                        ),
+                        dbc.Button(
+                            "Add MFC", id="add-mfc", color="primary", disabled=True
+                        ),
                     ]
                 ),
             ],
@@ -437,28 +452,22 @@ def add_reactor(n_clicks, reactor_id, reactor_type, temp, pressure, config):
 )
 def add_mfc(n_clicks, mfc_id, source, target, flow_rate, config):
     if not all([mfc_id, source, target, flow_rate]):
-        return dash.no_update, True, "Please fill in all fields"
+        return dash.no_update, True, "🔴 ERROR Please fill in all fields"
 
-    # Check if ID already exists
-    if any(comp["id"] == mfc_id for comp in config["components"]):
+    # Check if connection already exists
+    if any(
+        conn["source"] == source and conn["target"] == target
+        for conn in config["connections"]
+    ):
         return (
             dash.no_update,
             True,
-            f"🔴 ERROR Component with ID {mfc_id} already exists",
+            f"🔴 ERROR Connection from {source} to {target} already exists",
         )
 
-    # Create new MFC
-    new_mfc = {
-        "id": mfc_id,
-        "type": "MassFlowController",
-        "properties": {
-            "flow_rate": flow_rate,
-        },
-    }
-
-    # Create connection
+    # Create new connection
     new_connection = {
-        "id": f"{source}-{target}",
+        "id": mfc_id,
         "type": "MassFlowController",
         "source": source,
         "target": target,
@@ -467,8 +476,7 @@ def add_mfc(n_clicks, mfc_id, source, target, flow_rate, config):
         },
     }
 
-    # Update config
-    config["components"].append(new_mfc)
+    # Update config with only the connection
     config["connections"].append(new_connection)
     return config, True, f"Added MFC {mfc_id} from {source} to {target}"
 
@@ -614,6 +622,33 @@ def run_simulation(n_clicks, config):
         )
     except Exception as e:
         return {}, {}, {}, True, str(e)
+
+
+# Add callbacks to enable/disable Add buttons based on form fields
+@app.callback(
+    Output("add-reactor", "disabled"),
+    [
+        Input("reactor-id", "value"),
+        Input("reactor-type", "value"),
+        Input("reactor-temp", "value"),
+        Input("reactor-pressure", "value"),
+    ],
+)
+def toggle_reactor_button(reactor_id, reactor_type, temp, pressure):
+    return not all([reactor_id, reactor_type, temp, pressure])
+
+
+@app.callback(
+    Output("add-mfc", "disabled"),
+    [
+        Input("mfc-id", "value"),
+        Input("mfc-source", "value"),
+        Input("mfc-target", "value"),
+        Input("mfc-flow-rate", "value"),
+    ],
+)
+def toggle_mfc_button(mfc_id, source, target, flow_rate):
+    return not all([mfc_id, source, target, flow_rate])
 
 
 def run_server(debug: bool = False) -> None:
