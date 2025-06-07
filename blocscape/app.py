@@ -17,8 +17,16 @@ app = dash.Dash(
         "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css",
     ],
     external_scripts=[
+        # Load lodash first (dependency for edgehandles)
+        "https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js",
+        # Load Cytoscape next
         "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js",
-        "https://cdnjs.cloudflare.com/ajax/libs/cytoscape-edgehandles/4.0.1/cytoscape-edgehandles.min.js",
+        ### # Then load the edgehandles extension
+        ### "/assets/cytoscape-edgehandles.js",
+        # Then load the edgehandles extension - load from CDN to ensure correct version
+        "https://cdn.jsdelivr.net/npm/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.min.js",
+        # Finally load your initialization script
+        "/assets/cytoscape-init.js",
     ],
 )
 server = app.server  # Expose the server for deployment
@@ -275,7 +283,7 @@ app.layout = html.Div(
                                             id="upload-config",
                                             children=html.Div(
                                                 [
-                                                    "Drag and Drop or ",
+                                                    "Drop or ",
                                                     html.A("Select a Config File"),
                                                 ]
                                             ),
@@ -377,6 +385,10 @@ app.layout = html.Div(
                                             },
                                         ],
                                         responsive=True,
+                                        # Use only supported properties:
+                                        userPanningEnabled=True,
+                                        userZoomingEnabled=True,
+                                        boxSelectionEnabled=True,
                                     )
                                 ),
                             ],
@@ -412,6 +424,14 @@ app.layout = html.Div(
         dcc.Store(id="current-config", data=initial_config),
         # Hidden div for toast trigger
         dcc.Store(id="toast-trigger", data={}),
+        # Add this hidden div to your layout
+        html.Div(id="hidden-edge-data", style={"display": "none"}),
+        # Add a store component to hold edge data
+        dcc.Store(id="edge-added-store", data=None),
+        # Add a hidden div to trigger initialization (of new edge creation)
+        html.Div(
+            id="initialization-trigger", children="init", style={"display": "none"}
+        ),
     ]
 )
 
@@ -643,7 +663,7 @@ def show_properties(node_data, edge_data):
 )
 def run_simulation(n_clicks, config):
     if n_clicks == 0:
-        return {}, {}, {}, False, "", ""
+        return {}, {}, {}, False, ""
 
     try:
         # Run the simulation
@@ -833,37 +853,55 @@ def set_default_mfc_values(is_open, config):
     return 0.001, default_source, default_target
 
 
-# Add callback to handle edge creation
+# Replace the callback that's using elementsAdded with this:
+
+
 @app.callback(
     [
-        Output("reactor-graph", "elements", allow_duplicate=True),
         Output("current-config", "data", allow_duplicate=True),
+        Output("notification-toast", "is_open", allow_duplicate=True),
+        Output("notification-toast", "children", allow_duplicate=True),
     ],
-    [Input("reactor-graph", "tapEdgeData")],
-    [State("reactor-graph", "elements"), State("current-config", "data")],
+    [Input("edge-added-store", "data")],  # Use a store component instead
+    [State("current-config", "data")],
     prevent_initial_call=True,
 )
-def handle_edge_creation(edge_data, elements, config):
-    if not edge_data or not elements or not config:
-        return dash.no_update, dash.no_update
+def handle_edge_creation(edge_data, config):
+    if not edge_data:
+        return dash.no_update, dash.no_update, dash.no_update
 
-    # Check if this is a new edge
-    if edge_data.get("id") not in [conn["id"] for conn in config["connections"]]:
-        # Add new connection to config
-        config["connections"].append(
-            {
-                "id": edge_data["id"],
-                "source": edge_data["source"],
-                "target": edge_data["target"],
-                "type": "MassFlowController",
-                "properties": {
-                    "flow_rate": 0.001  # Default flow rate
-                },
-            }
-        )
-        return elements, config
+    # Process the edge data from the store
+    source_id = edge_data.get("source")
+    target_id = edge_data.get("target")
 
-    return dash.no_update, dash.no_update
+    if not source_id or not target_id:
+        return dash.no_update, dash.no_update, dash.no_update
+
+    # Check if this edge already exists in the config
+    if any(
+        conn["source"] == source_id and conn["target"] == target_id
+        for conn in config["connections"]
+    ):
+        return dash.no_update, dash.no_update, dash.no_update
+
+    # Generate unique ID for the new edge
+    edge_id = f"mfc_{len(config['connections']) + 1}"
+
+    # Add new connection to config
+    config["connections"].append(
+        {
+            "id": edge_id,
+            "source": source_id,
+            "target": target_id,
+            "type": "MassFlowController",
+            "properties": {
+                "flow_rate": 0.001  # Default flow rate
+            },
+        }
+    )
+
+    # Make sure to return exactly 3 values: config, is_open, children
+    return config, True, f"Added connection from {source_id} to {target_id}"
 
 
 # Add callback to handle edge creation from custom event
@@ -944,6 +982,47 @@ app.clientside_callback(
     """,
     Output("toast", "is_open"),
     Input("toast-trigger", "data"),
+    prevent_initial_call=True,
+)
+
+# Setup client-side callback to handle edge creation
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        // This is a trigger to create an initial placeholder
+        return [];
+    }
+    """,
+    Output("hidden-edge-data", "children"),
+    Input("reactor-graph", "id"),
+    prevent_initial_call=True,
+)
+
+# Add a clientside callback to update the store when an edge is created:
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        // Initialize event listener if not done already
+        if (!window.edgeEventInitialized) {
+            window.edgeEventInitialized = true;
+
+            document.addEventListener('edgeCreate', function(e) {
+                if (e && e.detail) {
+                    console.log('Edge creation event received:', e.detail);
+                    // Update the store with new edge data
+                    window.dash_clientside.no_update = false;
+                    return e.detail;
+                }
+                return window.dash_clientside.no_update;
+            });
+        }
+
+        // Initially return no update
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("edge-added-store", "data"),
+    Input("initialization-trigger", "children"),
     prevent_initial_call=True,
 )
 
