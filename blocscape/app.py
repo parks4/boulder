@@ -16,6 +16,10 @@ app = dash.Dash(
         dbc.themes.BOOTSTRAP,
         "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css",
     ],
+    external_scripts=[
+        "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/cytoscape-edgehandles/4.0.1/cytoscape-edgehandles.min.js",
+    ],
 )
 server = app.server  # Expose the server for deployment
 
@@ -256,122 +260,158 @@ app.layout = html.Div(
             id="add-mfc-modal",
             is_open=False,
         ),
-        # File upload component
-        dcc.Upload(
-            id="upload-config",
-            children=html.Div(
-                ["Drag and Drop or ", html.A("Select a Configuration File")]
-            ),
-            style={
-                "width": "100%",
-                "height": "60px",
-                "lineHeight": "60px",
-                "borderWidth": "1px",
-                "borderStyle": "dashed",
-                "borderRadius": "5px",
-                "textAlign": "center",
-                "margin": "10px",
-            },
-        ),
-        # Main content area
-        html.Div(
+        # Main content
+        dbc.Row(
             [
-                # Left panel: Cytoscape graph
-                html.Div(
+                # Left panel
+                dbc.Col(
                     [
-                        # Add buttons for new components
-                        html.Div(
+                        dbc.Card(
                             [
-                                dbc.Button(
-                                    "Add Reactor",
-                                    id="open-reactor-modal",
-                                    color="primary",
-                                    className="mr-2",
-                                ),
-                                dbc.Button(
-                                    "Add MFC", id="open-mfc-modal", color="primary"
+                                dbc.CardHeader("Edit Network"),
+                                dbc.CardBody(
+                                    [
+                                        dcc.Upload(
+                                            id="upload-config",
+                                            children=html.Div(
+                                                [
+                                                    "Drag and Drop or ",
+                                                    html.A("Select a Config File"),
+                                                ]
+                                            ),
+                                            style={
+                                                "width": "100%",
+                                                "height": "60px",
+                                                "lineHeight": "60px",
+                                                "borderWidth": "1px",
+                                                "borderStyle": "dashed",
+                                                "borderRadius": "5px",
+                                                "textAlign": "center",
+                                                "margin": "10px 0",
+                                            },
+                                            multiple=False,
+                                        ),
+                                        dbc.Button(
+                                            "Add Reactor",
+                                            id="open-reactor-modal",
+                                            color="primary",
+                                            className="mb-2 w-100",
+                                        ),
+                                        dbc.Button(
+                                            "Add MFC",
+                                            id="open-mfc-modal",
+                                            color="primary",
+                                            className="mb-2 w-100",
+                                        ),
+                                    ]
                                 ),
                             ],
-                            style={"marginBottom": "10px"},
+                            className="mb-3",
                         ),
-                        cyto.Cytoscape(
-                            id="reactor-graph",
-                            layout={"name": "grid"},
-                            style={
-                                "width": "100%",
-                                "height": "80vh",
-                            },
-                            elements=config_to_cyto_elements(initial_config),
-                            stylesheet=[
-                                {
-                                    "selector": "node",
-                                    "style": {
-                                        "label": "data(label)",
-                                        "text-wrap": "wrap",
-                                        "text-valign": "center",
-                                        "text-halign": "center",
-                                        "background-color": "#BEE",
-                                        "border-width": 2,
-                                        "border-color": "#888",
-                                    },
-                                },
-                                {
-                                    "selector": "edge",
-                                    "style": {
-                                        "label": "data(label)",
-                                        "text-rotation": "autorotate",
-                                        "text-margin-y": -10,
-                                        "curve-style": "taxi",
-                                        "target-arrow-shape": "triangle",
-                                        "edge-distances": "intersection",
-                                        "taxi-direction": "auto",
-                                    },
-                                },
+                        dbc.Card(
+                            [
+                                dbc.CardHeader("Simulate"),
+                                dbc.CardBody(
+                                    [
+                                        dbc.Button(
+                                            "Run Simulation",
+                                            id="run-simulation",
+                                            color="success",
+                                            className="mb-2 w-100",
+                                        ),
+                                    ]
+                                ),
                             ],
+                            className="mb-3",
+                        ),
+                        dbc.Card(
+                            [
+                                dbc.CardHeader("Properties"),
+                                dbc.CardBody(id="properties-panel"),
+                            ],
+                            className="mb-3",
                         ),
                     ],
-                    style={"width": "60%", "display": "inline-block"},
+                    width=3,
                 ),
-                # Right panel: Properties and simulation
-                html.Div(
+                # Right panel
+                dbc.Col(
                     [
-                        html.H3("Properties"),
-                        html.Div(id="properties-panel"),
-                        html.Hr(),
-                        html.Button("Run Simulation", id="run-simulation", n_clicks=0),
-                        html.Div(
+                        dbc.Card(
                             [
-                                dcc.Graph(id="temperature-plot"),
-                                dcc.Graph(id="pressure-plot"),
-                                dcc.Graph(id="species-plot"),
-                            ]
+                                dbc.CardHeader("Reactor Network"),
+                                dbc.CardBody(
+                                    cyto.Cytoscape(
+                                        id="reactor-graph",
+                                        layout={"name": "cose"},
+                                        style={"width": "100%", "height": "600px"},
+                                        elements=config_to_cyto_elements(
+                                            initial_config
+                                        ),
+                                        stylesheet=[
+                                            {
+                                                "selector": "node",
+                                                "style": {
+                                                    "content": "data(label)",
+                                                    "text-valign": "center",
+                                                    "text-halign": "center",
+                                                    "background-color": "#BEE",
+                                                    "text-outline-color": "#555",
+                                                    "text-outline-width": 2,
+                                                    "color": "#fff",
+                                                    "width": "80px",
+                                                    "height": "80px",
+                                                },
+                                            },
+                                            {
+                                                "selector": "edge",
+                                                "style": {
+                                                    "content": "data(label)",
+                                                    "text-rotation": "autorotate",
+                                                    "text-margin-y": -10,
+                                                    "curve-style": "bezier",
+                                                    "target-arrow-shape": "triangle",
+                                                    "target-arrow-color": "#555",
+                                                    "line-color": "#555",
+                                                },
+                                            },
+                                        ],
+                                        responsive=True,
+                                    )
+                                ),
+                            ],
+                            className="mb-3",
+                        ),
+                        dbc.Card(
+                            [
+                                dbc.CardHeader("Simulation Results"),
+                                dbc.CardBody(
+                                    dbc.Row(
+                                        [
+                                            dbc.Col(
+                                                dcc.Graph(id="temperature-plot"),
+                                                width=4,
+                                            ),
+                                            dbc.Col(
+                                                dcc.Graph(id="pressure-plot"), width=4
+                                            ),
+                                            dbc.Col(
+                                                dcc.Graph(id="species-plot"), width=4
+                                            ),
+                                        ]
+                                    )
+                                ),
+                            ],
                         ),
                     ],
-                    style={
-                        "width": "40%",
-                        "display": "inline-block",
-                        "verticalAlign": "top",
-                    },
+                    width=9,
                 ),
             ]
         ),
-        # Store for the current configuration
+        # Hidden div for storing current configuration
         dcc.Store(id="current-config", data=initial_config),
-        # Add toast container
-        dbc.Toast(
-            id="toast",
-            header="Notification",
-            is_open=False,
-            dismissable=True,
-            icon="primary",
-            style={"position": "fixed", "top": 66, "right": 10, "width": 350},
-        ),
-        # Add Store for toast trigger
-        dcc.Store(id="toast-trigger", data=None),
-        # Add Bootstrap JS
-        html.Script(
-            src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
-        ),
+        # Hidden div for toast trigger
+        dcc.Store(id="toast-trigger", data={}),
     ]
 )
 
@@ -855,7 +895,6 @@ app.clientside_callback(
     Input("reactor-graph", "tapNode"),
     prevent_initial_call=True,
 )
-
 
 # Update toast callback to use Store as trigger
 app.clientside_callback(
