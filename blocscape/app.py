@@ -1,5 +1,5 @@
 import dash
-from dash import html, dcc, Input, Output, State, callback, clientside_callback
+from dash import html, dcc, Input, Output, State
 import dash_cytoscape as cyto
 import json
 import plotly.graph_objects as go
@@ -14,7 +14,7 @@ app = dash.Dash(
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
     external_stylesheets=[
         dbc.themes.BOOTSTRAP,
-        'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css'
+        "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css",
     ],
 )
 server = app.server  # Expose the server for deployment
@@ -369,7 +369,9 @@ app.layout = html.Div(
         # Add Store for toast trigger
         dcc.Store(id="toast-trigger", data=None),
         # Add Bootstrap JS
-        html.Script(src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"),
+        html.Script(
+            src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"
+        ),
     ]
 )
 
@@ -829,7 +831,7 @@ app.clientside_callback(
     """
     function(n_clicks) {
         if (!window.cy) return null;
-        
+
         // Listen for the create-edge event
         if (!window._edgeListenerAdded) {
             window._edgeListenerAdded = true;
@@ -851,7 +853,7 @@ app.clientside_callback(
     """,
     Output("reactor-graph", "tapEdgeData"),
     Input("reactor-graph", "tapNode"),
-    prevent_initial_call=True
+    prevent_initial_call=True,
 )
 
 
@@ -860,7 +862,7 @@ app.clientside_callback(
     """
     function(n_clicks) {
         console.log('Toast callback triggered');
-        
+
         // Listen for the show-toast event
         if (!window._toastListenerAdded) {
             console.log('Setting up toast event listener');
@@ -877,16 +879,16 @@ app.clientside_callback(
                     console.log('Toast elements found:', { header: !!header, body: !!body });
                     if (header) header.textContent = type.charAt(0).toUpperCase() + type.slice(1);
                     if (body) body.textContent = message;
-                    
+
                     // Update toast style based on type
                     const icon = toast.querySelector('.toast-header i');
                     console.log('Icon element found:', !!icon);
                     if (icon) {
-                        icon.className = 'bi bi-' + (type === 'error' ? 'exclamation-circle' : 
-                                                    type === 'success' ? 'check-circle' : 
+                        icon.className = 'bi bi-' + (type === 'error' ? 'exclamation-circle' :
+                                                    type === 'success' ? 'check-circle' :
                                                     'info-circle');
                     }
-                    
+
                     // Show toast using Bootstrap's Toast
                     console.log('Creating Bootstrap Toast');
                     const bsToast = new bootstrap.Toast(toast, {
@@ -903,7 +905,7 @@ app.clientside_callback(
     """,
     Output("toast", "is_open"),
     Input("toast-trigger", "data"),
-    prevent_initial_call=True
+    prevent_initial_call=True,
 )
 
 
