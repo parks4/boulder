@@ -1,5 +1,5 @@
 import dash
-from dash import html, dcc, Input, Output, State
+from dash import html, dcc, Input, Output, State, callback, clientside_callback
 import dash_cytoscape as cyto
 import json
 import plotly.graph_objects as go
@@ -7,12 +7,15 @@ import os
 from .cantera_converter import CanteraConverter
 import dash_bootstrap_components as dbc
 
-# Initialize the Dash app
+# Initialize the Dash app with Bootstrap
 app = dash.Dash(
     __name__,
     suppress_callback_exceptions=True,
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
-    external_stylesheets=[dbc.themes.BOOTSTRAP],
+    external_stylesheets=[
+        dbc.themes.BOOTSTRAP,
+        'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css'
+    ],
 )
 server = app.server  # Expose the server for deployment
 
@@ -354,6 +357,19 @@ app.layout = html.Div(
         ),
         # Store for the current configuration
         dcc.Store(id="current-config", data=initial_config),
+        # Add toast container
+        dbc.Toast(
+            id="toast",
+            header="Notification",
+            is_open=False,
+            dismissable=True,
+            icon="primary",
+            style={"position": "fixed", "top": 66, "right": 10, "width": 350},
+        ),
+        # Add Store for toast trigger
+        dcc.Store(id="toast-trigger", data=None),
+        # Add Bootstrap JS
+        html.Script(src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"),
     ]
 )
 
@@ -806,6 +822,89 @@ def handle_edge_creation(edge_data, elements, config):
         return elements, config
 
     return dash.no_update, dash.no_update
+
+
+# Add callback to handle edge creation from custom event
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (!window.cy) return null;
+        
+        // Listen for the create-edge event
+        if (!window._edgeListenerAdded) {
+            window._edgeListenerAdded = true;
+            window.addEventListener('create-edge', function(e) {
+                const { source, target } = e.detail;
+                // Add the edge to Cytoscape
+                window.cy.add({
+                    group: 'edges',
+                    data: {
+                        source: source,
+                        target: target,
+                        label: 'New Edge'  // You can customize this
+                    }
+                });
+            });
+        }
+        return null;
+    }
+    """,
+    Output("reactor-graph", "tapEdgeData"),
+    Input("reactor-graph", "tapNode"),
+    prevent_initial_call=True
+)
+
+
+# Update toast callback to use Store as trigger
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        console.log('Toast callback triggered');
+        
+        // Listen for the show-toast event
+        if (!window._toastListenerAdded) {
+            console.log('Setting up toast event listener');
+            window._toastListenerAdded = true;
+            window.addEventListener('show-toast', function(e) {
+                console.log('Toast event received:', e.detail);
+                const { message, type } = e.detail;
+                const toast = document.getElementById('toast');
+                console.log('Toast element found:', !!toast);
+                if (toast) {
+                    // Update toast content
+                    const header = toast.querySelector('.toast-header');
+                    const body = toast.querySelector('.toast-body');
+                    console.log('Toast elements found:', { header: !!header, body: !!body });
+                    if (header) header.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+                    if (body) body.textContent = message;
+                    
+                    // Update toast style based on type
+                    const icon = toast.querySelector('.toast-header i');
+                    console.log('Icon element found:', !!icon);
+                    if (icon) {
+                        icon.className = 'bi bi-' + (type === 'error' ? 'exclamation-circle' : 
+                                                    type === 'success' ? 'check-circle' : 
+                                                    'info-circle');
+                    }
+                    
+                    // Show toast using Bootstrap's Toast
+                    console.log('Creating Bootstrap Toast');
+                    const bsToast = new bootstrap.Toast(toast, {
+                        autohide: true,
+                        delay: 3000
+                    });
+                    console.log('Showing toast');
+                    bsToast.show();
+                }
+            });
+        }
+        return null;
+    }
+    """,
+    Output("toast", "is_open"),
+    Input("toast-trigger", "data"),
+    prevent_initial_call=True
+)
 
 
 def run_server(debug: bool = False) -> None:
