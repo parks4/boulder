@@ -6,7 +6,6 @@ import plotly.graph_objects as go
 import os
 from .cantera_converter import CanteraConverter
 import dash_bootstrap_components as dbc
-import time
 
 # Initialize the Dash app
 app = dash.Dash(
@@ -322,12 +321,13 @@ app.layout = html.Div(
                                         "curve-style": "taxi",
                                         "target-arrow-shape": "triangle",
                                         "edge-distances": "intersection",
+                                        "taxi-direction": "auto",
                                     },
                                 },
                             ],
                         ),
                     ],
-                    style={"position": "relative"},
+                    style={"width": "60%", "display": "inline-block"},
                 ),
                 # Right panel: Properties and simulation
                 html.Div(

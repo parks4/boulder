@@ -15,4 +15,4 @@ document.addEventListener('DOMContentLoaded', function() {
             if (cy) cy.style.cursor = 'default';
         }
     });
-}); 
+});
