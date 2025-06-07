@@ -7,7 +7,12 @@ import os
 from .cantera_converter import CanteraConverter
 
 # Initialize the Dash app
-app = dash.Dash(__name__)
+app = dash.Dash(
+    __name__,
+    suppress_callback_exceptions=True,
+    meta_tags=[{'name': 'viewport', 'content': 'width=device-width, initial-scale=1'}]
+)
+server = app.server  # Expose the server for deployment
 
 # Initialize the Cantera converter
 converter = CanteraConverter()
@@ -230,6 +235,6 @@ def run_simulation(n_clicks, config):
     
     return temp_fig, press_fig, species_fig
 
-def run_server(debug=True):
+def run_server(debug: bool = False) -> None:
     """Run the Dash server."""
-    app.run_server(debug=debug) 
+    app.run(debug=debug, host='0.0.0.0', port=8050) 
