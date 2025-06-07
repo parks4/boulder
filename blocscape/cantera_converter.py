@@ -68,15 +68,13 @@ class CanteraConverter:
         
         # Create reactors
         for comp in config['components']:
-            if comp['type'] == 'IdealGasReactor':
-                self.reactors[comp['id']] = self._create_reactor(comp)
-            elif comp['type'] == 'Reservoir':
-                self.reactors[comp['id']] = self._create_reservoir(comp)
+            if comp['type'] == 'IdealGasReactor' or comp['type'] == 'Reservoir':
+                self.reactors[comp['id']] = self.create_reactor(comp)
         
         # Create connections
         for conn in config['connections']:
-            if conn['type'] == 'MassFlowController':
-                self.connections[conn['id']] = self._create_mass_flow_controller(conn)
+            if conn['type'] == 'MassFlowController' or conn['type'] == 'Valve':
+                self.connections[conn['id']] = self.create_connection(conn)
         
         # Create network - only include IdealGasReactors, not Reservoirs
         reactor_list = [r for r in self.reactors.values() if isinstance(r, ct.IdealGasReactor)]
