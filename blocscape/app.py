@@ -113,6 +113,7 @@ app.layout = html.Div(
                                                     "value": "ConstPReactor",
                                                 },
                                             ],
+                                            value="IdealGasReactor",  # Set default value
                                         ),
                                         width=8,
                                     ),
@@ -191,9 +192,26 @@ app.layout = html.Div(
                             ),
                             dbc.Row(
                                 [
+                                    dbc.Label("Flow Rate (kg/s)", width=4),
+                                    dbc.Col(
+                                        dbc.Input(
+                                            id="mfc-flow-rate",
+                                            type="number",
+                                            value=0.001,  # Default flow rate
+                                        ),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
                                     dbc.Label("Source Reactor", width=4),
                                     dbc.Col(
-                                        dbc.Select(id="mfc-source", options=[]),
+                                        dbc.Select(
+                                            id="mfc-source",
+                                            options=[],  # Will be populated dynamically
+                                        ),
                                         width=8,
                                     ),
                                 ],
@@ -203,20 +221,9 @@ app.layout = html.Div(
                                 [
                                     dbc.Label("Target Reactor", width=4),
                                     dbc.Col(
-                                        dbc.Select(id="mfc-target", options=[]),
-                                        width=8,
-                                    ),
-                                ],
-                                className="mb-3",
-                            ),
-                            dbc.Row(
-                                [
-                                    dbc.Label("Flow Rate (kg/s)", width=4),
-                                    dbc.Col(
-                                        dbc.Input(
-                                            id="mfc-flow-rate",
-                                            type="number",
-                                            value=0.001,
+                                        dbc.Select(
+                                            id="mfc-target",
+                                            options=[],  # Will be populated dynamically
                                         ),
                                         width=8,
                                     ),
@@ -235,7 +242,10 @@ app.layout = html.Div(
                             className="ml-auto",
                         ),
                         dbc.Button(
-                            "Add MFC", id="add-mfc", color="primary", disabled=True
+                            "Add MFC",
+                            id="add-mfc",
+                            color="primary",
+                            disabled=True,
                         ),
                     ]
                 ),
@@ -284,7 +294,10 @@ app.layout = html.Div(
                         cyto.Cytoscape(
                             id="reactor-graph",
                             layout={"name": "grid"},
-                            style={"width": "100%", "height": "500px"},
+                            style={
+                                "width": "100%",
+                                "height": "80vh",
+                            },
                             elements=config_to_cyto_elements(initial_config),
                             stylesheet=[
                                 {
@@ -649,6 +662,112 @@ def toggle_reactor_button(reactor_id, reactor_type, temp, pressure):
 )
 def toggle_mfc_button(mfc_id, source, target, flow_rate):
     return not all([mfc_id, source, target, flow_rate])
+
+
+# Add callback to generate default reactor ID
+@app.callback(
+    Output("reactor-id", "value"),
+    [Input("add-reactor-modal", "is_open")],
+    [State("current-config", "data")],
+    prevent_initial_call=True,
+)
+def generate_reactor_id(is_open, config):
+    if not is_open:
+        return dash.no_update
+    
+    # Auto-generate reactor ID:
+    # Get all existing reactor IDs
+    existing_ids = [
+        comp["id"] for comp in config["components"]
+        if comp["type"] in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor"]
+    ]
+    
+    # Find the highest number used
+    max_num = 0
+    for id in existing_ids:
+        if id.startswith("reactor_"):
+            try:
+                num = int(id.split("_")[1])
+                max_num = max(max_num, num)
+            except (ValueError, IndexError):
+                continue
+    
+    # Generate new ID
+    return f"reactor_{max_num + 1}"
+
+
+# Add callback to set default reactor type
+@app.callback(
+    Output("reactor-type", "value"),
+    [Input("add-reactor-modal", "is_open")],
+    prevent_initial_call=True,
+)
+def set_default_reactor_type(is_open):
+    if is_open:
+        return "IdealGasReactor"
+    return dash.no_update
+
+
+# Add callback to generate default MFC ID
+@app.callback(
+    Output("mfc-id", "value"),
+    [Input("add-mfc-modal", "is_open")],
+    [State("current-config", "data")],
+    prevent_initial_call=True,
+)
+def generate_mfc_id(is_open, config):
+    if not is_open:
+        return dash.no_update
+    
+    # Auto-generate MFC ID:
+    # Get all existing MFC IDs
+    existing_ids = [
+        comp["id"] for comp in config["components"]
+        if comp["type"] == "MassFlowController"
+    ]
+    
+    # Find the highest number used
+    max_num = 0
+    for id in existing_ids:
+        if id.startswith("mfc_"):
+            try:
+                num = int(id.split("_")[1])
+                max_num = max(max_num, num)
+            except (ValueError, IndexError):
+                continue
+    
+    # Generate new ID
+    return f"mfc_{max_num + 1}"
+
+
+# Add callback to set default MFC values
+@app.callback(
+    [
+        Output("mfc-flow-rate", "value"),
+        Output("mfc-source", "value"),
+        Output("mfc-target", "value"),
+    ],
+    [Input("add-mfc-modal", "is_open")],
+    [State("current-config", "data")],
+    prevent_initial_call=True,
+)
+def set_default_mfc_values(is_open, config):
+    if not is_open:
+        return dash.no_update, dash.no_update, dash.no_update
+    
+    # Get available reactor IDs for source/target
+    reactor_ids = [
+        comp["id"] for comp in config["components"]
+        if comp["type"] in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor"]
+    ]
+    
+    # Set default source to first reactor if available
+    default_source = reactor_ids[0] if reactor_ids else None
+    
+    # Set default target to second reactor if available
+    default_target = reactor_ids[1] if len(reactor_ids) > 1 else None
+    
+    return 0.001, default_source, default_target
 
 
 def run_server(debug: bool = False) -> None:
