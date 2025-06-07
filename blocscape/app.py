@@ -45,7 +45,7 @@ def config_to_cyto_elements(config):
             {
                 "data": {
                     "id": comp["id"],
-                    "label": f"{comp['type']}\n{comp['id']}",
+                    "label": f"{comp['id']} ({comp['type']})",
                     "type": comp["type"],
                     "properties": comp["properties"],
                 }
@@ -60,7 +60,7 @@ def config_to_cyto_elements(config):
                     "id": conn["id"],
                     "source": conn["source"],
                     "target": conn["target"],
-                    "label": f"{conn['type']}\n{conn['id']}",
+                    "label": f"{conn['id']} ({conn['type']})",
                     "type": conn["type"],
                     "properties": conn["properties"],
                 }
@@ -382,18 +382,24 @@ app.layout = html.Div(
                                                     "color": "#fff",
                                                     "width": "80px",
                                                     "height": "80px",
+                                                    "text-wrap": "wrap",
+                                                    "text-max-width": "80px",
                                                 },
                                             },
                                             {
                                                 "selector": "edge",
                                                 "style": {
                                                     "content": "data(label)",
-                                                    "text-rotation": "autorotate",
+                                                    "text-rotation": "none",
                                                     "text-margin-y": -10,
-                                                    "curve-style": "bezier",
+                                                    "curve-style": "taxi",
+                                                    "taxi-direction": "rightward",
+                                                    "taxi-turn": 50,
                                                     "target-arrow-shape": "triangle",
                                                     "target-arrow-color": "#555",
                                                     "line-color": "#555",
+                                                    "text-wrap": "wrap",
+                                                    "text-max-width": "80px",
                                                 },
                                             },
                                         ],
@@ -662,7 +668,7 @@ def show_properties(node_data, edge_data):
         return (
             html.Div(
                 [
-                    html.H4(f"{data['type']} Properties"),
+                    html.H4(f"{data['id']} ({data['type']})"),
                     html.Pre(json.dumps(data["properties"], indent=2)),
                 ]
             ),
@@ -674,7 +680,7 @@ def show_properties(node_data, edge_data):
         return (
             html.Div(
                 [
-                    html.H4(f"{data['type']} Properties"),
+                    html.H4(f"{data['id']} ({data['type']})"),
                     html.Pre(json.dumps(data["properties"], indent=2)),
                 ]
             ),
