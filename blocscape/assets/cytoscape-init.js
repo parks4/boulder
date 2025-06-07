@@ -1,10 +1,10 @@
 // Wait for document and scripts to load
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Document ready, setting up Cytoscape initialization');
-    
+
     // Track if we've already initialized to prevent loops
     let initialized = false;
-    
+
     // Function to get the Cytoscape instance from dash_cytoscape
     function getDashCytoscapeInstance() {
         // Method 1: Try to get from DOM
@@ -13,18 +13,18 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log('Found Cytoscape instance via DOM _cyreg');
             return cytoscapeDiv._cyreg.cy;
         }
-        
+
         // Method 2: Try to get from _dash-cytoscape namespace
         if (window._dashCytoscape && window._dashCytoscape['reactor-graph']) {
             console.log('Found Cytoscape instance via _dashCytoscape');
             return window._dashCytoscape['reactor-graph'];
         }
-        
+
         // Method 3: Look for any object that looks like a Cytoscape instance
         for (let key in window) {
-            if (key.startsWith('cy') && 
-                window[key] && 
-                typeof window[key] === 'object' && 
+            if (key.startsWith('cy') &&
+                window[key] &&
+                typeof window[key] === 'object' &&
                 typeof window[key].add === 'function' &&
                 typeof window[key].remove === 'function' &&
                 typeof window[key].elements === 'function') {
@@ -32,23 +32,23 @@ document.addEventListener('DOMContentLoaded', function() {
                 return window[key];
             }
         }
-        
+
         return null;
     }
-    
+
     // Function that will keep checking for the Cytoscape instance
     function initCytoscape() {
         if (initialized) {
             return; // Prevent multiple initializations
         }
-        
+
         console.log('Checking for Cytoscape instance...');
         const cy = getDashCytoscapeInstance();
-        
+
         if (cy) {
             console.log('Cytoscape instance found, initializing extensions');
             initialized = true;
-            
+
             // Ensure the edgehandles extension is registered with Cytoscape
             if (typeof cytoscape !== 'undefined' && typeof cytoscapeEdgehandles !== 'undefined') {
                 console.log('Registering edgehandles with Cytoscape');
@@ -58,11 +58,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log('Registration error (might be already registered):', e.message);
                 }
             }
-            
+
             // Add the edgehandles functionality
             if (typeof cy.edgehandles === 'function') {
                 console.log('Initializing edgehandles on instance');
-                
+
                 try {
                     const eh = cy.edgehandles({
                         preview: true,
@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         noEdgeEventsInDraw: true,
                         complete: function(sourceNode, targetNode, addedEles) {
                             console.log('Edge created:', sourceNode.id(), '->', targetNode.id());
-                            
+
                             // Dispatch event for Dash to handle
                             document.dispatchEvent(new CustomEvent('edgeCreate', {
                                 detail: {
@@ -79,11 +79,11 @@ document.addEventListener('DOMContentLoaded', function() {
                                     target: targetNode.id()
                                 }
                             }));
-                            
+
                             // Add the edge directly to the graph for immediate visual feedback
                             cy.add([{
                                 group: 'edges',
-                                data: { 
+                                data: {
                                     id: 'e' + Date.now(), // unique ID
                                     source: sourceNode.id(),
                                     target: targetNode.id()
@@ -91,9 +91,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             }]);
                         }
                     });
-                    
+
                     window.eh = eh; // Store globally
-                    
+
                     // Enable edgehandles with keyboard shortcut
                     document.addEventListener('keydown', function(e) {
                         if (e.key === 'Shift') {
@@ -101,17 +101,17 @@ document.addEventListener('DOMContentLoaded', function() {
                             console.log('Edgehandles enabled');
                         }
                     });
-                    
+
                     document.addEventListener('keyup', function(e) {
                         if (e.key === 'Shift') {
                             eh.disable();
                             console.log('Edgehandles disabled');
                         }
                     });
-                    
+
                     // Initially disable
                     eh.disable();
-                    
+
                     console.log('Edgehandles successfully initialized');
                 } catch (error) {
                     console.error('Error initializing edgehandles:', error);
@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(initCytoscape, 1000);
         }
     }
-    
+
     // Start initialization
     setTimeout(initCytoscape, 1500); // Give enough time for the page to load
 });

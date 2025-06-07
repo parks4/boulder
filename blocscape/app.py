@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import os
 from .cantera_converter import CanteraConverter
 import dash_bootstrap_components as dbc
+import base64
 
 # Initialize the Dash app with Bootstrap
 app = dash.Dash(
@@ -586,12 +587,17 @@ def add_mfc(n_clicks, mfc_id, source, target, flow_rate, config):
 )
 def update_config(contents, filename):
     if contents is None:
-        return initial_config, False, "", ""
+        return initial_config, False, ""
 
     # Parse the uploaded file
     content_type, content_string = contents.split(",")
-    decoded = json.loads(content_string)
-    return decoded, True, f"Configuration loaded from {filename}"
+    try:
+        decoded_string = base64.b64decode(content_string).decode("utf-8")
+        decoded = json.loads(decoded_string)
+        return decoded, True, f"✅ Configuration loaded from {filename}"
+    except Exception as e:
+        print(f"Error processing uploaded file: {e}")
+        return dash.no_update, True, f"🔴 Error: Could not parse file {filename}."
 
 
 # Callback to update the graph
