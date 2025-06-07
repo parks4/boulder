@@ -674,14 +674,15 @@ def toggle_mfc_button(mfc_id, source, target, flow_rate):
 def generate_reactor_id(is_open, config):
     if not is_open:
         return dash.no_update
-    
+
     # Auto-generate reactor ID:
     # Get all existing reactor IDs
     existing_ids = [
-        comp["id"] for comp in config["components"]
+        comp["id"]
+        for comp in config["components"]
         if comp["type"] in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor"]
     ]
-    
+
     # Find the highest number used
     max_num = 0
     for id in existing_ids:
@@ -691,7 +692,7 @@ def generate_reactor_id(is_open, config):
                 max_num = max(max_num, num)
             except (ValueError, IndexError):
                 continue
-    
+
     # Generate new ID
     return f"reactor_{max_num + 1}"
 
@@ -718,14 +719,15 @@ def set_default_reactor_type(is_open):
 def generate_mfc_id(is_open, config):
     if not is_open:
         return dash.no_update
-    
+
     # Auto-generate MFC ID:
     # Get all existing MFC IDs
     existing_ids = [
-        comp["id"] for comp in config["components"]
+        comp["id"]
+        for comp in config["components"]
         if comp["type"] == "MassFlowController"
     ]
-    
+
     # Find the highest number used
     max_num = 0
     for id in existing_ids:
@@ -735,7 +737,7 @@ def generate_mfc_id(is_open, config):
                 max_num = max(max_num, num)
             except (ValueError, IndexError):
                 continue
-    
+
     # Generate new ID
     return f"mfc_{max_num + 1}"
 
@@ -754,19 +756,20 @@ def generate_mfc_id(is_open, config):
 def set_default_mfc_values(is_open, config):
     if not is_open:
         return dash.no_update, dash.no_update, dash.no_update
-    
+
     # Get available reactor IDs for source/target
     reactor_ids = [
-        comp["id"] for comp in config["components"]
+        comp["id"]
+        for comp in config["components"]
         if comp["type"] in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor"]
     ]
-    
+
     # Set default source to first reactor if available
     default_source = reactor_ids[0] if reactor_ids else None
-    
+
     # Set default target to second reactor if available
     default_target = reactor_ids[1] if len(reactor_ids) > 1 else None
-    
+
     return 0.001, default_source, default_target
 
 
