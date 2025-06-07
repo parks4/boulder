@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import os
 from .cantera_converter import CanteraConverter
 import dash_bootstrap_components as dbc
+import time
 
 # Initialize the Dash app
 app = dash.Dash(
@@ -321,13 +322,12 @@ app.layout = html.Div(
                                         "curve-style": "taxi",
                                         "target-arrow-shape": "triangle",
                                         "edge-distances": "intersection",
-                                        "taxi-direction": "auto",
                                     },
                                 },
                             ],
                         ),
                     ],
-                    style={"width": "60%", "display": "inline-block"},
+                    style={"position": "relative"},
                 ),
                 # Right panel: Properties and simulation
                 html.Div(
@@ -773,6 +773,39 @@ def set_default_mfc_values(is_open, config):
     default_target = reactor_ids[1] if len(reactor_ids) > 1 else None
 
     return 0.001, default_source, default_target
+
+
+# Add callback to handle edge creation
+@app.callback(
+    [
+        Output("reactor-graph", "elements", allow_duplicate=True),
+        Output("current-config", "data", allow_duplicate=True),
+    ],
+    [Input("reactor-graph", "tapEdgeData")],
+    [State("reactor-graph", "elements"), State("current-config", "data")],
+    prevent_initial_call=True,
+)
+def handle_edge_creation(edge_data, elements, config):
+    if not edge_data or not elements or not config:
+        return dash.no_update, dash.no_update
+
+    # Check if this is a new edge
+    if edge_data.get("id") not in [conn["id"] for conn in config["connections"]]:
+        # Add new connection to config
+        config["connections"].append(
+            {
+                "id": edge_data["id"],
+                "source": edge_data["source"],
+                "target": edge_data["target"],
+                "type": "MassFlowController",
+                "properties": {
+                    "flow_rate": 0.001  # Default flow rate
+                },
+            }
+        )
+        return elements, config
+
+    return dash.no_update, dash.no_update
 
 
 def run_server(debug: bool = False) -> None:

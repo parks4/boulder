@@ -7,9 +7,10 @@ dependencies:
 - pip
 - cantera
 - dash
-- dash-cytoscape
+- dash_cytoscape
 - dash-core-components
 - dash-html-components
+- dash-extensions
 - numpy
 - pandas
 - plotly
