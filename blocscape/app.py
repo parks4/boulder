@@ -70,7 +70,163 @@ app.layout = html.Div(
             id="notification-toast",
             is_open=False,
             style={"position": "fixed", "top": 66, "right": 10, "width": 350},
-            duration=500,  # Duration in milliseconds (0.5 seconds)
+            duration=1000,  # Duration in milliseconds (0.5 seconds)
+        ),
+        # Add Reactor Modal
+        dbc.Modal(
+            [
+                dbc.ModalHeader("Add Reactor"),
+                dbc.ModalBody(
+                    dbc.Form(
+                        [
+                            dbc.Row(
+                                [
+                                    dbc.Label("Reactor ID", width=4),
+                                    dbc.Col(
+                                        dbc.Input(
+                                            id="reactor-id",
+                                            type="text",
+                                            placeholder="Enter reactor ID",
+                                        ),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
+                                    dbc.Label("Reactor Type", width=4),
+                                    dbc.Col(
+                                        dbc.Select(
+                                            id="reactor-type",
+                                            options=[
+                                                {
+                                                    "label": "Ideal Gas Reactor",
+                                                    "value": "IdealGasReactor",
+                                                },
+                                                {
+                                                    "label": "Constant Volume Reactor",
+                                                    "value": "ConstVolReactor",
+                                                },
+                                                {
+                                                    "label": "Constant Pressure Reactor",
+                                                    "value": "ConstPReactor",
+                                                },
+                                            ],
+                                        ),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
+                                    dbc.Label("Initial Temperature (K)", width=4),
+                                    dbc.Col(
+                                        dbc.Input(
+                                            id="reactor-temp", type="number", value=300
+                                        ),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
+                                    dbc.Label("Initial Pressure (Pa)", width=4),
+                                    dbc.Col(
+                                        dbc.Input(
+                                            id="reactor-pressure",
+                                            type="number",
+                                            value=101325,
+                                        ),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                        ]
+                    )
+                ),
+                dbc.ModalFooter(
+                    [
+                        dbc.Button(
+                            "Cancel", id="close-reactor-modal", className="ml-auto"
+                        ),
+                        dbc.Button("Add Reactor", id="add-reactor", color="primary"),
+                    ]
+                ),
+            ],
+            id="add-reactor-modal",
+            is_open=False,
+        ),
+        # Add MFC Modal
+        dbc.Modal(
+            [
+                dbc.ModalHeader("Add Mass Flow Controller"),
+                dbc.ModalBody(
+                    dbc.Form(
+                        [
+                            dbc.Row(
+                                [
+                                    dbc.Label("MFC ID", width=4),
+                                    dbc.Col(
+                                        dbc.Input(
+                                            id="mfc-id",
+                                            type="text",
+                                            placeholder="Enter MFC ID",
+                                        ),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
+                                    dbc.Label("Source Reactor", width=4),
+                                    dbc.Col(
+                                        dbc.Select(id="mfc-source", options=[]),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
+                                    dbc.Label("Target Reactor", width=4),
+                                    dbc.Col(
+                                        dbc.Select(id="mfc-target", options=[]),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
+                                    dbc.Label("Flow Rate (kg/s)", width=4),
+                                    dbc.Col(
+                                        dbc.Input(
+                                            id="mfc-flow-rate",
+                                            type="number",
+                                            value=0.001,
+                                        ),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                        ]
+                    )
+                ),
+                dbc.ModalFooter(
+                    [
+                        dbc.Button("Cancel", id="close-mfc-modal", className="ml-auto"),
+                        dbc.Button("Add MFC", id="add-mfc", color="primary"),
+                    ]
+                ),
+            ],
+            id="add-mfc-modal",
+            is_open=False,
         ),
         # File upload component
         dcc.Upload(
@@ -95,6 +251,21 @@ app.layout = html.Div(
                 # Left panel: Cytoscape graph
                 html.Div(
                     [
+                        # Add buttons for new components
+                        html.Div(
+                            [
+                                dbc.Button(
+                                    "Add Reactor",
+                                    id="open-reactor-modal",
+                                    color="primary",
+                                    className="mr-2",
+                                ),
+                                dbc.Button(
+                                    "Add MFC", id="open-mfc-modal", color="primary"
+                                ),
+                            ],
+                            style={"marginBottom": "10px"},
+                        ),
                         cyto.Cytoscape(
                             id="reactor-graph",
                             layout={"name": "grid"},
@@ -124,7 +295,7 @@ app.layout = html.Div(
                                     },
                                 },
                             ],
-                        )
+                        ),
                     ],
                     style={"width": "60%", "display": "inline-block"},
                 ),
@@ -155,6 +326,151 @@ app.layout = html.Div(
         dcc.Store(id="current-config", data=initial_config),
     ]
 )
+
+
+# Callback to open/close Reactor modal
+@app.callback(
+    Output("add-reactor-modal", "is_open"),
+    [
+        Input("open-reactor-modal", "n_clicks"),
+        Input("close-reactor-modal", "n_clicks"),
+        Input("add-reactor", "n_clicks"),
+    ],
+    [State("add-reactor-modal", "is_open")],
+)
+def toggle_reactor_modal(n1, n2, n3, is_open):
+    if n1 or n2 or n3:
+        return not is_open
+    return is_open
+
+
+# Callback to open/close MFC modal
+@app.callback(
+    Output("add-mfc-modal", "is_open"),
+    [
+        Input("open-mfc-modal", "n_clicks"),
+        Input("close-mfc-modal", "n_clicks"),
+        Input("add-mfc", "n_clicks"),
+    ],
+    [State("add-mfc-modal", "is_open")],
+)
+def toggle_mfc_modal(n1, n2, n3, is_open):
+    if n1 or n2 or n3:
+        return not is_open
+    return is_open
+
+
+# Callback to update MFC source/target options
+@app.callback(
+    [Output("mfc-source", "options"), Output("mfc-target", "options")],
+    [Input("current-config", "data")],
+)
+def update_mfc_options(config):
+    reactors = [
+        {"label": comp["id"], "value": comp["id"]}
+        for comp in config["components"]
+        if comp["type"] in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor"]
+    ]
+    return reactors, reactors
+
+
+# Callback to add new reactor
+@app.callback(
+    [
+        Output("current-config", "data", allow_duplicate=True),
+        Output("notification-toast", "is_open", allow_duplicate=True),
+        Output("notification-toast", "children", allow_duplicate=True),
+    ],
+    [Input("add-reactor", "n_clicks")],
+    [
+        State("reactor-id", "value"),
+        State("reactor-type", "value"),
+        State("reactor-temp", "value"),
+        State("reactor-pressure", "value"),
+        State("current-config", "data"),
+    ],
+    prevent_initial_call=True,
+)
+def add_reactor(n_clicks, reactor_id, reactor_type, temp, pressure, config):
+    if not all([reactor_id, reactor_type, temp, pressure]):
+        return dash.no_update, True, "🔴 ERROR Please fill in all fields"
+
+    # Check if ID already exists
+    if any(comp["id"] == reactor_id for comp in config["components"]):
+        return (
+            dash.no_update,
+            True,
+            f"🔴 ERROR Component with ID {reactor_id} already exists",
+        )
+
+    # Create new reactor
+    new_reactor = {
+        "id": reactor_id,
+        "type": reactor_type,
+        "properties": {
+            "temperature": temp,
+            "pressure": pressure,
+        },
+    }
+
+    # Update config
+    config["components"].append(new_reactor)
+    return config, True, f"Added {reactor_type} {reactor_id}"
+
+
+# Callback to add new MFC
+@app.callback(
+    [
+        Output("current-config", "data", allow_duplicate=True),
+        Output("notification-toast", "is_open", allow_duplicate=True),
+        Output("notification-toast", "children", allow_duplicate=True),
+    ],
+    [Input("add-mfc", "n_clicks")],
+    [
+        State("mfc-id", "value"),
+        State("mfc-source", "value"),
+        State("mfc-target", "value"),
+        State("mfc-flow-rate", "value"),
+        State("current-config", "data"),
+    ],
+    prevent_initial_call=True,
+)
+def add_mfc(n_clicks, mfc_id, source, target, flow_rate, config):
+    if not all([mfc_id, source, target, flow_rate]):
+        return dash.no_update, True, "Please fill in all fields"
+
+    # Check if ID already exists
+    if any(comp["id"] == mfc_id for comp in config["components"]):
+        return (
+            dash.no_update,
+            True,
+            f"🔴 ERROR Component with ID {mfc_id} already exists",
+        )
+
+    # Create new MFC
+    new_mfc = {
+        "id": mfc_id,
+        "type": "MassFlowController",
+        "properties": {
+            "flow_rate": flow_rate,
+        },
+    }
+
+    # Create connection
+    new_connection = {
+        "id": f"{source}-{target}",
+        "type": "MassFlowController",
+        "source": source,
+        "target": target,
+        "properties": {
+            "flow_rate": flow_rate,
+        },
+    }
+
+    # Update config
+    config["components"].append(new_mfc)
+    config["connections"].append(new_connection)
+    return config, True, f"Added MFC {mfc_id} from {source} to {target}"
 
 
 # Callback to handle file upload
@@ -188,6 +504,7 @@ def update_config(contents, filename):
     prevent_initial_call=True,
 )
 def update_graph(config):
+    print("Graph updated")
     return config_to_cyto_elements(config), True, "Graph updated"
 
 
