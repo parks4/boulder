@@ -121,6 +121,10 @@ app.layout = html.Div(
                                                     "label": "Constant Pressure Reactor",
                                                     "value": "ConstPReactor",
                                                 },
+                                                {
+                                                    "label": "Reservoir",
+                                                    "value": "Reservoir",
+                                                },
                                             ],
                                             value="IdealGasReactor",  # Set default value
                                         ),
@@ -149,6 +153,21 @@ app.layout = html.Div(
                                             id="reactor-pressure",
                                             type="number",
                                             value=101325,
+                                        ),
+                                        width=8,
+                                    ),
+                                ],
+                                className="mb-3",
+                            ),
+                            dbc.Row(
+                                [
+                                    dbc.Label("Composition", width=4),
+                                    dbc.Col(
+                                        dbc.Input(
+                                            id="reactor-composition",
+                                            type="text",
+                                            placeholder="e.g. CH4:1,O2:2,N2:7.52",
+                                            value="O2:1,N2:3.76",  # Default value
                                         ),
                                         width=8,
                                     ),
@@ -491,12 +510,15 @@ def update_mfc_options(config):
         State("reactor-type", "value"),
         State("reactor-temp", "value"),
         State("reactor-pressure", "value"),
+        State("reactor-composition", "value"),
         State("current-config", "data"),
     ],
     prevent_initial_call=True,
 )
-def add_reactor(n_clicks, reactor_id, reactor_type, temp, pressure, config):
-    if not all([reactor_id, reactor_type, temp, pressure]):
+def add_reactor(
+    n_clicks, reactor_id, reactor_type, temp, pressure, composition, config
+):
+    if not all([reactor_id, reactor_type, temp, pressure, composition]):
         return dash.no_update, True, "🔴 ERROR Please fill in all fields"
 
     # Check if ID already exists
@@ -507,15 +529,28 @@ def add_reactor(n_clicks, reactor_id, reactor_type, temp, pressure, config):
             f"🔴 ERROR Component with ID {reactor_id} already exists",
         )
 
-    # Create new reactor
-    new_reactor = {
-        "id": reactor_id,
-        "type": reactor_type,
-        "properties": {
-            "temperature": temp,
-            "pressure": pressure,
-        },
-    }
+    # Create new reactor or reservoir
+    if reactor_type == "Reservoir":
+        new_reactor = {
+            "id": reactor_id,
+            "type": reactor_type,
+            "properties": {
+                "temperature": temp,
+                # Reservoirs may not need pressure, but keep for consistency
+                "pressure": pressure,
+                "composition": composition,
+            },
+        }
+    else:
+        new_reactor = {
+            "id": reactor_id,
+            "type": reactor_type,
+            "properties": {
+                "temperature": temp,
+                "pressure": pressure,
+                "composition": composition,
+            },
+        }
 
     # Update config
     config["components"].append(new_reactor)
@@ -1063,9 +1098,10 @@ app.clientside_callback(
         return window.dash_clientside.no_update;
     }
     """,
-    Output('init-dummy-output', 'children'),
-    Input('init-interval', 'n_intervals')
+    Output("init-dummy-output", "children"),
+    Input("init-interval", "n_intervals"),
 )
+
 
 def run_server(debug: bool = False) -> None:
     """Run the Dash server."""
