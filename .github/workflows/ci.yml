@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   test:
@@ -50,4 +50,4 @@ jobs:
         pip install -e ".[docs]"
     - name: Build documentation
       run: |
-        make docs 
+        make docs

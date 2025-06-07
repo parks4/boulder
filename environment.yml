@@ -1,17 +1,17 @@
 name: blocscape
 channels:
-  - conda-forge
-  - defaults
+- conda-forge
+- defaults
 dependencies:
-  - python=3.11
-  - pip
-  - cantera
-  - dash
-  - dash-cytoscape
-  - dash-core-components
-  - dash-html-components
-  - numpy
-  - pandas
-  - plotly
-  - pip:
-    - -e . 
+- python=3.11
+- pip
+- cantera
+- dash
+- dash-cytoscape
+- dash-core-components
+- dash-html-components
+- numpy
+- pandas
+- plotly
+- pip:
+  - -e .

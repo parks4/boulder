@@ -14,11 +14,11 @@ A web-based tool for visually constructing and simulating Cantera ReactorNet sys
 ## Installation
 
 1. Clone this repository
-2. Install the required dependencies:
+1. Install the required dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Make sure you have Cantera installed with the GRI-Mech 3.0 mechanism
+1. Make sure you have Cantera installed with the GRI-Mech 3.0 mechanism
 
 ## Usage
 
@@ -26,8 +26,8 @@ A web-based tool for visually constructing and simulating Cantera ReactorNet sys
    ```bash
    python app.py
    ```
-2. Open your web browser and navigate to `http://localhost:8050`
-3. Use the interface to:
+1. Open your web browser and navigate to `http://localhost:8050`
+1. Use the interface to:
    - Upload existing configurations
    - Create new reactor networks
    - Edit properties
@@ -68,13 +68,15 @@ The application uses a JSON-based configuration format:
 ## Supported Components
 
 ### Reactors
+
 - IdealGasReactor
 - Reservoir
 
 ### Flow Devices
+
 - MassFlowController
 - Valve
 
 ## Contributing
 
-Feel free to submit issues and enhancement requests! 
+Feel free to submit issues and enhancement requests!
