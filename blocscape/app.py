@@ -18,16 +18,9 @@ app = dash.Dash(
         "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css",
     ],
     external_scripts=[
-        # Load lodash first (dependency for edgehandles)
-        "https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js",
-        # Load Cytoscape next
         "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js",
-        ### # Then load the edgehandles extension
-        ### "/assets/cytoscape-edgehandles.js",
-        # Then load the edgehandles extension - load from CDN to ensure correct version
+        "https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js",
         "https://cdn.jsdelivr.net/npm/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.min.js",
-        # Finally load your initialization script
-        "/assets/cytoscape-init.js",
     ],
 )
 server = app.server  # Expose the server for deployment
@@ -1032,6 +1025,45 @@ app.clientside_callback(
     prevent_initial_call=True,
 )
 
+app.clientside_callback(
+    """
+    function(n_intervals) {
+        if (window.edgehandles_setup_complete) {
+            return window.dash_clientside.no_update;
+        }
+        const cy = (
+            document.getElementById('reactor-graph') &&
+            document.getElementById('reactor-graph')._cyreg &&
+            document.getElementById('reactor-graph')._cyreg.cy
+        );
+        if (!cy || typeof cy.edgehandles !== 'function') {
+            console.log("Waiting for Cytoscape and the .edgehandles() function...");
+            return window.dash_clientside.no_update;
+        }
+        // --- One-time setup ---
+        window.blocscape_edge_queue = [];
+        document.addEventListener('blocscape_edge_created', e => {
+            window.blocscape_edge_queue.push(e.detail);
+        });
+        const eh = cy.edgehandles({
+            preview: true, snap: true,
+            complete: (sourceNode, targetNode, addedEles) => {
+                document.dispatchEvent(new CustomEvent('blocscape_edge_created', {
+                    detail: { source: sourceNode.id(), target: targetNode.id(), ts: Date.now() }
+                }));
+            }
+        });
+        document.addEventListener('keydown', e => { if (e.key === 'Shift') eh.enable(); });
+        document.addEventListener('keyup', e => { if (e.key === 'Shift') eh.disable(); });
+        eh.disable();
+        window.edgehandles_setup_complete = true;
+        console.log('Edgehandles initialized.');
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('init-dummy-output', 'children'),
+    Input('init-interval', 'n_intervals')
+)
 
 def run_server(debug: bool = False) -> None:
     """Run the Dash server."""
