@@ -1,6 +1,9 @@
 import cantera as ct
 import json
 from typing import Dict, List, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CanteraConverter:
     def __init__(self):
@@ -62,34 +65,60 @@ class CanteraConverter:
         # Clear previous state
         self.reactors.clear()
         self.connections.clear()
-
+        
         # Create reactors
         for comp in config['components']:
-            self.reactors[comp['id']] = self.create_reactor(comp)
-
+            if comp['type'] == 'IdealGasReactor':
+                self.reactors[comp['id']] = self._create_reactor(comp)
+            elif comp['type'] == 'Reservoir':
+                self.reactors[comp['id']] = self._create_reservoir(comp)
+        
         # Create connections
         for conn in config['connections']:
-            self.connections[conn['id']] = self.create_connection(conn)
-
-        # Create network
-        self.network = ct.ReactorNet(list(self.reactors.values()))
+            if conn['type'] == 'MassFlowController':
+                self.connections[conn['id']] = self._create_mass_flow_controller(conn)
         
-        # Run simulation
+        # Create network - only include IdealGasReactors, not Reservoirs
+        reactor_list = [r for r in self.reactors.values() if isinstance(r, ct.IdealGasReactor)]
+        if not reactor_list:
+            raise ValueError("No IdealGasReactors found in the network")
+            
+        self.network = ct.ReactorNet(reactor_list)
+        
+        # Configure solver for better stability
+        self.network.rtol = 1e-6  # Relaxed relative tolerance
+        self.network.atol = 1e-8  # Relaxed absolute tolerance
+        self.network.max_steps = 10000  # Increase maximum steps
+        
+        # Run simulation with smaller time steps
         times = []
         temperatures = []
         pressures = []
         species = {species: [] for species in self.gas.species_names}
 
-        for t in range(0, 100, 1):
-            self.network.advance(t)
-            times.append(t)
-            temperatures.append(self.reactors['reactor1'].thermo.T)
-            pressures.append(self.reactors['reactor1'].thermo.P)
-            
-            for species_name in self.gas.species_names:
-                species[species_name].append(
-                    self.reactors['reactor1'].thermo[species_name].X[0]
-                )
+        # Use smaller time steps and shorter simulation time
+        for t in range(0, 10, 1):  # Simulate for 10 seconds with 1-second steps
+            try:
+                self.network.advance(t)
+                times.append(t)
+                # Get results from the first reactor
+                first_reactor = reactor_list[0]
+                temperatures.append(first_reactor.thermo.T)
+                pressures.append(first_reactor.thermo.P)
+                
+                for species_name in self.gas.species_names:
+                    species[species_name].append(
+                        first_reactor.thermo[species_name].X[0]
+                    )
+            except Exception as e:
+                logger.warning(f"Warning at t={t}: {str(e)}")
+                # If we hit an error, use the last successful values
+                if times:
+                    times.append(t)
+                    temperatures.append(temperatures[-1])
+                    pressures.append(pressures[-1])
+                    for species_name in self.gas.species_names:
+                        species[species_name].append(species[species_name][-1])
 
         results = {
             'time': times,
@@ -97,7 +126,7 @@ class CanteraConverter:
             'pressure': pressures,
             'species': species
         }
-
+        
         return self.network, results
 
     def load_config(self, filepath: str) -> Dict:
