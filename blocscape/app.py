@@ -468,12 +468,14 @@ def toggle_mfc_modal(n1, n2, n3, is_open):
     [Input("current-config", "data")],
 )
 def update_mfc_options(config):
-    reactors = [
+    # Allow both Reservoirs and Reactors as sources/targets
+    valid_types = ["IdealGasReactor", "ConstVolReactor", "ConstPReactor", "Reservoir"]
+    options = [
         {"label": comp["id"], "value": comp["id"]}
         for comp in config["components"]
-        if comp["type"] in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor"]
+        if comp["type"] in valid_types
     ]
-    return reactors, reactors
+    return options, options
 
 
 # Callback to add new reactor
