@@ -1,6 +1,6 @@
 """Entry point for running the Boulder application."""
 
-from blocscape.app import run_server
+from boulder.app import run_server
 
 if __name__ == "__main__":
     run_server(debug=True)  # Enable debug mode to see errors in the browser

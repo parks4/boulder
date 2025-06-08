@@ -1,4 +1,4 @@
-name: blocscape
+name: boulder
 channels:
 - conda-forge
 - defaults

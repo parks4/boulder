@@ -22,7 +22,7 @@ dependencies = [
 description = "A visual interface for Cantera reactor networks"
 dynamic = ["version"]
 license = {file = "LICENSE"}
-name = "blocscape"
+name = "boulder"
 readme = "README.md"
 requires-python = ">=3.11"
 
@@ -47,10 +47,10 @@ max-line-length = 110
 convention = "numpy"
 
 [tool.setuptools]
-packages = ["blocscape"]
+packages = ["boulder"]
 
 [tool.setuptools_scm]
-write_to = "blocscape/version.py"
+write_to = "boulder/version.py"
 write_to_template = '''
 # Do not change! Do not track in version control!
 __version__ = "{version}"

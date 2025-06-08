@@ -1,4 +1,4 @@
-PROJECT := blocscape
+PROJECT := boulder
 CONDA := conda
 CONDAFLAGS :=
 COV_REPORT := html

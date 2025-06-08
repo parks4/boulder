@@ -1,8 +1,8 @@
-"""Test suite for blocscape."""
+"""Test suite for boulder."""
 
 
 def test_version():
     """Test that version is defined."""
-    from blocscape import __version__
+    from boulder import __version__
 
     assert isinstance(__version__, str)
