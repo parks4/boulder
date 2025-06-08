@@ -11,7 +11,7 @@ on:
     - main
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ '{{ github.workflow }}' }}-${{ '{{ github.ref }}' }}
   cancel-in-progress: true
 
 defaults:
@@ -28,77 +28,114 @@ jobs:
         python-version: 3.x
     - uses: pre-commit/action@v3.0.1
 
+  combine-environments:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.x
+    - name: Install conda-merge
+      run: |
+        python -m pip install conda-merge
+    - name: Combine environments
+      run: |
+        for SUFFIX in ci integration; do
+        conda-merge ci/environment-$SUFFIX.yml environment.yml > ci/combined-environment-$SUFFIX.yml || exit
+        done
+    - uses: actions/upload-artifact@v4
+      with:
+        name: combined-environments
+        path: ci/combined-environment-*.yml
+
   unit-tests:
     name: unit-tests
+    needs: combine-environments
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.11']
+
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - uses: actions/download-artifact@v4
       with:
-        python-version: ${{ matrix.python-version }}
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
+        name: combined-environments
+        path: ci
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
+    - uses: mamba-org/setup-micromamba@v2
       with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-    - name: Install dependencies
+        environment-file: ci/combined-environment-ci.yml
+        environment-name: DEVELOP
+        cache-environment: true
+        cache-environment-key: environment-${{ '{{ steps.date.outputs.date }}' }}
+        cache-downloads-key: downloads-${{ '{{ steps.date.outputs.date }}' }}
+        create-args: >-
+          python=${{ '{{ matrix.python-version }}' }}
+    - name: Install package
       run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
+        python -m pip install --no-deps -e .
     - name: Run tests
       run: |
-        make test
+        make unit-tests COV_REPORT=xml
 
   type-check:
-    needs: [unit-tests]
+    needs: [combine-environments, unit-tests]
     runs-on: ubuntu-latest
+
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - uses: actions/download-artifact@v4
       with:
-        python-version: 3.11
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
+        name: combined-environments
+        path: ci
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
+    - uses: mamba-org/setup-micromamba@v2
       with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-    - name: Install dependencies
+        environment-file: ci/combined-environment-ci.yml
+        environment-name: DEVELOP
+        cache-environment: true
+        cache-environment-key: environment-${{ '{{ steps.date.outputs.date }}' }}
+        cache-downloads-key: downloads-${{ '{{ steps.date.outputs.date }}' }}
+        create-args: >-
+          python=3.11
+    - name: Install package
       run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-    - name: Run type checking
+        python -m pip install --no-deps -e .
+    - name: Run code quality checks
       run: |
         make type-check
 
   docs-build:
-    needs: [unit-tests]
+    needs: [combine-environments, unit-tests]
     runs-on: ubuntu-latest
+
     steps:
     - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - uses: actions/download-artifact@v4
       with:
-        python-version: 3.11
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
+        name: combined-environments
+        path: ci
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
+    - uses: mamba-org/setup-micromamba@v2
       with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
-    - name: Install dependencies
+        environment-file: ci/combined-environment-ci.yml
+        environment-name: DEVELOP
+        cache-environment: true
+        cache-environment-key: environment-${{ '{{ steps.date.outputs.date }}' }}
+        cache-downloads-key: downloads-${{ '{{ steps.date.outputs.date }}' }}
+        create-args: >-
+          python=3.11
+    - name: Install package
       run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[docs]"
+        python -m pip install --no-deps -e .
     - name: Build documentation
       run: |
-        make docs
+        make docs-build
