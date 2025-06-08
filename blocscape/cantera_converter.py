@@ -136,3 +136,134 @@ class CanteraConverter:
         """Load configuration from JSON file."""
         with open(filepath, "r") as f:
             return json.load(f)
+
+
+class DualCanteraConverter:
+    def __init__(self):
+        """A DualCanteraConverter class that:
+        Executes the Cantera network as before.
+        Simultaneously builds a string of Python code that, if run, will produce the same objects and results.
+        Returns (network, results, code_str) from build_network_and_code(config).
+        """
+        self.gas = ct.Solution("gri30.yaml")
+        self.reactors = {}
+        self.connections = {}
+        self.network = None
+        self.code_lines = []
+
+    def parse_composition(self, comp_str: str) -> Dict[str, float]:
+        comp_dict = {}
+        for pair in comp_str.split(","):
+            species, value = pair.split(":")
+            comp_dict[species] = float(value)
+        return comp_dict
+
+    def build_network_and_code(
+        self, config: Dict
+    ) -> Tuple[ct.ReactorNet, Dict[str, List[float]], str]:
+        self.code_lines = []
+        self.code_lines.append("import cantera as ct")
+        self.code_lines.append("gas = ct.Solution('gri30.yaml')")
+        self.gas = ct.Solution("gri30.yaml")
+        self.reactors = {}
+        self.connections = {}
+        self.network = None
+
+        # Reactors
+        for comp in config["components"]:
+            rid = comp["id"]
+            typ = comp["type"]
+            props = comp["properties"]
+            temp = props.get("temperature", 300)
+            pres = props.get("pressure", 101325)
+            compo = props.get("composition", "N2:1")
+            self.code_lines.append(f"gas.TPX = ({temp}, {pres}, '{compo}')")
+            self.gas.TPX = (temp, pres, self.parse_composition(compo))
+            if typ == "IdealGasReactor":
+                self.code_lines.append(f"{rid} = ct.IdealGasReactor(gas)")
+                self.reactors[rid] = ct.IdealGasReactor(self.gas)
+            elif typ == "Reservoir":
+                self.code_lines.append(f"{rid} = ct.Reservoir(gas)")
+                self.reactors[rid] = ct.Reservoir(self.gas)
+            else:
+                self.code_lines.append(f"# Unsupported reactor type: {typ}")
+                raise ValueError(f"Unsupported reactor type: {typ}")
+
+        # Connections
+        for conn in config["connections"]:
+            cid = conn["id"]
+            typ = conn["type"]
+            src = conn["source"]
+            tgt = conn["target"]
+            props = conn["properties"]
+            if typ == "MassFlowController":
+                mfr = props.get("mass_flow_rate", 0.1)
+                self.code_lines.append(f"{cid} = ct.MassFlowController({src}, {tgt})")
+                self.code_lines.append(f"{cid}.mass_flow_rate = {mfr}")
+                self.connections[cid] = ct.MassFlowController(
+                    self.reactors[src], self.reactors[tgt]
+                )
+                self.connections[cid].mass_flow_rate = mfr
+            elif typ == "Valve":
+                coeff = props.get("valve_coeff", 1.0)
+                self.code_lines.append(f"{cid} = ct.Valve({src}, {tgt})")
+                self.code_lines.append(f"{cid}.valve_coeff = {coeff}")
+                self.connections[cid] = ct.Valve(self.reactors[src], self.reactors[tgt])
+                self.connections[cid].valve_coeff = coeff
+            else:
+                self.code_lines.append(f"# Unsupported connection type: {typ}")
+                raise ValueError(f"Unsupported connection type: {typ}")
+
+        # ReactorNet
+        reactor_ids = [
+            comp["id"]
+            for comp in config["components"]
+            if comp["type"] == "IdealGasReactor"
+        ]
+        self.code_lines.append(f"network = ct.ReactorNet([{', '.join(reactor_ids)}])")
+        self.network = ct.ReactorNet([self.reactors[rid] for rid in reactor_ids])
+        self.code_lines.append("network.rtol = 1e-6")
+        self.code_lines.append("network.atol = 1e-8")
+        self.code_lines.append("network.max_steps = 10000")
+        self.network.rtol = 1e-6
+        self.network.atol = 1e-8
+        self.network.max_steps = 10000
+
+        # Simulation loop (example)
+        self.code_lines.append(
+            """# Run the simulation\nfor t in range(0, 10, 1):\n    network.advance(t)\n    print(f\"t={t}, T={[r.thermo.T for r in network.reactors]}\")"""
+        )
+        # TOOD: add dual code directly in the simulation loop too.
+
+        # Run simulation (same as CanteraConverter)
+        times = []
+        temperatures = []
+        pressures = []
+        species = {species: [] for species in self.gas.species_names}
+        reactor_list = [self.reactors[rid] for rid in reactor_ids]
+        for t in range(0, 10, 1):
+            try:
+                self.network.advance(t)
+                times.append(t)
+                first_reactor = reactor_list[0]
+                temperatures.append(first_reactor.thermo.T)
+                pressures.append(first_reactor.thermo.P)
+                for species_name in self.gas.species_names:
+                    species[species_name].append(
+                        first_reactor.thermo[species_name].X[0]
+                    )
+            except Exception as e:
+                logger.warning(f"Warning at t={t}: {str(e)}")
+                if times:
+                    times.append(t)
+                    temperatures.append(temperatures[-1])
+                    pressures.append(pressures[-1])
+                    for species_name in self.gas.species_names:
+                        species[species_name].append(species[species_name][-1])
+        results = {
+            "time": times,
+            "temperature": temperatures,
+            "pressure": pressures,
+            "species": species,
+        }
+        return self.network, results, "\n".join(self.code_lines)
