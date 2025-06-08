@@ -20,7 +20,7 @@ app = dash.Dash(
         "https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js",
         "https://cdn.jsdelivr.net/npm/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.min.js",
     ],
-    title="Blocscape",
+    title="Boulder",
 )
 server = app.server  # Expose the server for deployment
 

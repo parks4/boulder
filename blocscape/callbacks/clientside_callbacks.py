@@ -94,14 +94,14 @@ def register_callbacks(app):
                 return window.dash_clientside.no_update;
             }
             // --- One-time setup ---
-            window.blocscape_edge_queue = [];
-            document.addEventListener('blocscape_edge_created', e => {
-                window.blocscape_edge_queue.push(e.detail);
+            window.boulder_edge_queue = [];
+            document.addEventListener('boulder_edge_created', e => {
+                window.boulder_edge_queue.push(e.detail);
             });
             const eh = cy.edgehandles({
                 preview: true, snap: true,
                 complete: (sourceNode, targetNode, addedEles) => {
-                    document.dispatchEvent(new CustomEvent('blocscape_edge_created', {
+                    document.dispatchEvent(new CustomEvent('boulder_edge_created', {
                         detail: { source: sourceNode.id(), target: targetNode.id(), ts: Date.now() }
                     }));
                 }
@@ -122,8 +122,8 @@ def register_callbacks(app):
     app.clientside_callback(
         """
         function(n_intervals) {
-            if (window._blocscape_keyboard_shortcut) return window.dash_clientside.no_update;
-            window._blocscape_keyboard_shortcut = true;
+            if (window._boulder_keyboard_shortcut) return window.dash_clientside.no_update;
+            window._boulder_keyboard_shortcut = true;
             document.addEventListener('keydown', function(e) {
                 if (e.ctrlKey && e.key === 'Enter') {
                     // Check if Add Reactor modal is open

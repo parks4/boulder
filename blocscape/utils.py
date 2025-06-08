@@ -1,4 +1,4 @@
-"""Utility functions for the Blocscape application."""
+"""Utility functions for the Boulder application."""
 
 
 def config_to_cyto_elements(config):

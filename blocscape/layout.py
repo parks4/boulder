@@ -1,4 +1,4 @@
-"""Layout definition for the Blocscape application."""
+"""Layout definition for the Boulder application."""
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 import dash_cytoscape as cyto
@@ -26,7 +26,7 @@ def get_layout(initial_config, cyto_stylesheet):
                 id="hidden-dummies",
                 style={"display": "none"},
             ),
-            html.H1("Cantera ReactorNet Visualizer"),
+            html.H1("Boulder - Cantera ReactorNet Visualizer"),
             # Toast for notifications
             dbc.Toast(
                 id="notification-toast",

@@ -1,4 +1,4 @@
-"""Entry point for running the Blocscape application."""
+"""Entry point for running the Boulder application."""
 
 from blocscape.app import run_server
 

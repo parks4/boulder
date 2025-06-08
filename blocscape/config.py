@@ -1,4 +1,4 @@
-"""Configuration management for the Blocscape application."""
+"""Configuration management for the Boulder application."""
 
 import json
 import os

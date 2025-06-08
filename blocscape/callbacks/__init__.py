@@ -1,4 +1,4 @@
-"""Callback modules for the Blocscape application."""
+"""Callback modules for the Boulder application."""
 
 from . import graph_callbacks
 from . import modal_callbacks  

@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(".."))
 
-project = "Blocscape"
+project = "Boulder"
 copyright = "2024"
 author = "Your Name"
 
