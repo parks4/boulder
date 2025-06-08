@@ -457,6 +457,14 @@ app.layout = html.Div(
                                                 },
                                             },
                                             {
+                                                "selector": "[type = 'Reservoir']",
+                                                "style": {
+                                                    "shape": "octagon",
+                                                    # Optionally, you can set a different color for Reservoirs
+                                                    # "background-color": "#F9C74F",
+                                                },
+                                            },
+                                            {
                                                 "selector": "edge",
                                                 "style": {
                                                     "content": "data(label)",
