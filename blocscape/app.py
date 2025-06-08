@@ -533,6 +533,7 @@ app.layout = html.Div(
         dcc.Store(id="config-json-edit-mode", data=False),
         # Add a Store to keep track of properties panel edit mode
         dcc.Store(id="properties-edit-mode", data=False),
+        dcc.Store(id="last-selected-element", data={}),
     ]
 )
 
@@ -897,30 +898,47 @@ def update_graph(config: dict) -> tuple:
 @app.callback(
     Output("properties-panel", "children"),
     [
-        Input("reactor-graph", "selectedNodeData"),
-        Input("reactor-graph", "selectedEdgeData"),
+        Input("last-selected-element", "data"),
         Input("properties-edit-mode", "data"),
-        State("current-config", "data"),
+        Input("current-config", "data"),
     ],
     prevent_initial_call=True,
 )
-def show_properties_editable(node_data, edge_data, edit_mode, config):
+def show_properties_editable(last_selected, edit_mode, config):
+    node_data = None
+    edge_data = None
+    if last_selected and last_selected.get("type") == "node":
+        node_id = last_selected["data"]["id"]
+        # Find the latest node data from config
+        for comp in config["components"]:
+            if comp["id"] == node_id:
+                node_data = [comp]
+                break
+    elif last_selected and last_selected.get("type") == "edge":
+        edge_id = last_selected["data"]["id"]
+        for conn in config["connections"]:
+            if conn["id"] == edge_id:
+                edge_data = [conn]
+                break
     if node_data:
         data = node_data[0]
         properties = data["properties"]
         if edit_mode:
-            # Show editable fields
             fields = [
-                html.Div(
+                dbc.Row(
                     [
-                        html.Label(str(k)),
-                        dcc.Input(
-                            id={"type": "prop-edit", "prop": k},
-                            value=str(v),
-                            type="text",
+                        dbc.Col(html.Label(str(k)), width=4),
+                        dbc.Col(
+                            dcc.Input(
+                                id={"type": "prop-edit", "prop": k},
+                                value=str(v),
+                                type="text",
+                                style={"width": "100%"},
+                            ),
+                            width=8,
                         ),
                     ],
-                    style={"marginBottom": 8},
+                    className="mb-2",
                 )
                 for k, v in properties.items()
             ]
@@ -928,36 +946,70 @@ def show_properties_editable(node_data, edge_data, edit_mode, config):
                 [
                     html.H4(f"{data['id']} ({data['type']})"),
                     html.Div(fields),
-                    html.Button(
-                        "Save",
-                        id="properties-save-btn",
-                        n_clicks=0,
-                        style={"display": "inline-block"},
-                    ),
-                    html.Button(
-                        "Edit",
-                        id="properties-edit-btn",
-                        n_clicks=0,
-                        style={"display": "none"},
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Button(
+                                    "Save",
+                                    id="properties-save-btn",
+                                    n_clicks=0,
+                                    style={"display": "inline-block"},
+                                ),
+                                width="auto",
+                            ),
+                            dbc.Col(
+                                html.Button(
+                                    "Edit",
+                                    id="properties-edit-btn",
+                                    n_clicks=0,
+                                    style={"display": "none"},
+                                ),
+                                width="auto",
+                            ),
+                        ],
+                        className="mt-3",
                     ),
                 ]
             )
         else:
+            fields = [
+                dbc.Row(
+                    [
+                        dbc.Col(html.Label(str(k)), width=4),
+                        dbc.Col(
+                            html.Div(str(v), style={"wordBreak": "break-all"}), width=8
+                        ),
+                    ],
+                    className="mb-2",
+                )
+                for k, v in properties.items()
+            ]
             return html.Div(
                 [
                     html.H4(f"{data['id']} ({data['type']})"),
-                    html.Pre(json.dumps(properties, indent=2)),
-                    html.Button(
-                        "Save",
-                        id="properties-save-btn",
-                        n_clicks=0,
-                        style={"display": "none"},
-                    ),
-                    html.Button(
-                        "Edit",
-                        id="properties-edit-btn",
-                        n_clicks=0,
-                        style={"display": "inline-block"},
+                    html.Div(fields),
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Button(
+                                    "Save",
+                                    id="properties-save-btn",
+                                    n_clicks=0,
+                                    style={"display": "none"},
+                                ),
+                                width="auto",
+                            ),
+                            dbc.Col(
+                                html.Button(
+                                    "Edit",
+                                    id="properties-edit-btn",
+                                    n_clicks=0,
+                                    style={"display": "inline-block"},
+                                ),
+                                width="auto",
+                            ),
+                        ],
+                        className="mt-3",
                     ),
                 ]
             )
@@ -966,16 +1018,20 @@ def show_properties_editable(node_data, edge_data, edit_mode, config):
         properties = data["properties"]
         if edit_mode:
             fields = [
-                html.Div(
+                dbc.Row(
                     [
-                        html.Label(str(k)),
-                        dcc.Input(
-                            id={"type": "prop-edit", "prop": k},
-                            value=str(v),
-                            type="text",
+                        dbc.Col(html.Label(str(k)), width=4),
+                        dbc.Col(
+                            dcc.Input(
+                                id={"type": "prop-edit", "prop": k},
+                                value=str(v),
+                                type="text",
+                                style={"width": "100%"},
+                            ),
+                            width=8,
                         ),
                     ],
-                    style={"marginBottom": 8},
+                    className="mb-2",
                 )
                 for k, v in properties.items()
             ]
@@ -983,36 +1039,70 @@ def show_properties_editable(node_data, edge_data, edit_mode, config):
                 [
                     html.H4(f"{data['id']} ({data['type']})"),
                     html.Div(fields),
-                    html.Button(
-                        "Save",
-                        id="properties-save-btn",
-                        n_clicks=0,
-                        style={"display": "inline-block"},
-                    ),
-                    html.Button(
-                        "Edit",
-                        id="properties-edit-btn",
-                        n_clicks=0,
-                        style={"display": "none"},
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Button(
+                                    "Save",
+                                    id="properties-save-btn",
+                                    n_clicks=0,
+                                    style={"display": "inline-block"},
+                                ),
+                                width="auto",
+                            ),
+                            dbc.Col(
+                                html.Button(
+                                    "Edit",
+                                    id="properties-edit-btn",
+                                    n_clicks=0,
+                                    style={"display": "none"},
+                                ),
+                                width="auto",
+                            ),
+                        ],
+                        className="mt-3",
                     ),
                 ]
             )
         else:
+            fields = [
+                dbc.Row(
+                    [
+                        dbc.Col(html.Label(str(k)), width=4),
+                        dbc.Col(
+                            html.Div(str(v), style={"wordBreak": "break-all"}), width=8
+                        ),
+                    ],
+                    className="mb-2",
+                )
+                for k, v in properties.items()
+            ]
             return html.Div(
                 [
                     html.H4(f"{data['id']} ({data['type']})"),
-                    html.Pre(json.dumps(properties, indent=2)),
-                    html.Button(
-                        "Save",
-                        id="properties-save-btn",
-                        n_clicks=0,
-                        style={"display": "none"},
-                    ),
-                    html.Button(
-                        "Edit",
-                        id="properties-edit-btn",
-                        n_clicks=0,
-                        style={"display": "inline-block"},
+                    html.Div(fields),
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Button(
+                                    "Save",
+                                    id="properties-save-btn",
+                                    n_clicks=0,
+                                    style={"display": "none"},
+                                ),
+                                width="auto",
+                            ),
+                            dbc.Col(
+                                html.Button(
+                                    "Edit",
+                                    id="properties-edit-btn",
+                                    n_clicks=0,
+                                    style={"display": "inline-block"},
+                                ),
+                                width="auto",
+                            ),
+                        ],
+                        className="mt-3",
                     ),
                 ]
             )
@@ -1762,6 +1852,36 @@ def set_json_modal_button_visibility(edit_mode: bool):
             {"display": "none"},
             {"display": "block"},
         )
+
+
+# Add a callback to update last-selected-element on selection
+@app.callback(
+    Output("last-selected-element", "data"),
+    [
+        Input("reactor-graph", "selectedNodeData"),
+        Input("reactor-graph", "selectedEdgeData"),
+    ],
+    prevent_initial_call=True,
+)
+def update_last_selected(node_data, edge_data):
+    if node_data:
+        return {"type": "node", "data": node_data[0]}
+    elif edge_data:
+        return {"type": "edge", "data": edge_data[0]}
+    return {}
+
+
+# After Save, re-trigger last-selected-element to force update
+@app.callback(
+    Output("last-selected-element", "data", allow_duplicate=True),
+    [Input("properties-save-btn", "n_clicks")],
+    [State("last-selected-element", "data")],
+    prevent_initial_call=True,
+)
+def retrigger_last_selected(n_clicks, last_selected):
+    if n_clicks:
+        return last_selected
+    raise dash.exceptions.PreventUpdate
 
 
 def run_server(debug: bool = False) -> None:
