@@ -36,6 +36,14 @@ with open(config_path, "r") as f:
 
 # Convert components to Cytoscape elements
 def config_to_cyto_elements(config):
+    """Convert the JSON-like configuration to two lists of Cytoscape elements:
+
+    nodes: list of dicts, each with a 'data' key containing the node's properties
+    edges: list of dicts, each with a 'data' key containing the edge's properties
+
+    Returns:
+        list: nodes + edges
+    """
     nodes = []
     edges = []
 
@@ -73,13 +81,34 @@ def config_to_cyto_elements(config):
 # Define the layout
 app.layout = html.Div(
     [
+        # Hidden dummy elements for callback IDs (always present)
+        html.Div(
+            [
+                html.Button("✕", id="delete-config-file", style={"display": "none"}),
+                html.Span("", id="config-file-name-span", style={"display": "none"}),
+                dcc.Upload(id="upload-config", style={"display": "none"}),
+                dcc.Textarea(id="config-json-edit-textarea", style={"display": "none"}),
+                dbc.Button(
+                    "Save", id="save-config-json-edit-btn", style={"display": "none"}
+                ),
+                dbc.Button(
+                    "Cancel",
+                    id="cancel-config-json-edit-btn",
+                    style={"display": "none"},
+                ),
+                html.Div(id="init-dummy-output", style={"display": "none"}),
+                dcc.Interval(id="init-interval"),
+            ],
+            id="hidden-dummies",
+            style={"display": "none"},
+        ),
         html.H1("Cantera ReactorNet Visualizer"),
         # Toast for notifications
         dbc.Toast(
             id="notification-toast",
             is_open=False,
             style={"position": "fixed", "top": 66, "right": 10, "width": 350},
-            duration=1500,  # Duration in milliseconds (0.5 seconds)
+            duration=3000,  # Duration in milliseconds (3 seconds)
         ),
         # Store for config file name
         dcc.Store(id="config-file-name", data=""),
@@ -88,10 +117,41 @@ app.layout = html.Div(
             [
                 dbc.ModalHeader("Current Configuration JSON"),
                 dbc.ModalBody(
-                    html.Pre(id="config-json-view", style={"maxHeight": "60vh", "overflowY": "auto"})
+                    [
+                        html.Div(id="config-json-modal-body"),
+                        dcc.Download(id="download-config-json"),
+                    ]
                 ),
                 dbc.ModalFooter(
-                    dbc.Button("Close", id="close-config-json-modal", className="ml-auto")
+                    [
+                        dbc.Button(
+                            "Save as New File",
+                            id="save-config-json-btn",
+                            color="secondary",
+                            className="mr-2",
+                        ),
+                        dbc.Button(
+                            "Edit",
+                            id="edit-config-json-btn",
+                            color="primary",
+                            className="mr-2",
+                        ),
+                        dbc.Button(
+                            "Save",
+                            id="save-config-json-edit-btn",
+                            color="success",
+                            className="mr-2",
+                        ),
+                        dbc.Button(
+                            "Cancel",
+                            id="cancel-config-json-edit-btn",
+                            color="secondary",
+                            className="ml-auto",
+                        ),
+                        dbc.Button(
+                            "Close", id="close-config-json-modal", className="ml-auto"
+                        ),
+                    ]
                 ),
             ],
             id="config-json-modal",
@@ -323,6 +383,16 @@ app.layout = html.Div(
                                             color="primary",
                                             className="mb-2 w-100",
                                         ),
+                                    ]
+                                ),
+                            ],
+                            className="mb-3",
+                        ),
+                        dbc.Card(
+                            [
+                                dbc.CardHeader("Simulate"),
+                                dbc.CardBody(
+                                    [
                                         dbc.Button(
                                             "Run Simulation",
                                             id="run-simulation",
@@ -440,12 +510,8 @@ app.layout = html.Div(
         html.Div(
             id="initialization-trigger", children="init", style={"display": "none"}
         ),
-        # Add hidden dummy elements for dynamic callback IDs
-        html.Div([
-            html.Button("✕", id="delete-config-file", style={"display": "none"}),
-            html.Span("", id="config-file-name-span", style={"display": "none"}),
-            dcc.Upload(id="upload-config", style={"display": "none"}),
-        ], style={"display": "none"}),
+        # Add a Store to keep track of edit mode
+        dcc.Store(id="config-json-edit-mode", data=False),
     ]
 )
 
@@ -459,11 +525,20 @@ app.layout = html.Div(
         Input("add-reactor", "n_clicks"),
     ],
     [State("add-reactor-modal", "is_open")],
+    prevent_initial_call=True,
 )
-def toggle_reactor_modal(n1, n2, n3, is_open):
-    if n1 or n2 or n3:
-        return not is_open
-    return is_open
+def toggle_reactor_modal(n1: int, n2: int, n3: int, is_open: bool) -> tuple[bool]:
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return (is_open,)
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger == "open-reactor-modal" and n1:
+        return (True,)
+    elif trigger == "close-reactor-modal" and n2:
+        return (False,)
+    elif trigger == "add-reactor" and n3:
+        return (False,)
+    return (is_open,)
 
 
 # Callback to open/close MFC modal
@@ -475,11 +550,20 @@ def toggle_reactor_modal(n1, n2, n3, is_open):
         Input("add-mfc", "n_clicks"),
     ],
     [State("add-mfc-modal", "is_open")],
+    prevent_initial_call=True,
 )
-def toggle_mfc_modal(n1, n2, n3, is_open):
-    if n1 or n2 or n3:
-        return not is_open
-    return is_open
+def toggle_mfc_modal(n1: int, n2: int, n3: int, is_open: bool) -> tuple[bool]:
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return (is_open,)
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger == "open-mfc-modal" and n1:
+        return (True,)
+    elif trigger == "close-mfc-modal" and n2:
+        return (False,)
+    elif trigger == "add-mfc" and n3:
+        return (False,)
+    return (is_open,)
 
 
 # Callback to update MFC source/target options
@@ -487,8 +571,7 @@ def toggle_mfc_modal(n1, n2, n3, is_open):
     [Output("mfc-source", "options"), Output("mfc-target", "options")],
     [Input("current-config", "data")],
 )
-def update_mfc_options(config):
-    # Allow both Reservoirs and Reactors as sources/targets
+def update_mfc_options(config: dict) -> tuple[list[dict], list[dict]]:
     valid_types = ["IdealGasReactor", "ConstVolReactor", "ConstPReactor", "Reservoir"]
     options = [
         {"label": comp["id"], "value": comp["id"]}
@@ -502,8 +585,6 @@ def update_mfc_options(config):
 @app.callback(
     [
         Output("current-config", "data", allow_duplicate=True),
-        Output("notification-toast", "is_open", allow_duplicate=True),
-        Output("notification-toast", "children", allow_duplicate=True),
     ],
     [Input("add-reactor", "n_clicks")],
     [
@@ -517,27 +598,24 @@ def update_mfc_options(config):
     prevent_initial_call=True,
 )
 def add_reactor(
-    n_clicks, reactor_id, reactor_type, temp, pressure, composition, config
-):
+    n_clicks: int,
+    reactor_id: str,
+    reactor_type: str,
+    temp: float,
+    pressure: float,
+    composition: str,
+    config: dict,
+) -> tuple[dict]:
     if not all([reactor_id, reactor_type, temp, pressure, composition]):
-        return dash.no_update, True, "🔴 ERROR Please fill in all fields"
-
-    # Check if ID already exists
+        return (dash.no_update,)
     if any(comp["id"] == reactor_id for comp in config["components"]):
-        return (
-            dash.no_update,
-            True,
-            f"🔴 ERROR Component with ID {reactor_id} already exists",
-        )
-
-    # Create new reactor or reservoir
+        return (dash.no_update,)
     if reactor_type == "Reservoir":
         new_reactor = {
             "id": reactor_id,
             "type": reactor_type,
             "properties": {
                 "temperature": temp,
-                # Reservoirs may not need pressure, but keep for consistency
                 "pressure": pressure,
                 "composition": composition,
             },
@@ -552,18 +630,14 @@ def add_reactor(
                 "composition": composition,
             },
         }
-
-    # Update config
     config["components"].append(new_reactor)
-    return config, True, f"Added {reactor_type} {reactor_id}"
+    return (config,)
 
 
 # Callback to add new MFC
 @app.callback(
     [
         Output("current-config", "data", allow_duplicate=True),
-        Output("notification-toast", "is_open", allow_duplicate=True),
-        Output("notification-toast", "children", allow_duplicate=True),
     ],
     [Input("add-mfc", "n_clicks")],
     [
@@ -575,22 +649,21 @@ def add_reactor(
     ],
     prevent_initial_call=True,
 )
-def add_mfc(n_clicks, mfc_id, source, target, flow_rate, config):
+def add_mfc(
+    n_clicks: int,
+    mfc_id: str,
+    source: str,
+    target: str,
+    flow_rate: float,
+    config: dict,
+) -> tuple[dict]:
     if not all([mfc_id, source, target, flow_rate]):
-        return dash.no_update, True, "🔴 ERROR Please fill in all fields"
-
-    # Check if connection already exists
+        return (dash.no_update,)
     if any(
         conn["source"] == source and conn["target"] == target
         for conn in config["connections"]
     ):
-        return (
-            dash.no_update,
-            True,
-            f"🔴 ERROR Connection from {source} to {target} already exists",
-        )
-
-    # Create new connection
+        return (dash.no_update,)
     new_connection = {
         "id": mfc_id,
         "type": "MassFlowController",
@@ -600,10 +673,8 @@ def add_mfc(n_clicks, mfc_id, source, target, flow_rate, config):
             "flow_rate": flow_rate,
         },
     }
-
-    # Update config with only the connection
     config["connections"].append(new_connection)
-    return config, True, f"Added MFC {mfc_id} from {source} to {target}"
+    return (config,)
 
 
 # Callback to render the config upload area
@@ -611,39 +682,58 @@ def add_mfc(n_clicks, mfc_id, source, target, flow_rate, config):
     Output("config-upload-area", "children"),
     [Input("config-file-name", "data")],
 )
-def render_config_upload_area(file_name):
+def render_config_upload_area(file_name: str) -> tuple:
     if file_name:
-        return html.Div([
-            html.Span(
-                file_name,
-                id="config-file-name-span",
-                style={"cursor": "pointer", "fontWeight": "bold", "marginRight": 10},
-                n_clicks=0,
+        return (
+            html.Div(
+                [
+                    dcc.Upload(
+                        id="upload-config",
+                        style={"display": "none"},  # Always present, just hidden
+                    ),
+                    html.Span(
+                        file_name,
+                        id="config-file-name-span",
+                        style={
+                            "cursor": "pointer",
+                            "fontWeight": "bold",
+                            "marginRight": 10,
+                        },
+                        n_clicks=0,
+                    ),
+                    html.Button(
+                        "✕",
+                        id="delete-config-file",
+                        n_clicks=0,
+                        style={
+                            "color": "red",
+                            "border": "none",
+                            "background": "none",
+                            "fontSize": 18,
+                            "cursor": "pointer",
+                        },
+                    ),
+                ],
+                style={"display": "flex", "alignItems": "center", "marginBottom": 10},
             ),
-            html.Button(
-                "✕",
-                id="delete-config-file",
-                n_clicks=0,
-                style={"color": "red", "border": "none", "background": "none", "fontSize": 18, "cursor": "pointer"}
-            ),
-        ], style={"display": "flex", "alignItems": "center", "marginBottom": 10})
+        )
     else:
-        return dcc.Upload(
-            id="upload-config",
-            children=html.Div([
-                "Drop or ", html.A("Select Config File")
-            ]),
-            style={
-                "width": "100%",
-                "height": "60px",
-                "lineHeight": "60px",
-                "borderWidth": "1px",
-                "borderStyle": "dashed",
-                "borderRadius": "5px",
-                "textAlign": "center",
-                "margin": "10px 0",
-            },
-            multiple=False,
+        return (
+            dcc.Upload(
+                id="upload-config",
+                children=html.Div(["Drop or ", html.A("Select Config File")]),
+                style={
+                    "width": "100%",
+                    "height": "60px",
+                    "lineHeight": "60px",
+                    "borderWidth": "1px",
+                    "borderStyle": "dashed",
+                    "borderRadius": "5px",
+                    "textAlign": "center",
+                    "margin": "10px 0",
+                },
+                multiple=False,
+            ),
         )
 
 
@@ -652,95 +742,146 @@ def render_config_upload_area(file_name):
     [
         Output("current-config", "data"),
         Output("config-file-name", "data"),
-        Output("notification-toast", "is_open"),
-        Output("notification-toast", "children"),
     ],
     [
         Input("upload-config", "contents"),
         Input("delete-config-file", "n_clicks"),
+        Input("save-config-json-edit-btn", "n_clicks"),
     ],
     [
         State("upload-config", "filename"),
+        State("config-json-edit-textarea", "value"),
+        State("current-config", "data"),
     ],
     prevent_initial_call=True,
 )
-def handle_config_upload_delete(upload_contents, delete_n_clicks, upload_filename):
+def handle_config_all(
+    upload_contents: str,
+    delete_n_clicks: int,
+    save_edit_n_clicks: int,
+    upload_filename: str,
+    edit_text: str,
+    old_config: dict,
+) -> tuple:
     ctx = dash.callback_context
     if not ctx.triggered:
         raise dash.exceptions.PreventUpdate
-
     trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-
     if trigger == "upload-config" and upload_contents:
         content_type, content_string = upload_contents.split(",")
         try:
-            decoded_string = base64.b64decode(content_string).decode('utf-8')
+            decoded_string = base64.b64decode(content_string).decode("utf-8")
             decoded = json.loads(decoded_string)
-            return decoded, upload_filename, True, f"✅ Configuration loaded from {upload_filename}"
+            return decoded, upload_filename
         except Exception as e:
             print(f"Error processing uploaded file: {e}")
-            return dash.no_update, "", True, f"🔴 Error: Could not parse file {upload_filename}."
+            return dash.no_update, ""
     elif trigger == "delete-config-file" and delete_n_clicks:
-        return initial_config, "", True, "Config file removed."
+        return initial_config, ""
+    elif trigger == "save-config-json-edit-btn" and save_edit_n_clicks:
+        try:
+            new_config = json.loads(edit_text)
+            return new_config, dash.no_update
+        except Exception:
+            return old_config, dash.no_update
     else:
         raise dash.exceptions.PreventUpdate
 
 
-# Callback to open/close the config JSON modal
+# Callback to render the modal body (view or edit mode)
 @app.callback(
-    Output("config-json-modal", "is_open"),
-    [Input("config-file-name-span", "n_clicks"), Input("close-config-json-modal", "n_clicks")],
-    [State("config-json-modal", "is_open")],
+    Output("config-json-modal-body", "children"),
+    [Input("config-json-edit-mode", "data"), Input("current-config", "data")],
+)
+def render_config_json_modal_body(edit_mode: bool, config: dict) -> tuple:
+    if edit_mode:
+        return (
+            html.Div(
+                [
+                    dcc.Textarea(
+                        id="config-json-edit-textarea",
+                        value=json.dumps(config, indent=2),
+                        style={
+                            "width": "100%",
+                            "height": "60vh",
+                            "fontFamily": "monospace",
+                        },
+                    ),
+                ]
+            ),
+        )
+    else:
+        return (
+            html.Pre(
+                json.dumps(config, indent=2),
+                style={"maxHeight": "60vh", "overflowY": "auto"},
+            ),
+        )
+
+
+# Callback to handle edit mode switching
+@app.callback(
+    Output("config-json-edit-mode", "data"),
+    [
+        Input("edit-config-json-btn", "n_clicks"),
+        Input("cancel-config-json-edit-btn", "n_clicks"),
+        Input("save-config-json-edit-btn", "n_clicks"),
+    ],
+    [State("config-json-edit-mode", "data")],
     prevent_initial_call=True,
 )
-def toggle_config_json_modal(open_click, close_click, is_open):
+def toggle_config_json_edit_mode(
+    edit_n: int,
+    cancel_n: int,
+    save_n: int,
+    edit_mode: bool,
+) -> bool:
     ctx = dash.callback_context
     if not ctx.triggered:
-        return is_open
+        raise dash.exceptions.PreventUpdate
     trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trigger == "config-file-name-span" and open_click:
+    if trigger == "edit-config-json-btn":
         return True
-    elif trigger == "close-config-json-modal" and close_click:
+    elif trigger in ("cancel-config-json-edit-btn", "save-config-json-edit-btn"):
         return False
-    return is_open
+    return edit_mode
 
 
-# Callback to show the config JSON in the modal
+# Callback to download config as JSON
 @app.callback(
-    Output("config-json-view", "children"),
-    Input("current-config", "data"),
+    Output("download-config-json", "data"),
+    [Input("save-config-json-btn", "n_clicks")],
+    [State("current-config", "data")],
+    prevent_initial_call=True,
 )
-def show_config_json(config):
-    return json.dumps(config, indent=2)
+def download_config_json(n: int, config: dict):
+    if n:
+        return dict(content=json.dumps(config, indent=2), filename="config.json")
+    return dash.no_update
 
 
 # Callback to update the graph
 @app.callback(
     [
         Output("reactor-graph", "elements"),
-        Output("notification-toast", "is_open", allow_duplicate=True),
-        Output("notification-toast", "children", allow_duplicate=True),
     ],
     Input("current-config", "data"),
     prevent_initial_call=True,
 )
-def update_graph(config):
-    print("Graph updated")
-    return config_to_cyto_elements(config), True, "Graph updated"
+def update_graph(config: dict) -> tuple:
+    return (config_to_cyto_elements(config),)
 
 
 # Callback to show properties of selected element
 @app.callback(
     [
         Output("properties-panel", "children"),
-        Output("notification-toast", "is_open", allow_duplicate=True),
-        Output("notification-toast", "children", allow_duplicate=True),
     ],
     Input("reactor-graph", "selectedNodeData"),
     Input("reactor-graph", "selectedEdgeData"),
     prevent_initial_call=True,
 )
-def show_properties(node_data, edge_data):
+def show_properties(node_data: list, edge_data: list) -> tuple:
     if node_data:
         data = node_data[0]
         return (
@@ -750,8 +891,6 @@ def show_properties(node_data, edge_data):
                     html.Pre(json.dumps(data["properties"], indent=2)),
                 ]
             ),
-            True,
-            f"Viewing properties of {data['type']} {data['id']}",  # toast message
         )
     elif edge_data:
         data = edge_data[0]
@@ -762,10 +901,8 @@ def show_properties(node_data, edge_data):
                     html.Pre(json.dumps(data["properties"], indent=2)),
                 ]
             ),
-            True,
-            f"Viewing properties of {data['type']} {data['id']}",  # toast message
         )
-    return html.Div("Select a node or edge to view properties"), False, ""
+    return (html.Div("Select a node or edge to view properties"),)
 
 
 # Callback to run simulation and update plots
@@ -774,16 +911,14 @@ def show_properties(node_data, edge_data):
         Output("temperature-plot", "figure"),
         Output("pressure-plot", "figure"),
         Output("species-plot", "figure"),
-        Output("notification-toast", "is_open", allow_duplicate=True),
-        Output("notification-toast", "children", allow_duplicate=True),
     ],
     Input("run-simulation", "n_clicks"),
     State("current-config", "data"),
     prevent_initial_call=True,
 )
-def run_simulation(n_clicks, config):
+def run_simulation(n_clicks: int, config: dict) -> tuple:
     if n_clicks == 0:
-        return {}, {}, {}, False, ""
+        return {}, {}, {}
 
     try:
         # Run the simulation
@@ -830,11 +965,9 @@ def run_simulation(n_clicks, config):
             temp_fig,
             press_fig,
             species_fig,
-            True,
-            "Simulation completed successfully",  # toast message
         )
-    except Exception as e:
-        return {}, {}, {}, True, str(e)
+    except Exception:
+        return {}, {}, {}
 
 
 # Add callbacks to enable/disable Add buttons based on form fields
@@ -847,7 +980,9 @@ def run_simulation(n_clicks, config):
         Input("reactor-pressure", "value"),
     ],
 )
-def toggle_reactor_button(reactor_id, reactor_type, temp, pressure):
+def toggle_reactor_button(
+    reactor_id: str, reactor_type: str, temp: float, pressure: float
+) -> bool:
     return not all([reactor_id, reactor_type, temp, pressure])
 
 
@@ -860,7 +995,7 @@ def toggle_reactor_button(reactor_id, reactor_type, temp, pressure):
         Input("mfc-flow-rate", "value"),
     ],
 )
-def toggle_mfc_button(mfc_id, source, target, flow_rate):
+def toggle_mfc_button(mfc_id: str, source: str, target: str, flow_rate: float) -> bool:
     return not all([mfc_id, source, target, flow_rate])
 
 
@@ -871,7 +1006,7 @@ def toggle_mfc_button(mfc_id, source, target, flow_rate):
     [State("current-config", "data")],
     prevent_initial_call=True,
 )
-def generate_reactor_id(is_open, config):
+def generate_reactor_id(is_open: bool, config: dict) -> str:
     if not is_open:
         return dash.no_update
 
@@ -903,7 +1038,7 @@ def generate_reactor_id(is_open, config):
     [Input("add-reactor-modal", "is_open")],
     prevent_initial_call=True,
 )
-def set_default_reactor_type(is_open):
+def set_default_reactor_type(is_open: bool) -> str:
     if is_open:
         return "IdealGasReactor"
     return dash.no_update
@@ -916,7 +1051,7 @@ def set_default_reactor_type(is_open):
     [State("current-config", "data")],
     prevent_initial_call=True,
 )
-def generate_mfc_id(is_open, config):
+def generate_mfc_id(is_open: bool, config: dict) -> str:
     if not is_open:
         return dash.no_update
 
@@ -953,7 +1088,7 @@ def generate_mfc_id(is_open, config):
     [State("current-config", "data")],
     prevent_initial_call=True,
 )
-def set_default_mfc_values(is_open, config):
+def set_default_mfc_values(is_open: bool, config: dict) -> tuple:
     if not is_open:
         return dash.no_update, dash.no_update, dash.no_update
 
@@ -979,30 +1114,28 @@ def set_default_mfc_values(is_open, config):
 @app.callback(
     [
         Output("current-config", "data", allow_duplicate=True),
-        Output("notification-toast", "is_open", allow_duplicate=True),
-        Output("notification-toast", "children", allow_duplicate=True),
     ],
     [Input("edge-added-store", "data")],  # Use a store component instead
     [State("current-config", "data")],
     prevent_initial_call=True,
 )
-def handle_edge_creation(edge_data, config):
+def handle_edge_creation(edge_data: dict, config: dict) -> tuple:
     if not edge_data:
-        return dash.no_update, dash.no_update, dash.no_update
+        return (dash.no_update,)
 
     # Process the edge data from the store
     source_id = edge_data.get("source")
     target_id = edge_data.get("target")
 
     if not source_id or not target_id:
-        return dash.no_update, dash.no_update, dash.no_update
+        return (dash.no_update,)
 
     # Check if this edge already exists in the config
     if any(
         conn["source"] == source_id and conn["target"] == target_id
         for conn in config["connections"]
     ):
-        return dash.no_update, dash.no_update, dash.no_update
+        return (dash.no_update,)
 
     # Generate unique ID for the new edge
     edge_id = f"mfc_{len(config['connections']) + 1}"
@@ -1020,8 +1153,7 @@ def handle_edge_creation(edge_data, config):
         }
     )
 
-    # Make sure to return exactly 3 values: config, is_open, children
-    return config, True, f"Added connection from {source_id} to {target_id}"
+    return (config,)
 
 
 # Add callback to handle edge creation from custom event
@@ -1051,57 +1183,6 @@ app.clientside_callback(
     """,
     Output("reactor-graph", "tapEdgeData"),
     Input("reactor-graph", "tapNode"),
-    prevent_initial_call=True,
-)
-
-# Update toast callback to use Store as trigger
-app.clientside_callback(
-    """
-    function(n_clicks) {
-        console.log('Toast callback triggered');
-
-        // Listen for the show-toast event
-        if (!window._toastListenerAdded) {
-            console.log('Setting up toast event listener');
-            window._toastListenerAdded = true;
-            window.addEventListener('show-toast', function(e) {
-                console.log('Toast event received:', e.detail);
-                const { message, type } = e.detail;
-                const toast = document.getElementById('toast');
-                console.log('Toast element found:', !!toast);
-                if (toast) {
-                    // Update toast content
-                    const header = toast.querySelector('.toast-header');
-                    const body = toast.querySelector('.toast-body');
-                    console.log('Toast elements found:', { header: !!header, body: !!body });
-                    if (header) header.textContent = type.charAt(0).toUpperCase() + type.slice(1);
-                    if (body) body.textContent = message;
-
-                    // Update toast style based on type
-                    const icon = toast.querySelector('.toast-header i');
-                    console.log('Icon element found:', !!icon);
-                    if (icon) {
-                        icon.className = 'bi bi-' + (type === 'error' ? 'exclamation-circle' :
-                                                    type === 'success' ? 'check-circle' :
-                                                    'info-circle');
-                    }
-
-                    // Show toast using Bootstrap's Toast
-                    console.log('Creating Bootstrap Toast');
-                    const bsToast = new bootstrap.Toast(toast, {
-                        autohide: true,
-                        delay: 3000
-                    });
-                    console.log('Showing toast');
-                    bsToast.show();
-                }
-            });
-        }
-        return null;
-    }
-    """,
-    Output("toast", "is_open"),
-    Input("toast-trigger", "data"),
     prevent_initial_call=True,
 )
 
@@ -1185,6 +1266,312 @@ app.clientside_callback(
     Output("init-dummy-output", "children"),
     Input("init-interval", "n_intervals"),
 )
+
+
+@app.callback(
+    [
+        Output("notification-toast", "is_open"),
+        Output("notification-toast", "children"),
+        Output("notification-toast", "style"),
+    ],
+    [
+        Input("add-reactor", "n_clicks"),
+        Input("add-mfc", "n_clicks"),
+        Input("upload-config", "contents"),
+        Input("delete-config-file", "n_clicks"),
+        Input("save-config-json-edit-btn", "n_clicks"),
+        Input("edge-added-store", "data"),
+        Input("run-simulation", "n_clicks"),
+        Input("reactor-graph", "selectedNodeData"),
+        Input("reactor-graph", "selectedEdgeData"),
+        Input("current-config", "data"),
+    ],
+    [
+        State("reactor-id", "value"),
+        State("reactor-type", "value"),
+        State("reactor-temp", "value"),
+        State("reactor-pressure", "value"),
+        State("reactor-composition", "value"),
+        State("mfc-id", "value"),
+        State("mfc-source", "value"),
+        State("mfc-target", "value"),
+        State("mfc-flow-rate", "value"),
+        State("upload-config", "filename"),
+        State("config-json-edit-textarea", "value"),
+        State("current-config", "data"),
+        State("edge-added-store", "data"),
+        State("run-simulation", "n_clicks"),
+        State("reactor-graph", "selectedNodeData"),
+        State("reactor-graph", "selectedEdgeData"),
+    ],
+    prevent_initial_call=True,
+)
+def notification_handler(
+    add_reactor_click: int,
+    add_mfc_click: int,
+    upload_contents: str,
+    delete_config_click: int,
+    save_edit_click: int,
+    edge_data: dict,
+    run_sim_click: int,
+    selected_node: list,
+    selected_edge: list,
+    config_data: dict,
+    reactor_id: str,
+    reactor_type: str,
+    reactor_temp: float,
+    reactor_pressure: float,
+    reactor_composition: str,
+    mfc_id: str,
+    mfc_source: str,
+    mfc_target: str,
+    mfc_flow_rate: float,
+    upload_filename: str,
+    edit_text: str,
+    config: dict,
+    edge_store: dict,
+    run_sim_n: int,
+    node_data: list,
+    edge_data_selected: list,
+):
+    """Handle the various events that can trigger the notification toast.
+
+    Notification toast is used to display messages to the user, they disappear after 1.5 seconds.
+    """
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    # Add Reactor
+    if trigger == "add-reactor" and add_reactor_click:
+        if not all(
+            [
+                reactor_id,
+                reactor_type,
+                reactor_temp,
+                reactor_pressure,
+                reactor_composition,
+            ]
+        ):
+            return (
+                True,
+                "🔴 ERROR Please fill in all fields",
+                {
+                    "position": "fixed",
+                    "top": 66,
+                    "right": 10,
+                    "width": 350,
+                    "backgroundColor": "#dc3545",
+                    "color": "white",
+                },
+            )
+        if any(comp["id"] == reactor_id for comp in config["components"]):
+            return (
+                True,
+                f"🔴 ERROR Component with ID {reactor_id} already exists",
+                {
+                    "position": "fixed",
+                    "top": 66,
+                    "right": 10,
+                    "width": 350,
+                    "backgroundColor": "#dc3545",
+                    "color": "white",
+                },
+            )
+        return (
+            True,
+            f"Added {reactor_type} {reactor_id}",
+            {"position": "fixed", "top": 66, "right": 10, "width": 350},
+        )
+
+    # Add MFC
+    if trigger == "add-mfc" and add_mfc_click:
+        if not all([mfc_id, mfc_source, mfc_target, mfc_flow_rate]):
+            return (
+                True,
+                "🔴 ERROR Please fill in all fields",
+                {
+                    "position": "fixed",
+                    "top": 66,
+                    "right": 10,
+                    "width": 350,
+                    "backgroundColor": "#dc3545",
+                    "color": "white",
+                },
+            )
+        if any(
+            conn["source"] == mfc_source and conn["target"] == mfc_target
+            for conn in config["connections"]
+        ):
+            return (
+                True,
+                f"🔴 ERROR Connection from {mfc_source} to {mfc_target} already exists",
+                {
+                    "position": "fixed",
+                    "top": 66,
+                    "right": 10,
+                    "width": 350,
+                    "backgroundColor": "#dc3545",
+                    "color": "white",
+                },
+            )
+        return (
+            True,
+            f"Added MFC {mfc_id} from {mfc_source} to {mfc_target}",
+            {"position": "fixed", "top": 66, "right": 10, "width": 350},
+        )
+
+    # Config upload
+    if trigger == "upload-config" and upload_contents:
+        try:
+            content_type, content_string = upload_contents.split(",")
+            decoded_string = base64.b64decode(content_string).decode("utf-8")
+            json.loads(decoded_string)
+            return (
+                True,
+                f"✅ Configuration loaded from {upload_filename}",
+                {"position": "fixed", "top": 66, "right": 10, "width": 350},
+            )
+        except Exception:
+            return (
+                True,
+                f"🔴 Error: Could not parse file {upload_filename}.",
+                {
+                    "position": "fixed",
+                    "top": 66,
+                    "right": 10,
+                    "width": 350,
+                    "backgroundColor": "#dc3545",
+                    "color": "white",
+                },
+            )
+
+    # Config delete
+    if trigger == "delete-config-file" and delete_config_click:
+        return (
+            True,
+            "Config file removed.",
+            {"position": "fixed", "top": 66, "right": 10, "width": 350},
+        )
+
+    # Config edit
+    if trigger == "save-config-json-edit-btn" and save_edit_click:
+        try:
+            json.loads(edit_text)
+            return (
+                True,
+                "✅ Configuration updated from editor.",
+                {"position": "fixed", "top": 66, "right": 10, "width": 350},
+            )
+        except Exception as e:
+            return (
+                True,
+                f"🔴 Error: Invalid JSON. {e}",
+                {
+                    "position": "fixed",
+                    "top": 66,
+                    "right": 10,
+                    "width": 350,
+                    "backgroundColor": "#dc3545",
+                    "color": "white",
+                },
+            )
+
+    # Edge creation
+    if trigger == "edge-added-store" and edge_data:
+        if edge_data and edge_data.get("source") and edge_data.get("target"):
+            return (
+                True,
+                f"Added connection from {edge_data['source']} to {edge_data['target']}",
+                {"position": "fixed", "top": 66, "right": 10, "width": 350},
+            )
+
+    # Run simulation
+    if trigger == "run-simulation" and run_sim_click:
+        return (
+            True,
+            "Simulation completed successfully",
+            {"position": "fixed", "top": 66, "right": 10, "width": 350},
+        )
+
+    # Show properties
+    if trigger == "reactor-graph" and (selected_node or selected_edge):
+        data = (
+            (selected_node or selected_edge)[0]
+            if (selected_node or selected_edge)
+            else None
+        )
+        if data:
+            return (
+                True,
+                f"Viewing properties of {data['type']} {data['id']}",
+                {"position": "fixed", "top": 66, "right": 10, "width": 350},
+            )
+
+    # Graph update
+    if trigger == "current-config":
+        return (
+            True,
+            "Graph updated",
+            {"position": "fixed", "top": 66, "right": 10, "width": 350},
+        )
+
+    return False, "", {"position": "fixed", "top": 66, "right": 10, "width": 350}
+
+
+@app.callback(
+    Output("config-json-modal", "is_open"),
+    [
+        Input("config-file-name-span", "n_clicks"),
+        Input("close-config-json-modal", "n_clicks"),
+    ],
+    [State("config-json-modal", "is_open")],
+    prevent_initial_call=True,
+)
+def toggle_config_json_modal(open_n: int, close_n: int, is_open: bool) -> bool:
+    """Toggle the configuration JSON modal.
+    The modal is used to edit the configuration JSON file.
+    """
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return is_open
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger == "config-file-name-span" and open_n:
+        return True
+    elif trigger == "close-config-json-modal" and close_n:
+        return False
+    return is_open
+
+
+# Add a callback to control button visibility
+@app.callback(
+    [
+        Output("save-config-json-btn", "style"),
+        Output("edit-config-json-btn", "style"),
+        Output("save-config-json-edit-btn", "style"),
+        Output("cancel-config-json-edit-btn", "style"),
+        Output("close-config-json-modal", "style"),
+    ],
+    [Input("config-json-edit-mode", "data")],
+)
+def set_json_modal_button_visibility(edit_mode: bool):
+    if edit_mode:
+        return (
+            {"display": "none"},
+            {"display": "none"},
+            {"display": "block"},
+            {"display": "block"},
+            {"display": "none"},
+        )
+    else:
+        return (
+            {"display": "block"},
+            {"display": "block"},
+            {"display": "none"},
+            {"display": "none"},
+            {"display": "block"},
+        )
 
 
 def run_server(debug: bool = False) -> None:
