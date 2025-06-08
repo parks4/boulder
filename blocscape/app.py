@@ -476,20 +476,30 @@ app.layout = html.Div(
                             [
                                 dbc.CardHeader("Simulation Results"),
                                 dbc.CardBody(
-                                    dbc.Row(
-                                        [
-                                            dbc.Col(
-                                                dcc.Graph(id="temperature-plot"),
-                                                width=4,
-                                            ),
-                                            dbc.Col(
-                                                dcc.Graph(id="pressure-plot"), width=4
-                                            ),
-                                            dbc.Col(
-                                                dcc.Graph(id="species-plot"), width=4
-                                            ),
-                                        ]
-                                    )
+                                    children=[
+                                        dbc.Row(
+                                            [
+                                                dbc.Col(
+                                                    dcc.Graph(id="temperature-plot"),
+                                                    width=6,
+                                                ),
+                                                dbc.Col(
+                                                    dcc.Graph(id="pressure-plot"),
+                                                    width=6,
+                                                ),
+                                            ],
+                                            className="mb-2",
+                                        ),
+                                        dbc.Row(
+                                            [
+                                                dbc.Col(
+                                                    dcc.Graph(id="species-plot"),
+                                                    width=6,
+                                                ),
+                                                dbc.Col(html.Div(), width=6),
+                                            ]
+                                        ),
+                                    ]
                                 ),
                             ],
                         ),

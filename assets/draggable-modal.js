@@ -50,4 +50,4 @@ window.addEventListener('DOMContentLoaded', function() {
 
     // Also try to enable on initial load
     enableDraggableModal();
-}); 
+});
