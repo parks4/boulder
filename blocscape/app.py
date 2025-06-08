@@ -46,7 +46,8 @@ cyto_stylesheet = [
             "text-halign": "center",
             "background-color": (
                 "mapData(temperature, 300, 2273, deepskyblue, tomato)"
-                if USE_TEMPERATURE_SCALE else "#BEE"
+                if USE_TEMPERATURE_SCALE
+                else "#BEE"
             ),
             "text-outline-color": "#555",
             "text-outline-width": 2,
@@ -80,6 +81,7 @@ cyto_stylesheet = [
         },
     },
 ]
+
 
 # Convert components to Cytoscape elements
 def config_to_cyto_elements(config):
@@ -941,6 +943,16 @@ def show_properties_editable(last_selected, edit_mode, config):
             if conn["id"] == edge_id:
                 edge_data = [conn]
                 break
+
+    def label_with_unit(k):
+        if k == "pressure":
+            return f"{k} (Pa)"
+        elif k == "composition":
+            return f"{k} (%mol)"
+        elif k == "temperature":
+            return f"{k} (K)"
+        return k
+
     if node_data:
         data = node_data[0]
         properties = data["properties"]
@@ -948,7 +960,7 @@ def show_properties_editable(last_selected, edit_mode, config):
             fields = [
                 dbc.Row(
                     [
-                        dbc.Col(html.Label(str(k)), width=4),
+                        dbc.Col(html.Label(label_with_unit(k)), width=6),
                         dbc.Col(
                             dcc.Input(
                                 id={"type": "prop-edit", "prop": k},
@@ -956,7 +968,7 @@ def show_properties_editable(last_selected, edit_mode, config):
                                 type="text",
                                 style={"width": "100%"},
                             ),
-                            width=8,
+                            width=6,
                         ),
                     ],
                     className="mb-2",
@@ -996,9 +1008,9 @@ def show_properties_editable(last_selected, edit_mode, config):
             fields = [
                 dbc.Row(
                     [
-                        dbc.Col(html.Label(str(k)), width=4),
+                        dbc.Col(html.Label(label_with_unit(k)), width=6),
                         dbc.Col(
-                            html.Div(str(v), style={"wordBreak": "break-all"}), width=8
+                            html.Div(str(v), style={"wordBreak": "break-all"}), width=6
                         ),
                     ],
                     className="mb-2",
@@ -1041,7 +1053,7 @@ def show_properties_editable(last_selected, edit_mode, config):
             fields = [
                 dbc.Row(
                     [
-                        dbc.Col(html.Label(str(k)), width=4),
+                        dbc.Col(html.Label(label_with_unit(k)), width=5),
                         dbc.Col(
                             dcc.Input(
                                 id={"type": "prop-edit", "prop": k},
@@ -1049,7 +1061,7 @@ def show_properties_editable(last_selected, edit_mode, config):
                                 type="text",
                                 style={"width": "100%"},
                             ),
-                            width=8,
+                            width=7,
                         ),
                     ],
                     className="mb-2",
@@ -1089,9 +1101,9 @@ def show_properties_editable(last_selected, edit_mode, config):
             fields = [
                 dbc.Row(
                     [
-                        dbc.Col(html.Label(str(k)), width=4),
+                        dbc.Col(html.Label(label_with_unit(k)), width=5),
                         dbc.Col(
-                            html.Div(str(v), style={"wordBreak": "break-all"}), width=8
+                            html.Div(str(v), style={"wordBreak": "break-all"}), width=7
                         ),
                     ],
                     className="mb-2",
