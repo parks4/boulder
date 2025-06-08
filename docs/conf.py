@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.abspath(".."))
 
 project = "Boulder"
-copyright = "2024"
+copyright = "2025"
 author = "Your Name"
 
 extensions = [
