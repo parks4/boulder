@@ -423,7 +423,16 @@ app.layout = html.Div(
                                 dbc.CardBody(
                                     cyto.Cytoscape(
                                         id="reactor-graph",
-                                        layout={"name": "cose"},
+                                        # Not all Cytoscape layouts are supported by Dash.
+                                        # see : https://dash.plotly.com/cytoscape/layout
+                                        layout={
+                                            # "name": "breadthfirst",  # https://js.cytoscape.org/#layouts/breadthfirst
+                                            # "directed": True,
+                                            #
+                                            # "name": "grid",
+                                            #
+                                            "name": "cose",
+                                        },
                                         style={"width": "100%", "height": "600px"},
                                         elements=config_to_cyto_elements(
                                             initial_config
