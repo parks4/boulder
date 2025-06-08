@@ -33,6 +33,53 @@ config_path = os.path.join(os.path.dirname(__file__), "data", "sample_config.jso
 with open(config_path, "r") as f:
     initial_config = json.load(f)
 
+# Add a global variable for temperature scale coloring
+USE_TEMPERATURE_SCALE = True
+
+# Cytoscape stylesheet is now set directly using the global variable
+cyto_stylesheet = [
+    {
+        "selector": "node",
+        "style": {
+            "content": "data(label)",
+            "text-valign": "center",
+            "text-halign": "center",
+            "background-color": (
+                "mapData(temperature, 300, 2273, deepskyblue, tomato)"
+                if USE_TEMPERATURE_SCALE else "#BEE"
+            ),
+            "text-outline-color": "#555",
+            "text-outline-width": 2,
+            "color": "#fff",
+            "width": "80px",
+            "height": "80px",
+            "text-wrap": "wrap",
+            "text-max-width": "80px",
+        },
+    },
+    {
+        "selector": "[type = 'Reservoir']",
+        "style": {
+            "shape": "octagon",
+        },
+    },
+    {
+        "selector": "edge",
+        "style": {
+            "content": "data(label)",
+            "text-rotation": "none",
+            "text-margin-y": -10,
+            "curve-style": "taxi",
+            "taxi-direction": "rightward",
+            "taxi-turn": 50,
+            "target-arrow-shape": "triangle",
+            "target-arrow-color": "#555",
+            "line-color": "#555",
+            "text-wrap": "wrap",
+            "text-max-width": "80px",
+        },
+    },
+]
 
 # Convert components to Cytoscape elements
 def config_to_cyto_elements(config):
@@ -49,16 +96,20 @@ def config_to_cyto_elements(config):
 
     # Add nodes
     for comp in config["components"]:
-        nodes.append(
-            {
-                "data": {
-                    "id": comp["id"],
-                    "label": f"{comp['id']} ({comp['type']})",
-                    "type": comp["type"],
-                    "properties": comp["properties"],
-                }
-            }
-        )
+        node_data = {
+            "id": comp["id"],
+            "label": f"{comp['id']} ({comp['type']})",
+            "type": comp["type"],
+            "properties": comp["properties"],
+        }
+        # Add temperature to top-level data for Cytoscape mapping
+        temp = comp["properties"].get("temperature")
+        if temp is not None:
+            try:
+                node_data["temperature"] = float(temp)
+            except Exception:
+                node_data["temperature"] = temp
+        nodes.append({"data": node_data})
 
     # Add edges
     for conn in config["connections"]:
@@ -439,48 +490,7 @@ app.layout = html.Div(
                                         ),
                                         minZoom=0.33,
                                         maxZoom=3,
-                                        stylesheet=[
-                                            {
-                                                "selector": "node",
-                                                "style": {
-                                                    "content": "data(label)",
-                                                    "text-valign": "center",
-                                                    "text-halign": "center",
-                                                    "background-color": "#BEE",
-                                                    "text-outline-color": "#555",
-                                                    "text-outline-width": 2,
-                                                    "color": "#fff",
-                                                    "width": "80px",
-                                                    "height": "80px",
-                                                    "text-wrap": "wrap",
-                                                    "text-max-width": "80px",
-                                                },
-                                            },
-                                            {
-                                                "selector": "[type = 'Reservoir']",
-                                                "style": {
-                                                    "shape": "octagon",
-                                                    # Optionally, you can set a different color for Reservoirs
-                                                    # "background-color": "#F9C74F",
-                                                },
-                                            },
-                                            {
-                                                "selector": "edge",
-                                                "style": {
-                                                    "content": "data(label)",
-                                                    "text-rotation": "none",
-                                                    "text-margin-y": -10,
-                                                    "curve-style": "taxi",
-                                                    "taxi-direction": "rightward",
-                                                    "taxi-turn": 50,
-                                                    "target-arrow-shape": "triangle",
-                                                    "target-arrow-color": "#555",
-                                                    "line-color": "#555",
-                                                    "text-wrap": "wrap",
-                                                    "text-max-width": "80px",
-                                                },
-                                            },
-                                        ],
+                                        stylesheet=cyto_stylesheet,
                                         responsive=True,
                                         # Use only supported properties:
                                         userPanningEnabled=True,
@@ -544,6 +554,7 @@ app.layout = html.Div(
         # Add a Store to keep track of properties panel edit mode
         dcc.Store(id="properties-edit-mode", data=False),
         dcc.Store(id="last-selected-element", data={}),
+        dcc.Store(id="use-temperature-scale", data=True),
     ]
 )
 
