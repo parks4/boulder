@@ -11,7 +11,7 @@ import base64
 # Initialize the Dash app with Bootstrap
 app = dash.Dash(
     __name__,
-    # suppress_callback_exceptions=True,
+    suppress_callback_exceptions=True,
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
     external_stylesheets=[
         dbc.themes.BOOTSTRAP,
@@ -531,6 +531,8 @@ app.layout = html.Div(
         ),
         # Add a Store to keep track of edit mode
         dcc.Store(id="config-json-edit-mode", data=False),
+        # Add a Store to keep track of properties panel edit mode
+        dcc.Store(id="properties-edit-mode", data=False),
     ]
 )
 
@@ -689,7 +691,7 @@ def add_mfc(
         "source": source,
         "target": target,
         "properties": {
-            "flow_rate": flow_rate,
+            "mass_flow_rate": flow_rate,
         },
     }
     config["connections"].append(new_connection)
@@ -891,37 +893,206 @@ def update_graph(config: dict) -> tuple:
     return (config_to_cyto_elements(config),)
 
 
-# Callback to show properties of selected element
+# Callback to show properties of selected element (editable)
 @app.callback(
+    Output("properties-panel", "children"),
     [
-        Output("properties-panel", "children"),
+        Input("reactor-graph", "selectedNodeData"),
+        Input("reactor-graph", "selectedEdgeData"),
+        Input("properties-edit-mode", "data"),
+        State("current-config", "data"),
     ],
-    Input("reactor-graph", "selectedNodeData"),
-    Input("reactor-graph", "selectedEdgeData"),
     prevent_initial_call=True,
 )
-def show_properties(node_data: list, edge_data: list) -> tuple:
+def show_properties_editable(node_data, edge_data, edit_mode, config):
     if node_data:
         data = node_data[0]
-        return (
-            html.Div(
+        properties = data["properties"]
+        if edit_mode:
+            # Show editable fields
+            fields = [
+                html.Div(
+                    [
+                        html.Label(str(k)),
+                        dcc.Input(
+                            id={"type": "prop-edit", "prop": k},
+                            value=str(v),
+                            type="text",
+                        ),
+                    ],
+                    style={"marginBottom": 8},
+                )
+                for k, v in properties.items()
+            ]
+            return html.Div(
                 [
                     html.H4(f"{data['id']} ({data['type']})"),
-                    html.Pre(json.dumps(data["properties"], indent=2)),
+                    html.Div(fields),
+                    html.Button(
+                        "Save",
+                        id="properties-save-btn",
+                        n_clicks=0,
+                        style={"display": "inline-block"},
+                    ),
+                    html.Button(
+                        "Edit",
+                        id="properties-edit-btn",
+                        n_clicks=0,
+                        style={"display": "none"},
+                    ),
                 ]
-            ),
-        )
+            )
+        else:
+            return html.Div(
+                [
+                    html.H4(f"{data['id']} ({data['type']})"),
+                    html.Pre(json.dumps(properties, indent=2)),
+                    html.Button(
+                        "Save",
+                        id="properties-save-btn",
+                        n_clicks=0,
+                        style={"display": "none"},
+                    ),
+                    html.Button(
+                        "Edit",
+                        id="properties-edit-btn",
+                        n_clicks=0,
+                        style={"display": "inline-block"},
+                    ),
+                ]
+            )
     elif edge_data:
         data = edge_data[0]
-        return (
-            html.Div(
+        properties = data["properties"]
+        if edit_mode:
+            fields = [
+                html.Div(
+                    [
+                        html.Label(str(k)),
+                        dcc.Input(
+                            id={"type": "prop-edit", "prop": k},
+                            value=str(v),
+                            type="text",
+                        ),
+                    ],
+                    style={"marginBottom": 8},
+                )
+                for k, v in properties.items()
+            ]
+            return html.Div(
                 [
                     html.H4(f"{data['id']} ({data['type']})"),
-                    html.Pre(json.dumps(data["properties"], indent=2)),
+                    html.Div(fields),
+                    html.Button(
+                        "Save",
+                        id="properties-save-btn",
+                        n_clicks=0,
+                        style={"display": "inline-block"},
+                    ),
+                    html.Button(
+                        "Edit",
+                        id="properties-edit-btn",
+                        n_clicks=0,
+                        style={"display": "none"},
+                    ),
                 ]
-            ),
-        )
-    return (html.Div("Select a node or edge to view properties"),)
+            )
+        else:
+            return html.Div(
+                [
+                    html.H4(f"{data['id']} ({data['type']})"),
+                    html.Pre(json.dumps(properties, indent=2)),
+                    html.Button(
+                        "Save",
+                        id="properties-save-btn",
+                        n_clicks=0,
+                        style={"display": "none"},
+                    ),
+                    html.Button(
+                        "Edit",
+                        id="properties-edit-btn",
+                        n_clicks=0,
+                        style={"display": "inline-block"},
+                    ),
+                ]
+            )
+    return html.Div("Select a node or edge to view properties")
+
+
+# Callback to toggle properties edit mode
+@app.callback(
+    Output("properties-edit-mode", "data"),
+    [
+        Input("properties-edit-btn", "n_clicks"),
+        Input("properties-save-btn", "n_clicks"),
+    ],
+    [State("properties-edit-mode", "data")],
+    prevent_initial_call=True,
+)
+def toggle_properties_edit_mode(edit_n, save_n, edit_mode):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+    if trigger == "properties-edit-btn" and edit_n:
+        return True
+    elif trigger == "properties-save-btn" and save_n:
+        return False
+    return edit_mode
+
+
+# Callback to save edited properties
+@app.callback(
+    Output("current-config", "data", allow_duplicate=True),
+    [Input("properties-save-btn", "n_clicks")],
+    [
+        State("reactor-graph", "selectedNodeData"),
+        State("reactor-graph", "selectedEdgeData"),
+        State("current-config", "data"),
+        State({"type": "prop-edit", "prop": dash.ALL}, "value"),
+        State({"type": "prop-edit", "prop": dash.ALL}, "id"),
+    ],
+    prevent_initial_call=True,
+)
+def save_properties(n_clicks, node_data, edge_data, config, values, ids):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+    if node_data:
+        data = node_data[0]
+        comp_id = data["id"]
+        for comp in config["components"]:
+            if comp["id"] == comp_id:
+                for v, i in zip(values, ids):
+                    key = i["prop"]
+                    # Convert to float if key is temperature or pressure
+                    if key in ("temperature", "pressure"):
+                        try:
+                            comp["properties"][key] = float(v)
+                        except Exception:
+                            comp["properties"][key] = v
+                    else:
+                        comp["properties"][key] = v
+                break
+    elif edge_data:
+        data = edge_data[0]
+        conn_id = data["id"]
+        for conn in config["connections"]:
+            if conn["id"] == conn_id:
+                for v, i in zip(values, ids):
+                    key = i["prop"]
+                    # Map 'flow_rate' to 'mass_flow_rate' for MassFlowController
+                    if conn["type"] == "MassFlowController" and key == "flow_rate":
+                        try:
+                            conn["properties"]["mass_flow_rate"] = float(v)
+                        except Exception:
+                            conn["properties"]["mass_flow_rate"] = v
+                        # Optionally remove old key
+                        if "flow_rate" in conn["properties"]:
+                            del conn["properties"]["flow_rate"]
+                    else:
+                        conn["properties"][key] = v
+                break
+    return config
 
 
 # Callback to run simulation and update plots
@@ -1167,7 +1338,7 @@ def handle_edge_creation(edge_data: dict, config: dict) -> tuple:
             "target": target_id,
             "type": "MassFlowController",
             "properties": {
-                "flow_rate": 0.001  # Default flow rate
+                "mass_flow_rate": 0.001  # Default flow rate
             },
         }
     )
