@@ -159,8 +159,16 @@ app.layout = html.Div(
         dbc.Toast(
             id="notification-toast",
             is_open=False,
-            style={"position": "fixed", "top": 66, "right": 10, "width": 350},
-            duration=3000,  # Duration in milliseconds (3 seconds)
+            header="Notification",
+            icon="primary",
+            style={
+                "position": "fixed",
+                "top": 66,
+                "right": 10,
+                "width": 350,
+                "zIndex": 1000,
+            },
+            duration=2000,  # Duration in milliseconds (2 seconds)
         ),
         # Store for config file name
         dcc.Store(id="config-file-name", data=""),
@@ -1607,7 +1615,8 @@ app.clientside_callback(
     [
         Output("notification-toast", "is_open"),
         Output("notification-toast", "children"),
-        Output("notification-toast", "style"),
+        Output("notification-toast", "header"),
+        Output("notification-toast", "icon"),
     ],
     [
         Input("add-reactor", "n_clicks"),
@@ -1634,10 +1643,6 @@ app.clientside_callback(
         State("upload-config", "filename"),
         State("config-json-edit-textarea", "value"),
         State("current-config", "data"),
-        State("edge-added-store", "data"),
-        State("run-simulation", "n_clicks"),
-        State("reactor-graph", "selectedNodeData"),
-        State("reactor-graph", "selectedEdgeData"),
     ],
     prevent_initial_call=True,
 )
@@ -1664,10 +1669,6 @@ def notification_handler(
     upload_filename: str,
     edit_text: str,
     config: dict,
-    edge_store: dict,
-    run_sim_n: int,
-    node_data: list,
-    edge_data_selected: list,
 ):
     """Handle the various events that can trigger the notification toast.
 
@@ -1689,72 +1690,35 @@ def notification_handler(
                 reactor_composition,
             ]
         ):
-            return (
-                True,
-                "🔴 ERROR Please fill in all fields",
-                {
-                    "position": "fixed",
-                    "top": 66,
-                    "right": 10,
-                    "width": 350,
-                    "backgroundColor": "#dc3545",
-                    "color": "white",
-                },
-            )
+            return True, "Please fill in all fields", "Error", "danger"
         if any(comp["id"] == reactor_id for comp in config["components"]):
             return (
                 True,
-                f"🔴 ERROR Component with ID {reactor_id} already exists",
-                {
-                    "position": "fixed",
-                    "top": 66,
-                    "right": 10,
-                    "width": 350,
-                    "backgroundColor": "#dc3545",
-                    "color": "white",
-                },
+                f"Component with ID {reactor_id} already exists",
+                "Error",
+                "danger",
             )
-        return (
-            True,
-            f"Added {reactor_type} {reactor_id}",
-            {"position": "fixed", "top": 66, "right": 10, "width": 350},
-        )
+        return True, f"Added {reactor_type} {reactor_id}", "Success", "success"
 
     # Add MFC
     if trigger == "add-mfc" and add_mfc_click:
         if not all([mfc_id, mfc_source, mfc_target, mfc_flow_rate]):
-            return (
-                True,
-                "🔴 ERROR Please fill in all fields",
-                {
-                    "position": "fixed",
-                    "top": 66,
-                    "right": 10,
-                    "width": 350,
-                    "backgroundColor": "#dc3545",
-                    "color": "white",
-                },
-            )
+            return True, "Please fill in all fields", "Error", "danger"
         if any(
             conn["source"] == mfc_source and conn["target"] == mfc_target
             for conn in config["connections"]
         ):
             return (
                 True,
-                f"🔴 ERROR Connection from {mfc_source} to {mfc_target} already exists",
-                {
-                    "position": "fixed",
-                    "top": 66,
-                    "right": 10,
-                    "width": 350,
-                    "backgroundColor": "#dc3545",
-                    "color": "white",
-                },
+                f"Connection from {mfc_source} to {mfc_target} already exists",
+                "Error",
+                "danger",
             )
         return (
             True,
             f"Added MFC {mfc_id} from {mfc_source} to {mfc_target}",
-            {"position": "fixed", "top": 66, "right": 10, "width": 350},
+            "Success",
+            "success",
         )
 
     # Config upload
@@ -1766,52 +1730,23 @@ def notification_handler(
             return (
                 True,
                 f"✅ Configuration loaded from {upload_filename}",
-                {"position": "fixed", "top": 66, "right": 10, "width": 350},
+                "Success",
+                "success",
             )
         except Exception:
-            return (
-                True,
-                f"🔴 Error: Could not parse file {upload_filename}.",
-                {
-                    "position": "fixed",
-                    "top": 66,
-                    "right": 10,
-                    "width": 350,
-                    "backgroundColor": "#dc3545",
-                    "color": "white",
-                },
-            )
+            return True, f"Could not parse file {upload_filename}.", "Error", "danger"
 
     # Config delete
     if trigger == "delete-config-file" and delete_config_click:
-        return (
-            True,
-            "Config file removed.",
-            {"position": "fixed", "top": 66, "right": 10, "width": 350},
-        )
+        return True, "Config file removed.", "Success", "success"
 
     # Config edit
     if trigger == "save-config-json-edit-btn" and save_edit_click:
         try:
             json.loads(edit_text)
-            return (
-                True,
-                "✅ Configuration updated from editor.",
-                {"position": "fixed", "top": 66, "right": 10, "width": 350},
-            )
+            return True, "✅ Configuration updated from editor.", "Success", "success"
         except Exception as e:
-            return (
-                True,
-                f"🔴 Error: Invalid JSON. {e}",
-                {
-                    "position": "fixed",
-                    "top": 66,
-                    "right": 10,
-                    "width": 350,
-                    "backgroundColor": "#dc3545",
-                    "color": "white",
-                },
-            )
+            return True, f"Invalid JSON. {e}", "Error", "danger"
 
     # Edge creation
     if trigger == "edge-added-store" and edge_data:
@@ -1819,16 +1754,13 @@ def notification_handler(
             return (
                 True,
                 f"Added connection from {edge_data['source']} to {edge_data['target']}",
-                {"position": "fixed", "top": 66, "right": 10, "width": 350},
+                "Success",
+                "success",
             )
 
     # Run simulation
     if trigger == "run-simulation" and run_sim_click:
-        return (
-            True,
-            "Simulation completed successfully",
-            {"position": "fixed", "top": 66, "right": 10, "width": 350},
-        )
+        return True, "Simulation successfully started", "Success", "success"
 
     # Show properties
     if trigger == "reactor-graph" and (selected_node or selected_edge):
@@ -1841,18 +1773,15 @@ def notification_handler(
             return (
                 True,
                 f"Viewing properties of {data['type']} {data['id']}",
-                {"position": "fixed", "top": 66, "right": 10, "width": 350},
+                "Info",
+                "info",
             )
 
     # Graph update
     if trigger == "current-config":
-        return (
-            True,
-            "Graph updated",
-            {"position": "fixed", "top": 66, "right": 10, "width": 350},
-        )
+        return True, "Graph updated", "Info", "info"
 
-    return False, "", {"position": "fixed", "top": 66, "right": 10, "width": 350}
+    return False, "", "", "primary"
 
 
 @app.callback(
