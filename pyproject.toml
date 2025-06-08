@@ -3,14 +3,21 @@ requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
 
 [project]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
-    "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Topic :: Scientific/Engineering"
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering"
+]
+dependencies = [
+  "dash>=2.0.0",
+  "dash-bootstrap-components>=1.0.0",
+  "dash-cytoscape>=0.3.0",
+  "cantera>=3.0.0",
+  "python-dotenv>=1.0.0"
 ]
 description = "A visual interface for Cantera reactor networks"
 dynamic = ["version"]
@@ -18,13 +25,6 @@ license = {file = "LICENSE"}
 name = "blocscape"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "dash>=2.0.0",
-    "dash-bootstrap-components>=1.0.0",
-    "dash-cytoscape>=0.3.0",
-    "cantera>=3.0.0",
-    "python-dotenv>=1.0.0",
-]
 
 [tool.coverage.run]
 branch = true
@@ -54,4 +54,4 @@ write_to = "blocscape/version.py"
 write_to_template = '''
 # Do not change! Do not track in version control!
 __version__ = "{version}"
-''' 
+'''

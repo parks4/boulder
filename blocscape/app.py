@@ -1,10 +1,10 @@
 import dash
 import dash_bootstrap_components as dbc
 
-from .config import get_initial_config
-from .styles import CYTOSCAPE_STYLESHEET
-from .layout import get_layout
 from . import callbacks
+from .config import get_initial_config
+from .layout import get_layout
+from .styles import CYTOSCAPE_STYLESHEET
 
 # Initialize the Dash app with Bootstrap
 app = dash.Dash(

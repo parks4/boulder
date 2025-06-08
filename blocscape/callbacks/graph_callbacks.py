@@ -6,7 +6,7 @@ from dash import Input, Output, State
 
 def register_callbacks(app):
     """Register graph-related callbacks."""
-    
+
     # Callback to update the graph
     @app.callback(
         [Output("reactor-graph", "elements")],
@@ -15,6 +15,7 @@ def register_callbacks(app):
     )
     def update_graph(config: dict) -> tuple:
         from ..utils import config_to_cyto_elements
+
         return (config_to_cyto_elements(config),)
 
     # Callback to add new reactor
@@ -44,7 +45,7 @@ def register_callbacks(app):
             return (dash.no_update,)
         if any(comp["id"] == reactor_id for comp in config["components"]):
             return (dash.no_update,)
-        
+
         new_reactor = {
             "id": reactor_id,
             "type": reactor_type,
@@ -85,7 +86,7 @@ def register_callbacks(app):
             for conn in config["connections"]
         ):
             return (dash.no_update,)
-        
+
         new_connection = {
             "id": mfc_id,
             "type": "MassFlowController",
@@ -166,4 +167,4 @@ def register_callbacks(app):
     def retrigger_last_selected(n_clicks, last_selected):
         if n_clicks:
             return last_selected
-        raise dash.exceptions.PreventUpdate 
+        raise dash.exceptions.PreventUpdate

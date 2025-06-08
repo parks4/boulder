@@ -1,15 +1,15 @@
 """Callbacks for configuration file handling and JSON editing."""
 
-import dash
-from dash import html, dcc, Input, Output, State
-import dash_bootstrap_components as dbc
-import json
 import base64
+import json
+
+import dash
+from dash import Input, Output, State, dcc, html
 
 
 def register_callbacks(app):
     """Register config-related callbacks."""
-    
+
     # Callback to render the config upload area
     @app.callback(
         Output("config-upload-area", "children"),
@@ -47,7 +47,11 @@ def register_callbacks(app):
                             },
                         ),
                     ],
-                    style={"display": "flex", "alignItems": "center", "marginBottom": 10},
+                    style={
+                        "display": "flex",
+                        "alignItems": "center",
+                        "marginBottom": 10,
+                    },
                 ),
             )
         else:
@@ -96,7 +100,7 @@ def register_callbacks(app):
         old_config: dict,
     ) -> tuple:
         from ..config import get_initial_config
-        
+
         ctx = dash.callback_context
         if not ctx.triggered:
             raise dash.exceptions.PreventUpdate
@@ -238,4 +242,4 @@ def register_callbacks(app):
                 {"display": "none"},
                 {"display": "none"},
                 {"display": "block"},
-            ) 
+            )

@@ -6,7 +6,7 @@ from dash import Input, Output, State
 
 def register_callbacks(app):
     """Register modal-related callbacks."""
-    
+
     # Callback to open/close Reactor modal
     @app.callback(
         Output("add-reactor-modal", "is_open"),
@@ -61,7 +61,12 @@ def register_callbacks(app):
         [Input("current-config", "data")],
     )
     def update_mfc_options(config: dict) -> tuple[list[dict], list[dict]]:
-        valid_types = ["IdealGasReactor", "ConstVolReactor", "ConstPReactor", "Reservoir"]
+        valid_types = [
+            "IdealGasReactor",
+            "ConstVolReactor",
+            "ConstPReactor",
+            "Reservoir",
+        ]
         options = [
             {"label": comp["id"], "value": comp["id"]}
             for comp in config["components"]
@@ -93,7 +98,9 @@ def register_callbacks(app):
             Input("mfc-flow-rate", "value"),
         ],
     )
-    def toggle_mfc_button(mfc_id: str, source: str, target: str, flow_rate: float) -> bool:
+    def toggle_mfc_button(
+        mfc_id: str, source: str, target: str, flow_rate: float
+    ) -> bool:
         return not all([mfc_id, source, target, flow_rate])
 
     # Auto-generate default IDs and values
@@ -184,4 +191,4 @@ def register_callbacks(app):
         default_source = reactor_ids[0] if reactor_ids else None
         default_target = reactor_ids[1] if len(reactor_ids) > 1 else None
 
-        return 0.001, default_source, default_target 
+        return 0.001, default_source, default_target

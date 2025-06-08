@@ -1,14 +1,15 @@
 """Callbacks for simulation execution and results handling."""
 
-import dash
-from dash import Input, Output, State
-import plotly.graph_objects as go
 import datetime
+
+import dash
+import plotly.graph_objects as go
+from dash import Input, Output, State
 
 
 def register_callbacks(app):
     """Register simulation-related callbacks."""
-    
+
     # Callback to run simulation and update plots
     @app.callback(
         [
@@ -23,9 +24,9 @@ def register_callbacks(app):
         prevent_initial_call=True,
     )
     def run_simulation(n_clicks: int, config: dict, config_filename: str):
-        from ..config import USE_DUAL_CONVERTER
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
-        
+        from ..config import USE_DUAL_CONVERTER
+
         if n_clicks == 0:
             return {}, {}, {}, ""
         try:
@@ -36,18 +37,20 @@ def register_callbacks(app):
                 converter = CanteraConverter()
                 network, results = converter.build_network(config)
                 code_str = ""
-            
+
             # Create temperature plot
             temp_fig = go.Figure()
             temp_fig.add_trace(
-                go.Scatter(x=results["time"], y=results["temperature"], name="Temperature")
+                go.Scatter(
+                    x=results["time"], y=results["temperature"], name="Temperature"
+                )
             )
             temp_fig.update_layout(
                 title="Temperature vs Time",
                 xaxis_title="Time (s)",
                 yaxis_title="Temperature (K)",
             )
-            
+
             # Create pressure plot
             press_fig = go.Figure()
             press_fig.add_trace(
@@ -58,7 +61,7 @@ def register_callbacks(app):
                 xaxis_title="Time (s)",
                 yaxis_title="Pressure (Pa)",
             )
-            
+
             # Create species plot
             species_fig = go.Figure()
             for species, concentrations in results["species"].items():
@@ -73,7 +76,7 @@ def register_callbacks(app):
                 xaxis_title="Time (s)",
                 yaxis_title="Mole Fraction",
             )
-            
+
             if USE_DUAL_CONVERTER and code_str:
                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 config_file_str = (
@@ -102,10 +105,11 @@ def register_callbacks(app):
         prevent_initial_call=False,
     )
     def show_download_button(code_str):
-        from ..config import USE_DUAL_CONVERTER
-        from dash import dcc
         import dash_bootstrap_components as dbc
-        
+        from dash import dcc
+
+        from ..config import USE_DUAL_CONVERTER
+
         if USE_DUAL_CONVERTER:
             return [
                 dbc.Button(
@@ -131,7 +135,7 @@ def register_callbacks(app):
     )
     def toggle_download_button(code_str):
         from ..config import USE_DUAL_CONVERTER
-        
+
         if not USE_DUAL_CONVERTER:
             return True, "secondary"
         if code_str and code_str.strip():
@@ -161,4 +165,4 @@ def register_callbacks(app):
     def trigger_download_py(n_clicks, code_str):
         if n_clicks and code_str and code_str.strip():
             return dict(content=code_str, filename="cantera_simulation.py")
-        return dash.no_update 
+        return dash.no_update

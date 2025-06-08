@@ -1,8 +1,11 @@
 """Layout definition for the Boulder application."""
-from dash import html, dcc
+
 import dash_bootstrap_components as dbc
 import dash_cytoscape as cyto
+from dash import dcc, html
+
 from .utils import config_to_cyto_elements
+
 
 def get_layout(initial_config, cyto_stylesheet):
     """Create the main application layout."""
@@ -11,10 +14,16 @@ def get_layout(initial_config, cyto_stylesheet):
             # Hidden dummy elements for callback IDs (always present)
             html.Div(
                 [
-                    html.Button("✕", id="delete-config-file", style={"display": "none"}),
-                    html.Span("", id="config-file-name-span", style={"display": "none"}),
+                    html.Button(
+                        "✕", id="delete-config-file", style={"display": "none"}
+                    ),
+                    html.Span(
+                        "", id="config-file-name-span", style={"display": "none"}
+                    ),
                     dcc.Upload(id="upload-config", style={"display": "none"}),
-                    dcc.Textarea(id="config-json-edit-textarea", style={"display": "none"}),
+                    dcc.Textarea(
+                        id="config-json-edit-textarea", style={"display": "none"}
+                    ),
                     dbc.Button(
                         "Cancel",
                         id="cancel-config-json-edit-btn",
@@ -81,7 +90,9 @@ def get_layout(initial_config, cyto_stylesheet):
                                 className="ml-auto",
                             ),
                             dbc.Button(
-                                "Close", id="close-config-json-modal", className="ml-auto"
+                                "Close",
+                                id="close-config-json-modal",
+                                className="ml-auto",
                             ),
                         ]
                     ),
@@ -147,7 +158,9 @@ def get_layout(initial_config, cyto_stylesheet):
                                         dbc.Label("Initial Temperature (K)", width=4),
                                         dbc.Col(
                                             dbc.Input(
-                                                id="reactor-temp", type="number", value=300
+                                                id="reactor-temp",
+                                                type="number",
+                                                value=300,
                                             ),
                                             width=8,
                                         ),
@@ -395,7 +408,9 @@ def get_layout(initial_config, cyto_stylesheet):
                                             dbc.Row(
                                                 [
                                                     dbc.Col(
-                                                        dcc.Graph(id="temperature-plot"),
+                                                        dcc.Graph(
+                                                            id="temperature-plot"
+                                                        ),
                                                         width=6,
                                                     ),
                                                     dbc.Col(
@@ -446,5 +461,3 @@ def get_layout(initial_config, cyto_stylesheet):
             dcc.Store(id="keyboard-trigger", data=""),
         ]
     )
-
- 

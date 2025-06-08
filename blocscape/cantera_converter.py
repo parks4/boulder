@@ -1,7 +1,8 @@
-import cantera as ct
 import json
-from typing import Dict, List, Tuple
 import logging
+from typing import Dict, List, Tuple
+
+import cantera as ct
 
 logger = logging.getLogger(__name__)
 

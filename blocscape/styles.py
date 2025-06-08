@@ -47,4 +47,4 @@ CYTOSCAPE_STYLESHEET = [
             "text-max-width": "80px",
         },
     },
-] 
+]

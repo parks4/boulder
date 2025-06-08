@@ -1,14 +1,15 @@
 """Callbacks for toast notifications."""
 
+import base64
+import json
+
 import dash
 from dash import Input, Output, State
-import json
-import base64
 
 
 def register_callbacks(app):
     """Register notification-related callbacks."""
-    
+
     @app.callback(
         [
             Output("notification-toast", "is_open"),
@@ -129,7 +130,12 @@ def register_callbacks(app):
                     "success",
                 )
             except Exception:
-                return True, f"Could not parse file {upload_filename}.", "Error", "danger"
+                return (
+                    True,
+                    f"Could not parse file {upload_filename}.",
+                    "Error",
+                    "danger",
+                )
 
         # Config delete
         if trigger == "delete-config-file" and delete_config_click:
@@ -139,7 +145,12 @@ def register_callbacks(app):
         if trigger == "save-config-json-edit-btn" and save_edit_click:
             try:
                 json.loads(edit_text)
-                return True, "✅ Configuration updated from editor.", "Success", "success"
+                return (
+                    True,
+                    "✅ Configuration updated from editor.",
+                    "Success",
+                    "success",
+                )
             except Exception as e:
                 return True, f"Invalid JSON. {e}", "Error", "danger"
 
@@ -176,4 +187,4 @@ def register_callbacks(app):
         if trigger == "current-config":
             return True, "Graph updated", "Info", "info"
 
-        return False, "", "", "primary" 
+        return False, "", "", "primary"

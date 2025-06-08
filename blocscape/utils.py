@@ -7,7 +7,8 @@ def config_to_cyto_elements(config):
     Args:
         config: Configuration dictionary containing components and connections
 
-    Returns:
+    Returns
+    -------
         list: nodes + edges for Cytoscape
     """
     nodes = []
@@ -56,4 +57,4 @@ def label_with_unit(key: str) -> str:
         "temperature": "temperature (K)",
         "mass_flow_rate": "mass flow rate (kg/s)",
     }
-    return unit_map.get(key, key) 
+    return unit_map.get(key, key)

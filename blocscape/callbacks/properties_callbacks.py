@@ -1,13 +1,13 @@
 """Callbacks for properties panel editing and display."""
 
 import dash
-from dash import html, dcc, Input, Output, State
 import dash_bootstrap_components as dbc
+from dash import Input, Output, State, dcc, html
 
 
 def register_callbacks(app):
     """Register properties-related callbacks."""
-    
+
     # Callback to show properties of selected element (editable)
     @app.callback(
         Output("properties-panel", "children"),
@@ -20,7 +20,7 @@ def register_callbacks(app):
     )
     def show_properties_editable(last_selected, edit_mode, config):
         from ..utils import label_with_unit
-        
+
         node_data = None
         edge_data = None
         if last_selected and last_selected.get("type") == "node":
@@ -94,7 +94,8 @@ def register_callbacks(app):
                         [
                             dbc.Col(html.Label(label_with_unit(k)), width=6),
                             dbc.Col(
-                                html.Div(str(v), style={"wordBreak": "break-all"}), width=6
+                                html.Div(str(v), style={"wordBreak": "break-all"}),
+                                width=6,
                             ),
                         ],
                         className="mb-2",
@@ -187,7 +188,8 @@ def register_callbacks(app):
                         [
                             dbc.Col(html.Label(label_with_unit(k)), width=5),
                             dbc.Col(
-                                html.Div(str(v), style={"wordBreak": "break-all"}), width=7
+                                html.Div(str(v), style={"wordBreak": "break-all"}),
+                                width=7,
                             ),
                         ],
                         className="mb-2",
@@ -297,4 +299,4 @@ def register_callbacks(app):
                         else:
                             conn["properties"][key] = v
                     break
-        return config 
+        return config

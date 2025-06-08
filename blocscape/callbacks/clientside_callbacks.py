@@ -5,7 +5,6 @@ from dash import Input, Output
 
 def register_callbacks(app):
     """Register client-side callbacks."""
-    
     # Custom edge creation from custom event
     app.clientside_callback(
         """
@@ -143,4 +142,4 @@ def register_callbacks(app):
         Output("keyboard-trigger", "data"),
         Input("reactor-graph", "id"),
         prevent_initial_call=False,
-    ) 
+    )
