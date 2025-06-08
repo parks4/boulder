@@ -1,6 +1,6 @@
 {
   "template": "https://github.com/spark-cleantech/package-template",
-  "commit": "2a0fd8b2fe3332c2f1586115d89ffc0fd387b126",
+  "commit": "02767a57f4444fc8413d0e3265a5a0f92d586794",
   "checkout": null,
   "context": {
     "cookiecutter": {
