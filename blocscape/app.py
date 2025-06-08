@@ -144,9 +144,6 @@ app.layout = html.Div(
                 dcc.Upload(id="upload-config", style={"display": "none"}),
                 dcc.Textarea(id="config-json-edit-textarea", style={"display": "none"}),
                 dbc.Button(
-                    "Save", id="save-config-json-edit-btn", style={"display": "none"}
-                ),
-                dbc.Button(
                     "Cancel",
                     id="cancel-config-json-edit-btn",
                     style={"display": "none"},
@@ -582,18 +579,18 @@ app.layout = html.Div(
     [State("add-reactor-modal", "is_open")],
     prevent_initial_call=True,
 )
-def toggle_reactor_modal(n1: int, n2: int, n3: int, is_open: bool) -> tuple[bool]:
+def toggle_reactor_modal(n1: int, n2: int, n3: int, is_open: bool) -> bool:
     ctx = dash.callback_context
     if not ctx.triggered:
-        return (is_open,)
+        return is_open
     trigger = ctx.triggered[0]["prop_id"].split(".")[0]
     if trigger == "open-reactor-modal" and n1:
-        return (True,)
+        return True
     elif trigger == "close-reactor-modal" and n2:
-        return (False,)
+        return False
     elif trigger == "add-reactor" and n3:
-        return (False,)
-    return (is_open,)
+        return False
+    return is_open
 
 
 # Callback to open/close MFC modal
@@ -607,18 +604,18 @@ def toggle_reactor_modal(n1: int, n2: int, n3: int, is_open: bool) -> tuple[bool
     [State("add-mfc-modal", "is_open")],
     prevent_initial_call=True,
 )
-def toggle_mfc_modal(n1: int, n2: int, n3: int, is_open: bool) -> tuple[bool]:
+def toggle_mfc_modal(n1: int, n2: int, n3: int, is_open: bool) -> bool:
     ctx = dash.callback_context
     if not ctx.triggered:
-        return (is_open,)
+        return is_open
     trigger = ctx.triggered[0]["prop_id"].split(".")[0]
     if trigger == "open-mfc-modal" and n1:
-        return (True,)
+        return True
     elif trigger == "close-mfc-modal" and n2:
-        return (False,)
+        return False
     elif trigger == "add-mfc" and n3:
-        return (False,)
-    return (is_open,)
+        return False
+    return is_open
 
 
 # Callback to update MFC source/target options

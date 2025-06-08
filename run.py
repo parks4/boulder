@@ -9,3 +9,4 @@ if __name__ == "__main__":
 # TODO
 # - min/max values for temperature, pressure.
 # - check inputs format
+# - add graphical option to delete a node (we can already do it through the JSON)
