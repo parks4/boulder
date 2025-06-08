@@ -1,7 +1,9 @@
 """Utility functions for the Boulder application."""
 
+from typing import Any, Dict, List
 
-def config_to_cyto_elements(config):
+
+def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Convert the JSON-like configuration to two lists of Cytoscape elements.
 
     Args:

@@ -7,7 +7,7 @@ import dash
 from dash import Input, Output, State
 
 
-def register_callbacks(app):
+def register_callbacks(app) -> None:  # type: ignore
     """Register notification-related callbacks."""
 
     @app.callback(

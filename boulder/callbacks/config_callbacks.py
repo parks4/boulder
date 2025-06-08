@@ -7,7 +7,7 @@ import dash
 from dash import Input, Output, State, dcc, html
 
 
-def register_callbacks(app):
+def register_callbacks(app) -> None:  # type: ignore
     """Register config-related callbacks."""
 
     # Callback to render the config upload area

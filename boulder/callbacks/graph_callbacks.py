@@ -1,19 +1,21 @@
-"""Callbacks for graph interactions and updates."""
+"""Callbacks for cytoscape graph interactions."""
+
+from typing import Any, Dict, List, Tuple, Union
 
 import dash
 from dash import Input, Output, State
 
 
-def register_callbacks(app):
+def register_callbacks(app) -> None:  # type: ignore
     """Register graph-related callbacks."""
 
     # Callback to update the graph
     @app.callback(
-        [Output("reactor-graph", "elements")],
-        Input("current-config", "data"),
-        prevent_initial_call=True,
+        [Output("cytoscape-graph", "elements")],
+        [Input("current-config", "data")],
+        prevent_initial_call=False,
     )
-    def update_graph(config: dict) -> tuple:
+    def update_graph(config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]]]:
         from ..utils import config_to_cyto_elements
 
         return (config_to_cyto_elements(config),)
@@ -40,7 +42,7 @@ def register_callbacks(app):
         pressure: float,
         composition: str,
         config: dict,
-    ) -> tuple[dict]:
+    ) -> Tuple[Union[Dict[str, Any], Any]]:
         if not all([reactor_id, reactor_type, temp, pressure, composition]):
             return (dash.no_update,)
         if any(comp["id"] == reactor_id for comp in config["components"]):
@@ -78,7 +80,7 @@ def register_callbacks(app):
         target: str,
         flow_rate: float,
         config: dict,
-    ) -> tuple[dict]:
+    ) -> Tuple[Union[Dict[str, Any], Any]]:
         if not all([mfc_id, source, target, flow_rate]):
             return (dash.no_update,)
         if any(
@@ -145,8 +147,8 @@ def register_callbacks(app):
     @app.callback(
         Output("last-selected-element", "data"),
         [
-            Input("reactor-graph", "selectedNodeData"),
-            Input("reactor-graph", "selectedEdgeData"),
+            Input("cytoscape-graph", "selectedNodeData"),
+            Input("cytoscape-graph", "selectedEdgeData"),
         ],
         prevent_initial_call=True,
     )

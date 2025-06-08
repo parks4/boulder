@@ -1,10 +1,12 @@
 """Callbacks for modal dialogs (reactor and MFC modals)."""
 
+from typing import Any, Union
+
 import dash
 from dash import Input, Output, State
 
 
-def register_callbacks(app):
+def register_callbacks(app) -> None:  # type: ignore
     """Register modal-related callbacks."""
 
     # Callback to open/close Reactor modal
@@ -110,7 +112,7 @@ def register_callbacks(app):
         [State("current-config", "data")],
         prevent_initial_call=True,
     )
-    def generate_reactor_id(is_open: bool, config: dict) -> str:
+    def generate_reactor_id(is_open: bool, config: dict) -> Union[str, Any]:
         if not is_open:
             return dash.no_update
 
@@ -136,7 +138,7 @@ def register_callbacks(app):
         [Input("add-reactor-modal", "is_open")],
         prevent_initial_call=True,
     )
-    def set_default_reactor_type(is_open: bool) -> str:
+    def set_default_reactor_type(is_open: bool) -> Union[str, Any]:
         if is_open:
             return "IdealGasReactor"
         return dash.no_update
@@ -147,7 +149,7 @@ def register_callbacks(app):
         [State("current-config", "data")],
         prevent_initial_call=True,
     )
-    def generate_mfc_id(is_open: bool, config: dict) -> str:
+    def generate_mfc_id(is_open: bool, config: dict) -> Union[str, Any]:
         if not is_open:
             return dash.no_update
 

@@ -3,7 +3,7 @@
 from dash import Input, Output
 
 
-def register_callbacks(app):
+def register_callbacks(app) -> None:  # type: ignore
     """Register client-side callbacks."""
     # Custom edge creation from custom event
     app.clientside_callback(

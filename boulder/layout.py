@@ -1,13 +1,17 @@
 """Layout definition for the Boulder application."""
 
-import dash_bootstrap_components as dbc
-import dash_cytoscape as cyto
+from typing import Any, Dict, List
+
+import dash_bootstrap_components as dbc  # type: ignore
+import dash_cytoscape as cyto  # type: ignore
 from dash import dcc, html
 
 from .utils import config_to_cyto_elements
 
 
-def get_layout(initial_config, cyto_stylesheet):
+def get_layout(
+    initial_config: Dict[str, Any], cyto_stylesheet: List[Dict[str, Any]]
+) -> html.Div:
     """Create the main application layout."""
     return html.Div(
         [
@@ -343,7 +347,7 @@ def get_layout(initial_config, cyto_stylesheet):
                                                 id="run-simulation",
                                                 color="success",
                                                 className="mb-2 w-100",
-                                                # Triggered by Ctrl + Enter see callback in app.clientside_callback
+                                                # Triggered by Ctrl + Enter see clientside_callback
                                             ),
                                             html.Div(
                                                 id="download-python-code-btn-container",

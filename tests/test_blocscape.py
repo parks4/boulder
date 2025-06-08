@@ -1,7 +1,7 @@
 """Test suite for boulder."""
 
 
-def test_version():
+def test_version() -> None:
     """Test that version is defined."""
     from boulder import __version__
 

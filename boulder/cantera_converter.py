@@ -1,18 +1,18 @@
 import json
 import logging
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
-import cantera as ct
+import cantera as ct  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 
 class CanteraConverter:
-    def __init__(self):
+    def __init__(self) -> None:
         self.gas = ct.Solution("gri30.yaml")
-        self.reactors = {}
-        self.connections = {}
-        self.network = None
+        self.reactors: Dict[str, ct.Reactor] = {}
+        self.connections: Dict[str, ct.FlowDevice] = {}
+        self.network: ct.ReactorNet = None
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         """Convert composition string to dictionary of species and mole fractions."""
@@ -22,7 +22,7 @@ class CanteraConverter:
             comp_dict[species] = float(value)
         return comp_dict
 
-    def create_reactor(self, reactor_config: Dict) -> ct.Reactor:
+    def create_reactor(self, reactor_config: Dict[str, Any]) -> ct.Reactor:
         """Create a Cantera reactor from configuration."""
         reactor_type = reactor_config["type"]
         props = reactor_config["properties"]
@@ -43,7 +43,7 @@ class CanteraConverter:
 
         return reactor
 
-    def create_connection(self, conn_config: Dict) -> ct.FlowDevice:
+    def create_connection(self, conn_config: Dict[str, Any]) -> ct.FlowDevice:
         """Create a Cantera flow device from configuration."""
         conn_type = conn_config["type"]
         props = conn_config["properties"]
@@ -63,8 +63,8 @@ class CanteraConverter:
         return device
 
     def build_network(
-        self, config: Dict
-    ) -> Tuple[ct.ReactorNet, Dict[str, List[float]]]:
+        self, config: Dict[str, Any]
+    ) -> Tuple[ct.ReactorNet, Dict[str, Any]]:
         """Build a ReactorNet from configuration and return network and results."""
         # Clear previous state
         self.reactors.clear()
@@ -98,7 +98,9 @@ class CanteraConverter:
         times = []
         temperatures = []
         pressures = []
-        species = {species: [] for species in self.gas.species_names}
+        species: Dict[str, List[float]] = {
+            species: [] for species in self.gas.species_names
+        }
 
         # Use smaller time steps and shorter simulation time
         for t in range(0, 10, 1):  # Simulate for 10 seconds with 1-second steps
@@ -124,7 +126,7 @@ class CanteraConverter:
                     for species_name in self.gas.species_names:
                         species[species_name].append(species[species_name][-1])
 
-        results = {
+        results: Dict[str, Any] = {
             "time": times,
             "temperature": temperatures,
             "pressure": pressures,
@@ -133,24 +135,25 @@ class CanteraConverter:
 
         return self.network, results
 
-    def load_config(self, filepath: str) -> Dict:
+    def load_config(self, filepath: str) -> Dict[str, Any]:
         """Load configuration from JSON file."""
         with open(filepath, "r") as f:
             return json.load(f)
 
 
 class DualCanteraConverter:
-    def __init__(self):
-        """A DualCanteraConverter class that:
+    def __init__(self) -> None:
+        """Initialize DualCanteraConverter.
+
         Executes the Cantera network as before.
         Simultaneously builds a string of Python code that, if run, will produce the same objects and results.
         Returns (network, results, code_str) from build_network_and_code(config).
         """
         self.gas = ct.Solution("gri30.yaml")
-        self.reactors = {}
-        self.connections = {}
-        self.network = None
-        self.code_lines = []
+        self.reactors: Dict[str, ct.Reactor] = {}
+        self.connections: Dict[str, ct.FlowDevice] = {}
+        self.network: ct.ReactorNet = None
+        self.code_lines: List[str] = []
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -160,8 +163,8 @@ class DualCanteraConverter:
         return comp_dict
 
     def build_network_and_code(
-        self, config: Dict
-    ) -> Tuple[ct.ReactorNet, Dict[str, List[float]], str]:
+        self, config: Dict[str, Any]
+    ) -> Tuple[Any, Dict[str, Any], str]:
         self.code_lines = []
         self.code_lines.append("import cantera as ct")
         self.code_lines.append("gas = ct.Solution('gri30.yaml')")
@@ -232,7 +235,8 @@ class DualCanteraConverter:
 
         # Simulation loop (example)
         self.code_lines.append(
-            """# Run the simulation\nfor t in range(0, 10, 1):\n    network.advance(t)\n    print(f\"t={t}, T={[r.thermo.T for r in network.reactors]}\")"""
+            """# Run the simulation\nfor t in range(0, 10, 1):\n    network.advance(t)\n    """
+            + """print(f\"t={t}, T={[r.thermo.T for r in network.reactors]}\")"""
         )
         # TOOD: add dual code directly in the simulation loop too.
 
@@ -240,7 +244,9 @@ class DualCanteraConverter:
         times = []
         temperatures = []
         pressures = []
-        species = {species: [] for species in self.gas.species_names}
+        species: Dict[str, List[float]] = {
+            species: [] for species in self.gas.species_names
+        }
         reactor_list = [self.reactors[rid] for rid in reactor_ids]
         for t in range(0, 10, 1):
             try:
@@ -261,7 +267,7 @@ class DualCanteraConverter:
                     pressures.append(pressures[-1])
                     for species_name in self.gas.species_names:
                         species[species_name].append(species[species_name][-1])
-        results = {
+        results: Dict[str, Any] = {
             "time": times,
             "temperature": temperatures,
             "pressure": pressures,

@@ -11,7 +11,7 @@ from . import (
 )
 
 
-def register_callbacks(app):
+def register_callbacks(app) -> None:  # type: ignore
     """Register all callbacks with the Dash app."""
     graph_callbacks.register_callbacks(app)
     modal_callbacks.register_callbacks(app)

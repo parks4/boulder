@@ -5,7 +5,7 @@ import dash_bootstrap_components as dbc
 from dash import Input, Output, State, dcc, html
 
 
-def register_callbacks(app):
+def register_callbacks(app) -> None:  # type: ignore
     """Register properties-related callbacks."""
 
     # Callback to show properties of selected element (editable)
