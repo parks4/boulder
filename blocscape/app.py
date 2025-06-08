@@ -449,10 +449,11 @@ app.layout = html.Div(
                                 dbc.CardBody(
                                     [
                                         dbc.Button(
-                                            "Run Simulation",
+                                            "Run Simulation (⌃+⏎)",
                                             id="run-simulation",
                                             color="success",
                                             className="mb-2 w-100",
+                                            # Triggered by Ctrl + Enter see callback in app.clientside_callback
                                         ),
                                         html.Div(
                                             id="download-python-code-btn-container",
@@ -564,6 +565,8 @@ app.layout = html.Div(
         dcc.Store(id="last-selected-element", data={}),
         dcc.Store(id="use-temperature-scale", data=True),
         dcc.Store(id="last-sim-python-code", data=""),
+        # Hidden store to trigger keyboard actions
+        dcc.Store(id="keyboard-trigger", data=""),
     ]
 )
 
@@ -2003,6 +2006,34 @@ def trigger_download_py(n_clicks, code_str):
     if n_clicks and code_str and code_str.strip():
         return dict(content=code_str, filename="cantera_simulation.py")
     return dash.no_update
+
+
+# Add a clientside callback for Ctrl+Enter keyboard shortcut
+app.clientside_callback(
+    """
+    function(n_intervals) {
+        if (window._blocscape_keyboard_shortcut) return window.dash_clientside.no_update;
+        window._blocscape_keyboard_shortcut = true;
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                // Check if Add Reactor modal is open
+                var addReactorModal = document.getElementById('add-reactor-modal');
+                if (addReactorModal && addReactorModal.classList.contains('show')) {
+                    var btn = document.getElementById('add-reactor');
+                    if (btn && !btn.disabled) btn.click();
+                } else {
+                    var runBtn = document.getElementById('run-simulation');
+                    if (runBtn && !runBtn.disabled) runBtn.click();
+                }
+            }
+        });
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("keyboard-trigger", "data"),
+    Input("reactor-graph", "id"),
+    prevent_initial_call=False,
+)
 
 
 def run_server(debug: bool = False) -> None:
