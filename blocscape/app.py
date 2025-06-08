@@ -564,6 +564,9 @@ app.layout = html.Div(
         dcc.Store(id="last-selected-element", data={}),
         dcc.Store(id="use-temperature-scale", data=True),
         dcc.Store(id="last-sim-python-code", data=""),
+        # Hidden store to trigger keyboard actions
+        dcc.Store(id="keyboard-trigger", data=""),
+        dcc.Store(id="simulation-status", data="idle"),
     ]
 )
 
@@ -1232,6 +1235,7 @@ def save_properties(n_clicks, node_data, edge_data, config, values, ids):
         Output("pressure-plot", "figure"),
         Output("species-plot", "figure"),
         Output("last-sim-python-code", "data"),
+        Output("simulation-status", "data", allow_duplicate=True),
     ],
     Input("run-simulation", "n_clicks"),
     State("current-config", "data"),
@@ -1240,7 +1244,7 @@ def save_properties(n_clicks, node_data, edge_data, config, values, ids):
 )
 def run_simulation(n_clicks: int, config: dict, config_filename: str):
     if n_clicks == 0:
-        return {}, {}, {}, ""
+        return {}, {}, {}, "", "idle"
     try:
         if USE_DUAL_CONVERTER:
             converter = DualCanteraConverter()
@@ -1300,9 +1304,9 @@ def run_simulation(n_clicks: int, config: dict, config_filename: str):
                 f'"""\n'
             )
             code_str = header + code_str
-        return temp_fig, press_fig, species_fig, code_str
+        return temp_fig, press_fig, species_fig, code_str, "idle"
     except Exception:
-        return {}, {}, {}, ""
+        return {}, {}, {}, "", "idle"
 
 
 # Add callbacks to enable/disable Add buttons based on form fields
@@ -2003,6 +2007,58 @@ def trigger_download_py(n_clicks, code_str):
     if n_clicks and code_str and code_str.strip():
         return dict(content=code_str, filename="cantera_simulation.py")
     return dash.no_update
+
+
+# Add a clientside callback for Ctrl+Enter keyboard shortcut
+app.clientside_callback(
+    """
+    function(n_intervals) {
+        if (window._blocscape_keyboard_shortcut) return window.dash_clientside.no_update;
+        window._blocscape_keyboard_shortcut = true;
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                // Check if Add Reactor modal is open
+                var addReactorModal = document.getElementById('add-reactor-modal');
+                if (addReactorModal && addReactorModal.classList.contains('show')) {
+                    var btn = document.getElementById('add-reactor');
+                    if (btn && !btn.disabled) btn.click();
+                } else {
+                    var runBtn = document.getElementById('run-simulation');
+                    if (runBtn && !runBtn.disabled) runBtn.click();
+                }
+            }
+        });
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("keyboard-trigger", "data"),
+    Input("reactor-graph", "id"),
+    prevent_initial_call=False,
+)
+
+
+# Set simulation status to 'running' when Run Simulation is clicked
+@app.callback(
+    Output("simulation-status", "data", allow_duplicate=True),
+    Input("run-simulation", "n_clicks"),
+    prevent_initial_call=True,
+)
+def set_simulation_running(n_clicks):
+    if n_clicks:
+        return "running"
+    return dash.no_update
+
+
+# Update Run Simulation button text based on simulation status
+@app.callback(
+    Output("run-simulation", "children"),
+    Input("simulation-status", "data"),
+    prevent_initial_call=False,
+)
+def update_run_simulation_text(status):
+    if status == "running":
+        return "Calculating"
+    return "Run Simulation"
 
 
 def run_server(debug: bool = False) -> None:
