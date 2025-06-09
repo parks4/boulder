@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+
+[project]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering"
+]
+dependencies = [
+  "dash>=2.0.0",
+  "dash-bootstrap-components>=1.0.0",
+  "dash-cytoscape>=0.3.0",
+  "cantera>=3.0.0",
+  "python-dotenv>=1.0.0"
+]
+description = "A visual interface for Cantera reactor networks"
+dynamic = ["version"]
+license = {file = "LICENSE"}
+name = "boulder"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.coverage.run]
+branch = true
+
+[tool.mypy]
+strict = true
+
+[tool.ruff]
+indent-width = 4
+line-length = 88
+
+[tool.ruff.lint]
+ignore = ["D1"]
+select = ["F", "E", "W", "I", "D"]
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 110
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.setuptools]
+packages = ["boulder"]
+
+[tool.setuptools_scm]
+write_to = "boulder/version.py"
+write_to_template = '''
+# Do not change! Do not track in version control!
+__version__ = "{version}"
+'''
