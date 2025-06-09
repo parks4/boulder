@@ -29,6 +29,7 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "source": connection["source"],
                     "target": connection["target"],
                     "label": connection["type"],
+                    "type": connection["type"],  # Add type field for consistency
                     "properties": connection.get("properties", {}),
                 }
             }
