@@ -87,28 +87,104 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("simulation-results-card", "style"),
             Output("simulation-data", "data"),
         ],
-        Input("run-simulation", "n_clicks"),
+        [
+            Input("run-simulation", "n_clicks"),
+            Input("theme-store", "data"),  # Add theme as input
+        ],
         [
             State("current-config", "data"),
             State("config-file-name", "data"),
             State("mechanism-select", "value"),
             State("custom-mechanism-input", "value"),
             State("custom-mechanism-upload", "filename"),
+            State("simulation-data", "data"),  # Keep existing simulation data
         ],
         prevent_initial_call=True,
     )
     def run_simulation(
         n_clicks: int,
+        theme: str,
         config: Dict[str, Any],
         config_filename: str,
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
+        existing_sim_data: Dict[str, Any],
     ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any]]:
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
         from ..config import USE_DUAL_CONVERTER
+        from ..utils import apply_theme_to_figure
 
-        if n_clicks == 0:
+        # Get the trigger context
+        ctx = dash.callback_context
+        triggered_id = (
+            ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
+        )
+
+        # If only theme changed and we have existing simulation data, just re-theme the plots
+        if (
+            triggered_id == "theme-store"
+            and existing_sim_data
+            and existing_sim_data.get("results")
+        ):
+            results = existing_sim_data["results"]
+            code_str = existing_sim_data.get("code", "")
+
+            # Create temperature plot
+            temp_fig = go.Figure()
+            temp_fig.add_trace(
+                go.Scatter(
+                    x=results["time"], y=results["temperature"], name="Temperature"
+                )
+            )
+            temp_fig.update_layout(
+                title="Temperature vs Time",
+                xaxis_title="Time (s)",
+                yaxis_title="Temperature (K)",
+            )
+            temp_fig = apply_theme_to_figure(temp_fig, theme)
+
+            # Create pressure plot
+            press_fig = go.Figure()
+            press_fig.add_trace(
+                go.Scatter(x=results["time"], y=results["pressure"], name="Pressure")
+            )
+            press_fig.update_layout(
+                title="Pressure vs Time",
+                xaxis_title="Time (s)",
+                yaxis_title="Pressure (Pa)",
+            )
+            press_fig = apply_theme_to_figure(press_fig, theme)
+
+            # Create species plot
+            species_fig = go.Figure()
+            for species, concentrations in results["species"].items():
+                if (
+                    max(concentrations) > 0.01
+                ):  # Only show species with significant concentration
+                    species_fig.add_trace(
+                        go.Scatter(x=results["time"], y=concentrations, name=species)
+                    )
+            species_fig.update_layout(
+                title="Species Concentrations vs Time",
+                xaxis_title="Time (s)",
+                yaxis_title="Mole Fraction",
+            )
+            species_fig = apply_theme_to_figure(species_fig, theme)
+
+            return (
+                temp_fig,
+                press_fig,
+                species_fig,
+                code_str,
+                "",
+                {"display": "none"},
+                {"display": "block"},
+                existing_sim_data,
+            )
+
+        # Original simulation logic for new simulations
+        if triggered_id != "run-simulation" or n_clicks == 0:
             return {}, {}, {}, "", "", {"display": "none"}, {"display": "none"}, {}
 
         # Determine the mechanism to use
@@ -121,9 +197,8 @@ def register_callbacks(app) -> None:  # type: ignore
         elif mechanism_select == "custom-path":
             if uploaded_filename:
                 # Use the uploaded file path from temp directory
-                import tempfile
-
-                mechanism = os.path.join(tempfile.gettempdir(), uploaded_filename)
+                temp_dir = tempfile.gettempdir()
+                mechanism = os.path.join(temp_dir, uploaded_filename)
             else:
                 mechanism = "gri30.yaml"  # Fallback
         else:
@@ -165,6 +240,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 xaxis_title="Time (s)",
                 yaxis_title="Temperature (K)",
             )
+            temp_fig = apply_theme_to_figure(temp_fig, theme)
 
             # Create pressure plot
             press_fig = go.Figure()
@@ -176,6 +252,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 xaxis_title="Time (s)",
                 yaxis_title="Pressure (Pa)",
             )
+            press_fig = apply_theme_to_figure(press_fig, theme)
 
             # Create species plot
             species_fig = go.Figure()
@@ -191,6 +268,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 xaxis_title="Time (s)",
                 yaxis_title="Mole Fraction",
             )
+            species_fig = apply_theme_to_figure(species_fig, theme)
 
             if USE_DUAL_CONVERTER and code_str:
                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -361,12 +439,13 @@ def register_callbacks(app) -> None:  # type: ignore
         [
             Input("results-tabs", "active_tab"),
             Input("simulation-data", "data"),
+            Input("theme-store", "data"),  # Add theme as input
         ],
         prevent_initial_call=True,
     )
     def update_sankey_plot(
-        active_tab: str, simulation_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        active_tab: str, simulation_data: Dict[str, Any], theme: str
+    ) -> Union[Dict[str, Any], Any]:
         """Generate Sankey diagram when the Sankey tab is selected."""
         import dash
         import plotly.graph_objects as go
@@ -377,6 +456,7 @@ def register_callbacks(app) -> None:  # type: ignore
             generate_sankey_input_from_sim,
             plot_sankey_diagram_from_links_and_nodes,
         )
+        from ..utils import get_sankey_theme_config
 
         # Only generate if Sankey tab is active
         if active_tab != "sankey-tab":
@@ -395,34 +475,44 @@ def register_callbacks(app) -> None:  # type: ignore
             mechanism = simulation_data["mechanism"]
             config = simulation_data["config"]
 
+            # Use Union type to handle both converter types
+            converter: Union[CanteraConverter, DualCanteraConverter]
             if USE_DUAL_CONVERTER:
-                converter = DualCanteraConverter(mechanism=mechanism)
+                dual_converter = DualCanteraConverter(mechanism=mechanism)
                 # Rebuild the network
-                converter.build_network_and_code(config)
+                dual_converter.build_network_and_code(config)
+                converter = dual_converter
             else:
-                converter = CanteraConverter(mechanism=mechanism)
+                single_converter = CanteraConverter(mechanism=mechanism)
                 # Rebuild the network
-                converter.build_network(config)
+                single_converter.build_network(config)
+                converter = single_converter
 
             # Check if network was successfully built
             if converter.last_network is None:
                 return dash.no_update
 
-            # Generate Sankey data from the rebuilt network
+            # Generate Sankey data from the rebuilt network with theme-aware colors
             links, nodes = generate_sankey_input_from_sim(
                 converter.last_network,
                 show_species=["H2", "CH4"],
                 verbose=False,
                 mechanism=converter.mechanism,
+                theme=theme,  # Pass theme to sankey generation
             )
 
-            # Create the Sankey plot
-            fig = plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False)
+            # Create the Sankey plot with theme-aware styling
+            sankey_theme = get_sankey_theme_config(theme)
+            fig = plot_sankey_diagram_from_links_and_nodes(
+                links, nodes, show=False, theme=theme
+            )
 
-            # Update layout for better display
+            # Update layout with theme styling
             fig.update_layout(
                 title="Energy Flow Sankey Diagram",
-                font_size=12,
+                font=sankey_theme["font"],
+                paper_bgcolor=sankey_theme["paper_bgcolor"],
+                plot_bgcolor=sankey_theme["plot_bgcolor"],
                 margin=dict(l=10, r=10, t=40, b=10),
             )
 
@@ -430,6 +520,7 @@ def register_callbacks(app) -> None:  # type: ignore
 
         except Exception as e:
             # Return empty figure with error message if something goes wrong
+            sankey_theme = get_sankey_theme_config(theme)
             fig = go.Figure()
             fig.add_annotation(
                 text=f"Error generating Sankey diagram:<br>{str(e)}",
@@ -438,15 +529,16 @@ def register_callbacks(app) -> None:  # type: ignore
                 x=0.5,
                 y=0.5,
                 showarrow=False,
-                font=dict(size=16, color="#dc3545"),
+                font=dict(size=16, color="#dc3545" if theme == "light" else "#ff6b6b"),
                 align="center",
             )
             fig.update_layout(
                 title="Energy Flow Sankey Diagram",
                 xaxis=dict(visible=False),
                 yaxis=dict(visible=False),
-                plot_bgcolor="rgba(0,0,0,0)",
-                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor=sankey_theme["plot_bgcolor"],
+                paper_bgcolor=sankey_theme["paper_bgcolor"],
+                font=sankey_theme["font"],
                 margin=dict(l=10, r=10, t=40, b=10),
                 height=400,
             )
