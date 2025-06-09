@@ -540,6 +540,8 @@ def get_layout(
                                         ]
                                     ),
                                 ],
+                                id="simulation-results-card",
+                                style={"display": "none"},
                             ),
                         ],
                         width=9,
