@@ -85,6 +85,7 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("simulation-error-display", "children"),
             Output("simulation-error-display", "style"),
             Output("simulation-results-card", "style"),
+            Output("simulation-data", "data"),
         ],
         Input("run-simulation", "n_clicks"),
         [
@@ -103,13 +104,12 @@ def register_callbacks(app) -> None:  # type: ignore
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-    ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str], Dict[str, str]]:
-        from .. import app as boulder_app  # Import to access global variables
+    ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any]]:
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
         from ..config import USE_DUAL_CONVERTER
 
         if n_clicks == 0:
-            return {}, {}, {}, "", "", {"display": "none"}, {"display": "none"}
+            return {}, {}, {}, "", "", {"display": "none"}, {"display": "none"}, {}
 
         # Determine the mechanism to use
         if mechanism_select == "custom-name":
@@ -144,9 +144,6 @@ def register_callbacks(app) -> None:  # type: ignore
                 network, results, code_str = dual_converter.build_network_and_code(
                     config
                 )
-                # Store globally for Sankey access
-                boulder_app.global_dual_converter = dual_converter
-                boulder_app.global_converter = None
             else:
                 single_converter = CanteraConverter(mechanism=mechanism)
                 print(
@@ -155,9 +152,6 @@ def register_callbacks(app) -> None:  # type: ignore
                 print(f"[DEBUG] CanteraConverter gas name: {single_converter.gas.name}")
                 network, results = single_converter.build_network(config)
                 code_str = ""
-                # Store globally for Sankey access
-                boulder_app.global_converter = single_converter
-                boulder_app.global_dual_converter = None
 
             # Create temperature plot
             temp_fig = go.Figure()
@@ -224,6 +218,12 @@ def register_callbacks(app) -> None:  # type: ignore
                 "",
                 {"display": "none"},
                 {"display": "block"},
+                {
+                    "mechanism": mechanism,
+                    "config": config,
+                    "results": results,
+                    "code": code_str,
+                },
             )
         except Exception as e:
             # Create user-friendly error message
@@ -283,6 +283,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 error_display,
                 {"display": "block"},
                 {"display": "none"},
+                {},
             )
 
     # Conditionally render Download .py button
@@ -359,16 +360,19 @@ def register_callbacks(app) -> None:  # type: ignore
         Output("sankey-plot", "figure"),
         [
             Input("results-tabs", "active_tab"),
-            Input("run-simulation", "n_clicks"),
+            Input("simulation-data", "data"),
         ],
         prevent_initial_call=True,
     )
-    def update_sankey_plot(active_tab: str, run_clicks: int) -> Dict[str, Any]:
+    def update_sankey_plot(
+        active_tab: str, simulation_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Generate Sankey diagram when the Sankey tab is selected."""
-        import plotly.graph_objects as go
         import dash
+        import plotly.graph_objects as go
 
-        from .. import app as boulder_app
+        from ..cantera_converter import CanteraConverter, DualCanteraConverter
+        from ..config import USE_DUAL_CONVERTER
         from ..sankey import (
             generate_sankey_input_from_sim,
             plot_sankey_diagram_from_links_and_nodes,
@@ -378,15 +382,33 @@ def register_callbacks(app) -> None:  # type: ignore
         if active_tab != "sankey-tab":
             return dash.no_update
 
+        # Check if we have simulation data
+        if (
+            not simulation_data
+            or not simulation_data.get("mechanism")
+            or not simulation_data.get("config")
+        ):
+            return dash.no_update
+
         try:
-            # Get the stored converter instance
-            converter = (
-                boulder_app.global_dual_converter or boulder_app.global_converter
-            )
-            if converter is None or converter.last_network is None:
+            # Rebuild the converter from stored session data
+            mechanism = simulation_data["mechanism"]
+            config = simulation_data["config"]
+
+            if USE_DUAL_CONVERTER:
+                converter = DualCanteraConverter(mechanism=mechanism)
+                # Rebuild the network
+                converter.build_network_and_code(config)
+            else:
+                converter = CanteraConverter(mechanism=mechanism)
+                # Rebuild the network
+                converter.build_network(config)
+
+            # Check if network was successfully built
+            if converter.last_network is None:
                 return dash.no_update
 
-            # Generate Sankey data from the stored network using the same mechanism as the simulation
+            # Generate Sankey data from the rebuilt network
             links, nodes = generate_sankey_input_from_sim(
                 converter.last_network,
                 show_species=["H2", "CH4"],

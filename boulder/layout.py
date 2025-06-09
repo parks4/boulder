@@ -567,6 +567,8 @@ def get_layout(
             dcc.Store(id="last-selected-element", data={}),
             dcc.Store(id="use-temperature-scale", data=True),
             dcc.Store(id="last-sim-python-code", data=""),
+            # Session-specific simulation data (replaces global converters)
+            dcc.Store(id="simulation-data", data=None),
             # Hidden store to trigger keyboard actions
             dcc.Store(id="keyboard-trigger", data=""),
         ]
