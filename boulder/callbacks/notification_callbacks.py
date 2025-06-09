@@ -40,7 +40,6 @@ def register_callbacks(app) -> None:  # type: ignore
             State("mfc-target", "value"),
             State("mfc-flow-rate", "value"),
             State("upload-config", "filename"),
-            State("config-json-edit-textarea", "value"),
             State("current-config", "data"),
         ],
         prevent_initial_call=True,
@@ -66,7 +65,6 @@ def register_callbacks(app) -> None:  # type: ignore
         mfc_target: str,
         mfc_flow_rate: float,
         upload_filename: str,
-        edit_text: str,
         config: dict,
     ):
         """Handle the various events that can trigger the notification toast."""
@@ -143,16 +141,12 @@ def register_callbacks(app) -> None:  # type: ignore
 
         # Config edit
         if trigger == "save-config-json-edit-btn" and save_edit_click:
-            try:
-                json.loads(edit_text)
-                return (
-                    True,
-                    "✅ Configuration updated from editor.",
-                    "Success",
-                    "success",
-                )
-            except Exception as e:
-                return True, f"Invalid JSON. {e}", "Error", "danger"
+            return (
+                True,
+                "✅ Configuration updated from editor.",
+                "Success",
+                "success",
+            )
 
         # Edge creation
         if trigger == "edge-added-store" and edge_data:

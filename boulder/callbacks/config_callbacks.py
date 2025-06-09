@@ -82,22 +82,16 @@ def register_callbacks(app) -> None:  # type: ignore
         [
             Input("upload-config", "contents"),
             Input("delete-config-file", "n_clicks"),
-            Input("save-config-json-edit-btn", "n_clicks"),
         ],
         [
             State("upload-config", "filename"),
-            State("config-json-edit-textarea", "value"),
-            State("current-config", "data"),
         ],
         prevent_initial_call=True,
     )
-    def handle_config_all(
+    def handle_config_upload_delete(
         upload_contents: str,
         delete_n_clicks: int,
-        save_edit_n_clicks: int,
         upload_filename: str,
-        edit_text: str,
-        old_config: dict,
     ) -> tuple:
         from ..config import get_initial_config
 
@@ -116,14 +110,31 @@ def register_callbacks(app) -> None:  # type: ignore
                 return dash.no_update, ""
         elif trigger == "delete-config-file" and delete_n_clicks:
             return get_initial_config(), ""
-        elif trigger == "save-config-json-edit-btn" and save_edit_n_clicks:
-            try:
-                new_config = json.loads(edit_text)
-                return new_config, dash.no_update
-            except Exception:
-                return old_config, dash.no_update
         else:
             raise dash.exceptions.PreventUpdate
+
+    # Separate callback to handle config JSON edit save
+    @app.callback(
+        Output("current-config", "data", allow_duplicate=True),
+        [Input("save-config-json-edit-btn", "n_clicks")],
+        [
+            State("config-json-edit-textarea", "value"),
+            State("current-config", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def handle_config_json_edit_save(
+        save_edit_n_clicks: int,
+        edit_text: str,
+        old_config: dict,
+    ) -> dict:
+        if save_edit_n_clicks:
+            try:
+                new_config = json.loads(edit_text)
+                return new_config
+            except Exception:
+                return old_config
+        raise dash.exceptions.PreventUpdate
 
     # Callback to render the modal body (view or edit mode)
     @app.callback(

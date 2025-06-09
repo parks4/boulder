@@ -25,9 +25,6 @@ def get_layout(
                         "", id="config-file-name-span", style={"display": "none"}
                     ),
                     dcc.Upload(id="upload-config", style={"display": "none"}),
-                    dcc.Textarea(
-                        id="config-json-edit-textarea", style={"display": "none"}
-                    ),
                     dbc.Button(
                         "Cancel",
                         id="cancel-config-json-edit-btn",
