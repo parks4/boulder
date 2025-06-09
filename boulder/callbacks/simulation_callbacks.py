@@ -82,6 +82,8 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("pressure-plot", "figure"),
             Output("species-plot", "figure"),
             Output("last-sim-python-code", "data"),
+            Output("simulation-error-display", "children"),
+            Output("simulation-error-display", "style"),
         ],
         Input("run-simulation", "n_clicks"),
         [
@@ -100,13 +102,13 @@ def register_callbacks(app) -> None:  # type: ignore
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-    ) -> Tuple[Any, Any, Any, str]:
+    ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str]]:
         from .. import app as boulder_app  # Import to access global variables
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
         from ..config import USE_DUAL_CONVERTER
 
         if n_clicks == 0:
-            return {}, {}, {}, ""
+            return {}, {}, {}, "", "", {"display": "none"}
 
         # Determine the mechanism to use
         if mechanism_select == "custom-name":
@@ -213,9 +215,43 @@ def register_callbacks(app) -> None:  # type: ignore
                     f'"""\n'
                 )
                 code_str = header + code_str
-            return temp_fig, press_fig, species_fig, code_str
-        except Exception:
-            return {}, {}, {}, ""
+            return temp_fig, press_fig, species_fig, code_str, "", {"display": "none"}
+        except Exception as e:
+            # Create user-friendly error message
+            import dash_bootstrap_components as dbc
+            from dash import html
+            
+            error_msg = str(e)
+            mechanism_name = mechanism if isinstance(mechanism, str) else str(mechanism)
+            
+            # Provide specific error messages for common issues
+            if "No such file or directory" in error_msg or "cannot find" in error_msg.lower():
+                user_message = f"Mechanism file '{mechanism_name}' could not be found. Please check the file path or select a different mechanism."
+            elif "failed to load mechanism" in error_msg.lower():
+                user_message = f"Failed to load mechanism '{mechanism_name}'. The file may be corrupted or incompatible."
+            elif "solution" in error_msg.lower() and "error" in error_msg.lower():
+                user_message = f"Error creating Cantera solution with mechanism '{mechanism_name}'. Please verify the mechanism file format."
+            elif "network" in error_msg.lower():
+                user_message = f"Error building reactor network. Please check your reactor configuration."
+            else:
+                user_message = f"Simulation failed: {error_msg}"
+            
+            error_display = dbc.Alert(
+                [
+                    html.H6("Simulation Error", className="alert-heading"),
+                    html.P(user_message),
+                    html.Hr(),
+                    html.P([
+                        "Details: ",
+                        html.Code(error_msg, style={"fontSize": "0.8em"})
+                    ], className="mb-0 small text-muted")
+                ],
+                color="danger",
+                dismissable=True,
+                is_open=True,
+            )
+            
+            return {}, {}, {}, "", error_display, {"display": "block"}
 
     # Conditionally render Download .py button
     @app.callback(

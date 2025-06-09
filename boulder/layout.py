@@ -25,11 +25,6 @@ def get_layout(
                         "", id="config-file-name-span", style={"display": "none"}
                     ),
                     dcc.Upload(id="upload-config", style={"display": "none"}),
-                    dbc.Button(
-                        "Cancel",
-                        id="cancel-config-json-edit-btn",
-                        style={"display": "none"},
-                    ),
                     html.Div(id="init-dummy-output", style={"display": "none"}),
                     dcc.Interval(id="init-interval"),
                 ],
@@ -416,6 +411,11 @@ def get_layout(
                                                 color="success",
                                                 className="mb-2 w-100",
                                                 # Triggered by Ctrl + Enter see clientside_callback
+                                            ),
+                                            html.Div(
+                                                id="simulation-error-display",
+                                                className="mb-2",
+                                                style={"display": "none"},
                                             ),
                                             html.Div(
                                                 id="download-python-code-btn-container",
