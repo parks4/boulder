@@ -1,6 +1,6 @@
 # Cantera ReactorNet Visualizer
 
-![logo](assets/boulder.png)
+![logo](docs/boulder_logo_small.png)
 
 A web-based tool for visually constructing and simulating Cantera ReactorNet systems using Dash and Cytoscape.
 
@@ -12,6 +12,8 @@ A web-based tool for visually constructing and simulating Cantera ReactorNet sys
 - Real-time property editing
 - Simulation capabilities with time-series plots
 - JSON configuration import/export
+
+![screenshot](https://private-user-images.githubusercontent.com/16088743/452821416-9d904892-a17c-4c60-8efa-c2aa7abf7da8.png?jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NDk0NjYzMDUsIm5iZiI6MTc0OTQ2NjAwNSwicGF0aCI6Ii8xNjA4ODc0My80NTI4MjE0MTYtOWQ5MDQ4OTItYTE3Yy00YzYwLThlZmEtYzJhYTdhYmY3ZGE4LnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNTA2MDklMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjUwNjA5VDEwNDY0NVomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWE5NTAzYzllYjVhODc2Njc1ZWM5N2NiODBkMjMxOWMwNmNjNzcyNDBlMThhY2U1YzlhMmFlZDVhOThhMzQ1ODYmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.P-wD297SHbNk1nuTgsBof3vmKukntOBWRnpgi7e774o)
 
 ## Installation
 
