@@ -4,15 +4,26 @@ from typing import Any, Dict, List, Tuple
 
 import cantera as ct  # type: ignore
 
+from .config import CANTERA_MECHANISM
+
 logger = logging.getLogger(__name__)
 
 
 class CanteraConverter:
-    def __init__(self) -> None:
-        self.gas = ct.Solution("gri30.yaml")
+    def __init__(self, mechanism: str = None) -> None:
+        # Use provided mechanism or fall back to config default
+        self.mechanism = mechanism or CANTERA_MECHANISM
+        try:
+            self.gas = ct.Solution(self.mechanism)
+            print(f"[INFO] Successfully loaded mechanism: {self.mechanism}")
+        except Exception as e:
+            raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.network: ct.ReactorNet = None
+        self.last_network: ct.ReactorNet = (
+            None  # Store the last successfully built network
+        )
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         """Convert composition string to dictionary of species and mole fractions."""
@@ -133,6 +144,9 @@ class CanteraConverter:
             "species": species,
         }
 
+        # Store the successful network for later use (e.g., Sankey diagrams)
+        self.last_network = self.network
+
         return self.network, results
 
     def load_config(self, filepath: str) -> Dict[str, Any]:
@@ -142,18 +156,27 @@ class CanteraConverter:
 
 
 class DualCanteraConverter:
-    def __init__(self) -> None:
+    def __init__(self, mechanism: str = None) -> None:
         """Initialize DualCanteraConverter.
 
         Executes the Cantera network as before.
         Simultaneously builds a string of Python code that, if run, will produce the same objects and results.
         Returns (network, results, code_str) from build_network_and_code(config).
         """
-        self.gas = ct.Solution("gri30.yaml")
+        # Use provided mechanism or fall back to config default
+        self.mechanism = mechanism or CANTERA_MECHANISM
+        try:
+            self.gas = ct.Solution(self.mechanism)
+            print(f"[INFO] Successfully loaded mechanism: {self.mechanism}")
+        except Exception as e:
+            raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.network: ct.ReactorNet = None
         self.code_lines: List[str] = []
+        self.last_network: ct.ReactorNet = (
+            None  # Store the last successfully built network
+        )
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -167,8 +190,14 @@ class DualCanteraConverter:
     ) -> Tuple[Any, Dict[str, Any], str]:
         self.code_lines = []
         self.code_lines.append("import cantera as ct")
-        self.code_lines.append("gas = ct.Solution('gri30.yaml')")
-        self.gas = ct.Solution("gri30.yaml")
+        self.code_lines.append(f"gas = ct.Solution('{self.mechanism}')")
+        try:
+            self.gas = ct.Solution(self.mechanism)
+        except Exception as e:
+            print(
+                f"[ERROR] Failed to reload mechanism '{self.mechanism}' in build_network_and_code: {e}"
+            )
+            # Note: self.gas should already be set from __init__, so this is just for consistency
         self.reactors = {}
         self.connections = {}
         self.network = None
@@ -273,4 +302,8 @@ class DualCanteraConverter:
             "pressure": pressures,
             "species": species,
         }
+
+        # Store the successful network for later use (e.g., Sankey diagrams)
+        self.last_network = self.network
+
         return self.network, results, "\n".join(self.code_lines)

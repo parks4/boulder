@@ -6,7 +6,7 @@ import dash_bootstrap_components as dbc  # type: ignore
 import dash_cytoscape as cyto  # type: ignore
 from dash import dcc, html
 
-from .utils import config_to_cyto_elements
+from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
 
 
 def get_layout(
@@ -25,11 +25,6 @@ def get_layout(
                         "", id="config-file-name-span", style={"display": "none"}
                     ),
                     dcc.Upload(id="upload-config", style={"display": "none"}),
-                    dbc.Button(
-                        "Cancel",
-                        id="cancel-config-json-edit-btn",
-                        style={"display": "none"},
-                    ),
                     html.Div(id="init-dummy-output", style={"display": "none"}),
                     dcc.Interval(id="init-interval"),
                 ],
@@ -339,12 +334,88 @@ def get_layout(
                                     dbc.CardHeader("Simulate"),
                                     dbc.CardBody(
                                         [
+                                            dbc.Row(
+                                                [
+                                                    dbc.Label("Mechanism", width=4),
+                                                    dbc.Col(
+                                                        dbc.Select(
+                                                            id="mechanism-select",
+                                                            options=get_available_cantera_mechanisms()
+                                                            + [
+                                                                {
+                                                                    "label": "Custom (name)",
+                                                                    "value": "custom-name",
+                                                                },
+                                                                {
+                                                                    "label": "Custom (path)",
+                                                                    "value": "custom-path",
+                                                                },
+                                                            ],
+                                                            value="gri30.yaml",  # Default value
+                                                        ),
+                                                        width=8,
+                                                    ),
+                                                ],
+                                                className="mb-3",
+                                            ),
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        dbc.Input(
+                                                            id="custom-mechanism-input",
+                                                            type="text",
+                                                            placeholder="Enter custom mechanism file name",
+                                                            style={"display": "none"},
+                                                        ),
+                                                        width=12,
+                                                    ),
+                                                ],
+                                                className="mb-3",
+                                                id="custom-mechanism-name-row",
+                                            ),
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        [
+                                                            dcc.Upload(
+                                                                id="custom-mechanism-upload",
+                                                                children=dbc.Button(
+                                                                    "Select Mechanism File",
+                                                                    color="secondary",
+                                                                    outline=True,
+                                                                    className="w-100",
+                                                                ),
+                                                                style={
+                                                                    "display": "none"
+                                                                },
+                                                                accept=".yaml,.yml",
+                                                            ),
+                                                            html.Div(
+                                                                id="selected-mechanism-display",
+                                                                style={
+                                                                    "display": "none",
+                                                                    "marginTop": "10px",
+                                                                },
+                                                                className="text-muted small",
+                                                            ),
+                                                        ],
+                                                        width=12,
+                                                    ),
+                                                ],
+                                                className="mb-3",
+                                                id="custom-mechanism-path-row",
+                                            ),
                                             dbc.Button(
                                                 "Run Simulation (⌃+⏎)",
                                                 id="run-simulation",
                                                 color="success",
                                                 className="mb-2 w-100",
                                                 # Triggered by Ctrl + Enter see clientside_callback
+                                            ),
+                                            html.Div(
+                                                id="simulation-error-display",
+                                                className="mb-2",
+                                                style={"display": "none"},
                                             ),
                                             html.Div(
                                                 id="download-python-code-btn-container",
@@ -388,8 +459,8 @@ def get_layout(
                                             elements=config_to_cyto_elements(
                                                 initial_config
                                             ),
-                                            minZoom=0.33,
-                                            maxZoom=3,
+                                            minZoom=0.5,
+                                            maxZoom=2,
                                             stylesheet=cyto_stylesheet,
                                             responsive=True,
                                             # Use only supported properties:
@@ -406,33 +477,71 @@ def get_layout(
                                     dbc.CardHeader("Simulation Results"),
                                     dbc.CardBody(
                                         children=[
-                                            dbc.Row(
+                                            dbc.Tabs(
                                                 [
-                                                    dbc.Col(
-                                                        dcc.Graph(
-                                                            id="temperature-plot"
-                                                        ),
-                                                        width=6,
+                                                    dbc.Tab(
+                                                        label="Plots",
+                                                        tab_id="plots-tab",
+                                                        children=[
+                                                            dbc.Row(
+                                                                [
+                                                                    dbc.Col(
+                                                                        dcc.Graph(
+                                                                            id="temperature-plot"
+                                                                        ),
+                                                                        width=6,
+                                                                    ),
+                                                                    dbc.Col(
+                                                                        dcc.Graph(
+                                                                            id="pressure-plot"
+                                                                        ),
+                                                                        width=6,
+                                                                    ),
+                                                                ],
+                                                                className="mb-2 mt-3",
+                                                            ),
+                                                            dbc.Row(
+                                                                [
+                                                                    dbc.Col(
+                                                                        dcc.Graph(
+                                                                            id="species-plot"
+                                                                        ),
+                                                                        width=6,
+                                                                    ),
+                                                                    dbc.Col(
+                                                                        html.Div(),
+                                                                        width=6,
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                        ],
                                                     ),
-                                                    dbc.Col(
-                                                        dcc.Graph(id="pressure-plot"),
-                                                        width=6,
+                                                    dbc.Tab(
+                                                        label="Sankey Diagram",
+                                                        tab_id="sankey-tab",
+                                                        children=[
+                                                            html.Div(
+                                                                [
+                                                                    dcc.Graph(
+                                                                        id="sankey-plot",
+                                                                        style={
+                                                                            "height": "600px"
+                                                                        },
+                                                                    ),
+                                                                ],
+                                                                className="mt-3",
+                                                            )
+                                                        ],
                                                     ),
                                                 ],
-                                                className="mb-2",
-                                            ),
-                                            dbc.Row(
-                                                [
-                                                    dbc.Col(
-                                                        dcc.Graph(id="species-plot"),
-                                                        width=6,
-                                                    ),
-                                                    dbc.Col(html.Div(), width=6),
-                                                ]
-                                            ),
+                                                id="results-tabs",
+                                                active_tab="plots-tab",
+                                            )
                                         ]
                                     ),
                                 ],
+                                id="simulation-results-card",
+                                style={"display": "none"},
                             ),
                         ],
                         width=9,
@@ -458,6 +567,8 @@ def get_layout(
             dcc.Store(id="last-selected-element", data={}),
             dcc.Store(id="use-temperature-scale", data=True),
             dcc.Store(id="last-sim-python-code", data=""),
+            # Session-specific simulation data (replaces global converters)
+            dcc.Store(id="simulation-data", data=None),
             # Hidden store to trigger keyboard actions
             dcc.Store(id="keyboard-trigger", data=""),
         ]
