@@ -11,7 +11,7 @@ def register_callbacks(app) -> None:  # type: ignore
 
     # Callback to update the graph
     @app.callback(
-        [Output("cytoscape-graph", "elements")],
+        [Output("reactor-graph", "elements")],
         [Input("current-config", "data")],
         prevent_initial_call=False,
     )
@@ -147,8 +147,8 @@ def register_callbacks(app) -> None:  # type: ignore
     @app.callback(
         Output("last-selected-element", "data"),
         [
-            Input("cytoscape-graph", "selectedNodeData"),
-            Input("cytoscape-graph", "selectedEdgeData"),
+            Input("reactor-graph", "selectedNodeData"),
+            Input("reactor-graph", "selectedEdgeData"),
         ],
         prevent_initial_call=True,
     )
