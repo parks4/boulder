@@ -6,7 +6,7 @@ import dash_bootstrap_components as dbc  # type: ignore
 import dash_cytoscape as cyto  # type: ignore
 from dash import dcc, html
 
-from .utils import config_to_cyto_elements
+from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
 
 
 def get_layout(
@@ -339,6 +339,77 @@ def get_layout(
                                     dbc.CardHeader("Simulate"),
                                     dbc.CardBody(
                                         [
+                                            dbc.Row(
+                                                [
+                                                    dbc.Label("Mechanism", width=4),
+                                                    dbc.Col(
+                                                        dbc.Select(
+                                                            id="mechanism-select",
+                                                            options=get_available_cantera_mechanisms()
+                                                            + [
+                                                                {
+                                                                    "label": "Custom (name)",
+                                                                    "value": "custom-name",
+                                                                },
+                                                                {
+                                                                    "label": "Custom (path)",
+                                                                    "value": "custom-path",
+                                                                },
+                                                            ],
+                                                            value="gri30.yaml",  # Default value
+                                                        ),
+                                                        width=8,
+                                                    ),
+                                                ],
+                                                className="mb-3",
+                                            ),
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        dbc.Input(
+                                                            id="custom-mechanism-input",
+                                                            type="text",
+                                                            placeholder="Enter custom mechanism file name",
+                                                            style={"display": "none"},
+                                                        ),
+                                                        width=12,
+                                                    ),
+                                                ],
+                                                className="mb-3",
+                                                id="custom-mechanism-name-row",
+                                            ),
+                                            dbc.Row(
+                                                [
+                                                    dbc.Col(
+                                                        [
+                                                            dcc.Upload(
+                                                                id="custom-mechanism-upload",
+                                                                children=dbc.Button(
+                                                                    "Select Mechanism File",
+                                                                    color="secondary",
+                                                                    outline=True,
+                                                                    className="w-100",
+                                                                ),
+                                                                style={
+                                                                    "display": "none"
+                                                                },
+                                                                accept=".yaml,.yml",
+                                                            ),
+                                                            html.Div(
+                                                                id="selected-mechanism-display",
+                                                                style={
+                                                                    "display": "none",
+                                                                    "marginTop": "10px",
+                                                                },
+                                                                className="text-muted small",
+                                                            ),
+                                                        ],
+                                                        width=12,
+                                                    ),
+                                                ],
+                                                className="mb-3",
+                                                id="custom-mechanism-path-row",
+                                            ),
                                             dbc.Button(
                                                 "Run Simulation (⌃+⏎)",
                                                 id="run-simulation",

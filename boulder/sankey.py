@@ -3,7 +3,7 @@
 from boulder.ctutils import collect_all_reactors_and_reservoirs
 
 
-def plot_sankey_diagram(sim):
+def plot_sankey_diagram(sim, mechanism="gri30.yaml"):
     """Plot Sankey Diagram for a simulation.
 
     Show the figure by default. If you want the figure without showing it, use
@@ -13,6 +13,8 @@ def plot_sankey_diagram(sim):
     ----------
     sim : Cantera ReactorNet object
         A ReactorNet instance containing a list of reactors; already resolved.
+    mechanism : str
+        Cantera mechanism file to use for heating value calculations. Default is "gri30.yaml".
 
     Example
     -------
@@ -30,7 +32,9 @@ def plot_sankey_diagram(sim):
 
     # Generate Sankey data:
     # ---------------------
-    links, nodes = generate_sankey_input_from_sim(sim, show_species=["H2", "CH4"])
+    links, nodes = generate_sankey_input_from_sim(
+        sim, show_species=["H2", "CH4"], mechanism=mechanism
+    )
 
     # Plot Sankey Diagram:
     # --------------------
@@ -77,7 +81,12 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False):
 
 
 def generate_sankey_input_from_sim(
-    sim, node_order=[], flow_type="hhv", show_species=["H2"], verbose=False
+    sim,
+    node_order=[],
+    flow_type="hhv",
+    show_species=["H2"],
+    verbose=False,
+    mechanism="gri30.yaml",
 ):
     """Generate input data for sankey plot from a Cantera Reactor Net simulation.
 
@@ -94,6 +103,8 @@ def generate_sankey_input_from_sim(
     show_species : list of str
         List of species to show in the sankey diagram. Default is ["H2", "C(s)"].
         Set to [] not to show any species.
+    mechanism : str
+        Cantera mechanism file to use for heating value calculations. Default is "gri30.yaml".
 
     Other Parameters
     ----------------
@@ -188,7 +199,7 @@ def generate_sankey_input_from_sim(
                     from boulder.ctutils import heating_values
 
                     lhv, hhv = heating_values(
-                        outlet.upstream.thermo, mechanism="Fincke_GRC.yaml"
+                        outlet.upstream.thermo, mechanism=mechanism
                     )  # J/kg
                     # TODO define temperature reference when computing HHV
                     # (and make it consistent with the one used in sensible enthalpy)
@@ -199,12 +210,12 @@ def generate_sankey_input_from_sim(
 
                         if s == "H2":
                             lhv_s, hhv_s = heating_values(
-                                ct.Hydrogen(), mechanism="Fincke_GRC.yaml"
+                                ct.Hydrogen(), mechanism=mechanism
                             )  # J/kg
                             links["color"] += [color_H2]
                         elif s == "CH4":
                             lhv_s, hhv_s = heating_values(
-                                ct.Methane(), mechanism="Fincke_GRC.yaml"
+                                ct.Methane(), mechanism=mechanism
                             )  # J/kg
                             links["color"] += [color_CH4]
                         elif s == "C(s)":  # Carbon
