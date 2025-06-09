@@ -32,6 +32,21 @@ branch = true
 [tool.mypy]
 strict = true
 
+[tool.pytest.ini_options]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+  "ignore::PendingDeprecationWarning"
+]
+markers = [
+  "e2e: End-to-end tests",
+  "slow: Slow running tests",
+  "integration: Integration tests",
+  "unit: Unit tests"
+]
+minversion = "6.0"
+testpaths = ["tests"]
+
 [tool.ruff]
 indent-width = 4
 line-length = 88

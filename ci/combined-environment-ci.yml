@@ -1,25 +1,33 @@
-# environment-ci.yml: Additional dependencies to install in the CI environment.
 channels:
 - conda-forge
+- defaults
 - nodefaults
 dependencies:
+- cantera
+- dash
+- dash-core-components
+- dash-extensions
+- dash-html-components
+- dash_cytoscape
 - make
 - mypy
 - myst-parser
+- numpy
+- pandas
 - pip
+- plotly
 - pre-commit
 - pydata-sphinx-theme
 - pytest
 - pytest-cov
+- python=3.11
+- selenium
 - sphinx
 - sphinx-autoapi
 - sphinx-gallery
-# DO NOT EDIT ABOVE THIS LINE, ADD DEPENDENCIES BELOW
-
-# E2E Testing dependencies
-- selenium
 - pip:
   - dash[testing]>=2.0.0
   - pytest-html>=3.0.0
-  - pytest-xvfb
   - pytest-mock>=3.0.0
+  - pytest-xvfb
+name: boulder
