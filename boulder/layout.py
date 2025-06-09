@@ -459,8 +459,8 @@ def get_layout(
                                             elements=config_to_cyto_elements(
                                                 initial_config
                                             ),
-                                            minZoom=0.33,
-                                            maxZoom=3,
+                                            minZoom=0.5,
+                                            maxZoom=2,
                                             stylesheet=cyto_stylesheet,
                                             responsive=True,
                                             # Use only supported properties:
