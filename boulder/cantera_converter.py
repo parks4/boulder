@@ -13,6 +13,9 @@ class CanteraConverter:
         self.reactors: Dict[str, ct.Reactor] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.network: ct.ReactorNet = None
+        self.last_network: ct.ReactorNet = (
+            None  # Store the last successfully built network
+        )
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         """Convert composition string to dictionary of species and mole fractions."""
@@ -133,6 +136,9 @@ class CanteraConverter:
             "species": species,
         }
 
+        # Store the successful network for later use (e.g., Sankey diagrams)
+        self.last_network = self.network
+
         return self.network, results
 
     def load_config(self, filepath: str) -> Dict[str, Any]:
@@ -154,6 +160,9 @@ class DualCanteraConverter:
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.network: ct.ReactorNet = None
         self.code_lines: List[str] = []
+        self.last_network: ct.ReactorNet = (
+            None  # Store the last successfully built network
+        )
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -273,4 +282,8 @@ class DualCanteraConverter:
             "pressure": pressures,
             "species": species,
         }
+
+        # Store the successful network for later use (e.g., Sankey diagrams)
+        self.last_network = self.network
+
         return self.network, results, "\n".join(self.code_lines)

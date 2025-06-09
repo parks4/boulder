@@ -27,6 +27,10 @@ server = app.server  # Expose the server for deployment
 # Load initial configuration
 initial_config = get_initial_config()
 
+# Global converter instances for accessing simulation data
+global_converter = None
+global_dual_converter = None
+
 # Set the layout
 app.layout = get_layout(initial_config, CYTOSCAPE_STYLESHEET)
 

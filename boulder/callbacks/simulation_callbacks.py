@@ -27,6 +27,7 @@ def register_callbacks(app) -> None:  # type: ignore
     def run_simulation(
         n_clicks: int, config: Dict[str, Any], config_filename: str
     ) -> Tuple[Any, Any, Any, str]:
+        from .. import app as boulder_app  # Import to access global variables
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
         from ..config import USE_DUAL_CONVERTER
 
@@ -38,10 +39,16 @@ def register_callbacks(app) -> None:  # type: ignore
                 network, results, code_str = dual_converter.build_network_and_code(
                     config
                 )
+                # Store globally for Sankey access
+                boulder_app.global_dual_converter = dual_converter
+                boulder_app.global_converter = None
             else:
                 single_converter = CanteraConverter()
                 network, results = single_converter.build_network(config)
                 code_str = ""
+                # Store globally for Sankey access
+                boulder_app.global_converter = single_converter
+                boulder_app.global_dual_converter = None
 
             # Create temperature plot
             temp_fig = go.Figure()
@@ -172,3 +179,70 @@ def register_callbacks(app) -> None:  # type: ignore
         if n_clicks and code_str and code_str.strip():
             return dict(content=code_str, filename="cantera_simulation.py")
         return dash.no_update
+
+    # Callback for Sankey diagram
+    @app.callback(
+        Output("sankey-plot", "figure"),
+        [
+            Input("results-tabs", "active_tab"),
+            Input("run-simulation", "n_clicks"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_sankey_plot(active_tab: str, run_clicks: int) -> Dict[str, Any]:
+        """Generate Sankey diagram when the Sankey tab is selected."""
+        from .. import app as boulder_app
+        from ..sankey import (
+            generate_sankey_input_from_sim,
+            plot_sankey_diagram_from_links_and_nodes,
+        )
+
+        # Only generate if Sankey tab is active and simulation has been run
+        if active_tab != "sankey-tab" or run_clicks == 0:
+            return {}
+
+        try:
+            # Get the stored converter instance
+            converter = (
+                boulder_app.global_dual_converter or boulder_app.global_converter
+            )
+            if converter is None or converter.last_network is None:
+                return {}
+
+            # Generate Sankey data from the stored network
+            links, nodes = generate_sankey_input_from_sim(
+                converter.last_network, show_species=["H2", "CH4"], verbose=False
+            )
+
+            # Create the Sankey plot
+            fig = plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False)
+
+            # Update layout for better display
+            fig.update_layout(
+                title="Energy Flow Sankey Diagram",
+                font_size=12,
+                margin=dict(l=10, r=10, t=40, b=10),
+            )
+
+            return fig.to_dict()
+
+        except Exception as e:
+            # Return empty figure with error message if something goes wrong
+            import plotly.graph_objects as go
+
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"Error generating Sankey diagram: {str(e)}",
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(size=16, color="red"),
+            )
+            fig.update_layout(
+                title="Sankey Diagram Error",
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+            )
+            return fig.to_dict()

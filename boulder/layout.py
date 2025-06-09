@@ -406,30 +406,66 @@ def get_layout(
                                     dbc.CardHeader("Simulation Results"),
                                     dbc.CardBody(
                                         children=[
-                                            dbc.Row(
+                                            dbc.Tabs(
                                                 [
-                                                    dbc.Col(
-                                                        dcc.Graph(
-                                                            id="temperature-plot"
-                                                        ),
-                                                        width=6,
+                                                    dbc.Tab(
+                                                        label="Plots",
+                                                        tab_id="plots-tab",
+                                                        children=[
+                                                            dbc.Row(
+                                                                [
+                                                                    dbc.Col(
+                                                                        dcc.Graph(
+                                                                            id="temperature-plot"
+                                                                        ),
+                                                                        width=6,
+                                                                    ),
+                                                                    dbc.Col(
+                                                                        dcc.Graph(
+                                                                            id="pressure-plot"
+                                                                        ),
+                                                                        width=6,
+                                                                    ),
+                                                                ],
+                                                                className="mb-2 mt-3",
+                                                            ),
+                                                            dbc.Row(
+                                                                [
+                                                                    dbc.Col(
+                                                                        dcc.Graph(
+                                                                            id="species-plot"
+                                                                        ),
+                                                                        width=6,
+                                                                    ),
+                                                                    dbc.Col(
+                                                                        html.Div(),
+                                                                        width=6,
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                        ],
                                                     ),
-                                                    dbc.Col(
-                                                        dcc.Graph(id="pressure-plot"),
-                                                        width=6,
+                                                    dbc.Tab(
+                                                        label="Sankey Diagram",
+                                                        tab_id="sankey-tab",
+                                                        children=[
+                                                            html.Div(
+                                                                [
+                                                                    dcc.Graph(
+                                                                        id="sankey-plot",
+                                                                        style={
+                                                                            "height": "600px"
+                                                                        },
+                                                                    ),
+                                                                ],
+                                                                className="mt-3",
+                                                            )
+                                                        ],
                                                     ),
                                                 ],
-                                                className="mb-2",
-                                            ),
-                                            dbc.Row(
-                                                [
-                                                    dbc.Col(
-                                                        dcc.Graph(id="species-plot"),
-                                                        width=6,
-                                                    ),
-                                                    dbc.Col(html.Div(), width=6),
-                                                ]
-                                            ),
+                                                id="results-tabs",
+                                                active_tab="plots-tab",
+                                            )
                                         ]
                                     ),
                                 ],
