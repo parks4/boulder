@@ -1,6 +1,9 @@
 """Callbacks for simulation execution and results handling."""
 
+import base64
 import datetime
+import os
+import tempfile
 from typing import Any, Dict, List, Tuple, Union
 
 import dash
@@ -11,6 +14,67 @@ from dash import Input, Output, State
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
 
+    # Callback to show/hide custom mechanism input
+    @app.callback(
+        [
+            Output("custom-mechanism-input", "style"),
+            Output("custom-mechanism-upload", "style"),
+            Output("selected-mechanism-display", "style"),
+        ],
+        Input("mechanism-select", "value"),
+        prevent_initial_call=False,
+    )
+    def toggle_custom_mechanism_input(
+        mechanism_value: str,
+    ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+        """Show appropriate custom mechanism input based on selection."""
+        if mechanism_value == "custom-name":
+            return {"display": "block"}, {"display": "none"}, {"display": "none"}
+        elif mechanism_value == "custom-path":
+            return {"display": "none"}, {"display": "block"}, {"display": "none"}
+        else:
+            return {"display": "none"}, {"display": "none"}, {"display": "none"}
+
+    # Callback to handle file upload for custom mechanism
+    @app.callback(
+        [
+            Output("selected-mechanism-display", "children"),
+            Output("selected-mechanism-display", "style", allow_duplicate=True),
+        ],
+        Input("custom-mechanism-upload", "contents"),
+        State("custom-mechanism-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    def handle_mechanism_upload(
+        contents: str, filename: str
+    ) -> Tuple[str, Dict[str, str]]:
+        """Handle uploaded mechanism file."""
+        if contents is None:
+            return "", {"display": "none"}
+
+        try:
+            # Decode the uploaded file
+            content_type, content_string = contents.split(",")
+            decoded = base64.b64decode(content_string)
+
+            # Save to a temporary location
+            temp_dir = tempfile.gettempdir()
+            temp_path = os.path.join(temp_dir, filename)
+
+            with open(temp_path, "wb") as f:
+                f.write(decoded)
+
+            # Display the file info
+            display_text = f"Selected: {filename} ({temp_path})"
+            return display_text, {"display": "block", "marginTop": "10px"}
+
+        except Exception as e:
+            return f"Error: {str(e)}", {
+                "display": "block",
+                "marginTop": "10px",
+                "color": "red",
+            }
+
     # Callback to run simulation and update plots
     @app.callback(
         [
@@ -20,12 +84,22 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("last-sim-python-code", "data"),
         ],
         Input("run-simulation", "n_clicks"),
-        State("current-config", "data"),
-        State("config-file-name", "data"),
+        [
+            State("current-config", "data"),
+            State("config-file-name", "data"),
+            State("mechanism-select", "value"),
+            State("custom-mechanism-input", "value"),
+            State("custom-mechanism-upload", "filename"),
+        ],
         prevent_initial_call=True,
     )
     def run_simulation(
-        n_clicks: int, config: Dict[str, Any], config_filename: str
+        n_clicks: int,
+        config: Dict[str, Any],
+        config_filename: str,
+        mechanism_select: str,
+        custom_mechanism: str,
+        uploaded_filename: str,
     ) -> Tuple[Any, Any, Any, str]:
         from .. import app as boulder_app  # Import to access global variables
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
@@ -33,9 +107,37 @@ def register_callbacks(app) -> None:  # type: ignore
 
         if n_clicks == 0:
             return {}, {}, {}, ""
+
+        # Determine the mechanism to use
+        if mechanism_select == "custom-name":
+            mechanism = (
+                custom_mechanism
+                if custom_mechanism and custom_mechanism.strip()
+                else "gri30.yaml"
+            )
+        elif mechanism_select == "custom-path":
+            if uploaded_filename:
+                # Use the uploaded file path from temp directory
+                import tempfile
+
+                mechanism = os.path.join(tempfile.gettempdir(), uploaded_filename)
+            else:
+                mechanism = "gri30.yaml"  # Fallback
+        else:
+            mechanism = mechanism_select
+
         try:
+            # Debug: Log the mechanism being used
+            print(f"[DEBUG] Using mechanism: {mechanism}")
+
             if USE_DUAL_CONVERTER:
-                dual_converter = DualCanteraConverter()
+                dual_converter = DualCanteraConverter(mechanism=mechanism)
+                print(
+                    f"[DEBUG] DualCanteraConverter mechanism: {dual_converter.mechanism}"
+                )
+                print(
+                    f"[DEBUG] DualCanteraConverter gas name: {dual_converter.gas.name}"
+                )
                 network, results, code_str = dual_converter.build_network_and_code(
                     config
                 )
@@ -43,7 +145,11 @@ def register_callbacks(app) -> None:  # type: ignore
                 boulder_app.global_dual_converter = dual_converter
                 boulder_app.global_converter = None
             else:
-                single_converter = CanteraConverter()
+                single_converter = CanteraConverter(mechanism=mechanism)
+                print(
+                    f"[DEBUG] CanteraConverter mechanism: {single_converter.mechanism}"
+                )
+                print(f"[DEBUG] CanteraConverter gas name: {single_converter.gas.name}")
                 network, results = single_converter.build_network(config)
                 code_str = ""
                 # Store globally for Sankey access
@@ -209,9 +315,12 @@ def register_callbacks(app) -> None:  # type: ignore
             if converter is None or converter.last_network is None:
                 return {}
 
-            # Generate Sankey data from the stored network
+            # Generate Sankey data from the stored network using the same mechanism as the simulation
             links, nodes = generate_sankey_input_from_sim(
-                converter.last_network, show_species=["H2", "CH4"], verbose=False
+                converter.last_network,
+                show_species=["H2", "CH4"],
+                verbose=False,
+                mechanism=converter.mechanism,
             )
 
             # Create the Sankey plot

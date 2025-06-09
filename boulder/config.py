@@ -10,6 +10,9 @@ USE_TEMPERATURE_SCALE = True
 # Global variable to control which converter to use
 USE_DUAL_CONVERTER = True
 
+# Global variable for the Cantera mechanism to use consistently across the application
+CANTERA_MECHANISM = "gri30.yaml"
+
 
 def get_initial_config() -> Dict[str, Any]:
     """Load the initial configuration from the sample config file."""
