@@ -62,7 +62,10 @@ class TestBoulderUtils:
         node = elements[0]
         assert node["data"]["id"] == "reactor1"
         assert node["data"]["type"] == "IdealGasReactor"
-        assert "classes" in node
+        assert "data" in node
+        assert node["data"]["label"] == "reactor1 (IdealGasReactor)"
+        assert node["data"]["properties"] == {"temperature": 300, "pressure": 101325}
+        assert node["data"]["temperature"] == 300.0
 
     def test_config_to_cyto_elements_with_connection(self):
         """Test config conversion with reactor and connection."""
