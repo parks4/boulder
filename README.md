@@ -1,6 +1,6 @@
 # Cantera ReactorNet Visualizer
 
-![logo](assets/boulder.png)
+![logo](docs/boulder_logo_small.png)
 
 A web-based tool for visually constructing and simulating Cantera ReactorNet systems using Dash and Cytoscape.
 
