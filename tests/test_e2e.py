@@ -10,6 +10,15 @@ from selenium.webdriver.common.keys import Keys
 class TestBoulderE2E:
     """End-to-end tests for Boulder application."""
 
+    def _select_bootstrap_dropdown(self, dash_duo, selector, value):
+        """Helper method to select from Bootstrap Select dropdown."""
+        select_element = dash_duo.find_element(selector)
+        # Use JavaScript to set the value directly
+        dash_duo.driver.execute_script(
+            "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('change'));", 
+            select_element, value
+        )
+
     @pytest.fixture
     def dash_duo(self, dash_duo):
         """Set up the app for testing."""
@@ -36,8 +45,7 @@ class TestBoulderE2E:
         reactor_id_input.send_keys("test-reactor-1")
 
         # Select reactor type
-        dash_duo.find_element("#reactor-type")
-        dash_duo.select_dcc_dropdown("#reactor-type", "IdealGasReactor")
+        self._select_bootstrap_dropdown(dash_duo, "#reactor-type", "IdealGasReactor")
 
         # Fill temperature
         temp_input = dash_duo.find_element("#reactor-temp")
@@ -70,7 +78,9 @@ class TestBoulderE2E:
     def test_add_reactor_validation(self, dash_duo):
         """Test reactor form validation."""
         dash_duo.wait_for_element("#open-reactor-modal", timeout=10)
-        dash_duo.find_element("#open-reactor-modal").click()
+        # Use JavaScript click to avoid interception issues
+        button = dash_duo.find_element("#open-reactor-modal")
+        dash_duo.driver.execute_script("arguments[0].click();", button)
 
         # Try to submit empty form
         dash_duo.find_element("#add-reactor").click()
@@ -94,8 +104,8 @@ class TestBoulderE2E:
 
         # Fill MFC details
         dash_duo.find_element("#mfc-id").send_keys("mfc-1")
-        dash_duo.select_dcc_dropdown("#mfc-source", "reactor-1")
-        dash_duo.select_dcc_dropdown("#mfc-target", "reactor-2")
+        self._select_bootstrap_dropdown(dash_duo, "#mfc-source", "reactor-1")
+        self._select_bootstrap_dropdown(dash_duo, "#mfc-target", "reactor-2")
         dash_duo.find_element("#mfc-flow-rate").send_keys("0.005")
 
         # Submit
@@ -225,7 +235,7 @@ class TestBoulderE2E:
         reactor_id_input.send_keys("duplicate-reactor")
 
         # Fill other required fields
-        dash_duo.select_dcc_dropdown("#reactor-type", "IdealGasReactor")
+        self._select_bootstrap_dropdown(dash_duo, "#reactor-type", "IdealGasReactor")
         dash_duo.find_element("#reactor-temp").clear()
         dash_duo.find_element("#reactor-temp").send_keys("300")
         dash_duo.find_element("#reactor-pressure").clear()
@@ -252,7 +262,7 @@ class TestBoulderE2E:
         reactor_id_input.clear()
         reactor_id_input.send_keys(reactor_id)
 
-        dash_duo.select_dcc_dropdown("#reactor-type", "IdealGasReactor")
+        self._select_bootstrap_dropdown(dash_duo, "#reactor-type", "IdealGasReactor")
 
         temp_input = dash_duo.find_element("#reactor-temp")
         temp_input.clear()
@@ -279,6 +289,15 @@ class TestBoulderE2E:
 @pytest.mark.e2e
 class TestBoulderPerformance:
     """Performance tests for Boulder application."""
+
+    def _select_bootstrap_dropdown(self, dash_duo, selector, value):
+        """Helper method to select from Bootstrap Select dropdown."""
+        select_element = dash_duo.find_element(selector)
+        # Use JavaScript to set the value directly
+        dash_duo.driver.execute_script(
+            "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('change'));", 
+            select_element, value
+        )
 
     @pytest.fixture
     def dash_duo(self, dash_duo):
@@ -328,7 +347,7 @@ class TestBoulderPerformance:
         reactor_id_input.clear()
         reactor_id_input.send_keys(reactor_id)
 
-        dash_duo.select_dcc_dropdown("#reactor-type", "IdealGasReactor")
+        self._select_bootstrap_dropdown(dash_duo, "#reactor-type", "IdealGasReactor")
 
         temp_input = dash_duo.find_element("#reactor-temp")
         temp_input.clear()
