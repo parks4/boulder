@@ -14,7 +14,8 @@ def get_layout(
 ) -> html.Div:
     """Create the main application layout."""
     return html.Div(
-        [
+        id="app-container",
+        children=[
             # Hidden dummy elements for callback IDs (always present)
             html.Div(
                 [
@@ -27,11 +28,26 @@ def get_layout(
                     dcc.Upload(id="upload-config", style={"display": "none"}),
                     html.Div(id="init-dummy-output", style={"display": "none"}),
                     dcc.Interval(id="init-interval"),
+                    # Dark mode store
+                    dcc.Store(id="theme-store", data="light"),
                 ],
                 id="hidden-dummies",
                 style={"display": "none"},
             ),
             html.H1("Boulder - Cantera ReactorNet Visualizer"),
+            # Dark mode toggle
+            html.Div(
+                [
+                    html.I(className="bi bi-sun theme-icon"),
+                    dbc.Switch(
+                        id="theme-switch",
+                        value=False,
+                        style={"margin": "0 8px"},
+                    ),
+                    html.I(className="bi bi-moon theme-icon"),
+                ],
+                className="dark-mode-toggle",
+            ),
             # Toast for notifications
             dbc.Toast(
                 id="notification-toast",
@@ -571,5 +587,5 @@ def get_layout(
             dcc.Store(id="simulation-data", data=None),
             # Hidden store to trigger keyboard actions
             dcc.Store(id="keyboard-trigger", data=""),
-        ]
+        ],
     )

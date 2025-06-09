@@ -1,0 +1,321 @@
+/* Dark mode styles for Boulder application */
+
+/* Light theme (default) */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --text-primary: #212529;
+  --text-secondary: #6c757d;
+  --border-color: #dee2e6;
+  --card-bg: #ffffff;
+  --modal-bg: #ffffff;
+  --navbar-bg: #ffffff;
+  --button-primary: #007bff;
+  --button-secondary: #6c757d;
+  --input-bg: #ffffff;
+  --input-border: #ced4da;
+  --cytoscape-bg: #ffffff;
+  --scrollbar-bg: #f1f1f1;
+  --scrollbar-thumb: #c1c1c1;
+  --selection-bg: #007bff;
+}
+
+/* Dark theme */
+[data-theme="dark"] {
+  --bg-primary: #1a1a1a;
+  --bg-secondary: #2d2d2d;
+  --text-primary: #ffffff;
+  --text-secondary: #b0b0b0;
+  --border-color: #404040;
+  --card-bg: #2d2d2d;
+  --modal-bg: #2d2d2d;
+  --navbar-bg: #1a1a1a;
+  --button-primary: #0d6efd;
+  --button-secondary: #6c757d;
+  --input-bg: #2d2d2d;
+  --input-border: #404040;
+  --cytoscape-bg: #2d2d2d;
+  --scrollbar-bg: #2d2d2d;
+  --scrollbar-thumb: #555555;
+  --selection-bg: #0d6efd;
+}
+
+/* Apply theme variables to elements */
+body {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Selection colors */
+::selection {
+  background-color: var(--selection-bg);
+  color: white;
+}
+
+::-moz-selection {
+  background-color: var(--selection-bg);
+  color: white;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* App container */
+.dash-bootstrap .container-fluid,
+.dash-bootstrap .container {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Cards and panels */
+.card {
+  background-color: var(--card-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.card-header {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Modals */
+.modal-content {
+  background-color: var(--modal-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.modal-header {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.modal-body {
+  background-color: var(--modal-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+.modal-footer {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Forms and inputs */
+.form-control,
+.form-select {
+  background-color: var(--input-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--input-border) !important;
+}
+
+.form-control:focus,
+.form-select:focus {
+  background-color: var(--input-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--button-primary) !important;
+  box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25) !important;
+}
+
+.form-control::placeholder {
+  color: var(--text-secondary) !important;
+  opacity: 0.7;
+}
+
+/* Labels */
+.form-label {
+  color: var(--text-primary) !important;
+}
+
+/* Textareas */
+textarea {
+  background-color: var(--input-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--input-border) !important;
+}
+
+/* Pre elements (for JSON display) */
+pre {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Toast notifications */
+.toast {
+  background-color: var(--card-bg) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.toast-header {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Cytoscape container */
+.cytoscape {
+  background-color: var(--cytoscape-bg) !important;
+}
+
+/* Upload area */
+.dash-uploader div {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Dark mode toggle switch */
+.dark-mode-toggle {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1050;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  transition: all 0.3s ease;
+}
+
+[data-theme="dark"] .dark-mode-toggle {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.dark-mode-toggle:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+[data-theme="dark"] .dark-mode-toggle:hover {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+}
+
+.theme-icon {
+  font-size: 16px;
+  transition: color 0.3s ease;
+}
+
+/* Switch styling */
+.form-switch .form-check-input {
+  background-color: var(--button-secondary) !important;
+  border-color: var(--button-secondary) !important;
+}
+
+.form-switch .form-check-input:checked {
+  background-color: var(--button-primary) !important;
+  border-color: var(--button-primary) !important;
+}
+
+/* Table styling for dark mode */
+.table {
+  color: var(--text-primary) !important;
+}
+
+.table-dark {
+  --bs-table-bg: var(--bg-secondary);
+  --bs-table-striped-bg: var(--bg-primary);
+}
+
+/* Buttons */
+.btn-outline-secondary {
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.btn-outline-secondary:hover {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Dropdown menus */
+.dropdown-menu {
+  background-color: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+.dropdown-item {
+  color: var(--text-primary) !important;
+}
+
+.dropdown-item:hover,
+.dropdown-item:focus {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Accordion styling */
+.accordion-item {
+  background-color: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+.accordion-button {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+}
+
+.accordion-button:not(.collapsed) {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+.accordion-body {
+  background-color: var(--card-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Additional dark mode improvements */
+[data-theme="dark"] h1,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] h4,
+[data-theme="dark"] h5,
+[data-theme="dark"] h6 {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .text-muted {
+  color: var(--text-secondary) !important;
+}
+
+/* Close button styling for dark mode */
+[data-theme="dark"] .btn-close {
+  filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* Alert styling */
+[data-theme="dark"] .alert {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Badge styling */
+[data-theme="dark"] .badge {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+} 
