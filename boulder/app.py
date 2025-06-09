@@ -28,6 +28,10 @@ server = app.server  # Expose the server for deployment
 initial_config = get_initial_config()
 
 # Global converter instances for accessing simulation data
+# TODO: For production multi-user deployment, replace with session-specific storage
+# using dcc.Store or server-side session management. Current approach may cause
+# race conditions or data leakage between concurrent users.
+# See: https://dash.plotly.com/sharing-data-between-callbacks
 global_converter = None
 global_dual_converter = None
 
