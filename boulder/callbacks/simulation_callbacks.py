@@ -413,7 +413,7 @@ def register_callbacks(app) -> None:  # type: ignore
         Output("last-sim-python-code", "data", allow_duplicate=True),
         [
             Input({"type": "prop-edit", "prop": dash.ALL}, "value"),
-            Input("save-config-json-edit-btn", "n_clicks"),
+            Input("save-config-yaml-edit-btn", "n_clicks"),
             Input("upload-config", "contents"),
         ],
         prevent_initial_call=True,
