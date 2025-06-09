@@ -478,11 +478,8 @@ if __name__ == "__main__":
     config = defaults()
     sim = default_simulation(**config)
 
-    from boulder.ctutils import draw_network_and_render
-
     sim.advance_to_steady_state()
 
-    draw_network_and_render(sim)
     links, nodes = generate_sankey_input_from_sim(sim, show_species=["H2", "CH4"])
 
     print("RESULT: ")

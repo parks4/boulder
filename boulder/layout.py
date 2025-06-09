@@ -6,10 +6,7 @@ import dash_bootstrap_components as dbc  # type: ignore
 import dash_cytoscape as cyto  # type: ignore
 from dash import dcc, html
 
-from . import utils
-
-config_to_cyto_elements = utils.config_to_cyto_elements
-get_available_cantera_mechanisms = utils.get_available_cantera_mechanisms
+from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
 
 
 def get_layout(
