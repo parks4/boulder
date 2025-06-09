@@ -216,43 +216,74 @@ def register_callbacks(app) -> None:  # type: ignore
                     f'"""\n'
                 )
                 code_str = header + code_str
-            return temp_fig, press_fig, species_fig, code_str, "", {"display": "none"}, {"display": "block"}
+            return (
+                temp_fig,
+                press_fig,
+                species_fig,
+                code_str,
+                "",
+                {"display": "none"},
+                {"display": "block"},
+            )
         except Exception as e:
             # Create user-friendly error message
             import dash_bootstrap_components as dbc
             from dash import html
-            
+
             error_msg = str(e)
             mechanism_name = mechanism if isinstance(mechanism, str) else str(mechanism)
-            
+
             # Provide specific error messages for common issues
-            if "No such file or directory" in error_msg or "cannot find" in error_msg.lower():
-                user_message = f"Mechanism file '{mechanism_name}' could not be found. Please check the file path or select a different mechanism."
+            if (
+                "No such file or directory" in error_msg
+                or "cannot find" in error_msg.lower()
+            ):
+                user_message = (
+                    f"Mechanism file '{mechanism_name}' could not be found. "
+                    "Please check the file path or select a different mechanism."
+                )
             elif "failed to load mechanism" in error_msg.lower():
-                user_message = f"Failed to load mechanism '{mechanism_name}'. The file may be corrupted or incompatible."
+                user_message = (
+                    f"Failed to load mechanism '{mechanism_name}'. "
+                    "The file may be corrupted or incompatible."
+                )
             elif "solution" in error_msg.lower() and "error" in error_msg.lower():
-                user_message = f"Error creating Cantera solution with mechanism '{mechanism_name}'. Please verify the mechanism file format."
+                user_message = (
+                    f"Error creating Cantera solution with mechanism '{mechanism_name}'. "
+                    "Please verify the mechanism file format."
+                )
             elif "network" in error_msg.lower():
-                user_message = f"Error building reactor network. Please check your reactor configuration."
+                user_message = "Error building reactor network. Please check your reactor configuration."
             else:
                 user_message = f"Simulation failed: {error_msg}"
-            
+
             error_display = dbc.Alert(
                 [
                     html.H6("Simulation Error", className="alert-heading"),
                     html.P(user_message),
                     html.Hr(),
-                    html.P([
-                        "Details: ",
-                        html.Code(error_msg, style={"fontSize": "0.8em"})
-                    ], className="mb-0 small text-muted")
+                    html.P(
+                        [
+                            "Details: ",
+                            html.Code(error_msg, style={"fontSize": "0.8em"}),
+                        ],
+                        className="mb-0 small text-muted",
+                    ),
                 ],
                 color="danger",
                 dismissable=True,
                 is_open=True,
             )
-            
-            return {}, {}, {}, "", error_display, {"display": "block"}, {"display": "none"}
+
+            return (
+                {},
+                {},
+                {},
+                "",
+                error_display,
+                {"display": "block"},
+                {"display": "none"},
+            )
 
     # Conditionally render Download .py button
     @app.callback(
@@ -334,12 +365,13 @@ def register_callbacks(app) -> None:  # type: ignore
     )
     def update_sankey_plot(active_tab: str, run_clicks: int) -> Dict[str, Any]:
         """Generate Sankey diagram when the Sankey tab is selected."""
+        import plotly.graph_objects as go
+
         from .. import app as boulder_app
         from ..sankey import (
             generate_sankey_input_from_sim,
             plot_sankey_diagram_from_links_and_nodes,
         )
-        import plotly.graph_objects as go
 
         # Only generate if Sankey tab is active
         if active_tab != "sankey-tab":
