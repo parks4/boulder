@@ -1,29 +1,31 @@
-# Basic reactor configuration
 metadata:
   name: "Basic Reactor Configuration"
-  description: "Simple ideal gas reactor setup"
+  description: "Simple configuration with one reactor and one reservoir"
   version: "1.0"
 
 simulation:
   mechanism: "gri30.yaml"
-  time_step: 0.001
-  max_time: 10.0
+  time_step: 0.001  # s
+  max_time: 10.0    # s
+  solver: "CVODE_BDF"
+  relative_tolerance: 1.0e-6
+  absolute_tolerance: 1.0e-9
 
 components:
-  - id: reactor1
-    type: IdealGasReactor
-    temperature: 1000  # K
-    pressure: 101325   # Pa
+- id: reactor1
+  IdealGasReactor:
+    temperature: 1000        # K
+    pressure: 101325         # Pa
     composition: "CH4:1,O2:2,N2:7.52"
-    
-  - id: res1
-    type: Reservoir
-    temperature: 300   # K
+
+- id: res1
+  Reservoir:
+    temperature: 300         # K
     composition: "O2:1,N2:3.76"
 
 connections:
-  - id: mfc1
-    type: MassFlowController
-    source: res1
-    target: reactor1
-    mass_flow_rate: 0.1  # kg/s
+- id: mfc1
+  MassFlowController:
+    mass_flow_rate: 0.1      # kg/s
+  source: res1
+  target: reactor1
