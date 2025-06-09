@@ -84,6 +84,7 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("last-sim-python-code", "data"),
             Output("simulation-error-display", "children"),
             Output("simulation-error-display", "style"),
+            Output("simulation-results-card", "style"),
         ],
         Input("run-simulation", "n_clicks"),
         [
@@ -102,13 +103,13 @@ def register_callbacks(app) -> None:  # type: ignore
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-    ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str]]:
+    ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str], Dict[str, str]]:
         from .. import app as boulder_app  # Import to access global variables
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
         from ..config import USE_DUAL_CONVERTER
 
         if n_clicks == 0:
-            return {}, {}, {}, "", "", {"display": "none"}
+            return {}, {}, {}, "", "", {"display": "none"}, {"display": "none"}
 
         # Determine the mechanism to use
         if mechanism_select == "custom-name":
@@ -215,7 +216,7 @@ def register_callbacks(app) -> None:  # type: ignore
                     f'"""\n'
                 )
                 code_str = header + code_str
-            return temp_fig, press_fig, species_fig, code_str, "", {"display": "none"}
+            return temp_fig, press_fig, species_fig, code_str, "", {"display": "none"}, {"display": "block"}
         except Exception as e:
             # Create user-friendly error message
             import dash_bootstrap_components as dbc
@@ -251,7 +252,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 is_open=True,
             )
             
-            return {}, {}, {}, "", error_display, {"display": "block"}
+            return {}, {}, {}, "", error_display, {"display": "block"}, {"display": "none"}
 
     # Conditionally render Download .py button
     @app.callback(
@@ -338,9 +339,10 @@ def register_callbacks(app) -> None:  # type: ignore
             generate_sankey_input_from_sim,
             plot_sankey_diagram_from_links_and_nodes,
         )
+        import plotly.graph_objects as go
 
-        # Only generate if Sankey tab is active and simulation has been run
-        if active_tab != "sankey-tab" or run_clicks == 0:
+        # Only generate if Sankey tab is active
+        if active_tab != "sankey-tab":
             return {}
 
         try:
@@ -373,21 +375,24 @@ def register_callbacks(app) -> None:  # type: ignore
 
         except Exception as e:
             # Return empty figure with error message if something goes wrong
-            import plotly.graph_objects as go
-
             fig = go.Figure()
             fig.add_annotation(
-                text=f"Error generating Sankey diagram: {str(e)}",
+                text=f"Error generating Sankey diagram:<br>{str(e)}",
                 xref="paper",
                 yref="paper",
                 x=0.5,
                 y=0.5,
                 showarrow=False,
-                font=dict(size=16, color="red"),
+                font=dict(size=16, color="#dc3545"),
+                align="center",
             )
             fig.update_layout(
-                title="Sankey Diagram Error",
+                title="Energy Flow Sankey Diagram",
                 xaxis=dict(visible=False),
                 yaxis=dict(visible=False),
+                plot_bgcolor="rgba(0,0,0,0)",
+                paper_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=10, r=10, t=40, b=10),
+                height=400,
             )
             return fig.to_dict()
