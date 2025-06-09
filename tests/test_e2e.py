@@ -12,7 +12,7 @@ class TestBoulderE2E:
 
     @pytest.fixture
     def dash_duo(self, dash_duo):
-        """Setup the app for testing."""
+        """Set up the app for testing."""
         # Import the app directly
         from boulder.app import app
 
@@ -36,7 +36,7 @@ class TestBoulderE2E:
         reactor_id_input.send_keys("test-reactor-1")
 
         # Select reactor type
-        reactor_type_select = dash_duo.find_element("#reactor-type")
+        dash_duo.find_element("#reactor-type")
         dash_duo.select_dcc_dropdown("#reactor-type", "IdealGasReactor")
 
         # Fill temperature
@@ -121,6 +121,7 @@ class TestBoulderE2E:
             ],
             "connections": [],
         }
+        test_config  # not used , until we have a way to upload the config file  #  TODO
 
         # Upload config (this would need to be adapted based on how file upload is implemented)
         # For now, test the config display
@@ -236,7 +237,7 @@ class TestBoulderE2E:
         )
 
     def _add_test_reactor(self, dash_duo, reactor_id):
-        """Helper method to add a test reactor."""
+        """Add a test reactor to the configuration."""
         dash_duo.find_element("#open-reactor-modal").click()
         dash_duo.wait_for_element("#add-reactor-modal", timeout=5)
 
@@ -273,6 +274,15 @@ class TestBoulderE2E:
 class TestBoulderPerformance:
     """Performance tests for Boulder application."""
 
+    @pytest.fixture
+    def dash_duo(self, dash_duo):
+        """Set up the app for testing."""
+        # Import the app directly
+        from boulder.app import app
+
+        dash_duo.start_server(app)
+        return dash_duo
+
     def test_large_graph_performance(self, dash_duo):
         """Test performance with many nodes."""
         # Add multiple reactors and measure time
@@ -299,3 +309,34 @@ class TestBoulderPerformance:
         end_time = time.time()
 
         assert end_time - start_time < 25  # Should complete within 25 seconds
+
+    def _add_test_reactor(self, dash_duo, reactor_id):
+        """Add a test reactor to the configuration."""
+        dash_duo.find_element("#open-reactor-modal").click()
+        dash_duo.wait_for_element("#add-reactor-modal", timeout=5)
+
+        # Fill reactor details
+        reactor_id_input = dash_duo.find_element("#reactor-id")
+        reactor_id_input.clear()
+        reactor_id_input.send_keys(reactor_id)
+
+        dash_duo.select_dcc_dropdown("#reactor-type", "IdealGasReactor")
+
+        temp_input = dash_duo.find_element("#reactor-temp")
+        temp_input.clear()
+        temp_input.send_keys("300")
+
+        pressure_input = dash_duo.find_element("#reactor-pressure")
+        pressure_input.clear()
+        pressure_input.send_keys("101325")
+
+        composition_input = dash_duo.find_element("#reactor-composition")
+        composition_input.clear()
+        composition_input.send_keys("O2:1,N2:3.76")
+
+        dash_duo.find_element("#add-reactor").click()
+
+        # Wait for success
+        dash_duo.wait_for_contains_text(
+            "#notification-toast", f"Added IdealGasReactor {reactor_id}", timeout=5
+        )
