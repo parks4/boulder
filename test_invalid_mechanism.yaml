@@ -1,0 +1,43 @@
+description: |-
+  This is an intentionally invalid mechanism file for testing error handling
+  
+generator: invalid_test_mechanism
+cantera-version: 2.6.0
+date: Wed, 11 Dec 2024 12:00:00 -0500
+
+units: {length: cm, quantity: mol, activation-energy: cal/mol}
+
+phases:
+- name: gas
+  thermo: ideal-gas
+  elements: [O, H, C, N, Ar]
+  species: [H2, O2, H2O, CO2, N2, AR]  # Invalid species names
+  kinetics: gas
+  reactions: all
+  transport: mixture-averaged
+  state:
+    T: 300.0
+    P: 1 atm
+
+species:
+# This section is intentionally malformed to cause errors
+- name: H2
+  composition: {H: 2}
+  thermo:
+    model: NASA7
+    temperature-ranges: [200.0, 1000.0, 3500.0]
+    data:
+    - [2.34433112, 7.98052075e-03, -1.9478151e-05, 2.01572094e-08, -7.37611761e-12,
+      -917.935173, 0.683010238]
+    - [3.3372792, -4.94024731e-05, 4.99456778e-07, -1.79566394e-10, 2.00255376e-14,
+      -950.158922, -3.20502331]
+  transport:
+    model: gas
+    geometry: linear
+    diameter: 2.92
+    well-depth: 38.0
+
+# Missing other species definitions - this will cause errors
+
+reactions:
+# Empty reactions section - this will also cause issues 

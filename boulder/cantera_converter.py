@@ -17,10 +17,7 @@ class CanteraConverter:
             self.gas = ct.Solution(self.mechanism)
             print(f"[INFO] Successfully loaded mechanism: {self.mechanism}")
         except Exception as e:
-            print(f"[ERROR] Failed to load mechanism '{self.mechanism}': {e}")
-            print("[INFO] Falling back to gri30.yaml")
-            self.mechanism = "gri30.yaml"
-            self.gas = ct.Solution(self.mechanism)
+            raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.network: ct.ReactorNet = None
@@ -172,12 +169,7 @@ class DualCanteraConverter:
             self.gas = ct.Solution(self.mechanism)
             print(f"[INFO] Successfully loaded mechanism: {self.mechanism}")
         except Exception as e:
-            raise ValueError(
-                f"[ERROR] Failed to load mechanism '{self.mechanism}': {e}"
-            )
-            # print(f"[INFO] Falling back to gri30.yaml")
-            # self.mechanism = "gri30.yaml"
-            # self.gas = ct.Solution(self.mechanism)
+            raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.network: ct.ReactorNet = None
