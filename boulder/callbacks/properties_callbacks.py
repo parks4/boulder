@@ -39,7 +39,7 @@ def register_callbacks(app) -> None:  # type: ignore
 
         if node_data:
             data = node_data[0]
-            properties = data["properties"]
+            properties = data.get("properties", {})
             if edit_mode:
                 fields = [
                     dbc.Row(
@@ -133,7 +133,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 )
         elif edge_data:
             data = edge_data[0]
-            properties = data["properties"]
+            properties = data.get("properties", {})
             if edit_mode:
                 fields = [
                     dbc.Row(
@@ -269,6 +269,9 @@ def register_callbacks(app) -> None:  # type: ignore
             comp_id = data["id"]
             for comp in config["components"]:
                 if comp["id"] == comp_id:
+                    # Ensure properties dict exists
+                    if "properties" not in comp:
+                        comp["properties"] = {}
                     for v, i in zip(values, ids):
                         key = i["prop"]
                         # Convert to float if key is temperature or pressure
@@ -285,6 +288,9 @@ def register_callbacks(app) -> None:  # type: ignore
             conn_id = data["id"]
             for conn in config["connections"]:
                 if conn["id"] == conn_id:
+                    # Ensure properties dict exists
+                    if "properties" not in conn:
+                        conn["properties"] = {}
                     for v, i in zip(values, ids):
                         key = i["prop"]
                         # Map 'flow_rate' to 'mass_flow_rate' for MassFlowController

@@ -22,7 +22,7 @@ def register_callbacks(app) -> None:  # type: ignore
             Input("add-mfc", "n_clicks"),
             Input("upload-config", "contents"),
             Input("delete-config-file", "n_clicks"),
-            Input("save-config-json-edit-btn", "n_clicks"),
+            Input("save-config-yaml-edit-btn", "n_clicks"),
             Input("edge-added-store", "data"),
             Input("run-simulation", "n_clicks"),
             Input("reactor-graph", "selectedNodeData"),
@@ -140,7 +140,7 @@ def register_callbacks(app) -> None:  # type: ignore
             return True, "Config file removed.", "Success", "success"
 
         # Config edit
-        if trigger == "save-config-json-edit-btn" and save_edit_click:
+        if trigger == "save-config-yaml-edit-btn" and save_edit_click:
             return (
                 True,
                 "✅ Configuration updated from editor.",

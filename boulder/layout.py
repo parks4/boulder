@@ -52,51 +52,53 @@ def get_layout(
             ),
             # Store for config file name
             dcc.Store(id="config-file-name", data=""),
-            # Modal for viewing config JSON
+            # Modal for viewing config in YAML with 🪨 STONE standard
             dbc.Modal(
                 [
-                    dbc.ModalHeader("Current Configuration JSON"),
+                    dbc.ModalHeader(
+                        "Current Configuration - YAML with 🪨 STONE Standard"
+                    ),
                     dbc.ModalBody(
                         [
-                            html.Div(id="config-json-modal-body"),
-                            dcc.Download(id="download-config-json"),
+                            html.Div(id="config-yaml-modal-body"),
+                            dcc.Download(id="download-config-yaml"),
                         ]
                     ),
                     dbc.ModalFooter(
                         [
                             dbc.Button(
                                 "Save as New File",
-                                id="save-config-json-btn",
+                                id="save-config-yaml-btn",
                                 color="secondary",
                                 className="mr-2",
                             ),
                             dbc.Button(
                                 "Edit",
-                                id="edit-config-json-btn",
+                                id="edit-config-yaml-btn",
                                 color="primary",
                                 className="mr-2",
                             ),
                             dbc.Button(
                                 "Save",
-                                id="save-config-json-edit-btn",
+                                id="save-config-yaml-edit-btn",
                                 color="success",
                                 className="mr-2",
                             ),
                             dbc.Button(
                                 "Cancel",
-                                id="cancel-config-json-edit-btn",
+                                id="cancel-config-yaml-edit-btn",
                                 color="secondary",
                                 className="ml-auto",
                             ),
                             dbc.Button(
                                 "Close",
-                                id="close-config-json-modal",
+                                id="close-config-yaml-modal",
                                 className="ml-auto",
                             ),
                         ]
                     ),
                 ],
-                id="config-json-modal",
+                id="config-yaml-modal",
                 is_open=False,
                 size="lg",
             ),
@@ -564,7 +566,7 @@ def get_layout(
                 id="initialization-trigger", children="init", style={"display": "none"}
             ),
             # Add a Store to keep track of edit mode
-            dcc.Store(id="config-json-edit-mode", data=False),
+            dcc.Store(id="config-yaml-edit-mode", data=False),
             # Add a Store to keep track of properties panel edit mode
             dcc.Store(id="properties-edit-mode", data=False),
             dcc.Store(id="last-selected-element", data={}),
