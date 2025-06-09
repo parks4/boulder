@@ -270,4 +270,9 @@ def get_gas_phase_composition(
         n_tot += n_s
         n_dict[f"{prefix}_{s}"] = n_s
 
+    # Guard against division by zero if all species are filtered out
+    if n_tot == 0:
+        # Return an empty Series if no non-solid species are found
+        return pd.Series(dtype=float)
+
     return pd.Series(n_dict).sort_values(ascending=False) / n_tot

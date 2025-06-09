@@ -366,6 +366,7 @@ def register_callbacks(app) -> None:  # type: ignore
     def update_sankey_plot(active_tab: str, run_clicks: int) -> Dict[str, Any]:
         """Generate Sankey diagram when the Sankey tab is selected."""
         import plotly.graph_objects as go
+        import dash
 
         from .. import app as boulder_app
         from ..sankey import (
@@ -375,7 +376,7 @@ def register_callbacks(app) -> None:  # type: ignore
 
         # Only generate if Sankey tab is active
         if active_tab != "sankey-tab":
-            return {}
+            return dash.no_update
 
         try:
             # Get the stored converter instance
@@ -383,7 +384,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 boulder_app.global_dual_converter or boulder_app.global_converter
             )
             if converter is None or converter.last_network is None:
-                return {}
+                return dash.no_update
 
             # Generate Sankey data from the stored network using the same mechanism as the simulation
             links, nodes = generate_sankey_input_from_sim(
