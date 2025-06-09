@@ -4,7 +4,43 @@ import base64
 import json
 
 import dash
+import yaml
 from dash import Input, Output, State, dcc, html
+
+
+def convert_to_stone_format(config: dict) -> dict:
+    """Convert internal format back to YAML with 🪨 STONE standard for file saving."""
+    stone_config = {}
+
+    # Copy metadata and simulation sections as-is
+    if "metadata" in config:
+        stone_config["metadata"] = config["metadata"]
+    if "simulation" in config:
+        stone_config["simulation"] = config["simulation"]
+
+    # Convert components
+    if "components" in config:
+        stone_config["components"] = []
+        for component in config["components"]:
+            stone_component = {"id": component["id"]}
+            component_type = component.get("type", "IdealGasReactor")
+            stone_component[component_type] = component.get("properties", {})
+            stone_config["components"].append(stone_component)
+
+    # Convert connections
+    if "connections" in config:
+        stone_config["connections"] = []
+        for connection in config["connections"]:
+            stone_connection = {
+                "id": connection["id"],
+                "source": connection["source"],
+                "target": connection["target"],
+            }
+            connection_type = connection.get("type", "MassFlowController")
+            stone_connection[connection_type] = connection.get("properties", {})
+            stone_config["connections"].append(stone_connection)
+
+    return stone_config
 
 
 def register_callbacks(app) -> None:  # type: ignore
@@ -103,22 +139,22 @@ def register_callbacks(app) -> None:  # type: ignore
             content_type, content_string = upload_contents.split(",")
             try:
                 decoded_string = base64.b64decode(content_string).decode("utf-8")
-                # Determine file type and parse accordingly
+                # Only accept YAML files with 🪨 STONE standard
                 if upload_filename and upload_filename.lower().endswith(
                     (".yaml", ".yml")
                 ):
-                    try:
-                        import yaml
+                    from ..config import normalize_config
 
-                        decoded = yaml.safe_load(decoded_string)
-                    except ImportError:
-                        print(
-                            "PyYAML is required to load YAML files. Install with: pip install PyYAML"
-                        )
-                        return dash.no_update, ""
+                    decoded = yaml.safe_load(decoded_string)
+                    # Normalize from YAML with 🪨 STONE standard to internal format
+                    normalized = normalize_config(decoded)
+                    return normalized, upload_filename
                 else:
-                    decoded = json.loads(decoded_string)
-                return decoded, upload_filename
+                    print(
+                        "Only YAML format with 🪨 STONE standard (.yaml/.yml) files are supported. Got:"
+                        f" {upload_filename}"
+                    )
+                    return dash.no_update, ""
             except Exception as e:
                 print(f"Error processing uploaded file: {e}")
                 return dash.no_update, ""
@@ -207,39 +243,19 @@ def register_callbacks(app) -> None:  # type: ignore
             return False
         return edit_mode
 
-    # Callback to download config as JSON
+    # Callback to download config as YAML with 🪨 STONE standard
     @app.callback(
         Output("download-config-json", "data"),
         [Input("save-config-json-btn", "n_clicks")],
         [State("current-config", "data")],
         prevent_initial_call=True,
     )
-    def download_config_json(n: int, config: dict):
+    def download_config_stone(n: int, config: dict):
         if n:
-            return dict(content=json.dumps(config, indent=2), filename="config.json")
-        return dash.no_update
-
-    # Callback to download config as YAML
-    @app.callback(
-        Output("download-config-yaml", "data"),
-        [Input("save-config-yaml-btn", "n_clicks")],
-        [State("current-config", "data")],
-        prevent_initial_call=True,
-    )
-    def download_config_yaml(n: int, config: dict):
-        if n:
-            try:
-                import yaml
-
-                return dict(
-                    content=yaml.dump(config, indent=2, default_flow_style=False),
-                    filename="config.yaml",
-                )
-            except ImportError:
-                print(
-                    "PyYAML is required to export YAML files. Install with: pip install PyYAML"
-                )
-                return dash.no_update
+            # Convert from internal format back to YAML with 🪨 STONE standard
+            stone_config = convert_to_stone_format(config)
+            yaml_content = yaml.dump(stone_config, default_flow_style=False, indent=2)
+            return dict(content=yaml_content, filename="config.yaml")
         return dash.no_update
 
     @app.callback(

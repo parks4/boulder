@@ -1,359 +1,328 @@
-# Boulder YAML Configuration Format
+# YAML with 🪨 STONE Standard - Boulder Configuration Files
 
-This document describes the YAML configuration format for Boulder reactor simulations. The YAML format provides a more readable and maintainable alternative to JSON configurations while maintaining full compatibility with the existing Boulder system.
+**YAML format with 🪨 STONE standard** is Boulder's elegant configuration format that makes reactor network definitions clean and intuitive.
 
-## Overview
+## What is the 🪨 STONE Standard?
 
-Boulder configurations describe reactor networks consisting of:
-- **Components**: Individual reactors, reservoirs, and other equipment
-- **Connections**: Flow connections between components (pipes, valves, controllers)
-- **Metadata**: Descriptive information about the configuration
-- **Simulation**: Parameters controlling the simulation execution
+**🪨 STONE** stands for **Structured Type-Oriented Network Expressions** - a YAML configuration standard where component types become keys that contain their properties. This creates a visually clear hierarchy that's both human-readable and programmatically robust.
 
-## Configuration Structure
+## Format Overview
 
-### Basic Structure
-```yaml
-# Required sections
-metadata:       # Configuration information and description
-simulation:     # Simulation parameters and settings
-components:     # List of reactor components
-connections:    # List of flow connections between components
-```
+### Traditional vs 🪨 STONE Standard
 
-### Metadata Section
-```yaml
-metadata:
-  name: "Configuration Name"           # Human-readable name
-  description: "Brief description"     # Purpose and details
-  version: "1.0"                      # Version number
-```
+**Traditional YAML format:**
 
-### Simulation Section
-```yaml
-simulation:
-  mechanism: "gri30.yaml"             # Cantera mechanism file
-  time_step: 0.001                    # Integration time step (seconds)
-  max_time: 10.0                      # Maximum simulation time (seconds)
-  solver_type: "CVODE_BDF"            # Optional: Integration method
-  rtol: 1.0e-6                        # Optional: Relative tolerance
-  atol: 1.0e-9                        # Optional: Absolute tolerance
-```
-
-### Components Section
 ```yaml
 components:
-  - id: "unique_component_id"         # Unique identifier
-    type: "ComponentType"             # Reactor/reservoir type
-    temperature: 1000                 # Temperature (K)
-    pressure: 101325                  # Optional: Pressure (Pa)
-    composition: "CH4:1,O2:2,N2:7.52" # Gas composition (molar ratios)
-    volume: 0.001                     # Optional: Volume (m³)
+  - id: reactor1
+    type: IdealGasReactor
+    properties:
+      temperature: 1000
+      pressure: 101325
 ```
 
-### Connections Section
+**YAML with 🪨 STONE standard:**
+
+```yaml
+components:
+  - id: reactor1
+    IdealGasReactor:
+      temperature: 1000      # K
+      pressure: 101325       # Pa
+```
+
+### Key Benefits
+
+- **🎯 Type Prominence**: Component types are visually prominent as keys
+- **🧹 Clean Structure**: No nested `properties` sections
+- **📖 Better Readability**: Properties are clearly grouped under their component type
+- **✅ Valid YAML**: Follows standard YAML syntax without mixed structures
+- **🚀 Intuitive**: Type-properties relationship is immediately clear
+
+## YAML with 🪨 STONE Standard Specification
+
+### File Structure
+
+```yaml
+metadata:
+  name: "Configuration Name"
+  description: "Brief description"
+  version: "1.0"
+
+simulation:
+  mechanism: "gri30.yaml"
+  time_step: 0.001          # s
+  max_time: 10.0            # s
+  solver: "CVODE_BDF"
+  relative_tolerance: 1.0e-6
+  absolute_tolerance: 1.0e-9
+
+components:
+  - id: component_id
+    ComponentType:
+      property1: value1
+      property2: value2
+      # ... more properties
+
+connections:
+  - id: connection_id
+    ConnectionType:
+      property1: value1
+      property2: value2
+    source: source_component_id
+    target: target_component_id
+```
+
+### Component Types
+
+#### IdealGasReactor
+
+```yaml
+components:
+  - id: reactor1
+    IdealGasReactor:
+      temperature: 1000      # K
+      pressure: 101325       # Pa
+      composition: "CH4:1,O2:2,N2:7.52"
+      volume: 0.01           # m³ (optional)
+```
+
+#### Reservoir
+
+```yaml
+components:
+  - id: inlet
+    Reservoir:
+      temperature: 300       # K
+      pressure: 101325       # Pa (optional)
+      composition: "O2:1,N2:3.76"
+```
+
+### Connection Types
+
+#### MassFlowController
+
 ```yaml
 connections:
-  - id: "unique_connection_id"        # Unique identifier
-    type: "ConnectionType"            # Flow controller type
-    source: "source_component_id"     # Source component ID
-    target: "target_component_id"     # Target component ID
-    mass_flow_rate: 0.1              # Flow rate (kg/s)
+  - id: mfc1
+    MassFlowController:
+      mass_flow_rate: 0.1    # kg/s
+    source: inlet
+    target: reactor1
 ```
 
-## Component Types
+#### Valve
 
-### IdealGasReactor
-Main reactor for combustion simulations:
 ```yaml
-- id: "reactor1"
-  type: "IdealGasReactor"
-  temperature: 1000    # Initial temperature (K)
-  pressure: 101325     # Initial pressure (Pa)
-  composition: "CH4:1,O2:2,N2:7.52"  # Initial composition
-  volume: 0.001        # Reactor volume (m³)
+connections:
+  - id: valve1
+    Valve:
+      valve_coeff: 1.0       # valve coefficient
+    source: reactor1
+    target: outlet
 ```
-
-### Reservoir
-Boundary condition with fixed composition:
-```yaml
-- id: "inlet"
-  type: "Reservoir"
-  temperature: 300     # Temperature (K)
-  pressure: 101325     # Optional: Pressure (Pa)
-  composition: "O2:0.21,N2:0.79"     # Composition
-```
-
-## Connection Types
-
-### MassFlowController
-Controls mass flow rate between components:
-```yaml
-- id: "fuel_injector"
-  type: "MassFlowController"
-  source: "fuel_tank"
-  target: "reactor1"
-  mass_flow_rate: 0.05  # kg/s
-```
-
-Alternative property names:
-- `flow_rate`: Alternative to `mass_flow_rate`
 
 ## Example Configurations
 
-### 1. Basic Single Reactor (`example_config.yaml`)
-Simple configuration with one reactor and one connection:
+### 📁 example_config.yaml
+
+Basic single reactor with reservoir inlet:
+
 ```yaml
 metadata:
   name: "Basic Reactor Configuration"
+  description: "Simple configuration with one reactor and one reservoir"
   version: "1.0"
 
 simulation:
   mechanism: "gri30.yaml"
   time_step: 0.001
   max_time: 10.0
+  solver: "CVODE_BDF"
 
 components:
   - id: reactor1
-    type: IdealGasReactor
-    temperature: 1000
-    pressure: 101325
-    composition: "CH4:1,O2:2,N2:7.52"
-    
+    IdealGasReactor:
+      temperature: 1000      # K
+      pressure: 101325       # Pa
+      composition: "CH4:1,O2:2,N2:7.52"
+
   - id: res1
-    type: Reservoir
-    temperature: 300
-    composition: "O2:1,N2:3.76"
+    Reservoir:
+      temperature: 300       # K
+      composition: "O2:1,N2:3.76"
 
 connections:
   - id: mfc1
-    type: MassFlowController
+    MassFlowController:
+      mass_flow_rate: 0.1    # kg/s
     source: res1
     target: reactor1
-    mass_flow_rate: 0.1
 ```
 
-### 2. Extended Configuration (`sample_configs2.yaml`)
-Configuration with multiple components and connections:
+### 📁 sample_configs2.yaml
+
+Extended configuration with multiple components:
+
 ```yaml
 metadata:
   name: "Extended Reactor Configuration"
+  description: "Multi-component reactor system with different flow controllers"
   version: "2.0"
-
-simulation:
-  mechanism: "gri30.yaml"
-  time_step: 0.001
-  max_time: 10.0
-  solver_type: "CVODE_BDF"
 
 components:
   - id: reactor1
-    type: IdealGasReactor
-    temperature: 1000
-    pressure: 101325
-    composition: "CH4:1,O2:2,N2:7.52"
-    
+    IdealGasReactor:
+      temperature: 1200      # K
+      pressure: 101325       # Pa
+      composition: "CH4:1,O2:2,N2:7.52"
+      volume: 0.01           # m³
+
   - id: res1
-    type: Reservoir
-    temperature: 800
-    composition: "O2:1,N2:3.76"
-    
-  - id: downstream
-    type: Reservoir
-    temperature: 300
-    pressure: 201325
-    composition: "O2:1,N2:3.76"
+    Reservoir:
+      temperature: 300       # K
+      composition: "O2:1,N2:3.76"
+
+  - id: res2
+    Reservoir:
+      temperature: 350       # K
+      pressure: 202650       # Pa
+      composition: "CH4:1"
 
 connections:
   - id: mfc1
-    type: MassFlowController
+    MassFlowController:
+      mass_flow_rate: 0.05   # kg/s
     source: res1
     target: reactor1
-    mass_flow_rate: 0.1
-    
+
   - id: mfc2
-    type: MassFlowController
-    source: reactor1
-    target: downstream
-    flow_rate: 0.1
+    MassFlowController:
+      mass_flow_rate: 0.02   # kg/s
+    source: res2
+    target: reactor1
 ```
 
-### 3. Complex Multi-Reactor (`mix_react_streams.yaml`)
-Advanced configuration with multiple reactors and complex flow patterns:
+### 📁 mix_react_streams.yaml
+
+Complex multi-reactor network:
+
 ```yaml
 metadata:
   name: "Mixed Reactor Streams"
-  description: "Complex reactor network with multiple streams"
+  description: "Complex multi-reactor network with interconnected streams"
   version: "3.0"
 
-simulation:
-  mechanism: "gri30.yaml"
-  time_step: 0.0001
-  max_time: 20.0
-  solver_type: "CVODE_BDF"
-  rtol: 1.0e-9
-  atol: 1.0e-12
-
 components:
-  # Multiple reactors with different conditions
-  # Multiple supply and exhaust streams
-  # See full example in mix_react_streams.yaml
+  - id: reactor1
+    IdealGasReactor:
+      temperature: 1100      # K
+      pressure: 101325       # Pa
+      composition: "CH4:0.8,O2:1.6,N2:6.0"
+      volume: 0.005          # m³
+
+  - id: reactor2
+    IdealGasReactor:
+      temperature: 900       # K
+      pressure: 101325       # Pa
+      composition: "H2:2,O2:1,N2:3.76"
+      volume: 0.008          # m³
+
+  - id: mixer1
+    IdealGasReactor:
+      temperature: 400       # K
+      pressure: 101325       # Pa
+      composition: "N2:1"
+      volume: 0.002          # m³
 
 connections:
-  # Complex flow network connecting all components
-  # See full example in mix_react_streams.yaml
+  - id: mfc3
+    MassFlowController:
+      mass_flow_rate: 0.025  # kg/s
+    source: reactor1
+    target: mixer1
+
+  - id: mfc4
+    MassFlowController:
+      mass_flow_rate: 0.035  # kg/s
+    source: mixer1
+    target: reactor2
 ```
 
-## Usage
+## Property Reference
 
-### Loading Configurations
+### Common Properties
 
-#### Python API
-```python
-from boulder.config import load_config_file, get_config_from_path
+| Property | Unit | Description | Components |
+|----------|------|-------------|------------|
+| `temperature` | K | Gas temperature | All |
+| `pressure` | Pa | Gas pressure | All |
+| `composition` | - | Species mole fractions (e.g., "CH4:1,O2:2") | All |
+| `volume` | m³ | Reactor volume | IdealGasReactor |
+| `mass_flow_rate` | kg/s | Mass flow rate | MassFlowController |
+| `valve_coeff` | - | Valve coefficient | Valve |
 
-# Load from file
-config = load_config_file("examples/example_config.yaml")
+### Composition Format
 
-# Load from specific path
-config = get_config_from_path("/path/to/config.yaml")
+Compositions are specified as comma-separated species:mole_fraction pairs:
+
+```yaml
+composition: "CH4:1,O2:2,N2:7.52"
+# Equivalent to: 1 mol CH4, 2 mol O2, 7.52 mol N2
 ```
 
-#### Command Line
-```bash
-# The Boulder application automatically detects and loads YAML files
-python run.py --config examples/example_config.yaml
-```
+### Units and Comments
 
-### Validation
+Always include units in comments for clarity:
 
-All configurations are automatically validated when loaded:
-- **Structure validation**: Ensures required sections and fields are present
-- **Reference validation**: Verifies all component references in connections are valid
-- **Type validation**: Checks data types and formats
-- **Normalization**: Adds default values and converts to internal format
-
-### Error Handling
-
-The system provides detailed error messages for configuration issues:
-```
-ConfigurationError: Connection 0 (mfc1) references unknown source component: 'invalid_id'
+```yaml
+IdealGasReactor:
+  temperature: 1000      # K
+  pressure: 101325       # Pa
+  mass_flow_rate: 0.1    # kg/s
+  volume: 0.01           # m³
 ```
 
 ## Best Practices
 
-### 1. Use Descriptive IDs
-```yaml
-# Good
-- id: "main_combustor"
-- id: "fuel_supply_tank"
+### 🎨 Formatting
 
-# Less clear
-- id: "r1"
-- id: "res1"
-```
+1. **Use consistent indentation** (2 spaces recommended)
+1. **Include unit comments** for all physical quantities
+1. **Group related components** logically
+1. **Use descriptive IDs** (e.g., `fuel_inlet`, `main_reactor`)
 
-### 2. Include Comments
-```yaml
-components:
-  - id: "reactor1"
-    type: "IdealGasReactor"
-    temperature: 1200  # High temperature for complete combustion
-    composition: "CH4:1,O2:2"  # Stoichiometric mixture
-```
+### 🏗️ Structure
 
-### 3. Group Related Components
-```yaml
-components:
-  # Main reactors
-  - id: "primary_reactor"
-    # ...
-  - id: "secondary_reactor"
-    # ...
-    
-  # Supply streams  
-  - id: "fuel_supply"
-    # ...
-  - id: "air_supply"
-    # ...
-```
+1. **Start with metadata** to describe your configuration
+1. **Define simulation parameters** before components
+1. **List components** before connections
+1. **Order connections** by flow direction when possible
 
-### 4. Use Consistent Units
-All values should use SI units:
-- Temperature: Kelvin (K)
-- Pressure: Pascals (Pa)  
-- Time: Seconds (s)
-- Mass flow: kg/s
-- Volume: m³
+### 🔄 Composition
 
-### 5. Validate Before Running
-```python
-from boulder.config import validate_config_structure, validate_component_references
+1. **Use standard species names** from your mechanism
+1. **Normalize compositions** (they don't need to sum to 1)
+1. **Include inert species** (like N2) for realistic mixtures
 
-try:
-    validate_config_structure(config)
-    validate_component_references(config)
-    print("Configuration is valid!")
-except ConfigurationError as e:
-    print(f"Configuration error: {e}")
-```
+## Validation
 
-## Migration from JSON
+YAML with 🪨 STONE standard includes automatic validation:
 
-Existing JSON configurations can be easily converted to YAML:
+- ✅ **Syntax validation**: YAML parser ensures proper syntax
+- ✅ **Structure validation**: Required sections and fields are checked
+- ✅ **Reference validation**: All connection sources/targets must exist
+- ✅ **Type validation**: Component and connection types are verified
 
-### JSON Format
-```json
-{
-  "components": [
-    {
-      "id": "reactor1",
-      "type": "IdealGasReactor",
-      "properties": {
-        "temperature": 1000,
-        "pressure": 101325
-      }
-    }
-  ]
-}
-```
+## Getting Started
 
-### YAML Format
-```yaml
-components:
-  - id: reactor1
-    type: IdealGasReactor
-    temperature: 1000
-    pressure: 101325
-```
+1. **Copy an example** configuration file as a starting point
+1. **Modify metadata** to describe your system
+1. **Update simulation parameters** for your mechanism and time scales
+1. **Define your components** with appropriate properties
+1. **Connect components** with flow controllers or valves
+1. **Test and iterate** using Boulder's simulation interface
 
-The YAML format is more concise and readable while maintaining the same structure and functionality.
+______________________________________________________________________
 
-## Troubleshooting
-
-### Common Issues
-
-1. **Invalid YAML Syntax**
-   - Check indentation (use spaces, not tabs)
-   - Ensure proper quoting of strings with special characters
-   - Validate YAML syntax with online tools
-
-2. **Missing Components**
-   - Verify all component IDs referenced in connections exist
-   - Check for typos in component and connection IDs
-
-3. **Invalid Properties**
-   - Ensure all required fields are present
-   - Check data types (numbers vs strings)
-   - Verify composition format: "species1:ratio1,species2:ratio2"
-
-4. **PyYAML Not Available**
-   - Install PyYAML: `pip install PyYAML`
-   - Or use JSON format as fallback
-
-### Getting Help
-
-- Check the examples in this directory for reference configurations
-- Review error messages carefully - they indicate the specific issue and location
-- Use the validation functions to debug configuration problems
-- Consult the Boulder documentation for component and connection types 
+*YAML with 🪨 STONE standard makes reactor network configuration as solid as stone - reliable, clear, and built to last.*
