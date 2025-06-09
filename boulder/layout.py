@@ -6,7 +6,10 @@ import dash_bootstrap_components as dbc  # type: ignore
 import dash_cytoscape as cyto  # type: ignore
 from dash import dcc, html
 
-from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
+from . import utils
+
+config_to_cyto_elements = utils.config_to_cyto_elements
+get_available_cantera_mechanisms = utils.get_available_cantera_mechanisms
 
 
 def get_layout(
@@ -35,19 +38,6 @@ def get_layout(
                 style={"display": "none"},
             ),
             html.H1("Boulder - Cantera ReactorNet Visualizer"),
-            # Dark mode toggle
-            html.Div(
-                [
-                    html.I(className="bi bi-sun theme-icon"),
-                    dbc.Switch(
-                        id="theme-switch",
-                        value=False,
-                        style={"margin": "0 8px"},
-                    ),
-                    html.I(className="bi bi-moon theme-icon"),
-                ],
-                className="dark-mode-toggle",
-            ),
             # Toast for notifications
             dbc.Toast(
                 id="notification-toast",

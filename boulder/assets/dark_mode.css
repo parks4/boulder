@@ -1,6 +1,6 @@
 /* Dark mode styles for Boulder application */
 
-/* Light theme (default) */
+/* CSS Custom Properties for theming */
 :root {
   --bg-primary: #ffffff;
   --bg-secondary: #f8f9fa;
@@ -18,9 +18,37 @@
   --scrollbar-bg: #f1f1f1;
   --scrollbar-thumb: #c1c1c1;
   --selection-bg: #007bff;
+  --button-primary-hover: #0056b3;
+  --shadow: rgba(0, 0, 0, 0.1);
+  --shadow-hover: rgba(0, 0, 0, 0.15);
 }
 
-/* Dark theme */
+/* Automatic dark theme based on system preference - prevents white flash */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2d2d2d;
+    --text-primary: #ffffff;
+    --text-secondary: #b0b0b0;
+    --border-color: #404040;
+    --card-bg: #2d2d2d;
+    --modal-bg: #2d2d2d;
+    --navbar-bg: #1a1a1a;
+    --button-primary: #0d6efd;
+    --button-secondary: #6c757d;
+    --input-bg: #404040;
+    --input-border: #404040;
+    --cytoscape-bg: #2d2d2d;
+    --scrollbar-bg: #2d2d2d;
+    --scrollbar-thumb: #555555;
+    --selection-bg: #0d6efd;
+    --button-primary-hover: #0b5ed7;
+    --shadow: rgba(0, 0, 0, 0.3);
+    --shadow-hover: rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* Dark theme override when explicitly set */
 [data-theme="dark"] {
   --bg-primary: #1a1a1a;
   --bg-secondary: #2d2d2d;
@@ -32,12 +60,37 @@
   --navbar-bg: #1a1a1a;
   --button-primary: #0d6efd;
   --button-secondary: #6c757d;
-  --input-bg: #2d2d2d;
+  --input-bg: #404040;
   --input-border: #404040;
   --cytoscape-bg: #2d2d2d;
   --scrollbar-bg: #2d2d2d;
   --scrollbar-thumb: #555555;
   --selection-bg: #0d6efd;
+  --shadow: rgba(0, 0, 0, 0.3);
+  --shadow-hover: rgba(0, 0, 0, 0.4);
+}
+
+/* Light theme override when explicitly set */
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --text-primary: #212529;
+  --text-secondary: #6c757d;
+  --border-color: #dee2e6;
+  --card-bg: #ffffff;
+  --modal-bg: #ffffff;
+  --navbar-bg: #ffffff;
+  --button-primary: #007bff;
+  --button-secondary: #6c757d;
+  --input-bg: #ffffff;
+  --input-border: #ced4da;
+  --cytoscape-bg: #ffffff;
+  --scrollbar-bg: #f1f1f1;
+  --scrollbar-thumb: #c1c1c1;
+  --selection-bg: #007bff;
+  --button-primary-hover: #0056b3;
+  --shadow: rgba(0, 0, 0, 0.1);
+  --shadow-hover: rgba(0, 0, 0, 0.15);
 }
 
 /* Apply theme variables to elements */
@@ -89,6 +142,12 @@ body {
   background-color: var(--card-bg) !important;
   color: var(--text-primary) !important;
   border-color: var(--border-color) !important;
+  box-shadow: 0 2px 4px var(--shadow) !important;
+  transition: all 0.3s ease;
+}
+
+.card:hover {
+  box-shadow: 0 4px 8px var(--shadow-hover) !important;
 }
 
 .card-header {
@@ -99,7 +158,7 @@ body {
 
 /* Modals */
 .modal-content {
-  background-color: var(--modal-bg) !important;
+  background-color: var(--card-bg) !important;
   color: var(--text-primary) !important;
   border-color: var(--border-color) !important;
 }
@@ -111,7 +170,7 @@ body {
 }
 
 .modal-body {
-  background-color: var(--modal-bg) !important;
+  background-color: var(--card-bg) !important;
   color: var(--text-primary) !important;
 }
 
@@ -125,7 +184,7 @@ body {
 .form-select {
   background-color: var(--input-bg) !important;
   color: var(--text-primary) !important;
-  border-color: var(--input-border) !important;
+  border-color: var(--border-color) !important;
 }
 
 .form-control:focus,
@@ -138,7 +197,6 @@ body {
 
 .form-control::placeholder {
   color: var(--text-secondary) !important;
-  opacity: 0.7;
 }
 
 /* Labels */
@@ -185,40 +243,6 @@ pre {
   border-color: var(--border-color) !important;
 }
 
-/* Dark mode toggle switch */
-.dark-mode-toggle {
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: 1050;
-  background-color: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 20px;
-  padding: 8px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  transition: all 0.3s ease;
-}
-
-[data-theme="dark"] .dark-mode-toggle {
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-}
-
-.dark-mode-toggle:hover {
-  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-}
-
-[data-theme="dark"] .dark-mode-toggle:hover {
-  box-shadow: 0 4px 8px rgba(0,0,0,0.4);
-}
-
-.theme-icon {
-  font-size: 16px;
-  transition: color 0.3s ease;
-}
-
 /* Switch styling */
 .form-switch .form-check-input {
   background-color: var(--button-secondary) !important;
@@ -255,6 +279,7 @@ pre {
 .dropdown-menu {
   background-color: var(--card-bg) !important;
   border-color: var(--border-color) !important;
+  box-shadow: 0 4px 8px var(--shadow) !important;
 }
 
 .dropdown-item {
@@ -318,4 +343,60 @@ pre {
 [data-theme="dark"] .badge {
   background-color: var(--bg-secondary) !important;
   color: var(--text-primary) !important;
-} 
+}
+
+/* Tab styling for better visibility in dark mode */
+[data-theme="dark"] .nav-tabs .nav-link {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] .nav-tabs .nav-link:hover {
+  color: var(--text-primary) !important;
+  background-color: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
+}
+
+[data-theme="dark"] .nav-tabs .nav-link.active {
+  color: var(--text-primary) !important;
+  background-color: var(--card-bg) !important;
+  border-color: var(--border-color) !important;
+  border-bottom-color: var(--card-bg) !important;
+}
+
+/* Tab content styling */
+[data-theme="dark"] .tab-content {
+  background-color: var(--card-bg) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+  border-top: none !important;
+  padding: 1rem !important;
+}
+
+/* Plotly graph containers - fix empty state background */
+[data-theme="dark"] .js-plotly-plot,
+[data-theme="dark"] .plotly,
+[data-theme="dark"] .plotly-div,
+[data-theme="dark"] .plot-container {
+  background-color: var(--card-bg) !important;
+}
+
+/* Specific styling for graph containers */
+[data-theme="dark"] #sankey-plot,
+[data-theme="dark"] #temperature-plot,
+[data-theme="dark"] #pressure-plot,
+[data-theme="dark"] #species-plot {
+  background-color: var(--card-bg) !important;
+}
+
+/* Plotly graph SVG and canvas elements */
+[data-theme="dark"] .js-plotly-plot .plotly svg,
+[data-theme="dark"] .js-plotly-plot .plotly canvas {
+  background-color: transparent !important;
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
+}
