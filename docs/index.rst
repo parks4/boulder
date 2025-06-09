@@ -1,7 +1,7 @@
-Welcome to Blocscape's documentation!
+Welcome to Boulder's documentation!
 ================================
 
-Blocscape is a web-based tool for visually constructing and simulating Cantera ReactorNet systems.
+Boulder is a web-based tool for visually constructing and simulating Cantera ReactorNet systems.
 
 .. toctree::
    :maxdepth: 2
@@ -16,4 +16,4 @@ Indices and tables
 
 * :ref:`genindex`
 * :ref:`modindex`
-* :ref:`search` 
+* :ref:`search`

@@ -1,0 +1,17 @@
+{
+  "template": "https://github.com/spark-cleantech/package-template",
+  "commit": "02767a57f4444fc8413d0e3265a5a0f92d586794",
+  "checkout": null,
+  "context": {
+    "cookiecutter": {
+      "project_name": "boulder",
+      "repo_name": "boulder",
+      "project_author": "Erwan Pannier",
+      "project_short_description": "Cantera Reactor Net Simulations",
+      "copyright_year": "2025",
+      "mypy_strict": false,
+      "_template": "https://github.com/spark-cleantech/package-template"
+    }
+  },
+  "directory": null
+}

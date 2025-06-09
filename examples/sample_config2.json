@@ -13,7 +13,16 @@
       "id": "res1",
       "type": "Reservoir",
       "properties": {
+        "temperature": 800,
+        "composition": "O2:1,N2:3.76"
+      }
+    },
+    {
+      "id": "downstream",
+      "type": "Reservoir",
+      "properties": {
         "temperature": 300,
+        "pressure": 201325,
         "composition": "O2:1,N2:3.76"
       }
     }
@@ -27,6 +36,15 @@
       "properties": {
         "mass_flow_rate": 0.1
       }
+    },
+    {
+      "id": "mfc2",
+      "type": "MassFlowController",
+      "source": "reactor1",
+      "target": "downstream",
+      "properties": {
+        "flow_rate": 0.1
+      }
     }
   ]
-} 
+}
