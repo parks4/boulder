@@ -170,9 +170,12 @@ def register_callbacks(app) -> None:  # type: ignore
                 else None
             )
             if data:
+                # Use .get() to safely access 'type' key with fallback
+                element_type = data.get("type", "Element")
+                element_id = data.get("id", "Unknown")
                 return (
                     True,
-                    f"Viewing properties of {data['type']} {data['id']}",
+                    f"Viewing properties of {element_type} {element_id}",
                     "Info",
                     "info",
                 )
