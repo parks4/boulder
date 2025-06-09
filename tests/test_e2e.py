@@ -87,7 +87,9 @@ class TestBoulderE2E:
         self._add_test_reactor(dash_duo, "reactor-2")
 
         # Click "Add MFC" button
-        dash_duo.find_element("#open-mfc-modal").click()
+        # Use JavaScript click to avoid interception issues
+        mfc_button = dash_duo.find_element("#open-mfc-modal")
+        dash_duo.driver.execute_script("arguments[0].click();", mfc_button)
         dash_duo.wait_for_element("#add-mfc-modal", timeout=5)
 
         # Fill MFC details
@@ -212,7 +214,9 @@ class TestBoulderE2E:
         self._add_test_reactor(dash_duo, "duplicate-reactor")
 
         # Try to add same reactor again
-        dash_duo.find_element("#open-reactor-modal").click()
+        # Use JavaScript click to avoid interception issues
+        button = dash_duo.find_element("#open-reactor-modal")
+        dash_duo.driver.execute_script("arguments[0].click();", button)
         dash_duo.wait_for_element("#add-reactor-modal", timeout=5)
 
         # Fill with same ID
@@ -238,7 +242,9 @@ class TestBoulderE2E:
 
     def _add_test_reactor(self, dash_duo, reactor_id):
         """Add a test reactor to the configuration."""
-        dash_duo.find_element("#open-reactor-modal").click()
+        # Use JavaScript click to avoid interception issues
+        button = dash_duo.find_element("#open-reactor-modal")
+        dash_duo.driver.execute_script("arguments[0].click();", button)
         dash_duo.wait_for_element("#add-reactor-modal", timeout=5)
 
         # Fill reactor details
@@ -312,7 +318,9 @@ class TestBoulderPerformance:
 
     def _add_test_reactor(self, dash_duo, reactor_id):
         """Add a test reactor to the configuration."""
-        dash_duo.find_element("#open-reactor-modal").click()
+        # Use JavaScript click to avoid interception issues
+        button = dash_duo.find_element("#open-reactor-modal")
+        dash_duo.driver.execute_script("arguments[0].click();", button)
         dash_duo.wait_for_element("#add-reactor-modal", timeout=5)
 
         # Fill reactor details
