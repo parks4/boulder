@@ -103,7 +103,16 @@ def register_callbacks(app) -> None:  # type: ignore
             content_type, content_string = upload_contents.split(",")
             try:
                 decoded_string = base64.b64decode(content_string).decode("utf-8")
-                decoded = json.loads(decoded_string)
+                # Determine file type and parse accordingly
+                if upload_filename and upload_filename.lower().endswith(('.yaml', '.yml')):
+                    try:
+                        import yaml
+                        decoded = yaml.safe_load(decoded_string)
+                    except ImportError:
+                        print("PyYAML is required to load YAML files. Install with: pip install PyYAML")
+                        return dash.no_update, ""
+                else:
+                    decoded = json.loads(decoded_string)
                 return decoded, upload_filename
             except Exception as e:
                 print(f"Error processing uploaded file: {e}")
@@ -203,6 +212,23 @@ def register_callbacks(app) -> None:  # type: ignore
     def download_config_json(n: int, config: dict):
         if n:
             return dict(content=json.dumps(config, indent=2), filename="config.json")
+        return dash.no_update
+
+    # Callback to download config as YAML
+    @app.callback(
+        Output("download-config-yaml", "data"),
+        [Input("save-config-yaml-btn", "n_clicks")],
+        [State("current-config", "data")],
+        prevent_initial_call=True,
+    )
+    def download_config_yaml(n: int, config: dict):
+        if n:
+            try:
+                import yaml
+                return dict(content=yaml.dump(config, indent=2, default_flow_style=False), filename="config.yaml")
+            except ImportError:
+                print("PyYAML is required to export YAML files. Install with: pip install PyYAML")
+                return dash.no_update
         return dash.no_update
 
     @app.callback(
