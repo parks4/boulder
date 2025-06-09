@@ -104,12 +104,17 @@ def register_callbacks(app) -> None:  # type: ignore
             try:
                 decoded_string = base64.b64decode(content_string).decode("utf-8")
                 # Determine file type and parse accordingly
-                if upload_filename and upload_filename.lower().endswith(('.yaml', '.yml')):
+                if upload_filename and upload_filename.lower().endswith(
+                    (".yaml", ".yml")
+                ):
                     try:
                         import yaml
+
                         decoded = yaml.safe_load(decoded_string)
                     except ImportError:
-                        print("PyYAML is required to load YAML files. Install with: pip install PyYAML")
+                        print(
+                            "PyYAML is required to load YAML files. Install with: pip install PyYAML"
+                        )
                         return dash.no_update, ""
                 else:
                     decoded = json.loads(decoded_string)
@@ -225,9 +230,15 @@ def register_callbacks(app) -> None:  # type: ignore
         if n:
             try:
                 import yaml
-                return dict(content=yaml.dump(config, indent=2, default_flow_style=False), filename="config.yaml")
+
+                return dict(
+                    content=yaml.dump(config, indent=2, default_flow_style=False),
+                    filename="config.yaml",
+                )
             except ImportError:
-                print("PyYAML is required to export YAML files. Install with: pip install PyYAML")
+                print(
+                    "PyYAML is required to export YAML files. Install with: pip install PyYAML"
+                )
                 return dash.no_update
         return dash.no_update
 

@@ -1,0 +1,74 @@
+# Mixed reactor streams configuration
+metadata:
+  name: "Mixed Reactor Streams"
+  description: "Complex reactor network with multiple streams"
+  version: "3.0"
+
+simulation:
+  mechanism: "gri30.yaml"
+  time_step: 0.0001
+  max_time: 20.0
+  solver_type: "CVODE_BDF"
+  rtol: 1.0e-9
+  atol: 1.0e-12
+
+components:
+  # Main reactors
+  - id: reactor1
+    type: IdealGasReactor
+    temperature: 1200
+    pressure: 101325
+    composition: "CH4:0.5,O2:2,N2:7.52"
+    volume: 0.002
+    
+  - id: reactor2
+    type: IdealGasReactor
+    temperature: 900
+    pressure: 101325
+    composition: "N2:1"
+    volume: 0.001
+    
+  # Supply streams
+  - id: fuel_supply
+    type: Reservoir
+    temperature: 350
+    pressure: 200000
+    composition: "CH4:1"
+    
+  - id: air_supply
+    type: Reservoir
+    temperature: 300
+    composition: "O2:0.21,N2:0.79"
+    
+  - id: exhaust
+    type: Reservoir
+    temperature: 300
+    composition: "N2:1"
+
+connections:
+  # Feed streams
+  - id: fuel_flow
+    type: MassFlowController
+    source: fuel_supply
+    target: reactor1
+    mass_flow_rate: 0.05
+    
+  - id: air_flow
+    type: MassFlowController
+    source: air_supply
+    target: reactor1
+    mass_flow_rate: 0.8
+    
+  # Inter-reactor flow
+  - id: reactor_transfer
+    type: MassFlowController
+    source: reactor1
+    target: reactor2
+    mass_flow_rate: 0.7
+    
+  # Exit stream
+  - id: exhaust_flow
+    type: MassFlowController
+    source: reactor2
+    target: exhaust
+    mass_flow_rate: 0.7
