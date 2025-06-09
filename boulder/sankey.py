@@ -41,7 +41,7 @@ def plot_sankey_diagram(sim, mechanism="gri30.yaml"):
     plot_sankey_diagram_from_links_and_nodes(links, nodes, show=True)
 
 
-def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False):
+def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="light"):
     """Plot Sankey Diagram from links and nodes.
 
     Parameters
@@ -52,6 +52,8 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False):
         List of nodes for the sankey diagram.
     show : bool
         Whether to show the plot or not. Default is False.
+    theme : str
+        Theme to use for styling ("light" or "dark"). Default is "light".
 
     Returns
     -------
@@ -62,15 +64,23 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False):
     # ------
     import plotly.graph_objects as go
 
+    # Get theme-specific colors for nodes
+    if theme == "dark":
+        node_color = "#4A90E2"
+        node_line_color = "#222222"
+    else:
+        node_color = "grey"
+        node_line_color = "black"
+
     fig = go.Figure(
         data=go.Sankey(
             arrangement="snap",
             node={
                 "label": nodes,
                 "pad": 11,
-                #'line': dict(color = "black", width = 0.5),
+                "line": dict(color=node_line_color, width=0.5),
                 "thickness": 20,
-                "color": "grey",
+                "color": node_color,
             },
             link=links,
         )
@@ -87,6 +97,7 @@ def generate_sankey_input_from_sim(
     show_species=["H2"],
     verbose=False,
     mechanism="gri30.yaml",
+    theme="light",
 ):
     """Generate input data for sankey plot from a Cantera Reactor Net simulation.
 
@@ -105,6 +116,8 @@ def generate_sankey_input_from_sim(
         Set to [] not to show any species.
     mechanism : str
         Cantera mechanism file to use for heating value calculations. Default is "gri30.yaml".
+    theme : str
+        Theme to use for colors ("light" or "dark"). Default is "light".
 
     Other Parameters
     ----------------
@@ -153,20 +166,37 @@ def generate_sankey_input_from_sim(
 
     links = {"source": [], "target": [], "value": [], "color": [], "label": []}
 
-    # colors
-    try:
-        from spy.colors import clight  # type: ignore
+    # Theme-aware colors
+    if theme == "dark":
+        # Dark theme colors
+        try:
+            from spy.colors import clight  # type: ignore
 
-        color_mass = clight["surface"]
-        color_mass2 = clight["primary"]
-        color_bus = clight["secondary"]
-    except ImportError:
-        color_mass = "pink"
-        color_mass2 = "purple"
-        color_bus = "green"
-    color_H2 = "#B481FF"  # purple
-    color_Cs = "#000000"  # black
-    color_CH4 = "#6828B4"  # purple
+            color_mass = clight["surface"] if "surface" in clight else "#B0B0B0"
+            color_mass2 = clight["primary"] if "primary" in clight else "#4A90E2"
+            color_bus = clight["secondary"] if "secondary" in clight else "#7ED321"
+        except ImportError:
+            color_mass = "#B0B0B0"
+            color_mass2 = "#4A90E2"
+            color_bus = "#7ED321"
+        color_H2 = "#B481FF"  # purple
+        color_Cs = "#666666"  # lighter for dark theme
+        color_CH4 = "#9C4FFF"  # lighter purple for dark theme
+    else:
+        # Light theme colors (original)
+        try:
+            from spy.colors import clight  # type: ignore
+
+            color_mass = clight["surface"]
+            color_mass2 = clight["primary"]
+            color_bus = clight["secondary"]
+        except ImportError:
+            color_mass = "pink"
+            color_mass2 = "purple"
+            color_bus = "green"
+        color_H2 = "#B481FF"  # purple
+        color_Cs = "#000000"  # black
+        color_CH4 = "#6828B4"  # purple
 
     # Create nodes for each reactor
     # ... sort all_reactors list using the reactor.name key, and the order defined in node_order
@@ -448,11 +478,8 @@ if __name__ == "__main__":
     config = defaults()
     sim = default_simulation(**config)
 
-    from boulder.ctutils import draw_network_and_render
-
     sim.advance_to_steady_state()
 
-    draw_network_and_render(sim)
     links, nodes = generate_sankey_input_from_sim(sim, show_species=["H2", "CH4"])
 
     print("RESULT: ")

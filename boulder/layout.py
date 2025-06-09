@@ -14,7 +14,8 @@ def get_layout(
 ) -> html.Div:
     """Create the main application layout."""
     return html.Div(
-        [
+        id="app-container",
+        children=[
             # Hidden dummy elements for callback IDs (always present)
             html.Div(
                 [
@@ -27,6 +28,8 @@ def get_layout(
                     dcc.Upload(id="upload-config", style={"display": "none"}),
                     html.Div(id="init-dummy-output", style={"display": "none"}),
                     dcc.Interval(id="init-interval"),
+                    # Dark mode store
+                    dcc.Store(id="theme-store", data="light"),
                 ],
                 id="hidden-dummies",
                 style={"display": "none"},
@@ -571,5 +574,5 @@ def get_layout(
             dcc.Store(id="simulation-data", data=None),
             # Hidden store to trigger keyboard actions
             dcc.Store(id="keyboard-trigger", data=""),
-        ]
+        ],
     )

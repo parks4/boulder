@@ -8,6 +8,7 @@ from . import (
     notification_callbacks,
     properties_callbacks,
     simulation_callbacks,
+    theme_callbacks,
 )
 
 
@@ -20,3 +21,4 @@ def register_callbacks(app) -> None:  # type: ignore
     simulation_callbacks.register_callbacks(app)
     notification_callbacks.register_callbacks(app)
     clientside_callbacks.register_callbacks(app)
+    theme_callbacks.register_callbacks(app)
