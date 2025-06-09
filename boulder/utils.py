@@ -60,7 +60,7 @@ def get_available_cantera_mechanisms() -> List[Dict[str, str]]:
         data_dirs = [str(cantera_dir / "data")]
 
     # Scan for YAML mechanism files
-    yaml_files = set()
+    yaml_files: set[Path] = set()
     for data_dir in data_dirs:
         data_path = Path(data_dir)
         if data_path.exists():

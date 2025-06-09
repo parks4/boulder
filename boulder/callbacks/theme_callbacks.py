@@ -10,11 +10,17 @@ def register_callbacks(app) -> None:  # type: ignore
         """
         function() {
             // Detect system theme preference
-            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const prefersDark = window.matchMedia &&
+                window.matchMedia('(prefers-color-scheme: dark)').matches;
             const theme = prefersDark ? 'dark' : 'light';
 
             // Apply theme to DOM immediately
             document.documentElement.setAttribute('data-theme', theme);
+
+            // Setup listener for theme preference changes
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+                document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+            });
 
             console.log('System theme detected:', theme);
 

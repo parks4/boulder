@@ -197,9 +197,8 @@ def register_callbacks(app) -> None:  # type: ignore
         elif mechanism_select == "custom-path":
             if uploaded_filename:
                 # Use the uploaded file path from temp directory
-                import tempfile
-
-                mechanism = os.path.join(tempfile.gettempdir(), uploaded_filename)
+                temp_dir = tempfile.gettempdir()
+                mechanism = os.path.join(temp_dir, uploaded_filename)
             else:
                 mechanism = "gri30.yaml"  # Fallback
         else:
@@ -446,7 +445,7 @@ def register_callbacks(app) -> None:  # type: ignore
     )
     def update_sankey_plot(
         active_tab: str, simulation_data: Dict[str, Any], theme: str
-    ) -> Dict[str, Any]:
+    ) -> Union[Dict[str, Any], Any]:
         """Generate Sankey diagram when the Sankey tab is selected."""
         import dash
         import plotly.graph_objects as go
@@ -476,14 +475,18 @@ def register_callbacks(app) -> None:  # type: ignore
             mechanism = simulation_data["mechanism"]
             config = simulation_data["config"]
 
+            # Use Union type to handle both converter types
+            converter: Union[CanteraConverter, DualCanteraConverter]
             if USE_DUAL_CONVERTER:
-                converter = DualCanteraConverter(mechanism=mechanism)
+                dual_converter = DualCanteraConverter(mechanism=mechanism)
                 # Rebuild the network
-                converter.build_network_and_code(config)
+                dual_converter.build_network_and_code(config)
+                converter = dual_converter
             else:
-                converter = CanteraConverter(mechanism=mechanism)
+                single_converter = CanteraConverter(mechanism=mechanism)
                 # Rebuild the network
-                converter.build_network(config)
+                single_converter.build_network(config)
+                converter = single_converter
 
             # Check if network was successfully built
             if converter.last_network is None:

@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cantera as ct  # type: ignore
 
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class CanteraConverter:
-    def __init__(self, mechanism: str = None) -> None:
+    def __init__(self, mechanism: Optional[str] = None) -> None:
         # Use provided mechanism or fall back to config default
         self.mechanism = mechanism or CANTERA_MECHANISM
         try:
@@ -156,7 +156,7 @@ class CanteraConverter:
 
 
 class DualCanteraConverter:
-    def __init__(self, mechanism: str = None) -> None:
+    def __init__(self, mechanism: Optional[str] = None) -> None:
         """Initialize DualCanteraConverter.
 
         Executes the Cantera network as before.
