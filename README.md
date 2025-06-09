@@ -15,18 +15,22 @@ A web-based tool for visually constructing and simulating Cantera ReactorNet sys
 
 ## Installation
 
-1. Clone this repository
-1. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-1. Make sure you have Cantera installed with the GRI-Mech 3.0 mechanism
+It is recommended to install this package in a dedicated environment. Clone the repository and create
+an isolated environment :
+
+```
+git clone https://github.com/parks4/boulder.git
+cd boulder
+conda env create -n boulder -f environment.yml
+conda activate boulder
+pip install -e .         # install in editable mode
+```
 
 ## Usage
 
 1. Start the application:
    ```bash
-   python app.py
+   python run.py
    ```
 1. Open your web browser and navigate to `http://localhost:8050`
 1. Use the interface to:
@@ -79,6 +83,28 @@ The application uses a JSON-based configuration format:
 - MassFlowController
 - Valve
 
-## Contributing
+## Contributing / Developers
 
 Feel free to submit issues and enhancement requests!
+Before pushing to GitHub, run the following commands:
+
+1. Update conda environment: `make conda-env-update`
+1. Install this package in editable mode: `pip install -e .`
+1. (optional) Sync with the latest [template](https://github.com/spark-cleantech/package-template) : `make template-update`
+1. (optional) Run quality assurance checks (code linting): `make qa`
+1. (optional) Run tests: `make unit-tests`
+1. (optional) Run the static type checker: `make type-check`
+1. (optional) Build the documentation (see [Sphinx tutorial](https://www.sphinx-doc.org/en/master/tutorial/)): `make docs-build`
+
+If using Windows, `make` is not available by default. Either install it
+([for instance with Chocolatey](https://stackoverflow.com/questions/32127524/how-to-install-and-use-make-in-windows)),
+or open the [Makefile](./Makefile) and execute the lines therein manually.
+
+## License
+
+```
+Copyright (C) Spark Cleantech SAS (SIREN 909736068) - All Rights Reserved
+Unauthorized copying of this file, via any medium is strictly prohibited
+Proprietary and confidential
+Written by Erwan Pannier <erwan.pannier@spark-cleantech.eu>, June2025
+```
