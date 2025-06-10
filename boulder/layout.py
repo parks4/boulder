@@ -460,7 +460,7 @@ def get_layout(
                                                 #
                                                 "name": "cose",
                                             },
-                                            style={"width": "100%", "height": "600px"},
+                                            style={"width": "100%", "height": "360px"},
                                             elements=config_to_cyto_elements(
                                                 initial_config
                                             ),

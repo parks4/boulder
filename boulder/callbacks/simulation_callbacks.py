@@ -441,10 +441,14 @@ def register_callbacks(app) -> None:  # type: ignore
             Input("simulation-data", "data"),
             Input("theme-store", "data"),  # Add theme as input
         ],
+        State("reactor-graph", "elements"),
         prevent_initial_call=True,
     )
     def update_sankey_plot(
-        active_tab: str, simulation_data: Dict[str, Any], theme: str
+        active_tab: str,
+        simulation_data: Dict[str, Any],
+        theme: str,
+        reactor_elements: List[Dict[str, Any]],
     ) -> Union[Dict[str, Any], Any]:
         """Generate Sankey diagram when the Sankey tab is selected."""
         import dash
@@ -492,6 +496,17 @@ def register_callbacks(app) -> None:  # type: ignore
             if converter.last_network is None:
                 return dash.no_update
 
+            # Extract reactor IDs from reactor graph elements
+            reactor_node_ids = []
+            if reactor_elements:
+                for element in reactor_elements:
+                    if (
+                        "data" in element and "source" not in element["data"]
+                    ):  # It's a node, not an edge
+                        reactor_node_ids.append(element["data"].get("id", ""))
+
+            print(f"[DEBUG] Reactor IDs for Sankey: {reactor_node_ids}")
+
             # Generate Sankey data from the rebuilt network with theme-aware colors
             links, nodes = generate_sankey_input_from_sim(
                 converter.last_network,
@@ -500,6 +515,16 @@ def register_callbacks(app) -> None:  # type: ignore
                 mechanism=converter.mechanism,
                 theme=theme,  # Pass theme to sankey generation
             )
+
+            # Override Sankey node IDs to match reactor graph IDs
+            if reactor_node_ids and len(reactor_node_ids) == len(nodes):
+                print(f"[DEBUG] Original Sankey nodes: {nodes}")
+                nodes = reactor_node_ids  # Use reactor graph IDs directly
+                print(f"[DEBUG] Overridden Sankey nodes: {nodes}")
+            else:
+                print(
+                    f"[DEBUG] ID count mismatch - Sankey: {len(nodes)}, Reactor: {len(reactor_node_ids)}"
+                )
 
             # Create the Sankey plot with theme-aware styling
             sankey_theme = get_sankey_theme_config(theme)
