@@ -18,7 +18,6 @@ USE_DUAL_CONVERTER = True
 # Global variable for the Cantera mechanism to use consistently across the application
 CANTERA_MECHANISM = "gri30.yaml"
 
-
 def load_config_file(config_path: str) -> Dict[str, Any]:
     """Load configuration from YAML file with 🪨 STONE standard."""
     _, ext = os.path.splitext(config_path.lower())
@@ -88,7 +87,6 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
                     )
 
     return normalized
-
 
 def get_initial_config() -> Dict[str, Any]:
     """Load the initial configuration in YAML format with 🪨 STONE standard.
