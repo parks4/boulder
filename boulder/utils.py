@@ -117,6 +117,10 @@ def get_available_cantera_mechanisms() -> List[Dict[str, str]]:
         if filename.startswith(".") or len(filename) < 5:
             continue
 
+        # Skip duplicate filenames (same file in multiple directories)
+        if filename in seen_filenames:
+            continue
+
         # Mark this filename as seen
         seen_filenames.add(filename)
 
