@@ -173,9 +173,9 @@ def register_callbacks(app) -> None:  # type: ignore
             species_fig = apply_theme_to_figure(species_fig, theme)
 
             return (
-                temp_fig,
-                press_fig,
-                species_fig,
+                temp_fig.to_dict(),
+                press_fig.to_dict(),
+                species_fig.to_dict(),
                 code_str,
                 "",
                 {"display": "none"},
@@ -289,9 +289,9 @@ def register_callbacks(app) -> None:  # type: ignore
                 )
                 code_str = header + code_str
             return (
-                temp_fig,
-                press_fig,
-                species_fig,
+                temp_fig.to_dict(),
+                press_fig.to_dict(),
+                species_fig.to_dict(),
                 code_str,
                 "",
                 {"display": "none"},
@@ -475,20 +475,22 @@ def register_callbacks(app) -> None:  # type: ignore
             return dash.no_update
 
         try:
-            # Rebuild the converter from stored session data
+            # Rebuild the converter from stored session data (same as original simulation)
             mechanism = simulation_data["mechanism"]
             config = simulation_data["config"]
+            
+
 
             # Use Union type to handle both converter types
             converter: Union[CanteraConverter, DualCanteraConverter]
             if USE_DUAL_CONVERTER:
                 dual_converter = DualCanteraConverter(mechanism=mechanism)
-                # Rebuild the network
+                # Rebuild the network using the exact same config
                 dual_converter.build_network_and_code(config)
                 converter = dual_converter
             else:
                 single_converter = CanteraConverter(mechanism=mechanism)
-                # Rebuild the network
+                # Rebuild the network using the exact same config
                 single_converter.build_network(config)
                 converter = single_converter
 
@@ -500,31 +502,17 @@ def register_callbacks(app) -> None:  # type: ignore
             reactor_node_ids = []
             if reactor_elements:
                 for element in reactor_elements:
-                    if (
-                        "data" in element and "source" not in element["data"]
-                    ):  # It's a node, not an edge
-                        reactor_node_ids.append(element["data"].get("id", ""))
-
-            print(f"[DEBUG] Reactor IDs for Sankey: {reactor_node_ids}")
-
-            # Generate Sankey data from the rebuilt network with theme-aware colors
+                    if 'data' in element and 'source' not in element['data']:  # It's a node, not an edge
+                        reactor_node_ids.append(element['data'].get('id', ''))
+            # Generate Sankey data from the rebuilt network
+            # Now reactor names should match config IDs directly
             links, nodes = generate_sankey_input_from_sim(
                 converter.last_network,
                 show_species=["H2", "CH4"],
-                verbose=False,
+                verbose=False,  # Disable verbose output
                 mechanism=converter.mechanism,
                 theme=theme,  # Pass theme to sankey generation
             )
-
-            # Override Sankey node IDs to match reactor graph IDs
-            if reactor_node_ids and len(reactor_node_ids) == len(nodes):
-                print(f"[DEBUG] Original Sankey nodes: {nodes}")
-                nodes = reactor_node_ids  # Use reactor graph IDs directly
-                print(f"[DEBUG] Overridden Sankey nodes: {nodes}")
-            else:
-                print(
-                    f"[DEBUG] ID count mismatch - Sankey: {len(nodes)}, Reactor: {len(reactor_node_ids)}"
-                )
 
             # Create the Sankey plot with theme-aware styling
             sankey_theme = get_sankey_theme_config(theme)
