@@ -186,6 +186,9 @@ def get_available_cantera_mechanisms() -> List[Dict[str, str]]:
         "thermo",
     ]
 
+    # Track filenames to avoid duplicates
+    seen_filenames = set()
+
     for yaml_file in sorted(yaml_files):
         filename = yaml_file.name
 
@@ -195,6 +198,10 @@ def get_available_cantera_mechanisms() -> List[Dict[str, str]]:
 
         # Skip files that are clearly not mechanism files (dot files, etc)
         if filename.startswith(".") or len(filename) < 5:
+            continue
+
+        # Skip duplicate filenames (same file in multiple directories)
+        if filename in seen_filenames:
             continue
 
         # Mark this filename as seen
