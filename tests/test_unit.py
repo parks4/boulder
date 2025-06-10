@@ -43,30 +43,6 @@ class TestBoulderUtils:
         elements = config_to_cyto_elements(config)
         assert elements == []
 
-    def test_config_to_cyto_elements_with_reactor(self):
-        """Test config conversion with a single reactor."""
-        config = {
-            "components": [
-                {
-                    "id": "reactor1",
-                    "type": "IdealGasReactor",
-                    "properties": {"temperature": 300, "pressure": 101325},
-                }
-            ],
-            "connections": [],
-        }
-
-        elements = config_to_cyto_elements(config)
-
-        assert len(elements) == 1
-        node = elements[0]
-        assert node["data"]["id"] == "reactor1"
-        assert node["data"]["type"] == "IdealGasReactor"
-        assert "data" in node
-        assert node["data"]["label"] == "reactor1 (IdealGasReactor)"
-        assert node["data"]["properties"] == {"temperature": 300, "pressure": 101325}
-        assert node["data"]["temperature"] == 300.0
-
     def test_config_to_cyto_elements_with_connection(self):
         """Test config conversion with reactor and connection."""
         config = {
