@@ -27,7 +27,6 @@ def register_callbacks(app) -> None:  # type: ignore
             Input("run-simulation", "n_clicks"),
             Input("reactor-graph", "selectedNodeData"),
             Input("reactor-graph", "selectedEdgeData"),
-            Input("current-config", "data"),
         ],
         [
             State("reactor-id", "value"),
@@ -54,7 +53,6 @@ def register_callbacks(app) -> None:  # type: ignore
         run_sim_click: int,
         selected_node: list,
         selected_edge: list,
-        config_data: dict,
         reactor_id: str,
         reactor_type: str,
         reactor_temp: float,
@@ -92,7 +90,7 @@ def register_callbacks(app) -> None:  # type: ignore
                     "Error",
                     "danger",
                 )
-            return True, f"Added {reactor_type} {reactor_id}", "Success", "success"
+            return False, "", "", "primary"
 
         # Add MFC
         if trigger == "add-mfc" and add_mfc_click:
@@ -108,12 +106,7 @@ def register_callbacks(app) -> None:  # type: ignore
                     "Error",
                     "danger",
                 )
-            return (
-                True,
-                f"Added MFC {mfc_id} from {mfc_source} to {mfc_target}",
-                "Success",
-                "success",
-            )
+            return False, "", "", "primary"
 
         # Config upload
         if trigger == "upload-config" and upload_contents:
@@ -179,9 +172,5 @@ def register_callbacks(app) -> None:  # type: ignore
                     "Info",
                     "info",
                 )
-
-        # Graph update
-        if trigger == "current-config":
-            return True, "Graph updated", "Info", "info"
 
         return False, "", "", "primary"
