@@ -18,6 +18,9 @@ USE_DUAL_CONVERTER = True
 # Global variable for the Cantera mechanism to use consistently across the application
 CANTERA_MECHANISM = "gri30.yaml"
 
+# Theme setting: "light", "dark", or "system"
+THEME = "system"
+
 
 def load_config_file(config_path: str) -> Dict[str, Any]:
     """Load configuration from YAML file with 🪨 STONE standard."""

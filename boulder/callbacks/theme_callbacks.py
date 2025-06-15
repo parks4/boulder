@@ -3,35 +3,53 @@
 import dash
 from dash import Input, Output, clientside_callback
 
+from ..config import THEME
+
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register theme-related callbacks."""
-    # Client-side callback to detect system theme on page load
-    clientside_callback(
-        """
-        function() {
-            // Detect system theme preference
-            const prefersDark = window.matchMedia &&
-                window.matchMedia('(prefers-color-scheme: dark)').matches;
-            const theme = prefersDark ? 'dark' : 'light';
+    if THEME == "system":
+        # Client-side callback to detect system theme on page load
+        clientside_callback(
+            """
+            function() {
+                // Detect system theme preference
+                const prefersDark = window.matchMedia &&
+                    window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const theme = prefersDark ? 'dark' : 'light';
 
-            // Apply theme to DOM immediately
-            document.documentElement.setAttribute('data-theme', theme);
+                // Apply theme to DOM immediately
+                document.documentElement.setAttribute('data-theme', theme);
 
-            // Setup listener for theme preference changes
-            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
-                document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
-            });
+                // Setup listener for theme preference changes
+                window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+                    document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+                });
 
-            console.log('System theme detected:', theme);
+                console.log('System theme detected:', theme);
 
-            return theme;
-        }
-        """,
-        Output("theme-store", "data"),
-        [Input("app-container", "id")],  # Use app container as a simple trigger
-        prevent_initial_call=False,
-    )
+                return theme;
+            }
+            """,
+            Output("theme-store", "data"),
+            [Input("app-container", "id")],  # Use app container as a simple trigger
+            prevent_initial_call=False,
+        )
+    else:
+        # If theme is hardcoded, just set it and we're done.
+        clientside_callback(
+            f"""
+            function() {{
+                const theme = '{THEME}';
+                document.documentElement.setAttribute('data-theme', theme);
+                console.log('Hardcoded theme applied:', theme);
+                return theme;
+            }}
+            """,
+            Output("theme-store", "data"),
+            [Input("app-container", "id")],  # Use app container as a simple trigger
+            prevent_initial_call=False,
+        )
 
     # Callback to select reactor graph node when hovering over Sankey nodes
     @app.callback(

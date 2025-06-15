@@ -6,6 +6,7 @@ import dash_bootstrap_components as dbc  # type: ignore
 import dash_cytoscape as cyto  # type: ignore
 from dash import dcc, html
 
+from .config import THEME
 from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
 
 
@@ -28,8 +29,8 @@ def get_layout(
                     dcc.Upload(id="upload-config", style={"display": "none"}),
                     html.Div(id="init-dummy-output", style={"display": "none"}),
                     dcc.Interval(id="init-interval"),
-                    # Dark mode store
-                    dcc.Store(id="theme-store", data="light"),
+                    # Light/Dark mode store
+                    dcc.Store(id="theme-store", data=THEME),
                     # Intermediate stores for chained callbacks
                     dcc.Store(id="add-reactor-trigger", data={}),
                     dcc.Store(id="add-mfc-trigger", data={}),
