@@ -163,7 +163,7 @@ def register_callbacks(app) -> None:  # type: ignore
                     # Use comment-preserving YAML loader
                     try:
                         decoded = load_yaml_string_with_comments(decoded_string)
-                    except:
+                    except Exception:
                         # Fallback to standard loader for compatibility
                         decoded = yaml.safe_load(decoded_string)
 

@@ -141,7 +141,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 # No original YAML, use standard format
                 try:
                     yaml_str = yaml_to_string_with_comments(stone_config)
-                except:
+                except Exception:
                     yaml_str = yaml.dump(stone_config, sort_keys=False, indent=2)
 
             textarea = dcc.Textarea(
@@ -168,12 +168,13 @@ def register_callbacks(app) -> None:  # type: ignore
         [
             Output("current-config", "data", allow_duplicate=True),
             Output("config-yaml-modal", "is_open", allow_duplicate=True),
+            Output("original-yaml-with-comments", "data", allow_duplicate=True),
         ],
         Input("save-config-yaml-edit-btn", "n_clicks"),
         State("config-yaml-editor", "value"),
         prevent_initial_call=True,
     )
-    def update_config_from_yaml(n_clicks: int, yaml_str: str) -> Tuple[dict, bool]:
+    def update_config_from_yaml(n_clicks: int, yaml_str: str) -> Tuple[dict, bool, str]:
         """Save changes from the YAML editor to the main config and close modal."""
         if not n_clicks or not yaml_str:
             raise dash.exceptions.PreventUpdate
@@ -184,12 +185,13 @@ def register_callbacks(app) -> None:  # type: ignore
             # Try to use comment-preserving YAML loader first
             try:
                 new_config = load_yaml_string_with_comments(yaml_str)
-            except:
+            except Exception:
                 # Fallback to standard loader for compatibility
                 new_config = yaml.safe_load(yaml_str)
 
             normalized_config = normalize_config(new_config)
-            return normalized_config, False
+            # Update the original YAML store with the new YAML string to preserve comments for future edits
+            return normalized_config, False, yaml_str
         except yaml.YAMLError as e:
             print(f"YAML Error on save: {e}")
             # In a real app, you'd show an error to the user here
