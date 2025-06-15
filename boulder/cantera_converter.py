@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cantera as ct  # type: ignore
 
 from .config import CANTERA_MECHANISM
+from .sankey import generate_sankey_input_from_sim
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +78,15 @@ class CanteraConverter:
         return device
 
     def build_network(
-        self, config: Dict[str, Any]
+        self, config: Dict[str, Any], theme: str = "light"
     ) -> Tuple[ct.ReactorNet, Dict[str, Any]]:
-        """Build a ReactorNet from configuration and return network and results."""
+        """Build a ReactorNet from configuration and return network and results.
+        
+        Parameters
+        ----------
+        theme: light/dark mode
+            used to generate Sankey diagrams."""
+        # TODO: move theme at the Sankey generation step only ?
         # Clear previous state
         self.reactors.clear()
         self.connections.clear()
@@ -150,6 +157,22 @@ class CanteraConverter:
         # Store the successful network for later use (e.g., Sankey diagrams)
         self.last_network = self.network
 
+        # Generate Sankey data
+        try:
+            links, nodes = generate_sankey_input_from_sim(
+                self.last_network,
+                show_species=["H2", "CH4"],
+                verbose=False,
+                mechanism=self.mechanism,
+                theme=theme,
+            )
+            results["sankey_links"] = links
+            results["sankey_nodes"] = nodes
+        except Exception as e:
+            logger.error(f"Error generating Sankey diagram: {e}")
+            results["sankey_links"] = None
+            results["sankey_nodes"] = None
+
         return self.network, results
 
     def load_config(self, filepath: str) -> Dict[str, Any]:
@@ -189,7 +212,7 @@ class DualCanteraConverter:
         return comp_dict
 
     def build_network_and_code(
-        self, config: Dict[str, Any]
+        self, config: Dict[str, Any], theme: str = "light"
     ) -> Tuple[Any, Dict[str, Any], str]:
         self.code_lines = []
         self.code_lines.append("import cantera as ct")
@@ -312,5 +335,21 @@ class DualCanteraConverter:
 
         # Store the successful network for later use (e.g., Sankey diagrams)
         self.last_network = self.network
+
+        # Generate Sankey data
+        try:
+            links, nodes = generate_sankey_input_from_sim(
+                self.last_network,
+                show_species=["H2", "CH4"],
+                verbose=False,
+                mechanism=self.mechanism,
+                theme=theme,
+            )
+            results["sankey_links"] = links
+            results["sankey_nodes"] = nodes
+        except Exception as e:
+            logger.error(f"Error generating Sankey diagram: {e}")
+            results["sankey_links"] = None
+            results["sankey_nodes"] = None
 
         return self.network, results, "\n".join(self.code_lines)

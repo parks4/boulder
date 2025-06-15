@@ -177,14 +177,14 @@ def register_callbacks(app) -> None:  # type: ignore
                 press_fig.to_dict(),
                 species_fig.to_dict(),
                 code_str,
-                "",
+                dash.no_update,
                 {"display": "none"},
                 {"display": "block"},
-                existing_sim_data,
+                existing_sim_data,  # Return existing data
             )
 
-        # Original simulation logic for new simulations
-        if triggered_id != "run-simulation" or n_clicks == 0:
+        # Proceed with full simulation if button clicked or no existing data
+        if not config:
             return {}, {}, {}, "", "", {"display": "none"}, {"display": "none"}, {}
 
         # Determine the mechanism to use
@@ -217,7 +217,7 @@ def register_callbacks(app) -> None:  # type: ignore
                     f"[DEBUG] DualCanteraConverter gas name: {dual_converter.gas.name}"
                 )
                 network, results, code_str = dual_converter.build_network_and_code(
-                    config
+                    config, theme=theme
                 )
             else:
                 single_converter = CanteraConverter(mechanism=mechanism)
@@ -225,7 +225,7 @@ def register_callbacks(app) -> None:  # type: ignore
                     f"[DEBUG] CanteraConverter mechanism: {single_converter.mechanism}"
                 )
                 print(f"[DEBUG] CanteraConverter gas name: {single_converter.gas.name}")
-                network, results = single_converter.build_network(config)
+                network, results = single_converter.build_network(config, theme=theme)
                 code_str = ""
 
             # Create temperature plot
@@ -454,66 +454,48 @@ def register_callbacks(app) -> None:  # type: ignore
         import dash
         import plotly.graph_objects as go
 
-        from ..cantera_converter import CanteraConverter, DualCanteraConverter
-        from ..config import USE_DUAL_CONVERTER
-        from ..sankey import (
-            generate_sankey_input_from_sim,
-            plot_sankey_diagram_from_links_and_nodes,
-        )
+        from ..sankey import plot_sankey_diagram_from_links_and_nodes
         from ..utils import get_sankey_theme_config
 
         # Only generate if Sankey tab is active
         if active_tab != "sankey-tab":
             return dash.no_update
 
-        # Check if we have simulation data
-        if (
-            not simulation_data
-            or not simulation_data.get("mechanism")
-            or not simulation_data.get("config")
-        ):
+        # Check if we have simulation results
+        if not simulation_data or "results" not in simulation_data:
             return dash.no_update
 
-        try:
-            # Rebuild the converter from stored session data (same as original simulation)
-            mechanism = simulation_data["mechanism"]
-            config = simulation_data["config"]
+        results = simulation_data["results"]
+        links = results.get("sankey_links")
+        nodes = results.get("sankey_nodes")
 
-            # Use Union type to handle both converter types
-            converter: Union[CanteraConverter, DualCanteraConverter]
-            if USE_DUAL_CONVERTER:
-                dual_converter = DualCanteraConverter(mechanism=mechanism)
-                # Rebuild the network using the exact same config
-                dual_converter.build_network_and_code(config)
-                converter = dual_converter
-            else:
-                single_converter = CanteraConverter(mechanism=mechanism)
-                # Rebuild the network using the exact same config
-                single_converter.build_network(config)
-                converter = single_converter
-
-            # Check if network was successfully built
-            if converter.last_network is None:
-                return dash.no_update
-
-            # Extract reactor IDs from reactor graph elements
-            reactor_node_ids = []
-            if reactor_elements:
-                for element in reactor_elements:
-                    if (
-                        "data" in element and "source" not in element["data"]
-                    ):  # It's a node, not an edge
-                        reactor_node_ids.append(element["data"].get("id", ""))
-            # Generate Sankey data from the rebuilt network
-            # Now reactor names should match config IDs directly
-            links, nodes = generate_sankey_input_from_sim(
-                converter.last_network,
-                show_species=["H2", "CH4"],
-                verbose=False,  # Disable verbose output
-                mechanism=converter.mechanism,
-                theme=theme,  # Pass theme to sankey generation
+        # Check if Sankey data is available
+        if not links or not nodes:
+            sankey_theme = get_sankey_theme_config(theme)
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Sankey diagram data not available for this simulation.",
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(size=16, color="#dc3545" if theme == "light" else "#ff6b6b"),
+                align="center",
             )
+            fig.update_layout(
+                title="Energy Flow Sankey Diagram",
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                plot_bgcolor=sankey_theme["plot_bgcolor"],
+                paper_bgcolor=sankey_theme["paper_bgcolor"],
+                font=sankey_theme["font"],
+                margin=dict(l=10, r=10, t=40, b=10),
+                height=400,
+            )
+            return fig.to_dict()
 
+        try:
             # Create the Sankey plot with theme-aware styling
             sankey_theme = get_sankey_theme_config(theme)
             fig = plot_sankey_diagram_from_links_and_nodes(
