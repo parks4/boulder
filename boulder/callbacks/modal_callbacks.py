@@ -92,19 +92,58 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("config-yaml-modal-body", "children"),
         ],
         Input("config-file-name-span", "n_clicks"),
-        State("current-config", "data"),
+        [
+            State("current-config", "data"),
+            State("original-yaml-with-comments", "data"),
+        ],
         prevent_initial_call=True,
     )
-    def open_config_yaml_modal(n_clicks: int, config: dict) -> Tuple[bool, Any]:
+    def open_config_yaml_modal(
+        n_clicks: int, config: dict, original_yaml: str
+    ) -> Tuple[bool, Any]:
         """Open the YAML config modal, always in edit mode."""
         if not n_clicks:
             raise dash.exceptions.PreventUpdate
 
         try:
-            from ..config import convert_to_stone_format
+            from ..config import (
+                _update_yaml_preserving_comments,
+                convert_to_stone_format,
+                load_yaml_string_with_comments,
+                normalize_config,
+                yaml_to_string_with_comments,
+            )
 
             stone_config = convert_to_stone_format(config)
-            yaml_str = yaml.dump(stone_config, sort_keys=False, indent=2)
+
+            # If we have original YAML with comments, try to preserve them
+            if original_yaml and original_yaml.strip():
+                try:
+                    # Load original YAML with comments
+                    original_data = load_yaml_string_with_comments(original_yaml)
+
+                    # Check if the config has actually changed by comparing the original with new stone config
+                    original_normalized = normalize_config(original_data)
+                    if original_normalized == config:
+                        # Config hasn't changed, use original YAML directly
+                        yaml_str = original_yaml
+                    else:
+                        # Config has changed, update while preserving comments
+                        updated_data = _update_yaml_preserving_comments(
+                            original_data, stone_config
+                        )
+                        yaml_str = yaml_to_string_with_comments(updated_data)
+                except Exception as e:
+                    print(f"Warning: Could not preserve comments: {e}")
+                    # Fallback to standard format
+                    yaml_str = yaml_to_string_with_comments(stone_config)
+            else:
+                # No original YAML, use standard format
+                try:
+                    yaml_str = yaml_to_string_with_comments(stone_config)
+                except:
+                    yaml_str = yaml.dump(stone_config, sort_keys=False, indent=2)
+
             textarea = dcc.Textarea(
                 id="config-yaml-editor",
                 value=yaml_str,
@@ -140,9 +179,15 @@ def register_callbacks(app) -> None:  # type: ignore
             raise dash.exceptions.PreventUpdate
 
         try:
-            from ..config import normalize_config
+            from ..config import load_yaml_string_with_comments, normalize_config
 
-            new_config = yaml.safe_load(yaml_str)
+            # Try to use comment-preserving YAML loader first
+            try:
+                new_config = load_yaml_string_with_comments(yaml_str)
+            except:
+                # Fallback to standard loader for compatibility
+                new_config = yaml.safe_load(yaml_str)
+
             normalized_config = normalize_config(new_config)
             return normalized_config, False
         except yaml.YAMLError as e:

@@ -125,6 +125,7 @@ def register_callbacks(app) -> None:  # type: ignore
         [
             Output("current-config", "data"),
             Output("config-file-name", "data"),
+            Output("original-yaml-with-comments", "data"),
         ],
         [
             Input("upload-config", "contents"),
@@ -154,23 +155,32 @@ def register_callbacks(app) -> None:  # type: ignore
                 if upload_filename and upload_filename.lower().endswith(
                     (".yaml", ".yml")
                 ):
-                    from ..config import normalize_config
+                    from ..config import (
+                        load_yaml_string_with_comments,
+                        normalize_config,
+                    )
 
-                    decoded = yaml.safe_load(decoded_string)
+                    # Use comment-preserving YAML loader
+                    try:
+                        decoded = load_yaml_string_with_comments(decoded_string)
+                    except:
+                        # Fallback to standard loader for compatibility
+                        decoded = yaml.safe_load(decoded_string)
+
                     # Normalize from YAML with 🪨 STONE standard to internal format
                     normalized = normalize_config(decoded)
-                    return normalized, upload_filename
+                    return normalized, upload_filename, decoded_string
                 else:
                     print(
                         "Only YAML format with 🪨 STONE standard (.yaml/.yml) files are supported. Got:"
                         f" {upload_filename}"
                     )
-                    return dash.no_update, ""
+                    return dash.no_update, "", ""
             except Exception as e:
                 print(f"Error processing uploaded file: {e}")
-                return dash.no_update, ""
+                return dash.no_update, "", ""
         elif trigger == "delete-config-file" and delete_n_clicks:
-            return get_initial_config(), ""
+            return get_initial_config(), "", ""
         else:
             raise dash.exceptions.PreventUpdate
 

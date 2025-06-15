@@ -11,7 +11,9 @@ from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
 
 
 def get_layout(
-    initial_config: Dict[str, Any], cyto_stylesheet: List[Dict[str, Any]]
+    initial_config: Dict[str, Any],
+    cyto_stylesheet: List[Dict[str, Any]],
+    original_yaml: str = "",
 ) -> html.Div:
     """Create the main application layout."""
     return html.Div(
@@ -564,5 +566,7 @@ def get_layout(
             dcc.Store(id="simulation-data", data=None),
             # Hidden store to trigger keyboard actions
             dcc.Store(id="keyboard-trigger", data=""),
+            # Store for original YAML with comments
+            dcc.Store(id="original-yaml-with-comments", data=original_yaml),
         ],
     )
