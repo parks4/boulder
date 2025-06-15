@@ -187,12 +187,14 @@ def register_callbacks(app) -> None:  # type: ignore
             )
 
         except Exception as e:
+            message = f"Error during simulation: {str(e)}"
+            print(f"ERROR: {message}")
             return (
                 go.Figure(),
                 go.Figure(),
                 go.Figure(),
                 "",
-                f"Error during simulation: {str(e)}",
+                message,
                 {"display": "block", "color": "red"},
                 {"display": "none"},
                 {},

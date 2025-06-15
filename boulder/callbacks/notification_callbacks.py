@@ -55,10 +55,12 @@ def register_callbacks(app) -> None:  # type: ignore
                     "Success",
                     "success",
                 )
-            except Exception:
+            except Exception as e:
+                message = f"Could not parse file {upload_filename}. Error: {e}"
+                print(f"ERROR: {message}")
                 return (
                     True,
-                    f"Could not parse file {upload_filename}.",
+                    message,
                     "Error",
                     "danger",
                 )
