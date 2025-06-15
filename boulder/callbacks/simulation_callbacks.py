@@ -117,26 +117,13 @@ def register_callbacks(app) -> None:  # type: ignore
             mechanism = mechanism_select
 
         try:
-            # Debug: Log the mechanism being used
-            print(f"[DEBUG] Using mechanism: {mechanism}")
-
             if USE_DUAL_CONVERTER:
                 dual_converter = DualCanteraConverter(mechanism=mechanism)
-                print(
-                    f"[DEBUG] DualCanteraConverter mechanism: {dual_converter.mechanism}"
-                )
-                print(
-                    f"[DEBUG] DualCanteraConverter gas name: {dual_converter.gas.name}"
-                )
                 network, results, code_str = dual_converter.build_network_and_code(
                     config
                 )
             else:
                 single_converter = CanteraConverter(mechanism=mechanism)
-                print(
-                    f"[DEBUG] CanteraConverter mechanism: {single_converter.mechanism}"
-                )
-                print(f"[DEBUG] CanteraConverter gas name: {single_converter.gas.name}")
                 network, results = single_converter.build_network(config)
                 code_str = ""
 

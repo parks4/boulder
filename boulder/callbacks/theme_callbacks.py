@@ -92,11 +92,9 @@ def register_callbacks(app) -> None:  # type: ignore
 
             if "label" in hovered_point:
                 reactor_node_id = hovered_point["label"]
-                print(f"[DEBUG] Hovering over Sankey node: '{reactor_node_id}'")
 
                 # Create selected node data to programmatically select the node
                 selected_node_data = [{"id": reactor_node_id}]
-                print(f"[DEBUG] Setting selectedNodeData: {selected_node_data}")
 
                 # Also update stylesheet with highlight using direct node selector
                 new_stylesheet = copy.deepcopy(base_stylesheet)
@@ -134,8 +132,6 @@ def register_callbacks(app) -> None:  # type: ignore
                 }
 
                 new_stylesheet.append(highlight_style)
-                print(f"[DEBUG] Added highlight style: {highlight_style}")
-                print(f"[DEBUG] Total stylesheet entries: {len(new_stylesheet)}")
 
                 return selected_node_data, new_stylesheet
 

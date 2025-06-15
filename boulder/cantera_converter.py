@@ -16,7 +16,6 @@ class CanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         try:
             self.gas = ct.Solution(self.mechanism)
-            print(f"[INFO] Successfully loaded mechanism: {self.mechanism}")
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
@@ -186,7 +185,6 @@ class DualCanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         try:
             self.gas = ct.Solution(self.mechanism)
-            print(f"[INFO] Successfully loaded mechanism: {self.mechanism}")
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
@@ -213,7 +211,7 @@ class DualCanteraConverter:
         try:
             self.gas = ct.Solution(self.mechanism)
         except Exception as e:
-            print(
+            logger.error(
                 f"[ERROR] Failed to reload mechanism '{self.mechanism}' in build_network_and_code: {e}"
             )
             # Note: self.gas should already be set from __init__, so this is just for consistency
