@@ -34,5 +34,5 @@ def register_callbacks(app) -> None:  # type: ignore
         """,
         Output("keyboard-trigger", "data"),
         Input("reactor-graph", "id"),
-        prevent_initial_call=False,
+        prevent_initial_call=True,
     )

@@ -1,7 +1,6 @@
 """Callbacks for simulation execution and results handling."""
 
 import base64
-import datetime
 import os
 import tempfile
 from typing import Any, Dict, List, Tuple, Union
@@ -13,27 +12,6 @@ from dash import Input, Output, State
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
-
-    # Callback to show/hide custom mechanism input
-    @app.callback(
-        [
-            Output("custom-mechanism-input", "style"),
-            Output("custom-mechanism-upload", "style"),
-            Output("selected-mechanism-display", "style"),
-        ],
-        Input("mechanism-select", "value"),
-        prevent_initial_call=False,
-    )
-    def toggle_custom_mechanism_input(
-        mechanism_value: str,
-    ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
-        """Show appropriate custom mechanism input based on selection."""
-        if mechanism_value == "custom-name":
-            return {"display": "block"}, {"display": "none"}, {"display": "none"}
-        elif mechanism_value == "custom-path":
-            return {"display": "none"}, {"display": "block"}, {"display": "none"}
-        else:
-            return {"display": "none"}, {"display": "none"}, {"display": "none"}
 
     # Callback to handle file upload for custom mechanism
     @app.callback(
@@ -87,105 +65,39 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("simulation-results-card", "style"),
             Output("simulation-data", "data"),
         ],
-        [
-            Input("run-simulation", "n_clicks"),
-            Input("theme-store", "data"),  # Add theme as input
-        ],
+        Input("run-simulation", "n_clicks"),
         [
             State("current-config", "data"),
             State("config-file-name", "data"),
             State("mechanism-select", "value"),
             State("custom-mechanism-input", "value"),
             State("custom-mechanism-upload", "filename"),
-            State("simulation-data", "data"),  # Keep existing simulation data
         ],
         prevent_initial_call=True,
     )
     def run_simulation(
         n_clicks: int,
-        theme: str,
         config: Dict[str, Any],
         config_filename: str,
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-        existing_sim_data: Dict[str, Any],
     ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any]]:
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
         from ..config import USE_DUAL_CONVERTER
         from ..utils import apply_theme_to_figure
 
-        # Get the trigger context
-        ctx = dash.callback_context
-        triggered_id = (
-            ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
-        )
-
-        # If only theme changed and we have existing simulation data, just re-theme the plots
-        if (
-            triggered_id == "theme-store"
-            and existing_sim_data
-            and existing_sim_data.get("results")
-        ):
-            results = existing_sim_data["results"]
-            code_str = existing_sim_data.get("code", "")
-
-            # Create temperature plot
-            temp_fig = go.Figure()
-            temp_fig.add_trace(
-                go.Scatter(
-                    x=results["time"], y=results["temperature"], name="Temperature"
-                )
-            )
-            temp_fig.update_layout(
-                title="Temperature vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Temperature (K)",
-            )
-            temp_fig = apply_theme_to_figure(temp_fig, theme)
-
-            # Create pressure plot
-            press_fig = go.Figure()
-            press_fig.add_trace(
-                go.Scatter(x=results["time"], y=results["pressure"], name="Pressure")
-            )
-            press_fig.update_layout(
-                title="Pressure vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Pressure (Pa)",
-            )
-            press_fig = apply_theme_to_figure(press_fig, theme)
-
-            # Create species plot
-            species_fig = go.Figure()
-            for species, concentrations in results["species"].items():
-                if (
-                    max(concentrations) > 0.01
-                ):  # Only show species with significant concentration
-                    species_fig.add_trace(
-                        go.Scatter(x=results["time"], y=concentrations, name=species)
-                    )
-            species_fig.update_layout(
-                title="Species Concentrations vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Mole Fraction",
-            )
-            species_fig = apply_theme_to_figure(species_fig, theme)
-
+        if not n_clicks or not config:
             return (
-                temp_fig.to_dict(),
-                press_fig.to_dict(),
-                species_fig.to_dict(),
-                code_str,
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
+                "",
                 dash.no_update,
                 {"display": "none"},
-                {"display": "block"},
-                existing_sim_data,  # Return existing data
+                {"display": "none"},
+                {},
             )
-
-        # Proceed with full simulation if button clicked or no existing data
-        if not config:
-            return {}, {}, {}, "", "", {"display": "none"}, {"display": "none"}, {}
 
         # Determine the mechanism to use
         if mechanism_select == "custom-name":
@@ -228,6 +140,9 @@ def register_callbacks(app) -> None:  # type: ignore
                 network, results = single_converter.build_network(config)
                 code_str = ""
 
+            # Get the current theme from the app's layout
+            theme = dash.get_app().layout["theme-store"].data
+
             # Create temperature plot
             temp_fig = go.Figure()
             temp_fig.add_trace(
@@ -270,96 +185,28 @@ def register_callbacks(app) -> None:  # type: ignore
             )
             species_fig = apply_theme_to_figure(species_fig, theme)
 
-            if USE_DUAL_CONVERTER and code_str:
-                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                config_file_str = (
-                    config_filename
-                    if config_filename
-                    else "(no file, edited or generated in app)"
-                )
-                header = (
-                    f'"""\n'
-                    f"This file was automatically generated by Boulder on {now}.\n"
-                    f"Configuration source: {config_file_str}\n"
-                    f"\n"
-                    f"This script defines all Cantera objects (reactors, connections), "
-                    f"builds the reactor network, and runs a sample simulation loop.\n"
-                    f"You can modify and run this script independently with Cantera installed.\n"
-                    f'"""\n'
-                )
-                code_str = header + code_str
+            # Store results for re-theming and other uses
+            simulation_data = {"results": results, "code": code_str}
+
             return (
                 temp_fig.to_dict(),
                 press_fig.to_dict(),
                 species_fig.to_dict(),
                 code_str,
-                "",
+                dash.no_update,
                 {"display": "none"},
                 {"display": "block"},
-                {
-                    "mechanism": mechanism,
-                    "config": config,
-                    "results": results,
-                    "code": code_str,
-                },
+                simulation_data,
             )
+
         except Exception as e:
-            # Create user-friendly error message
-            import dash_bootstrap_components as dbc
-            from dash import html
-
-            error_msg = str(e)
-            mechanism_name = mechanism if isinstance(mechanism, str) else str(mechanism)
-
-            # Provide specific error messages for common issues
-            if (
-                "No such file or directory" in error_msg
-                or "cannot find" in error_msg.lower()
-            ):
-                user_message = (
-                    f"Mechanism file '{mechanism_name}' could not be found. "
-                    "Please check the file path or select a different mechanism."
-                )
-            elif "failed to load mechanism" in error_msg.lower():
-                user_message = (
-                    f"Failed to load mechanism '{mechanism_name}'. "
-                    "The file may be corrupted or incompatible."
-                )
-            elif "solution" in error_msg.lower() and "error" in error_msg.lower():
-                user_message = (
-                    f"Error creating Cantera solution with mechanism '{mechanism_name}'. "
-                    "Please verify the mechanism file format."
-                )
-            elif "network" in error_msg.lower():
-                user_message = "Error building reactor network. Please check your reactor configuration."
-            else:
-                user_message = f"Simulation failed: {error_msg}"
-
-            error_display = dbc.Alert(
-                [
-                    html.H6("Simulation Error", className="alert-heading"),
-                    html.P(user_message),
-                    html.Hr(),
-                    html.P(
-                        [
-                            "Details: ",
-                            html.Code(error_msg, style={"fontSize": "0.8em"}),
-                        ],
-                        className="mb-0 small text-muted",
-                    ),
-                ],
-                color="danger",
-                dismissable=True,
-                is_open=True,
-            )
-
             return (
-                {},
-                {},
-                {},
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
                 "",
-                error_display,
-                {"display": "block"},
+                f"Error during simulation: {str(e)}",
+                {"display": "block", "color": "red"},
                 {"display": "none"},
                 {},
             )
