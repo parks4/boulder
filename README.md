@@ -71,7 +71,7 @@ connections:
     target: reactor1
 ```
 
-See [`examples/README.md`](examples/README.md) for comprehensive YAML with 🪨 STONE standard documentation and examples.
+See [`configs/README.md`](configs/README.md) for comprehensive YAML with 🪨 STONE standard documentation and examples.
 
 ## Supported Components
 

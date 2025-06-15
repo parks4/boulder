@@ -124,7 +124,7 @@ connections:
 
 ## Example Configurations
 
-### 📁 example_config.yaml
+### 📁 default.yaml
 
 Basic single reactor with reservoir inlet:
 

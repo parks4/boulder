@@ -5,7 +5,7 @@ where component types are keys containing their properties.
 """
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 import yaml
 
@@ -96,11 +96,11 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
 def get_initial_config() -> Dict[str, Any]:
     """Load the initial configuration in YAML format with 🪨 STONE standard.
 
-    Loads from examples/example_config.yaml using the elegant 🪨 STONE standard.
+    Loads from configs/default.yaml using the elegant 🪨 STONE standard.
     """
-    # Load from examples directory (YAML with 🪨 STONE standard)
-    examples_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "examples")
-    stone_config_path = os.path.join(examples_dir, "example_config.yaml")
+    # Load from configs directory (YAML with 🪨 STONE standard)
+    configs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "configs")
+    stone_config_path = os.path.join(configs_dir, "default.yaml")
 
     if os.path.exists(stone_config_path):
         config = load_config_file(stone_config_path)
