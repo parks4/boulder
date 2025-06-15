@@ -115,3 +115,42 @@ def get_config_from_path(config_path: str) -> Dict[str, Any]:
 
     config = load_config_file(config_path)
     return normalize_config(config)
+
+
+def convert_to_stone_format(config: dict) -> dict:
+    """Convert internal format back to YAML with 🪨 STONE standard for file saving."""
+    stone_config = {}
+
+    # Copy metadata and simulation sections as-is
+    if "metadata" in config:
+        stone_config["metadata"] = config["metadata"]
+    if "simulation" in config:
+        stone_config["simulation"] = config["simulation"]
+
+    # Convert components
+    if "components" in config:
+        stone_config["components"] = []
+        for component in config["components"]:
+            # Build component with id first, then type
+            component_type = component.get("type", "IdealGasReactor")
+            stone_component = {
+                "id": component["id"],
+                component_type: component.get("properties", {}),
+            }
+            stone_config["components"].append(stone_component)
+
+    # Convert connections
+    if "connections" in config:
+        stone_config["connections"] = []
+        for connection in config["connections"]:
+            # Build connection with id first, then type, then source/target
+            connection_type = connection.get("type", "MassFlowController")
+            stone_connection = {
+                "id": connection["id"],
+                connection_type: connection.get("properties", {}),
+                "source": connection["source"],
+                "target": connection["target"],
+            }
+            stone_config["connections"].append(stone_connection)
+
+    return stone_config

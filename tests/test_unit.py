@@ -5,6 +5,8 @@ import json
 import pytest
 
 from boulder.config import get_initial_config
+from boulder.layout import get_layout
+from boulder.styles import CYTOSCAPE_STYLESHEET
 from boulder.utils import config_to_cyto_elements
 
 
@@ -192,11 +194,7 @@ class TestBoulderLayout:
 
     def test_layout_generation(self):
         """Test that layout can be generated with initial config."""
-        from boulder.layout import get_layout
-        from boulder.styles import CYTOSCAPE_STYLESHEET
-
-        initial_config = get_initial_config()
-        layout = get_layout(initial_config, CYTOSCAPE_STYLESHEET)
+        layout = get_layout(get_initial_config(), CYTOSCAPE_STYLESHEET)
 
         assert layout is not None
         # Layout should be a Dash component
@@ -204,11 +202,7 @@ class TestBoulderLayout:
 
     def test_layout_contains_required_components(self):
         """Test that layout contains required UI components."""
-        from boulder.layout import get_layout
-        from boulder.styles import CYTOSCAPE_STYLESHEET
-
-        initial_config = get_initial_config()
-        layout = get_layout(initial_config, CYTOSCAPE_STYLESHEET)
+        layout = get_layout(get_initial_config(), CYTOSCAPE_STYLESHEET)
 
         # Convert layout to string to check for component IDs
         layout_str = str(layout)
@@ -256,8 +250,6 @@ class TestBoulderIntegration:
 
     def test_stylesheet_loading(self):
         """Test that cytoscape stylesheet loads correctly."""
-        from boulder.styles import CYTOSCAPE_STYLESHEET
-
         assert isinstance(CYTOSCAPE_STYLESHEET, list)
         assert len(CYTOSCAPE_STYLESHEET) > 0
 

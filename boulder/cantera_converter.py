@@ -54,7 +54,7 @@ class CanteraConverter:
 
         # Set the reactor name to match the config ID
         reactor.name = reactor_config["id"]
-        
+
         return reactor
 
     def create_connection(self, conn_config: Dict[str, Any]) -> ct.FlowDevice:

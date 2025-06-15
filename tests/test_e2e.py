@@ -200,46 +200,30 @@ class TestBoulderE2E:
     def test_config_yaml_edit(self, dash_duo):
         """Test YAML configuration editing with 🪨 STONE standard."""
         # Click on config file name to open modal
-        dash_duo.wait_for_element("#config-file-name-span", timeout=10)
-        config_span = dash_duo.find_element("#config-file-name-span")
-        dash_duo.driver.execute_script("arguments[0].click();", config_span)
+        config_button = dash_duo.find_element("#config-file-name-span")
+        config_button.click()
 
-        # Wait for modal
-        dash_duo.wait_for_element("#config-yaml-modal", timeout=5)
-
-        # Click edit button using JavaScript
-        edit_button = dash_duo.find_element("#edit-config-yaml-btn")
-        dash_duo.driver.execute_script("arguments[0].click();", edit_button)
-
-        # Wait for textarea to appear
-        dash_duo.wait_for_element("#config-yaml-edit-textarea", timeout=5)
+        # Wait for modal and ensure it's in edit mode
+        dash_duo.wait_for_element("#config-yaml-modal")
+        textarea = dash_duo.find_element("#config-yaml-editor")
+        assert textarea.is_displayed()
 
         # Edit the YAML
-        textarea = dash_duo.find_element("#config-yaml-edit-textarea")
-        current_text = textarea.get_attribute("value")
-        # Modify the YAML (change temperature value)
-        modified_text = current_text.replace("temperature: 300", "temperature: 350")
+        original_yaml = textarea.get_attribute("value")
+        new_yaml = original_yaml.replace("max_time: 2", "max_time: 5")
         textarea.clear()
-        textarea.send_keys(modified_text)
+        textarea.send_keys(new_yaml)
 
-        # Save changes using JavaScript click
+        # Save changes
         save_button = dash_duo.find_element("#save-config-yaml-edit-btn")
-        dash_duo.driver.execute_script("arguments[0].click();", save_button)
+        save_button.click()
 
-        # Wait for the textarea to disappear (indicates save was processed)
-        import time
-
-        time.sleep(1)
-        try:
-            textarea = dash_duo.find_element("#config-yaml-edit-textarea")
-            assert not textarea.is_displayed(), "Textarea should be hidden after save"
-        except (
-            NoSuchElementException,
-            StaleElementReferenceException,
-            WebDriverException,
-        ):
-            # Textarea might be removed from DOM, which is also success
-            pass
+        # Wait for modal to close and re-open to verify changes
+        dash_duo.wait_for_element_to_be_removed("#config-yaml-modal")
+        config_button.click()
+        dash_duo.wait_for_element("#config-yaml-modal")
+        updated_textarea = dash_duo.find_element("#config-yaml-editor")
+        assert updated_textarea.get_attribute("value") == new_yaml
 
     def test_graph_node_selection(self, dash_duo):
         """Test selecting nodes in the graph."""

@@ -1,66 +1,47 @@
 """Callbacks for modal dialogs (reactor and MFC modals)."""
 
-from typing import Any, Union
+from typing import Any, Tuple, Union
 
 import dash
-from dash import Input, Output, State
+import yaml
+from dash import Input, Output, State, dcc
 
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register modal-related callbacks."""
 
-    # Callback to open/close Reactor modal
+    # ---- Add Component Modals ----
+
     @app.callback(
         Output("add-reactor-modal", "is_open"),
         [
             Input("open-reactor-modal", "n_clicks"),
             Input("close-reactor-modal", "n_clicks"),
-            Input("add-reactor", "n_clicks"),
         ],
-        [State("add-reactor-modal", "is_open")],
+        State("add-reactor-modal", "is_open"),
         prevent_initial_call=True,
     )
-    def toggle_reactor_modal(n1: int, n2: int, n3: int, is_open: bool) -> bool:
-        ctx = dash.callback_context
-        if not ctx.triggered:
-            return is_open
-        trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-        if trigger == "open-reactor-modal" and n1:
-            return True
-        elif trigger == "close-reactor-modal" and n2:
-            return False
-        elif trigger == "add-reactor" and n3:
-            return False
+    def toggle_reactor_modal(n_open: int, n_close: int, is_open: bool) -> bool:
+        if n_open or n_close:
+            return not is_open
         return is_open
 
-    # Callback to open/close MFC modal
     @app.callback(
         Output("add-mfc-modal", "is_open"),
-        [
-            Input("open-mfc-modal", "n_clicks"),
-            Input("close-mfc-modal", "n_clicks"),
-            Input("add-mfc", "n_clicks"),
-        ],
-        [State("add-mfc-modal", "is_open")],
+        [Input("open-mfc-modal", "n_clicks"), Input("close-mfc-modal", "n_clicks")],
+        State("add-mfc-modal", "is_open"),
         prevent_initial_call=True,
     )
-    def toggle_mfc_modal(n1: int, n2: int, n3: int, is_open: bool) -> bool:
-        ctx = dash.callback_context
-        if not ctx.triggered:
-            return is_open
-        trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-        if trigger == "open-mfc-modal" and n1:
-            return True
-        elif trigger == "close-mfc-modal" and n2:
-            return False
-        elif trigger == "add-mfc" and n3:
-            return False
+    def toggle_mfc_modal(n_open: int, n_close: int, is_open: bool) -> bool:
+        if n_open or n_close:
+            return not is_open
         return is_open
 
-    # Callback to update MFC source/target options
+    # ---- Form Logic ----
+
     @app.callback(
         [Output("mfc-source", "options"), Output("mfc-target", "options")],
-        [Input("current-config", "data")],
+        Input("current-config", "data"),
     )
     def update_mfc_options(config: dict) -> tuple[list[dict], list[dict]]:
         valid_types = [
@@ -71,12 +52,11 @@ def register_callbacks(app) -> None:  # type: ignore
         ]
         options = [
             {"label": comp["id"], "value": comp["id"]}
-            for comp in config["components"]
-            if comp["type"] in valid_types
+            for comp in config.get("components", [])
+            if comp.get("type") in valid_types
         ]
         return options, options
 
-    # Add callbacks to enable/disable Add buttons based on form fields
     @app.callback(
         Output("add-reactor", "disabled"),
         [
@@ -105,11 +85,93 @@ def register_callbacks(app) -> None:  # type: ignore
     ) -> bool:
         return not all([mfc_id, source, target, flow_rate])
 
-    # Auto-generate default IDs and values
+    # ---- Config Editor Modal ----
+
+    @app.callback(
+        [
+            Output("config-yaml-modal", "is_open", allow_duplicate=True),
+            Output("config-yaml-modal-body", "children"),
+        ],
+        Input("config-file-name-span", "n_clicks"),
+        State("current-config", "data"),
+        prevent_initial_call=True,
+    )
+    def open_config_yaml_modal(n_clicks: int, config: dict) -> Tuple[bool, Any]:
+        """Open the YAML config modal, always in edit mode."""
+        if not n_clicks:
+            raise dash.exceptions.PreventUpdate
+
+        try:
+            from ..config import convert_to_stone_format
+            stone_config = convert_to_stone_format(config)
+            yaml_str = yaml.dump(stone_config, sort_keys=False, indent=2)
+            textarea = dcc.Textarea(
+                id="config-yaml-editor",
+                value=yaml_str,
+                style={"width": "100%", "height": 400, "fontFamily": "monospace"},
+            )
+            return True, textarea
+        except Exception as e:
+            print(f"Error creating YAML for modal: {e}")
+            return False, f"Error creating YAML: {e}"
+
+    @app.callback(
+        Output("config-yaml-modal", "is_open", allow_duplicate=True),
+        Input("close-config-yaml-modal", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def close_config_yaml_modal(n_clicks: int) -> bool:
+        if not n_clicks:
+            raise dash.exceptions.PreventUpdate
+        return False
+
+    @app.callback(
+        [
+            Output("current-config", "data", allow_duplicate=True),
+            Output("config-yaml-modal", "is_open", allow_duplicate=True),
+        ],
+        Input("save-config-yaml-edit-btn", "n_clicks"),
+        State("config-yaml-editor", "value"),
+        prevent_initial_call=True,
+    )
+    def update_config_from_yaml(n_clicks: int, yaml_str: str) -> Tuple[dict, bool]:
+        """Save changes from the YAML editor to the main config and close modal."""
+        if not n_clicks or not yaml_str:
+            raise dash.exceptions.PreventUpdate
+
+        try:
+            from ..config import normalize_config
+
+            new_config = yaml.safe_load(yaml_str)
+            normalized_config = normalize_config(new_config)
+            return normalized_config, False
+        except yaml.YAMLError as e:
+            print(f"YAML Error on save: {e}")
+            # In a real app, you'd show an error to the user here
+            raise dash.exceptions.PreventUpdate
+        except Exception as e:
+            print(f"Error updating config from YAML: {e}")
+            raise dash.exceptions.PreventUpdate
+
+    @app.callback(
+        Output("download-config-yaml", "data"),
+        Input("save-config-yaml-btn", "n_clicks"),
+        State("config-yaml-editor", "value"),
+        prevent_initial_call=True,
+    )
+    def download_config_yaml(n_clicks: int, yaml_str: str) -> dict:
+        """Download the current content of the YAML editor as a file."""
+        if not n_clicks or not yaml_str:
+            raise dash.exceptions.PreventUpdate
+
+        return dict(content=yaml_str, filename="config.yaml")
+
+    # ---- Auto-generate default IDs and values ----
+
     @app.callback(
         Output("reactor-id", "value"),
-        [Input("add-reactor-modal", "is_open")],
-        [State("current-config", "data")],
+        Input("add-reactor-modal", "is_open"),
+        State("current-config", "data"),
         prevent_initial_call=True,
     )
     def generate_reactor_id(is_open: bool, config: dict) -> Union[str, Any]:
@@ -117,36 +179,28 @@ def register_callbacks(app) -> None:  # type: ignore
             return dash.no_update
 
         existing_ids = [
-            comp["id"]
-            for comp in config["components"]
-            if comp["type"] in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor"]
+            comp.get("id", "") for comp in config.get("components", [])
         ]
-
-        max_num = 0
-        for id in existing_ids:
-            if id.startswith("reactor_"):
-                try:
-                    num = int(id.split("_")[1])
-                    max_num = max(max_num, num)
-                except (ValueError, IndexError):
-                    continue
-
-        return f"reactor_{max_num + 1}"
+        
+        i = 1
+        while f"reactor_{i}" in existing_ids:
+            i += 1
+        return f"reactor_{i}"
 
     @app.callback(
         Output("reactor-type", "value"),
-        [Input("add-reactor-modal", "is_open")],
+        Input("add-reactor-modal", "is_open"),
         prevent_initial_call=True,
     )
-    def set_default_reactor_type(is_open: bool) -> Union[str, Any]:
+    def set__default_reactor_type(is_open: bool) -> Union[str, Any]:
         if is_open:
             return "IdealGasReactor"
         return dash.no_update
 
     @app.callback(
         Output("mfc-id", "value"),
-        [Input("add-mfc-modal", "is_open")],
-        [State("current-config", "data")],
+        Input("add-mfc-modal", "is_open"),
+        State("current-config", "data"),
         prevent_initial_call=True,
     )
     def generate_mfc_id(is_open: bool, config: dict) -> Union[str, Any]:
@@ -154,21 +208,12 @@ def register_callbacks(app) -> None:  # type: ignore
             return dash.no_update
 
         existing_ids = [
-            comp["id"]
-            for comp in config["components"]
-            if comp["type"] == "MassFlowController"
+            conn.get("id", "") for conn in config.get("connections", [])
         ]
-
-        max_num = 0
-        for id in existing_ids:
-            if id.startswith("mfc_"):
-                try:
-                    num = int(id.split("_")[1])
-                    max_num = max(max_num, num)
-                except (ValueError, IndexError):
-                    continue
-
-        return f"mfc_{max_num + 1}"
+        i = 1
+        while f"mfc_{i}" in existing_ids:
+            i += 1
+        return f"mfc_{i}"
 
     @app.callback(
         [
@@ -176,8 +221,8 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("mfc-source", "value"),
             Output("mfc-target", "value"),
         ],
-        [Input("add-mfc-modal", "is_open")],
-        [State("current-config", "data")],
+        Input("add-mfc-modal", "is_open"),
+        State("current-config", "data"),
         prevent_initial_call=True,
     )
     def set_default_mfc_values(is_open: bool, config: dict) -> tuple:
@@ -185,9 +230,9 @@ def register_callbacks(app) -> None:  # type: ignore
             return dash.no_update, dash.no_update, dash.no_update
 
         reactor_ids = [
-            comp["id"]
-            for comp in config["components"]
-            if comp["type"] in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor"]
+            comp.get("id")
+            for comp in config.get("components", [])
+            if comp.get("type") in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor", "Reservoir"]
         ]
 
         default_source = reactor_ids[0] if reactor_ids else None

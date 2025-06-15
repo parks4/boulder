@@ -72,12 +72,6 @@ def get_layout(
                             dbc.Button(
                                 "Save as New File",
                                 id="save-config-yaml-btn",
-                                color="secondary",
-                                className="mr-2",
-                            ),
-                            dbc.Button(
-                                "Edit",
-                                id="edit-config-yaml-btn",
                                 color="primary",
                                 className="mr-2",
                             ),
@@ -88,14 +82,9 @@ def get_layout(
                                 className="mr-2",
                             ),
                             dbc.Button(
-                                "Cancel",
-                                id="cancel-config-yaml-edit-btn",
-                                color="secondary",
-                                className="ml-auto",
-                            ),
-                            dbc.Button(
                                 "Close",
                                 id="close-config-yaml-modal",
+                                color="secondary",
                                 className="ml-auto",
                             ),
                         ]
@@ -104,6 +93,7 @@ def get_layout(
                 id="config-yaml-modal",
                 is_open=False,
                 size="lg",
+                fade=False,
             ),
             # Add Reactor Modal
             dbc.Modal(
