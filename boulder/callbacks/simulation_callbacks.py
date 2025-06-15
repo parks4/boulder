@@ -248,14 +248,35 @@ def register_callbacks(app) -> None:  # type: ignore
     @app.callback(
         Output("last-sim-python-code", "data", allow_duplicate=True),
         [
-            Input({"type": "prop-edit", "prop": dash.ALL}, "value"),
             Input("save-config-yaml-edit-btn", "n_clicks"),
             Input("upload-config", "contents"),
+            Input("add-reactor-trigger", "data"),
+            Input("add-mfc-trigger", "data"),
+            Input("current-config", "data"),
         ],
         prevent_initial_call=True,
     )
     def clear_python_code_on_edit(*_: Any) -> str:
         return ""
+
+    # Hide simulation results (plots & Sankey diagrams) on configuration change
+    @app.callback(
+        [
+            Output("simulation-results-card", "style", allow_duplicate=True),
+            Output("simulation-data", "data", allow_duplicate=True),
+        ],
+        [
+            Input("save-config-yaml-edit-btn", "n_clicks"),
+            Input("upload-config", "contents"),
+            Input("add-reactor-trigger", "data"),
+            Input("add-mfc-trigger", "data"),
+            Input("current-config", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def hide_results_on_config_change(*_: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """Hide plots and Sankey diagrams when configuration changes."""
+        return {"display": "none"}, {}
 
     # Download .py file when button is clicked
     @app.callback(

@@ -5,7 +5,7 @@ where component types are keys containing their properties.
 """
 
 import os
-from typing import Any, Dict, Literal
+from typing import Any, Dict
 
 import yaml
 
