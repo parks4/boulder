@@ -9,31 +9,46 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     # Add nodes (reactors)
     for component in config.get("components", []):
-        elements.append(
-            {
-                "data": {
-                    "id": component["id"],
-                    "label": component["id"],
-                    "type": component["type"],
-                    "properties": component.get("properties", {}),
-                }
-            }
-        )
+        properties = component.get("properties", {})
+        node_data = {
+            "id": component["id"],
+            "label": component["id"],
+            "type": component["type"],
+            "properties": properties,
+        }
+
+        # Flatten commonly used properties for Cytoscape mapping
+        # This allows Cytoscape selectors like "mapData(temperature, ...)" to work
+        if "temperature" in properties:
+            node_data["temperature"] = properties["temperature"]
+        if "pressure" in properties:
+            node_data["pressure"] = properties["pressure"]
+        if "composition" in properties:
+            node_data["composition"] = properties["composition"]
+        if "volume" in properties:
+            node_data["volume"] = properties["volume"]
+
+        elements.append({"data": node_data})
 
     # Add edges (connections)
     for connection in config.get("connections", []):
-        elements.append(
-            {
-                "data": {
-                    "id": connection["id"],
-                    "source": connection["source"],
-                    "target": connection["target"],
-                    "label": connection["type"],
-                    "type": connection["type"],  # Add type field for consistency
-                    "properties": connection.get("properties", {}),
-                }
-            }
-        )
+        properties = connection.get("properties", {})
+        edge_data = {
+            "id": connection["id"],
+            "source": connection["source"],
+            "target": connection["target"],
+            "label": connection["type"],
+            "type": connection["type"],  # Add type field for consistency
+            "properties": properties,
+        }
+
+        # Flatten commonly used properties for Cytoscape mapping
+        if "mass_flow_rate" in properties:
+            edge_data["mass_flow_rate"] = properties["mass_flow_rate"]
+        if "valve_coeff" in properties:
+            edge_data["valve_coeff"] = properties["valve_coeff"]
+
+        elements.append({"data": edge_data})
 
     return elements
 
@@ -84,8 +99,16 @@ def get_available_cantera_mechanisms() -> List[Dict[str, str]]:
         "thermo",
     ]
 
+    # Use a set to track filenames and avoid duplicates
+    seen_filenames = set()
+
     for yaml_file in sorted(yaml_files):
         filename = yaml_file.name
+
+        # Skip duplicates based on filename
+        if filename in seen_filenames:
+            continue
+
         # Skip files that match exclude patterns or don't seem like mechanism files
         if any(pattern in filename.lower() for pattern in exclude_patterns):
             continue
@@ -93,6 +116,13 @@ def get_available_cantera_mechanisms() -> List[Dict[str, str]]:
         # Skip files that are clearly not mechanism files (dot files, etc)
         if filename.startswith(".") or len(filename) < 5:
             continue
+
+        # Skip duplicate filenames (same file in multiple directories)
+        if filename in seen_filenames:
+            continue
+
+        # Mark this filename as seen
+        seen_filenames.add(filename)
 
         # Create a readable label
         label = filename.replace(".yaml", "").replace(".yml", "").replace("_", " ")
@@ -124,6 +154,8 @@ def label_with_unit(key: str) -> str:
         "composition": "composition (%mol)",
         "temperature": "temperature (K)",
         "mass_flow_rate": "mass flow rate (kg/s)",
+        "volume": "volume (m³)",
+        "valve_coeff": "valve coefficient (-)",
     }
     return unit_map.get(key, key)
 

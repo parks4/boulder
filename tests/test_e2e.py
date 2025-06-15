@@ -197,33 +197,33 @@ class TestBoulderE2E:
         # For now, test the config display
         dash_duo.wait_for_element("#config-upload-area", timeout=10)
 
-    def test_config_json_edit(self, dash_duo):
-        """Test JSON configuration editing."""
+    def test_config_yaml_edit(self, dash_duo):
+        """Test YAML configuration editing with 🪨 STONE standard."""
         # Click on config file name to open modal
         dash_duo.wait_for_element("#config-file-name-span", timeout=10)
         config_span = dash_duo.find_element("#config-file-name-span")
         dash_duo.driver.execute_script("arguments[0].click();", config_span)
 
         # Wait for modal
-        dash_duo.wait_for_element("#config-json-modal", timeout=5)
+        dash_duo.wait_for_element("#config-yaml-modal", timeout=5)
 
         # Click edit button using JavaScript
-        edit_button = dash_duo.find_element("#edit-config-json-btn")
+        edit_button = dash_duo.find_element("#edit-config-yaml-btn")
         dash_duo.driver.execute_script("arguments[0].click();", edit_button)
 
         # Wait for textarea to appear
-        dash_duo.wait_for_element("#config-json-edit-textarea", timeout=5)
+        dash_duo.wait_for_element("#config-yaml-edit-textarea", timeout=5)
 
-        # Edit the JSON
-        textarea = dash_duo.find_element("#config-json-edit-textarea")
+        # Edit the YAML
+        textarea = dash_duo.find_element("#config-yaml-edit-textarea")
         current_text = textarea.get_attribute("value")
-        # Modify the JSON (add a comment or change a value)
-        modified_text = current_text.replace('"temperature": 300', '"temperature": 350')
+        # Modify the YAML (change temperature value)
+        modified_text = current_text.replace("temperature: 300", "temperature: 350")
         textarea.clear()
         textarea.send_keys(modified_text)
 
         # Save changes using JavaScript click
-        save_button = dash_duo.find_element("#save-config-json-edit-btn")
+        save_button = dash_duo.find_element("#save-config-yaml-edit-btn")
         dash_duo.driver.execute_script("arguments[0].click();", save_button)
 
         # Wait for the textarea to disappear (indicates save was processed)
@@ -231,7 +231,7 @@ class TestBoulderE2E:
 
         time.sleep(1)
         try:
-            textarea = dash_duo.find_element("#config-json-edit-textarea")
+            textarea = dash_duo.find_element("#config-yaml-edit-textarea")
             assert not textarea.is_displayed(), "Textarea should be hidden after save"
         except (
             NoSuchElementException,

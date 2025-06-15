@@ -173,9 +173,9 @@ def register_callbacks(app) -> None:  # type: ignore
             species_fig = apply_theme_to_figure(species_fig, theme)
 
             return (
-                temp_fig,
-                press_fig,
-                species_fig,
+                temp_fig.to_dict(),
+                press_fig.to_dict(),
+                species_fig.to_dict(),
                 code_str,
                 "",
                 {"display": "none"},
@@ -289,9 +289,9 @@ def register_callbacks(app) -> None:  # type: ignore
                 )
                 code_str = header + code_str
             return (
-                temp_fig,
-                press_fig,
-                species_fig,
+                temp_fig.to_dict(),
+                press_fig.to_dict(),
+                species_fig.to_dict(),
                 code_str,
                 "",
                 {"display": "none"},
@@ -413,7 +413,7 @@ def register_callbacks(app) -> None:  # type: ignore
         Output("last-sim-python-code", "data", allow_duplicate=True),
         [
             Input({"type": "prop-edit", "prop": dash.ALL}, "value"),
-            Input("save-config-json-edit-btn", "n_clicks"),
+            Input("save-config-yaml-edit-btn", "n_clicks"),
             Input("upload-config", "contents"),
         ],
         prevent_initial_call=True,
@@ -441,10 +441,14 @@ def register_callbacks(app) -> None:  # type: ignore
             Input("simulation-data", "data"),
             Input("theme-store", "data"),  # Add theme as input
         ],
+        State("reactor-graph", "elements"),
         prevent_initial_call=True,
     )
     def update_sankey_plot(
-        active_tab: str, simulation_data: Dict[str, Any], theme: str
+        active_tab: str,
+        simulation_data: Dict[str, Any],
+        theme: str,
+        reactor_elements: List[Dict[str, Any]],
     ) -> Union[Dict[str, Any], Any]:
         """Generate Sankey diagram when the Sankey tab is selected."""
         import dash
@@ -471,7 +475,7 @@ def register_callbacks(app) -> None:  # type: ignore
             return dash.no_update
 
         try:
-            # Rebuild the converter from stored session data
+            # Rebuild the converter from stored session data (same as original simulation)
             mechanism = simulation_data["mechanism"]
             config = simulation_data["config"]
 
@@ -479,12 +483,12 @@ def register_callbacks(app) -> None:  # type: ignore
             converter: Union[CanteraConverter, DualCanteraConverter]
             if USE_DUAL_CONVERTER:
                 dual_converter = DualCanteraConverter(mechanism=mechanism)
-                # Rebuild the network
+                # Rebuild the network using the exact same config
                 dual_converter.build_network_and_code(config)
                 converter = dual_converter
             else:
                 single_converter = CanteraConverter(mechanism=mechanism)
-                # Rebuild the network
+                # Rebuild the network using the exact same config
                 single_converter.build_network(config)
                 converter = single_converter
 
@@ -492,11 +496,20 @@ def register_callbacks(app) -> None:  # type: ignore
             if converter.last_network is None:
                 return dash.no_update
 
-            # Generate Sankey data from the rebuilt network with theme-aware colors
+            # Extract reactor IDs from reactor graph elements
+            reactor_node_ids = []
+            if reactor_elements:
+                for element in reactor_elements:
+                    if (
+                        "data" in element and "source" not in element["data"]
+                    ):  # It's a node, not an edge
+                        reactor_node_ids.append(element["data"].get("id", ""))
+            # Generate Sankey data from the rebuilt network
+            # Now reactor names should match config IDs directly
             links, nodes = generate_sankey_input_from_sim(
                 converter.last_network,
                 show_species=["H2", "CH4"],
-                verbose=False,
+                verbose=False,  # Disable verbose output
                 mechanism=converter.mechanism,
                 theme=theme,  # Pass theme to sankey generation
             )

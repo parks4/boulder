@@ -1,10 +1,57 @@
-"""Callbacks for configuration file handling and JSON editing."""
+"""Callbacks for configuration file handling and YAML editing."""
 
 import base64
-import json
 
 import dash
+import yaml
 from dash import Input, Output, State, dcc, html
+
+# Configure YAML to preserve dict order without Python tags
+yaml.add_representer(
+    dict,
+    lambda dumper, data: dumper.represent_mapping(
+        "tag:yaml.org,2002:map", data.items()
+    ),
+)
+
+
+def convert_to_stone_format(config: dict) -> dict:
+    """Convert internal format back to YAML with 🪨 STONE standard for file saving."""
+    stone_config = {}
+
+    # Copy metadata and simulation sections as-is
+    if "metadata" in config:
+        stone_config["metadata"] = config["metadata"]
+    if "simulation" in config:
+        stone_config["simulation"] = config["simulation"]
+
+    # Convert components
+    if "components" in config:
+        stone_config["components"] = []
+        for component in config["components"]:
+            # Build component with id first, then type
+            component_type = component.get("type", "IdealGasReactor")
+            stone_component = {
+                "id": component["id"],
+                component_type: component.get("properties", {}),
+            }
+            stone_config["components"].append(stone_component)
+
+    # Convert connections
+    if "connections" in config:
+        stone_config["connections"] = []
+        for connection in config["connections"]:
+            # Build connection with id first, then type, then source/target
+            connection_type = connection.get("type", "MassFlowController")
+            stone_connection = {
+                "id": connection["id"],
+                connection_type: connection.get("properties", {}),
+                "source": connection["source"],
+                "target": connection["target"],
+            }
+            stone_config["connections"].append(stone_connection)
+
+    return stone_config
 
 
 def register_callbacks(app) -> None:  # type: ignore
@@ -103,8 +150,22 @@ def register_callbacks(app) -> None:  # type: ignore
             content_type, content_string = upload_contents.split(",")
             try:
                 decoded_string = base64.b64decode(content_string).decode("utf-8")
-                decoded = json.loads(decoded_string)
-                return decoded, upload_filename
+                # Only accept YAML files with 🪨 STONE standard
+                if upload_filename and upload_filename.lower().endswith(
+                    (".yaml", ".yml")
+                ):
+                    from ..config import normalize_config
+
+                    decoded = yaml.safe_load(decoded_string)
+                    # Normalize from YAML with 🪨 STONE standard to internal format
+                    normalized = normalize_config(decoded)
+                    return normalized, upload_filename
+                else:
+                    print(
+                        "Only YAML format with 🪨 STONE standard (.yaml/.yml) files are supported. Got:"
+                        f" {upload_filename}"
+                    )
+                    return dash.no_update, ""
             except Exception as e:
                 print(f"Error processing uploaded file: {e}")
                 return dash.no_update, ""
@@ -113,24 +174,29 @@ def register_callbacks(app) -> None:  # type: ignore
         else:
             raise dash.exceptions.PreventUpdate
 
-    # Separate callback to handle config JSON edit save
+    # Separate callback to handle config YAML edit save
     @app.callback(
         Output("current-config", "data", allow_duplicate=True),
-        [Input("save-config-json-edit-btn", "n_clicks")],
+        [Input("save-config-yaml-edit-btn", "n_clicks")],
         [
-            State("config-json-edit-textarea", "value"),
+            State("config-yaml-edit-textarea", "value"),
             State("current-config", "data"),
         ],
         prevent_initial_call=True,
     )
-    def handle_config_json_edit_save(
+    def handle_config_yaml_edit_save(
         save_edit_n_clicks: int,
         edit_text: str,
         old_config: dict,
     ) -> dict:
         if save_edit_n_clicks:
             try:
-                new_config = json.loads(edit_text)
+                from ..config import normalize_config
+
+                # Parse YAML with 🪨 STONE standard
+                parsed_config = yaml.safe_load(edit_text)
+                # Normalize to internal format
+                new_config = normalize_config(parsed_config)
                 return new_config
             except Exception:
                 return old_config
@@ -138,17 +204,22 @@ def register_callbacks(app) -> None:  # type: ignore
 
     # Callback to render the modal body (view or edit mode)
     @app.callback(
-        Output("config-json-modal-body", "children"),
-        [Input("config-json-edit-mode", "data"), Input("current-config", "data")],
+        Output("config-yaml-modal-body", "children"),
+        [Input("config-yaml-edit-mode", "data"), Input("current-config", "data")],
     )
-    def render_config_json_modal_body(edit_mode: bool, config: dict) -> tuple:
+    def render_config_yaml_modal_body(edit_mode: bool, config: dict) -> tuple:
         if edit_mode:
+            # Convert internal format to YAML with 🪨 STONE standard for editing
+            stone_config = convert_to_stone_format(config)
+            yaml_content = yaml.dump(
+                stone_config, default_flow_style=False, indent=2, sort_keys=False
+            )
             return (
                 html.Div(
                     [
                         dcc.Textarea(
-                            id="config-json-edit-textarea",
-                            value=json.dumps(config, indent=2),
+                            id="config-yaml-edit-textarea",
+                            value=yaml_content,
                             style={
                                 "width": "100%",
                                 "height": "60vh",
@@ -159,85 +230,101 @@ def register_callbacks(app) -> None:  # type: ignore
                 ),
             )
         else:
+            # Convert internal format to YAML with 🪨 STONE standard for viewing
+            stone_config = convert_to_stone_format(config)
+            yaml_content = yaml.dump(
+                stone_config, default_flow_style=False, indent=2, sort_keys=False
+            )
             return (
                 html.Pre(
-                    json.dumps(config, indent=2),
+                    yaml_content,
                     style={"maxHeight": "60vh", "overflowY": "auto"},
                 ),
             )
 
     # Callback to handle edit mode switching
     @app.callback(
-        Output("config-json-edit-mode", "data"),
+        Output("config-yaml-edit-mode", "data"),
         [
-            Input("edit-config-json-btn", "n_clicks"),
-            Input("cancel-config-json-edit-btn", "n_clicks"),
-            Input("save-config-json-edit-btn", "n_clicks"),
+            Input("edit-config-yaml-btn", "n_clicks"),
+            Input("cancel-config-yaml-edit-btn", "n_clicks"),
+            Input("save-config-yaml-edit-btn", "n_clicks"),
+            Input("close-config-yaml-modal", "n_clicks"),
         ],
-        [State("config-json-edit-mode", "data")],
+        [State("config-yaml-edit-mode", "data")],
         prevent_initial_call=True,
     )
-    def toggle_config_json_edit_mode(
+    def toggle_config_yaml_edit_mode(
         edit_n: int,
         cancel_n: int,
         save_n: int,
+        close_n: int,
         edit_mode: bool,
     ) -> bool:
         ctx = dash.callback_context
         if not ctx.triggered:
             raise dash.exceptions.PreventUpdate
         trigger = ctx.triggered[0]["prop_id"].split(".")[0]
-        if trigger == "edit-config-json-btn":
+        if trigger == "edit-config-yaml-btn":
             return True
-        elif trigger in ("cancel-config-json-edit-btn", "save-config-json-edit-btn"):
+        elif trigger in (
+            "cancel-config-yaml-edit-btn",
+            "save-config-yaml-edit-btn",
+            "close-config-yaml-modal",
+        ):
             return False
         return edit_mode
 
-    # Callback to download config as JSON
+    # Callback to download config as YAML with 🪨 STONE standard
     @app.callback(
-        Output("download-config-json", "data"),
-        [Input("save-config-json-btn", "n_clicks")],
+        Output("download-config-yaml", "data"),
+        [Input("save-config-yaml-btn", "n_clicks")],
         [State("current-config", "data")],
         prevent_initial_call=True,
     )
-    def download_config_json(n: int, config: dict):
+    def download_config_stone(n: int, config: dict):
         if n:
-            return dict(content=json.dumps(config, indent=2), filename="config.json")
+            # Convert from internal format back to YAML with 🪨 STONE standard
+            stone_config = convert_to_stone_format(config)
+            yaml_content = yaml.dump(
+                stone_config, default_flow_style=False, indent=2, sort_keys=False
+            )
+            return dict(content=yaml_content, filename="config.yaml")
         return dash.no_update
 
     @app.callback(
-        Output("config-json-modal", "is_open"),
+        Output("config-yaml-modal", "is_open"),
         [
             Input("config-file-name-span", "n_clicks"),
-            Input("close-config-json-modal", "n_clicks"),
+            Input("close-config-yaml-modal", "n_clicks"),
         ],
-        [State("config-json-modal", "is_open")],
+        [State("config-yaml-modal", "is_open")],
         prevent_initial_call=True,
     )
-    def toggle_config_json_modal(open_n: int, close_n: int, is_open: bool) -> bool:
-        """Toggle the configuration JSON modal."""
+    def toggle_config_yaml_modal(open_n: int, close_n: int, is_open: bool) -> bool:
+        """Toggle the configuration YAML modal."""
         ctx = dash.callback_context
         if not ctx.triggered:
             return is_open
         trigger = ctx.triggered[0]["prop_id"].split(".")[0]
         if trigger == "config-file-name-span" and open_n:
             return True
-        elif trigger == "close-config-json-modal" and close_n:
+        elif trigger == "close-config-yaml-modal" and close_n:
             return False
         return is_open
 
     # Add a callback to control button visibility
     @app.callback(
         [
-            Output("save-config-json-btn", "style"),
-            Output("edit-config-json-btn", "style"),
-            Output("save-config-json-edit-btn", "style"),
-            Output("cancel-config-json-edit-btn", "style"),
-            Output("close-config-json-modal", "style"),
+            Output("save-config-yaml-btn", "style"),
+            Output("edit-config-yaml-btn", "style"),
+            Output("save-config-yaml-edit-btn", "style"),
+            Output("cancel-config-yaml-edit-btn", "style"),
+            Output("close-config-yaml-modal", "style"),
         ],
-        [Input("config-json-edit-mode", "data")],
+        [Input("config-yaml-edit-mode", "data")],
     )
-    def set_json_modal_button_visibility(edit_mode: bool):
+    def set_yaml_modal_button_visibility(edit_mode: bool):
         if edit_mode:
             return (
                 {"display": "none"},

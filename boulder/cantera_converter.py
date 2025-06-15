@@ -52,6 +52,9 @@ class CanteraConverter:
         else:
             raise ValueError(f"Unsupported reactor type: {reactor_type}")
 
+        # Set the reactor name to match the config ID
+        reactor.name = reactor_config["id"]
+        
         return reactor
 
     def create_connection(self, conn_config: Dict[str, Any]) -> ct.FlowDevice:
@@ -214,10 +217,14 @@ class DualCanteraConverter:
             self.gas.TPX = (temp, pres, self.parse_composition(compo))
             if typ == "IdealGasReactor":
                 self.code_lines.append(f"{rid} = ct.IdealGasReactor(gas)")
+                self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasReactor(self.gas)
+                self.reactors[rid].name = rid
             elif typ == "Reservoir":
                 self.code_lines.append(f"{rid} = ct.Reservoir(gas)")
+                self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.Reservoir(self.gas)
+                self.reactors[rid].name = rid
             else:
                 self.code_lines.append(f"# Unsupported reactor type: {typ}")
                 raise ValueError(f"Unsupported reactor type: {typ}")

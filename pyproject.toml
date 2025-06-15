@@ -17,7 +17,8 @@ dependencies = [
   "dash-bootstrap-components>=1.0.0",
   "dash-cytoscape>=0.3.0",
   "cantera>=3.0.0",
-  "python-dotenv>=1.0.0"
+  "python-dotenv>=1.0.0",
+  "PyYAML>=6.0"
 ]
 description = "A visual interface for Cantera reactor networks"
 dynamic = ["version"]
