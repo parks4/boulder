@@ -276,6 +276,7 @@ def get_sankey_theme_config(theme: str = "light") -> Dict[str, Any]:
                 "H2": "#B481FF",
                 "CH4": "#6828B4",
                 "heat": "#F5A623",
+                "Cs": "#666666",
             },
         }
     else:  # light theme
@@ -295,6 +296,7 @@ def get_sankey_theme_config(theme: str = "light") -> Dict[str, Any]:
                 "H2": "#B481FF",
                 "CH4": "#6828B4",
                 "heat": "green",
+                "Cs": "#000000",
             },
         }
 

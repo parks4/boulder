@@ -9,7 +9,6 @@ from dash import Input, Output, State, dcc
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register modal-related callbacks."""
-
     # ---- Add Component Modals ----
 
     @app.callback(
@@ -103,6 +102,7 @@ def register_callbacks(app) -> None:  # type: ignore
 
         try:
             from ..config import convert_to_stone_format
+
             stone_config = convert_to_stone_format(config)
             yaml_str = yaml.dump(stone_config, sort_keys=False, indent=2)
             textarea = dcc.Textarea(
@@ -178,10 +178,8 @@ def register_callbacks(app) -> None:  # type: ignore
         if not is_open:
             return dash.no_update
 
-        existing_ids = [
-            comp.get("id", "") for comp in config.get("components", [])
-        ]
-        
+        existing_ids = [comp.get("id", "") for comp in config.get("components", [])]
+
         i = 1
         while f"reactor_{i}" in existing_ids:
             i += 1
@@ -207,9 +205,7 @@ def register_callbacks(app) -> None:  # type: ignore
         if not is_open:
             return dash.no_update
 
-        existing_ids = [
-            conn.get("id", "") for conn in config.get("connections", [])
-        ]
+        existing_ids = [conn.get("id", "") for conn in config.get("connections", [])]
         i = 1
         while f"mfc_{i}" in existing_ids:
             i += 1
@@ -232,7 +228,8 @@ def register_callbacks(app) -> None:  # type: ignore
         reactor_ids = [
             comp.get("id")
             for comp in config.get("components", [])
-            if comp.get("type") in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor", "Reservoir"]
+            if comp.get("type")
+            in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor", "Reservoir"]
         ]
 
         default_source = reactor_ids[0] if reactor_ids else None

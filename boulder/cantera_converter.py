@@ -78,15 +78,9 @@ class CanteraConverter:
         return device
 
     def build_network(
-        self, config: Dict[str, Any], theme: str = "light"
+        self, config: Dict[str, Any]
     ) -> Tuple[ct.ReactorNet, Dict[str, Any]]:
-        """Build a ReactorNet from configuration and return network and results.
-        
-        Parameters
-        ----------
-        theme: light/dark mode
-            used to generate Sankey diagrams."""
-        # TODO: move theme at the Sankey generation step only ?
+        """Build a ReactorNet from configuration and return network and results."""
         # Clear previous state
         self.reactors.clear()
         self.connections.clear()
@@ -164,7 +158,6 @@ class CanteraConverter:
                 show_species=["H2", "CH4"],
                 verbose=False,
                 mechanism=self.mechanism,
-                theme=theme,
             )
             results["sankey_links"] = links
             results["sankey_nodes"] = nodes
@@ -212,7 +205,7 @@ class DualCanteraConverter:
         return comp_dict
 
     def build_network_and_code(
-        self, config: Dict[str, Any], theme: str = "light"
+        self, config: Dict[str, Any]
     ) -> Tuple[Any, Dict[str, Any], str]:
         self.code_lines = []
         self.code_lines.append("import cantera as ct")
@@ -343,7 +336,6 @@ class DualCanteraConverter:
                 show_species=["H2", "CH4"],
                 verbose=False,
                 mechanism=self.mechanism,
-                theme=theme,
             )
             results["sankey_links"] = links
             results["sankey_nodes"] = nodes
