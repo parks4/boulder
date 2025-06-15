@@ -30,6 +30,9 @@ def get_layout(
                     dcc.Interval(id="init-interval"),
                     # Dark mode store
                     dcc.Store(id="theme-store", data="light"),
+                    # Intermediate stores for chained callbacks
+                    dcc.Store(id="add-reactor-trigger", data={}),
+                    dcc.Store(id="add-mfc-trigger", data={}),
                 ],
                 id="hidden-dummies",
                 style={"display": "none"},
@@ -219,6 +222,7 @@ def get_layout(
                 ],
                 id="add-reactor-modal",
                 is_open=False,
+                fade=False,
             ),
             # Add MFC Modal
             dbc.Modal(
@@ -303,6 +307,7 @@ def get_layout(
                 ],
                 id="add-mfc-modal",
                 is_open=False,
+                fade=False,
             ),
             # Main content
             dbc.Row(
@@ -557,14 +562,6 @@ def get_layout(
             dcc.Store(id="current-config", data=initial_config),
             # Hidden div for toast trigger
             dcc.Store(id="toast-trigger", data={}),
-            # Add this hidden div to your layout
-            html.Div(id="hidden-edge-data", style={"display": "none"}),
-            # Add a store component to hold edge data
-            dcc.Store(id="edge-added-store", data=None),
-            # Add a hidden div to trigger initialization (of new edge creation)
-            html.Div(
-                id="initialization-trigger", children="init", style={"display": "none"}
-            ),
             # Add a Store to keep track of edit mode
             dcc.Store(id="config-yaml-edit-mode", data=False),
             # Add a Store to keep track of properties panel edit mode

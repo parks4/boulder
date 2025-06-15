@@ -478,8 +478,6 @@ def register_callbacks(app) -> None:  # type: ignore
             # Rebuild the converter from stored session data (same as original simulation)
             mechanism = simulation_data["mechanism"]
             config = simulation_data["config"]
-            
-
 
             # Use Union type to handle both converter types
             converter: Union[CanteraConverter, DualCanteraConverter]
@@ -502,8 +500,10 @@ def register_callbacks(app) -> None:  # type: ignore
             reactor_node_ids = []
             if reactor_elements:
                 for element in reactor_elements:
-                    if 'data' in element and 'source' not in element['data']:  # It's a node, not an edge
-                        reactor_node_ids.append(element['data'].get('id', ''))
+                    if (
+                        "data" in element and "source" not in element["data"]
+                    ):  # It's a node, not an edge
+                        reactor_node_ids.append(element["data"].get("id", ""))
             # Generate Sankey data from the rebuilt network
             # Now reactor names should match config IDs directly
             links, nodes = generate_sankey_input_from_sim(

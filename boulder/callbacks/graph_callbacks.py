@@ -1,6 +1,7 @@
 """Callbacks for cytoscape graph interactions."""
 
-from typing import Any, Dict, List, Tuple, Union
+import time
+from typing import Any, Dict, List, Tuple
 
 import dash
 from dash import Input, Output, State
@@ -20,35 +21,35 @@ def register_callbacks(app) -> None:  # type: ignore
 
         return (config_to_cyto_elements(config),)
 
-    # Callback to add new reactor
+    # STEP 1: Trigger reactor addition and close modal immediately
     @app.callback(
-        [Output("current-config", "data", allow_duplicate=True)],
-        [Input("add-reactor", "n_clicks")],
+        [
+            Output("add-reactor-modal", "is_open", allow_duplicate=True),
+            Output("add-reactor-trigger", "data"),
+        ],
+        Input("add-reactor", "n_clicks"),
         [
             State("reactor-id", "value"),
             State("reactor-type", "value"),
             State("reactor-temp", "value"),
             State("reactor-pressure", "value"),
             State("reactor-composition", "value"),
-            State("current-config", "data"),
         ],
         prevent_initial_call=True,
     )
-    def add_reactor(
+    def trigger_reactor_addition(
         n_clicks: int,
         reactor_id: str,
         reactor_type: str,
         temp: float,
         pressure: float,
         composition: str,
-        config: dict,
-    ) -> Tuple[Union[Dict[str, Any], Any]]:
+    ) -> Tuple[bool, Dict[str, Any]]:
         if not all([reactor_id, reactor_type, temp, pressure, composition]):
-            return (dash.no_update,)
-        if any(comp["id"] == reactor_id for comp in config["components"]):
-            return (dash.no_update,)
+            # Keep modal open for user to complete form
+            return (True, dash.no_update)
 
-        new_reactor = {
+        payload = {
             "id": reactor_id,
             "type": reactor_type,
             "properties": {
@@ -56,92 +57,96 @@ def register_callbacks(app) -> None:  # type: ignore
                 "pressure": pressure,
                 "composition": composition,
             },
+            "timestamp": time.time(),  # Ensures change fires
         }
-        config["components"].append(new_reactor)
-        return (config,)
+        return (False, payload)  # Close modal, trigger step 2
 
-    # Callback to add new MFC
+    # STEP 2: Update config from trigger
     @app.callback(
-        [Output("current-config", "data", allow_duplicate=True)],
-        [Input("add-mfc", "n_clicks")],
+        Output("current-config", "data", allow_duplicate=True),
+        Input("add-reactor-trigger", "data"),
+        State("current-config", "data"),
+        prevent_initial_call=True,
+    )
+    def add_reactor(trigger_data: dict, config: dict) -> Dict[str, Any]:
+        if not trigger_data:
+            raise dash.exceptions.PreventUpdate
+
+        new_reactor = {
+            "id": trigger_data["id"],
+            "type": trigger_data["type"],
+            "properties": trigger_data["properties"],
+        }
+        if any(comp["id"] == new_reactor["id"] for comp in config["components"]):
+            # Prevent adding duplicate
+            return dash.no_update
+
+        config["components"].append(new_reactor)
+        return config
+
+    # STEP 1: Trigger MFC addition and close modal immediately
+    @app.callback(
+        [
+            Output("add-mfc-modal", "is_open", allow_duplicate=True),
+            Output("add-mfc-trigger", "data"),
+        ],
+        Input("add-mfc", "n_clicks"),
         [
             State("mfc-id", "value"),
             State("mfc-source", "value"),
             State("mfc-target", "value"),
             State("mfc-flow-rate", "value"),
-            State("current-config", "data"),
         ],
         prevent_initial_call=True,
     )
-    def add_mfc(
+    def trigger_mfc_addition(
         n_clicks: int,
         mfc_id: str,
         source: str,
         target: str,
         flow_rate: float,
-        config: dict,
-    ) -> Tuple[Union[Dict[str, Any], Any]]:
+    ) -> Tuple[bool, Dict[str, Any]]:
         if not all([mfc_id, source, target, flow_rate]):
-            return (dash.no_update,)
-        if any(
-            conn["source"] == source and conn["target"] == target
-            for conn in config["connections"]
-        ):
-            return (dash.no_update,)
+            return (True, dash.no_update)
 
-        new_connection = {
+        payload = {
             "id": mfc_id,
-            "type": "MassFlowController",
             "source": source,
             "target": target,
+            "mass_flow_rate": flow_rate,
+            "timestamp": time.time(),
+        }
+        return (False, payload)
+
+    # STEP 2: Update config from trigger
+    @app.callback(
+        Output("current-config", "data", allow_duplicate=True),
+        Input("add-mfc-trigger", "data"),
+        State("current-config", "data"),
+        prevent_initial_call=True,
+    )
+    def add_mfc(trigger_data: dict, config: dict) -> Dict[str, Any]:
+        if not trigger_data:
+            raise dash.exceptions.PreventUpdate
+
+        if any(
+            conn["source"] == trigger_data["source"]
+            and conn["target"] == trigger_data["target"]
+            for conn in config["connections"]
+        ):
+            return dash.no_update
+
+        new_connection = {
+            "id": trigger_data["id"],
+            "type": "MassFlowController",
+            "source": trigger_data["source"],
+            "target": trigger_data["target"],
             "properties": {
-                "mass_flow_rate": flow_rate,
+                "mass_flow_rate": trigger_data["mass_flow_rate"],
             },
         }
         config["connections"].append(new_connection)
-        return (config,)
-
-    # Handle edge creation from store
-    @app.callback(
-        [Output("current-config", "data", allow_duplicate=True)],
-        [Input("edge-added-store", "data")],
-        [State("current-config", "data")],
-        prevent_initial_call=True,
-    )
-    def handle_edge_creation(edge_data: dict, config: dict) -> tuple:
-        if not edge_data:
-            return (dash.no_update,)
-
-        source_id = edge_data.get("source")
-        target_id = edge_data.get("target")
-
-        if not source_id or not target_id:
-            return (dash.no_update,)
-
-        # Check if this edge already exists in the config
-        if any(
-            conn["source"] == source_id and conn["target"] == target_id
-            for conn in config["connections"]
-        ):
-            return (dash.no_update,)
-
-        # Generate unique ID for the new edge
-        edge_id = f"mfc_{len(config['connections']) + 1}"
-
-        # Add new connection to config
-        config["connections"].append(
-            {
-                "id": edge_id,
-                "source": source_id,
-                "target": target_id,
-                "type": "MassFlowController",
-                "properties": {
-                    "mass_flow_rate": 0.001  # Default flow rate
-                },
-            }
-        )
-
-        return (config,)
+        return config
 
     # Update last-selected-element on selection
     @app.callback(
