@@ -56,7 +56,7 @@ class TestBoulderE2E:
             time.sleep(0.1)
         return False
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture
     def app_setup(self, dash_duo):
         """Set up the Boulder app for testing."""
         try:

@@ -9,8 +9,9 @@ well-organized test suite covering:
 """
 
 import base64
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from boulder.config import (
     _update_yaml_preserving_comments,
@@ -314,14 +315,18 @@ components:
         # Check both possible formats for robustness
         if "IdealGasReactor" in final_data["components"][0]:
             # STONE format
-            assert final_data["components"][0]["IdealGasReactor"]["temperature"] == 1200.0
+            assert (
+                final_data["components"][0]["IdealGasReactor"]["temperature"] == 1200.0
+            )
         elif "type" in final_data["components"][0]:
             # Internal format (current behavior)
             assert final_data["components"][0]["type"] == "IdealGasReactor"
             assert final_data["components"][0]["properties"]["temperature"] == 1200.0
         else:
             # Unexpected format
-            pytest.fail(f"Unexpected component format: {list(final_data['components'][0].keys())}")
+            pytest.fail(
+                f"Unexpected component format: {list(final_data['components'][0].keys())}"
+            )
 
 
 class TestYAMLCommentIntegration:
@@ -504,4 +509,4 @@ components:
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"]) 
+    pytest.main([__file__, "-v"])
