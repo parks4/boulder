@@ -42,9 +42,10 @@ try:
     )
 
     if env_config_path and env_config_path.strip():
-        initial_config, original_yaml = get_config_from_path_with_comments(
-            env_config_path.strip()
-        )
+        cleaned = env_config_path.strip()
+        initial_config, original_yaml = get_config_from_path_with_comments(cleaned)
+        # When a specific file is provided, propagate its base name to the UI store
+        provided_filename = os.path.basename(cleaned)
     else:
         initial_config, original_yaml = get_initial_config_with_comments()
 except Exception as e:
@@ -53,7 +54,12 @@ except Exception as e:
     original_yaml = ""
 
 # Set the layout
-app.layout = get_layout(initial_config, CYTOSCAPE_STYLESHEET, original_yaml)
+app.layout = get_layout(
+    initial_config,
+    CYTOSCAPE_STYLESHEET,
+    original_yaml,
+    config_filename=locals().get("provided_filename", ""),
+)
 
 # Register all callbacks
 callbacks.register_callbacks(app)

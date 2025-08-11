@@ -12,8 +12,6 @@ import os
 import sys
 import webbrowser
 
-from .app import run_server
-
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -58,6 +56,9 @@ def main(argv: list[str] | None = None) -> None:
     # If a config path is provided, propagate it via environment for app initialization
     if args.config:
         os.environ["BOULDER_CONFIG_PATH"] = args.config
+
+    # Import after environment is set so app initialization can read it
+    from .app import run_server
 
     url = f"http://{args.host}:{args.port}"
     if not args.no_open:

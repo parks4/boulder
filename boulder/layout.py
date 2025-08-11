@@ -17,6 +17,7 @@ def get_layout(
     initial_config: Dict[str, Any],
     cyto_stylesheet: List[Dict[str, Any]],
     original_yaml: str = "",
+    config_filename: str = "",
 ) -> html.Div:
     """Create the main application layout."""
     return html.Div(
@@ -60,7 +61,7 @@ def get_layout(
                 duration=2000,  # Duration in milliseconds (2 seconds)
             ),
             # Store for config file name
-            dcc.Store(id="config-file-name", data=""),
+            dcc.Store(id="config-file-name", data=config_filename),
             # Modal for viewing config in YAML with 🪨 STONE standard
             dbc.Modal(
                 [

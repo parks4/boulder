@@ -27,14 +27,14 @@ name = "boulder"
 readme = "README.md"
 requires-python = ">=3.11"
 
-[project.scripts]
-boulder = "boulder.cli:main"
-
 [project.optional-dependencies]
 dev = [
   "mypy>=1.0.0",
   "types-PyYAML>=6.0.0"
 ]
+
+[project.scripts]
+boulder = "boulder.cli:main"
 
 [tool.coverage.run]
 branch = true
