@@ -1,7 +1,6 @@
 """Callbacks for simulation execution and results handling."""
 
 import base64
-import datetime
 import os
 import tempfile
 from typing import Any, Dict, List, Tuple, Union
@@ -13,27 +12,6 @@ from dash import Input, Output, State
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
-
-    # Callback to show/hide custom mechanism input
-    @app.callback(
-        [
-            Output("custom-mechanism-input", "style"),
-            Output("custom-mechanism-upload", "style"),
-            Output("selected-mechanism-display", "style"),
-        ],
-        Input("mechanism-select", "value"),
-        prevent_initial_call=False,
-    )
-    def toggle_custom_mechanism_input(
-        mechanism_value: str,
-    ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
-        """Show appropriate custom mechanism input based on selection."""
-        if mechanism_value == "custom-name":
-            return {"display": "block"}, {"display": "none"}, {"display": "none"}
-        elif mechanism_value == "custom-path":
-            return {"display": "none"}, {"display": "block"}, {"display": "none"}
-        else:
-            return {"display": "none"}, {"display": "none"}, {"display": "none"}
 
     # Callback to handle file upload for custom mechanism
     @app.callback(
@@ -87,105 +65,39 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("simulation-results-card", "style"),
             Output("simulation-data", "data"),
         ],
-        [
-            Input("run-simulation", "n_clicks"),
-            Input("theme-store", "data"),  # Add theme as input
-        ],
+        Input("run-simulation", "n_clicks"),
         [
             State("current-config", "data"),
             State("config-file-name", "data"),
             State("mechanism-select", "value"),
             State("custom-mechanism-input", "value"),
             State("custom-mechanism-upload", "filename"),
-            State("simulation-data", "data"),  # Keep existing simulation data
         ],
         prevent_initial_call=True,
     )
     def run_simulation(
         n_clicks: int,
-        theme: str,
         config: Dict[str, Any],
         config_filename: str,
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-        existing_sim_data: Dict[str, Any],
     ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any]]:
         from ..cantera_converter import CanteraConverter, DualCanteraConverter
         from ..config import USE_DUAL_CONVERTER
         from ..utils import apply_theme_to_figure
 
-        # Get the trigger context
-        ctx = dash.callback_context
-        triggered_id = (
-            ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else None
-        )
-
-        # If only theme changed and we have existing simulation data, just re-theme the plots
-        if (
-            triggered_id == "theme-store"
-            and existing_sim_data
-            and existing_sim_data.get("results")
-        ):
-            results = existing_sim_data["results"]
-            code_str = existing_sim_data.get("code", "")
-
-            # Create temperature plot
-            temp_fig = go.Figure()
-            temp_fig.add_trace(
-                go.Scatter(
-                    x=results["time"], y=results["temperature"], name="Temperature"
-                )
-            )
-            temp_fig.update_layout(
-                title="Temperature vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Temperature (K)",
-            )
-            temp_fig = apply_theme_to_figure(temp_fig, theme)
-
-            # Create pressure plot
-            press_fig = go.Figure()
-            press_fig.add_trace(
-                go.Scatter(x=results["time"], y=results["pressure"], name="Pressure")
-            )
-            press_fig.update_layout(
-                title="Pressure vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Pressure (Pa)",
-            )
-            press_fig = apply_theme_to_figure(press_fig, theme)
-
-            # Create species plot
-            species_fig = go.Figure()
-            for species, concentrations in results["species"].items():
-                if (
-                    max(concentrations) > 0.01
-                ):  # Only show species with significant concentration
-                    species_fig.add_trace(
-                        go.Scatter(x=results["time"], y=concentrations, name=species)
-                    )
-            species_fig.update_layout(
-                title="Species Concentrations vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Mole Fraction",
-            )
-            species_fig = apply_theme_to_figure(species_fig, theme)
-
+        if not n_clicks or not config:
             return (
-                temp_fig.to_dict(),
-                press_fig.to_dict(),
-                species_fig.to_dict(),
-                code_str,
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
                 "",
+                dash.no_update,
                 {"display": "none"},
-                {"display": "block"},
-                existing_sim_data,
+                {"display": "none"},
+                {},
             )
-
-        # Original simulation logic for new simulations
-        if triggered_id != "run-simulation" or n_clicks == 0:
-            return {}, {}, {}, "", "", {"display": "none"}, {"display": "none"}, {}
 
         # Determine the mechanism to use
         if mechanism_select == "custom-name":
@@ -205,28 +117,18 @@ def register_callbacks(app) -> None:  # type: ignore
             mechanism = mechanism_select
 
         try:
-            # Debug: Log the mechanism being used
-            print(f"[DEBUG] Using mechanism: {mechanism}")
-
             if USE_DUAL_CONVERTER:
                 dual_converter = DualCanteraConverter(mechanism=mechanism)
-                print(
-                    f"[DEBUG] DualCanteraConverter mechanism: {dual_converter.mechanism}"
-                )
-                print(
-                    f"[DEBUG] DualCanteraConverter gas name: {dual_converter.gas.name}"
-                )
                 network, results, code_str = dual_converter.build_network_and_code(
                     config
                 )
             else:
                 single_converter = CanteraConverter(mechanism=mechanism)
-                print(
-                    f"[DEBUG] CanteraConverter mechanism: {single_converter.mechanism}"
-                )
-                print(f"[DEBUG] CanteraConverter gas name: {single_converter.gas.name}")
                 network, results = single_converter.build_network(config)
                 code_str = ""
+
+            # Get the current theme from the app's layout
+            theme = dash.get_app().layout["theme-store"].data
 
             # Create temperature plot
             temp_fig = go.Figure()
@@ -270,96 +172,30 @@ def register_callbacks(app) -> None:  # type: ignore
             )
             species_fig = apply_theme_to_figure(species_fig, theme)
 
-            if USE_DUAL_CONVERTER and code_str:
-                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                config_file_str = (
-                    config_filename
-                    if config_filename
-                    else "(no file, edited or generated in app)"
-                )
-                header = (
-                    f'"""\n'
-                    f"This file was automatically generated by Boulder on {now}.\n"
-                    f"Configuration source: {config_file_str}\n"
-                    f"\n"
-                    f"This script defines all Cantera objects (reactors, connections), "
-                    f"builds the reactor network, and runs a sample simulation loop.\n"
-                    f"You can modify and run this script independently with Cantera installed.\n"
-                    f'"""\n'
-                )
-                code_str = header + code_str
+            # Store results for re-theming and other uses
+            simulation_data = {"results": results, "code": code_str}
+
             return (
                 temp_fig.to_dict(),
                 press_fig.to_dict(),
                 species_fig.to_dict(),
                 code_str,
-                "",
+                dash.no_update,
                 {"display": "none"},
                 {"display": "block"},
-                {
-                    "mechanism": mechanism,
-                    "config": config,
-                    "results": results,
-                    "code": code_str,
-                },
+                simulation_data,
             )
+
         except Exception as e:
-            # Create user-friendly error message
-            import dash_bootstrap_components as dbc
-            from dash import html
-
-            error_msg = str(e)
-            mechanism_name = mechanism if isinstance(mechanism, str) else str(mechanism)
-
-            # Provide specific error messages for common issues
-            if (
-                "No such file or directory" in error_msg
-                or "cannot find" in error_msg.lower()
-            ):
-                user_message = (
-                    f"Mechanism file '{mechanism_name}' could not be found. "
-                    "Please check the file path or select a different mechanism."
-                )
-            elif "failed to load mechanism" in error_msg.lower():
-                user_message = (
-                    f"Failed to load mechanism '{mechanism_name}'. "
-                    "The file may be corrupted or incompatible."
-                )
-            elif "solution" in error_msg.lower() and "error" in error_msg.lower():
-                user_message = (
-                    f"Error creating Cantera solution with mechanism '{mechanism_name}'. "
-                    "Please verify the mechanism file format."
-                )
-            elif "network" in error_msg.lower():
-                user_message = "Error building reactor network. Please check your reactor configuration."
-            else:
-                user_message = f"Simulation failed: {error_msg}"
-
-            error_display = dbc.Alert(
-                [
-                    html.H6("Simulation Error", className="alert-heading"),
-                    html.P(user_message),
-                    html.Hr(),
-                    html.P(
-                        [
-                            "Details: ",
-                            html.Code(error_msg, style={"fontSize": "0.8em"}),
-                        ],
-                        className="mb-0 small text-muted",
-                    ),
-                ],
-                color="danger",
-                dismissable=True,
-                is_open=True,
-            )
-
+            message = f"Error during simulation: {str(e)}"
+            print(f"ERROR: {message}")
             return (
-                {},
-                {},
-                {},
+                go.Figure(),
+                go.Figure(),
+                go.Figure(),
                 "",
-                error_display,
-                {"display": "block"},
+                message,
+                {"display": "block", "color": "red"},
                 {"display": "none"},
                 {},
             )
@@ -412,14 +248,35 @@ def register_callbacks(app) -> None:  # type: ignore
     @app.callback(
         Output("last-sim-python-code", "data", allow_duplicate=True),
         [
-            Input({"type": "prop-edit", "prop": dash.ALL}, "value"),
             Input("save-config-yaml-edit-btn", "n_clicks"),
             Input("upload-config", "contents"),
+            Input("add-reactor-trigger", "data"),
+            Input("add-mfc-trigger", "data"),
+            Input("current-config", "data"),
         ],
         prevent_initial_call=True,
     )
     def clear_python_code_on_edit(*_: Any) -> str:
         return ""
+
+    # Hide simulation results (plots & Sankey diagrams) on configuration change
+    @app.callback(
+        [
+            Output("simulation-results-card", "style", allow_duplicate=True),
+            Output("simulation-data", "data", allow_duplicate=True),
+        ],
+        [
+            Input("save-config-yaml-edit-btn", "n_clicks"),
+            Input("upload-config", "contents"),
+            Input("add-reactor-trigger", "data"),
+            Input("add-mfc-trigger", "data"),
+            Input("current-config", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def hide_results_on_config_change(*_: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
+        """Hide plots and Sankey diagrams when configuration changes."""
+        return {"display": "none"}, {}
 
     # Download .py file when button is clicked
     @app.callback(
@@ -454,66 +311,48 @@ def register_callbacks(app) -> None:  # type: ignore
         import dash
         import plotly.graph_objects as go
 
-        from ..cantera_converter import CanteraConverter, DualCanteraConverter
-        from ..config import USE_DUAL_CONVERTER
-        from ..sankey import (
-            generate_sankey_input_from_sim,
-            plot_sankey_diagram_from_links_and_nodes,
-        )
+        from ..sankey import plot_sankey_diagram_from_links_and_nodes
         from ..utils import get_sankey_theme_config
 
         # Only generate if Sankey tab is active
         if active_tab != "sankey-tab":
             return dash.no_update
 
-        # Check if we have simulation data
-        if (
-            not simulation_data
-            or not simulation_data.get("mechanism")
-            or not simulation_data.get("config")
-        ):
+        # Check if we have simulation results
+        if not simulation_data or "results" not in simulation_data:
             return dash.no_update
 
-        try:
-            # Rebuild the converter from stored session data (same as original simulation)
-            mechanism = simulation_data["mechanism"]
-            config = simulation_data["config"]
+        results = simulation_data["results"]
+        links = results.get("sankey_links")
+        nodes = results.get("sankey_nodes")
 
-            # Use Union type to handle both converter types
-            converter: Union[CanteraConverter, DualCanteraConverter]
-            if USE_DUAL_CONVERTER:
-                dual_converter = DualCanteraConverter(mechanism=mechanism)
-                # Rebuild the network using the exact same config
-                dual_converter.build_network_and_code(config)
-                converter = dual_converter
-            else:
-                single_converter = CanteraConverter(mechanism=mechanism)
-                # Rebuild the network using the exact same config
-                single_converter.build_network(config)
-                converter = single_converter
-
-            # Check if network was successfully built
-            if converter.last_network is None:
-                return dash.no_update
-
-            # Extract reactor IDs from reactor graph elements
-            reactor_node_ids = []
-            if reactor_elements:
-                for element in reactor_elements:
-                    if (
-                        "data" in element and "source" not in element["data"]
-                    ):  # It's a node, not an edge
-                        reactor_node_ids.append(element["data"].get("id", ""))
-            # Generate Sankey data from the rebuilt network
-            # Now reactor names should match config IDs directly
-            links, nodes = generate_sankey_input_from_sim(
-                converter.last_network,
-                show_species=["H2", "CH4"],
-                verbose=False,  # Disable verbose output
-                mechanism=converter.mechanism,
-                theme=theme,  # Pass theme to sankey generation
+        # Check if Sankey data is available
+        if not links or not nodes:
+            sankey_theme = get_sankey_theme_config(theme)
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Sankey diagram data not available for this simulation.",
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(size=16, color="#dc3545" if theme == "light" else "#ff6b6b"),
+                align="center",
             )
+            fig.update_layout(
+                title="Energy Flow Sankey Diagram",
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                plot_bgcolor=sankey_theme["plot_bgcolor"],
+                paper_bgcolor=sankey_theme["paper_bgcolor"],
+                font=sankey_theme["font"],
+                margin=dict(l=10, r=10, t=40, b=10),
+                height=400,
+            )
+            return fig.to_dict()
 
+        try:
             # Create the Sankey plot with theme-aware styling
             sankey_theme = get_sankey_theme_config(theme)
             fig = plot_sankey_diagram_from_links_and_nodes(

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cantera as ct  # type: ignore
 
 from .config import CANTERA_MECHANISM
+from .sankey import generate_sankey_input_from_sim
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,6 @@ class CanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         try:
             self.gas = ct.Solution(self.mechanism)
-            print(f"[INFO] Successfully loaded mechanism: {self.mechanism}")
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
@@ -54,7 +54,7 @@ class CanteraConverter:
 
         # Set the reactor name to match the config ID
         reactor.name = reactor_config["id"]
-        
+
         return reactor
 
     def create_connection(self, conn_config: Dict[str, Any]) -> ct.FlowDevice:
@@ -150,6 +150,21 @@ class CanteraConverter:
         # Store the successful network for later use (e.g., Sankey diagrams)
         self.last_network = self.network
 
+        # Generate Sankey data
+        try:
+            links, nodes = generate_sankey_input_from_sim(
+                self.last_network,
+                show_species=["H2", "CH4"],
+                verbose=False,
+                mechanism=self.mechanism,
+            )
+            results["sankey_links"] = links
+            results["sankey_nodes"] = nodes
+        except Exception as e:
+            logger.error(f"Error generating Sankey diagram: {e}")
+            results["sankey_links"] = None
+            results["sankey_nodes"] = None
+
         return self.network, results
 
     def load_config(self, filepath: str) -> Dict[str, Any]:
@@ -170,7 +185,6 @@ class DualCanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         try:
             self.gas = ct.Solution(self.mechanism)
-            print(f"[INFO] Successfully loaded mechanism: {self.mechanism}")
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
@@ -197,7 +211,7 @@ class DualCanteraConverter:
         try:
             self.gas = ct.Solution(self.mechanism)
         except Exception as e:
-            print(
+            logger.error(
                 f"[ERROR] Failed to reload mechanism '{self.mechanism}' in build_network_and_code: {e}"
             )
             # Note: self.gas should already be set from __init__, so this is just for consistency
@@ -312,5 +326,20 @@ class DualCanteraConverter:
 
         # Store the successful network for later use (e.g., Sankey diagrams)
         self.last_network = self.network
+
+        # Generate Sankey data
+        try:
+            links, nodes = generate_sankey_input_from_sim(
+                self.last_network,
+                show_species=["H2", "CH4"],
+                verbose=False,
+                mechanism=self.mechanism,
+            )
+            results["sankey_links"] = links
+            results["sankey_nodes"] = nodes
+        except Exception as e:
+            logger.error(f"Error generating Sankey diagram: {e}")
+            results["sankey_links"] = None
+            results["sankey_nodes"] = None
 
         return self.network, results, "\n".join(self.code_lines)

@@ -2,7 +2,7 @@ import dash
 import dash_bootstrap_components as dbc
 
 from . import callbacks
-from .config import get_initial_config
+from .config import get_initial_config, get_initial_config_with_comments
 from .layout import get_layout
 from .styles import CYTOSCAPE_STYLESHEET
 
@@ -24,11 +24,16 @@ app = dash.Dash(
 )
 server = app.server  # Expose the server for deployment
 
-# Load initial configuration
-initial_config = get_initial_config()
+# Load initial configuration with comments preserved
+try:
+    initial_config, original_yaml = get_initial_config_with_comments()
+except Exception as e:
+    print(f"Warning: Could not load config with comments, using standard loader: {e}")
+    initial_config = get_initial_config()
+    original_yaml = ""
 
 # Set the layout
-app.layout = get_layout(initial_config, CYTOSCAPE_STYLESHEET)
+app.layout = get_layout(initial_config, CYTOSCAPE_STYLESHEET, original_yaml)
 
 # Register all callbacks
 callbacks.register_callbacks(app)

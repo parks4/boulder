@@ -1,6 +1,6 @@
 """Sankey diagrams tools for Bloc."""
 
-from boulder.ctutils import collect_all_reactors_and_reservoirs
+from .ctutils import collect_all_reactors_and_reservoirs
 
 
 def plot_sankey_diagram(sim, mechanism="gri30.yaml"):
@@ -64,6 +64,15 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="li
     # ------
     import plotly.graph_objects as go
 
+    from .utils import get_sankey_theme_config
+
+    sankey_theme = get_sankey_theme_config(theme)
+    link_color_map = sankey_theme["link_colors"]
+
+    # Create a copy to avoid modifying the original dict from dcc.Store
+    links_with_colors = links.copy()
+    links_with_colors["color"] = [link_color_map.get(c, "grey") for c in links["color"]]
+
     # Get theme-specific colors for nodes
     if theme == "dark":
         node_color = "#4A90E2"
@@ -82,7 +91,7 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="li
                 "thickness": 20,
                 "color": node_color,
             },
-            link=links,
+            link=links_with_colors,
         )
     )
     if show:
@@ -97,7 +106,6 @@ def generate_sankey_input_from_sim(
     show_species=["H2"],
     verbose=False,
     mechanism="gri30.yaml",
-    theme="light",
 ):
     """Generate input data for sankey plot from a Cantera Reactor Net simulation.
 
@@ -116,8 +124,6 @@ def generate_sankey_input_from_sim(
         Set to [] not to show any species.
     mechanism : str
         Cantera mechanism file to use for heating value calculations. Default is "gri30.yaml".
-    theme : str
-        Theme to use for colors ("light" or "dark"). Default is "light".
 
     Other Parameters
     ----------------
@@ -166,38 +172,6 @@ def generate_sankey_input_from_sim(
 
     links = {"source": [], "target": [], "value": [], "color": [], "label": []}
 
-    # Theme-aware colors
-    if theme == "dark":
-        # Dark theme colors
-        try:
-            from spy.colors import clight  # type: ignore
-
-            color_mass = clight["surface"] if "surface" in clight else "#B0B0B0"
-            color_mass2 = clight["primary"] if "primary" in clight else "#4A90E2"
-            color_bus = clight["secondary"] if "secondary" in clight else "#7ED321"
-        except ImportError:
-            color_mass = "#B0B0B0"
-            color_mass2 = "#4A90E2"
-            color_bus = "#7ED321"
-        color_H2 = "#B481FF"  # purple
-        color_Cs = "#666666"  # lighter for dark theme
-        color_CH4 = "#9C4FFF"  # lighter purple for dark theme
-    else:
-        # Light theme colors (original)
-        try:
-            from spy.colors import clight  # type: ignore
-
-            color_mass = clight["surface"]
-            color_mass2 = clight["primary"]
-            color_bus = clight["secondary"]
-        except ImportError:
-            color_mass = "pink"
-            color_mass2 = "purple"
-            color_bus = "green"
-        color_H2 = "#B481FF"  # purple
-        color_Cs = "#000000"  # black
-        color_CH4 = "#6828B4"  # purple
-
     # Create nodes for each reactor
     # ... sort all_reactors list using the reactor.name key, and the order defined in node_order
     nodes = sorted(all_reactors, key=lambda r: node_order.index(r.name))
@@ -221,12 +195,12 @@ def generate_sankey_input_from_sim(
                     links["source"] += [i]
                     links["target"] += [j]
                     links["value"] += [energy_rate]
-                    links["color"] += [color_mass]
+                    links["color"] += ["enthalpy"]
                     links["label"] += ["Enthalpy (W)"]
                 elif flow_type == "hhv":
                     # Add a first link with HHV
                     # -------------------------
-                    from boulder.ctutils import heating_values
+                    from .ctutils import heating_values
 
                     lhv, hhv = heating_values(
                         outlet.upstream.thermo, mechanism=mechanism
@@ -242,15 +216,15 @@ def generate_sankey_input_from_sim(
                             lhv_s, hhv_s = heating_values(
                                 ct.Hydrogen(), mechanism=mechanism
                             )  # J/kg
-                            links["color"] += [color_H2]
+                            links["color"] += ["H2"]
                         elif s == "CH4":
                             lhv_s, hhv_s = heating_values(
                                 ct.Methane(), mechanism=mechanism
                             )  # J/kg
-                            links["color"] += [color_CH4]
+                            links["color"] += ["CH4"]
                         elif s == "C(s)":  # Carbon
                             raise NotImplementedError(f"{s} not implemented yet")
-                            links["color"] += [color_Cs]
+                            links["color"] += ["Cs"]
                         else:
                             raise NotImplementedError(f"{s} not implemented yet")
 
@@ -267,12 +241,12 @@ def generate_sankey_input_from_sim(
                     links["source"] += [i]
                     links["target"] += [j]
                     links["value"] += [energy_rate]
-                    links["color"] += [color_mass2]
+                    links["color"] += ["enthalpy"]
                     links["label"] += ["HHV (W)"]
 
                     # Add a second link with sensible enthalpy
                     # ----------------------------------------
-                    from boulder.ctutils import get_STP_properties_IUPAC
+                    from .ctutils import get_STP_properties_IUPAC
 
                     _, enthalpy_STP = get_STP_properties_IUPAC(outlet.upstream.thermo)
                     sensible_enthalpy = (
@@ -283,7 +257,7 @@ def generate_sankey_input_from_sim(
                     links["source"] += [i]
                     links["target"] += [j]
                     links["value"] += [sensible_energy_rate]
-                    links["color"] += [color_mass]
+                    links["color"] += ["heat"]
                     links["label"] += ["Heat (W)"]
 
                 else:
@@ -307,13 +281,13 @@ def generate_sankey_input_from_sim(
                     links["source"] += [i]
                     links["target"] += [j]
                     links["value"] += [heat_rate]
-                    links["color"] += [color_bus]
+                    links["color"] += ["heat"]
                     links["label"] += ["Power (W)"]
                 elif wall.heat_rate < 0:
                     links["source"] += [j]
                     links["target"] += [i]
                     links["value"] += [-heat_rate]
-                    links["color"] += [color_bus]
+                    links["color"] += ["heat"]
                     links["label"] += ["Power (W)"]
                 else:
                     if verbose:

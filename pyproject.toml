@@ -27,6 +27,12 @@ name = "boulder"
 readme = "README.md"
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.0.0",
+  "types-PyYAML>=6.0.0"
+]
+
 [tool.coverage.run]
 branch = true
 
@@ -34,18 +40,32 @@ branch = true
 strict = true
 
 [tool.pytest.ini_options]
-addopts = ["-ra", "--strict-markers", "--strict-config"]
+# Add useful options
+addopts = [
+  "--strict-markers",
+  "--strict-config",
+  "--verbose",
+  "--tb=short",
+  "--durations=10"
+]
+# Filter warnings
 filterwarnings = [
   "ignore::DeprecationWarning",
   "ignore::PendingDeprecationWarning"
 ]
+# Test markers
 markers = [
-  "e2e: End-to-end tests",
-  "slow: Slow running tests",
-  "integration: Integration tests",
-  "unit: Unit tests"
+  "e2e: marks tests as end-to-end tests requiring ChromeDriver (deselect with '-m \"not e2e\"')",
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "integration: marks tests as integration tests",
+  "unit: marks tests as unit tests"
 ]
+# Minimum version requirements
 minversion = "6.0"
+python_classes = ["Test*"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+# Test discovery patterns
 testpaths = ["tests"]
 
 [tool.ruff]

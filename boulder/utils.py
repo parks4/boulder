@@ -258,7 +258,7 @@ def get_plotly_theme_template(theme: str = "light") -> Dict[str, Any]:
 
 
 def get_sankey_theme_config(theme: str = "light") -> Dict[str, Any]:
-    """Get Sankey diagram theme configuration."""
+    """Get theme-specific Sankey diagram configuration."""
     if theme == "dark":
         return {
             "paper_bgcolor": "#1a1a1a",
@@ -271,30 +271,32 @@ def get_sankey_theme_config(theme: str = "light") -> Dict[str, Any]:
                 "reactor": "#F5A623",
             },
             "link_colors": {
-                "mass": "#B0B0B0",
-                "enthalpy": "#4A90E2",
-                "H2": "#B481FF",
-                "CH4": "#6828B4",
-                "heat": "#F5A623",
+                "mass": "#B0B0B0",  # gray
+                "enthalpy": "#4A90E2",  # blue
+                "H2": "#B481FF",  # purple
+                "CH4": "#6828B4",  # dark purple
+                "heat": "#D3D3D3",  # light gray
+                "Cs": "#666666",  # gray
             },
         }
     else:  # light theme
         return {
-            "paper_bgcolor": "#ffffff",
-            "plot_bgcolor": "#ffffff",
+            "paper_bgcolor": "#ffffff",  # white
+            "plot_bgcolor": "#ffffff",  # white
             "font": {"color": "#212529", "size": 12},
             "title": {"font": {"color": "#212529"}},
             "node_colors": {
-                "default": "#1f77b4",
-                "reservoir": "#2ca02c",
-                "reactor": "#ff7f0e",
+                "default": "#1f77b4",  # blue
+                "reservoir": "#2ca02c",  # green
+                "reactor": "#ff7f0e",  # orange
             },
             "link_colors": {
-                "mass": "pink",
-                "enthalpy": "purple",
-                "H2": "#B481FF",
-                "CH4": "#6828B4",
-                "heat": "green",
+                "mass": "pink",  # pink
+                "enthalpy": "purple",  # purple
+                "H2": "#B481FF",  # purple
+                "CH4": "#6828B4",  # dark purple
+                "heat": "#D3D3D3",  # light gray
+                "Cs": "#000000",  # black
             },
         }
 

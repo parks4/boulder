@@ -6,11 +6,14 @@ import dash_bootstrap_components as dbc  # type: ignore
 import dash_cytoscape as cyto  # type: ignore
 from dash import dcc, html
 
+from .config import THEME
 from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
 
 
 def get_layout(
-    initial_config: Dict[str, Any], cyto_stylesheet: List[Dict[str, Any]]
+    initial_config: Dict[str, Any],
+    cyto_stylesheet: List[Dict[str, Any]],
+    original_yaml: str = "",
 ) -> html.Div:
     """Create the main application layout."""
     return html.Div(
@@ -28,8 +31,8 @@ def get_layout(
                     dcc.Upload(id="upload-config", style={"display": "none"}),
                     html.Div(id="init-dummy-output", style={"display": "none"}),
                     dcc.Interval(id="init-interval"),
-                    # Dark mode store
-                    dcc.Store(id="theme-store", data="light"),
+                    # Light/Dark mode store
+                    dcc.Store(id="theme-store", data=THEME),
                     # Intermediate stores for chained callbacks
                     dcc.Store(id="add-reactor-trigger", data={}),
                     dcc.Store(id="add-mfc-trigger", data={}),
@@ -72,12 +75,6 @@ def get_layout(
                             dbc.Button(
                                 "Save as New File",
                                 id="save-config-yaml-btn",
-                                color="secondary",
-                                className="mr-2",
-                            ),
-                            dbc.Button(
-                                "Edit",
-                                id="edit-config-yaml-btn",
                                 color="primary",
                                 className="mr-2",
                             ),
@@ -88,14 +85,9 @@ def get_layout(
                                 className="mr-2",
                             ),
                             dbc.Button(
-                                "Cancel",
-                                id="cancel-config-yaml-edit-btn",
-                                color="secondary",
-                                className="ml-auto",
-                            ),
-                            dbc.Button(
                                 "Close",
                                 id="close-config-yaml-modal",
+                                color="secondary",
                                 className="ml-auto",
                             ),
                         ]
@@ -104,6 +96,7 @@ def get_layout(
                 id="config-yaml-modal",
                 is_open=False,
                 size="lg",
+                fade=False,
             ),
             # Add Reactor Modal
             dbc.Modal(
@@ -573,5 +566,7 @@ def get_layout(
             dcc.Store(id="simulation-data", data=None),
             # Hidden store to trigger keyboard actions
             dcc.Store(id="keyboard-trigger", data=""),
+            # Store for original YAML with comments
+            dcc.Store(id="original-yaml-with-comments", data=original_yaml),
         ],
     )

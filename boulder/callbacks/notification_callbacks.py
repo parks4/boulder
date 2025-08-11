@@ -22,8 +22,6 @@ def register_callbacks(app) -> None:  # type: ignore
             Input("delete-config-file", "n_clicks"),
             Input("save-config-yaml-edit-btn", "n_clicks"),
             Input("run-simulation", "n_clicks"),
-            Input("reactor-graph", "selectedNodeData"),
-            Input("reactor-graph", "selectedEdgeData"),
         ],
         [
             State("upload-config", "filename"),
@@ -36,8 +34,6 @@ def register_callbacks(app) -> None:  # type: ignore
         delete_config_click: int,
         save_edit_click: int,
         run_sim_click: int,
-        selected_node: list,
-        selected_edge: list,
         upload_filename: str,
         config: dict,
     ):
@@ -59,10 +55,12 @@ def register_callbacks(app) -> None:  # type: ignore
                     "Success",
                     "success",
                 )
-            except Exception:
+            except Exception as e:
+                message = f"Could not parse file {upload_filename}. Error: {e}"
+                print(f"ERROR: {message}")
                 return (
                     True,
-                    f"Could not parse file {upload_filename}.",
+                    message,
                     "Error",
                     "danger",
                 )
@@ -83,23 +81,5 @@ def register_callbacks(app) -> None:  # type: ignore
         # Run simulation
         if trigger == "run-simulation" and run_sim_click:
             return True, "Simulation successfully started", "Success", "success"
-
-        # Show properties
-        if trigger == "reactor-graph" and (selected_node or selected_edge):
-            data = (
-                (selected_node or selected_edge)[0]
-                if (selected_node or selected_edge)
-                else None
-            )
-            if data:
-                # Use .get() to safely access 'type' key with fallback
-                element_type = data.get("type", "Element")
-                element_id = data.get("id", "Unknown")
-                return (
-                    True,
-                    f"Viewing properties of {element_type} {element_id}",
-                    "Info",
-                    "info",
-                )
 
         return False, "", "", "primary"
