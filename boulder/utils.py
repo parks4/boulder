@@ -1,5 +1,6 @@
 """Utility functions for the Boulder application."""
 
+from functools import lru_cache
 from typing import Any, Dict, List
 
 
@@ -53,6 +54,7 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     return elements
 
 
+@lru_cache(maxsize=1)
 def get_available_cantera_mechanisms() -> List[Dict[str, str]]:
     """Get all available Cantera mechanism files from data directories.
 

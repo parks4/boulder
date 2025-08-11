@@ -1,6 +1,7 @@
 """Cytoscape styling configuration for the reactor network graph."""
 
 # Global variable to control temperature scale coloring
+# Single source of truth; avoid duplicating in other modules
 USE_TEMPERATURE_SCALE = True
 
 # Light theme cytoscape stylesheet

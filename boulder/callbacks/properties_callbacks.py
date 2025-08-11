@@ -267,42 +267,48 @@ def register_callbacks(app) -> None:  # type: ignore
         if node_data:
             data = node_data[0]
             comp_id = data["id"]
+            new_components = []
             for comp in config["components"]:
                 if comp["id"] == comp_id:
                     # Ensure properties dict exists
-                    if "properties" not in comp:
-                        comp["properties"] = {}
+                    props = dict(comp.get("properties", {}))
                     for v, i in zip(values, ids):
                         key = i["prop"]
                         # Convert to float if key is temperature or pressure
                         if key in ("temperature", "pressure"):
                             try:
-                                comp["properties"][key] = float(v)
+                                props[key] = float(v)
                             except Exception:
-                                comp["properties"][key] = v
+                                props[key] = v
                         else:
-                            comp["properties"][key] = v
-                    break
+                            props[key] = v
+                    new_components.append({**comp, "properties": props})
+                else:
+                    new_components.append(comp)
+            return {**config, "components": new_components}
         elif edge_data:
             data = edge_data[0]
             conn_id = data["id"]
+            new_connections = []
             for conn in config["connections"]:
                 if conn["id"] == conn_id:
                     # Ensure properties dict exists
-                    if "properties" not in conn:
-                        conn["properties"] = {}
+                    props = dict(conn.get("properties", {}))
                     for v, i in zip(values, ids):
                         key = i["prop"]
                         # Map 'flow_rate' to 'mass_flow_rate' for MassFlowController
                         if conn["type"] == "MassFlowController" and key == "flow_rate":
                             try:
-                                conn["properties"]["mass_flow_rate"] = float(v)
+                                props["mass_flow_rate"] = float(v)
                             except Exception:
-                                conn["properties"]["mass_flow_rate"] = v
+                                props["mass_flow_rate"] = v
                             # Optionally remove old key
-                            if "flow_rate" in conn["properties"]:
-                                del conn["properties"]["flow_rate"]
+                            if "flow_rate" in props:
+                                del props["flow_rate"]
                         else:
-                            conn["properties"][key] = v
-                    break
+                            props[key] = v
+                    new_connections.append({**conn, "properties": props})
+                else:
+                    new_connections.append(conn)
+            return {**config, "connections": new_connections}
         return config
