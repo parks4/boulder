@@ -4,13 +4,13 @@ from typing import Any, Dict, List
 
 import dash_bootstrap_components as dbc  # type: ignore
 import dash_cytoscape as cyto  # type: ignore
-
-# Enable additional Cytoscape layouts packaged with dash-cytoscape
-cyto.load_extra_layouts()  # provides 'dagre', 'klay', 'cose-bilkent', etc.
 from dash import dcc, html
 
 from .config import THEME
 from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
+
+# Enable additional Cytoscape layouts packaged with dash-cytoscape
+cyto.load_extra_layouts()  # provides 'dagre', 'klay', 'cose-bilkent', etc.
 
 
 def get_layout(
