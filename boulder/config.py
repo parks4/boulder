@@ -5,7 +5,7 @@ where component types are keys containing their properties.
 """
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
 from ruamel.yaml import YAML
@@ -236,7 +236,7 @@ def load_yaml_string_with_comments(yaml_str: str):
 
 
 def save_config_to_file_with_comments(
-    config: dict, file_path: str, original_yaml_str: str = None
+    config: dict, file_path: str, original_yaml_str: Optional[str] = None
 ):
     """Save configuration to file, preserving comments when possible."""
     stone_config = convert_to_stone_format(config)

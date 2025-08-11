@@ -44,7 +44,7 @@ def register_callbacks(app) -> None:  # type: ignore
         temp: float,
         pressure: float,
         composition: str,
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> Tuple[bool, Any]:
         if not all([reactor_id, reactor_type, temp, pressure, composition]):
             # Keep modal open for user to complete form
             return (True, dash.no_update)
@@ -68,7 +68,7 @@ def register_callbacks(app) -> None:  # type: ignore
         State("current-config", "data"),
         prevent_initial_call=True,
     )
-    def add_reactor(trigger_data: dict, config: dict) -> Dict[str, Any]:
+    def add_reactor(trigger_data: dict, config: dict) -> Any:
         if not trigger_data:
             raise dash.exceptions.PreventUpdate
 
@@ -105,7 +105,7 @@ def register_callbacks(app) -> None:  # type: ignore
         source: str,
         target: str,
         flow_rate: float,
-    ) -> Tuple[bool, Dict[str, Any]]:
+    ) -> Tuple[bool, Any]:
         if not all([mfc_id, source, target, flow_rate]):
             return (True, dash.no_update)
 
@@ -125,7 +125,7 @@ def register_callbacks(app) -> None:  # type: ignore
         State("current-config", "data"),
         prevent_initial_call=True,
     )
-    def add_mfc(trigger_data: dict, config: dict) -> Dict[str, Any]:
+    def add_mfc(trigger_data: dict, config: dict) -> Any:
         if not trigger_data:
             raise dash.exceptions.PreventUpdate
 
