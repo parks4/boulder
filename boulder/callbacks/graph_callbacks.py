@@ -78,11 +78,11 @@ def register_callbacks(app) -> None:  # type: ignore
             "properties": trigger_data["properties"],
         }
         if any(comp["id"] == new_reactor["id"] for comp in config["components"]):
-            # Prevent adding duplicate
             return dash.no_update
 
-        config["components"].append(new_reactor)
-        return config
+        new_components = [*config.get("components", []), new_reactor]
+        new_config = {**config, "components": new_components}
+        return new_config
 
     # STEP 1: Trigger MFC addition and close modal immediately
     @app.callback(
@@ -145,8 +145,9 @@ def register_callbacks(app) -> None:  # type: ignore
                 "mass_flow_rate": trigger_data["mass_flow_rate"],
             },
         }
-        config["connections"].append(new_connection)
-        return config
+        new_connections = [*config.get("connections", []), new_connection]
+        new_config = {**config, "connections": new_connections}
+        return new_config
 
     # Update last-selected-element on selection
     @app.callback(

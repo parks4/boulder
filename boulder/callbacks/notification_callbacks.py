@@ -1,7 +1,6 @@
 """Callbacks for toast notifications."""
 
 import base64
-import json
 
 import dash
 from dash import Input, Output, State
@@ -46,9 +45,12 @@ def register_callbacks(app) -> None:  # type: ignore
         # Config upload
         if trigger == "upload-config" and upload_contents:
             try:
+                import yaml
+
                 content_type, content_string = upload_contents.split(",")
                 decoded_string = base64.b64decode(content_string).decode("utf-8")
-                json.loads(decoded_string)
+                # Validate as YAML (STONE standard) instead of JSON
+                yaml.safe_load(decoded_string)
                 return (
                     True,
                     f"✅ Configuration loaded from {upload_filename}",
