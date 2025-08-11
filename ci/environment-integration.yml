@@ -7,3 +7,7 @@ dependencies:
 - pytest
 - pytest-cov
 # DO NOT EDIT ABOVE THIS LINE, ADD DEPENDENCIES BELOW
+- mypy
+- pip
+- pip:
+  - types-PyYAML>=6.0.0
