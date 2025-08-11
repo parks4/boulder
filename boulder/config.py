@@ -177,6 +177,28 @@ def get_config_from_path(config_path: str) -> Dict[str, Any]:
     return normalize_config(config)
 
 
+def get_config_from_path_with_comments(config_path: str) -> tuple[Dict[str, Any], str]:
+    """Load configuration from a specific path with comments preserved.
+
+    Returns
+    -------
+    tuple
+        (normalized_config, original_yaml_string)
+    """
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    try:
+        config_with_comments = load_config_file_with_comments(config_path)
+        with open(config_path, "r", encoding="utf-8") as f:
+            original_yaml = f.read()
+        return normalize_config(config_with_comments), original_yaml
+    except Exception:
+        # Fallback to standard loader
+        config = load_config_file(config_path)
+        return normalize_config(config), ""
+
+
 def convert_to_stone_format(config: dict) -> dict:
     """Convert internal format back to YAML with 🪨 STONE standard for file saving."""
     stone_config = {}

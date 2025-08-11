@@ -1,8 +1,14 @@
+import os
+
 import dash
 import dash_bootstrap_components as dbc
 
 from . import callbacks
-from .config import get_initial_config, get_initial_config_with_comments
+from .config import (
+    get_config_from_path_with_comments,
+    get_initial_config,
+    get_initial_config_with_comments,
+)
 from .layout import get_layout
 from .styles import CYTOSCAPE_STYLESHEET
 
@@ -27,9 +33,20 @@ app = dash.Dash(
 )
 server = app.server  # Expose the server for deployment
 
-# Load initial configuration with comments preserved
+# Load initial configuration with optional override via environment variable
 try:
-    initial_config, original_yaml = get_initial_config_with_comments()
+    # Allow overriding the initial configuration via environment variable
+    # Use either BOULDER_CONFIG_PATH or BOULDER_CONFIG for convenience
+    env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
+        "BOULDER_CONFIG"
+    )
+
+    if env_config_path and env_config_path.strip():
+        initial_config, original_yaml = get_config_from_path_with_comments(
+            env_config_path.strip()
+        )
+    else:
+        initial_config, original_yaml = get_initial_config_with_comments()
 except Exception as e:
     print(f"Warning: Could not load config with comments, using standard loader: {e}")
     initial_config = get_initial_config()
@@ -42,6 +59,6 @@ app.layout = get_layout(initial_config, CYTOSCAPE_STYLESHEET, original_yaml)
 callbacks.register_callbacks(app)
 
 
-def run_server(debug: bool = False) -> None:
+def run_server(debug: bool = False, host: str = "0.0.0.0", port: int = 8050) -> None:
     """Run the Dash server."""
-    app.run(debug=debug, host="0.0.0.0", port=8050)
+    app.run(debug=debug, host=host, port=port)

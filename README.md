@@ -30,17 +30,45 @@ pip install -e .         # install in editable mode
 
 ## Usage
 
-1. Start the application:
-   ```bash
-   python run.py
-   ```
-1. Open your web browser and navigate to `http://localhost:8050`
-1. Use the interface to:
-   - Upload existing configurations
-   - Create new reactor networks
-   - Edit properties
-   - Run simulations
-   - View results
+### From Python
+
+Start the application programmatically (as in `run.py`):
+
+```python
+from boulder.app import run_server
+
+if __name__ == "__main__":
+    run_server(debug=True)
+```
+
+### From the CLI
+
+After installation, use the `boulder` command:
+
+```bash
+boulder                 # launches the server & opens the interface
+boulder some_file.yaml  # launches the server & preloads the YAML into the UI
+```
+
+Optional flags:
+
+```bash
+boulder --host 0.0.0.0 --port 8050 --debug  # customize host/port and enable debug
+boulder some_file.yaml --no-open            # do not auto-open the browser
+```
+
+Notes:
+
+- You can also set `BOULDER_CONFIG_PATH` (or `BOULDER_CONFIG`) to preload a YAML file.
+- Default address is `http://127.0.0.1:8050`.
+
+Once running, use the interface to:
+
+- Upload existing configurations
+- Create new reactor networks
+- Edit properties
+- Run simulations
+- View results
 
 ## YAML Configuration with 🪨 STONE Standard
 
