@@ -8,5 +8,3 @@ Install from source::
     conda env create -n boulder -f environment.yml
     conda activate boulder
     pip install -e .
-
-

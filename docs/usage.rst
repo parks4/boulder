@@ -29,5 +29,3 @@ Environment variables
 You can set ``BOULDER_CONFIG_PATH`` (or ``BOULDER_CONFIG``) to preload a YAML file::
 
     BOULDER_CONFIG_PATH=path/to/config.yaml boulder
-
-

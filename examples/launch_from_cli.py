@@ -1,6 +1,4 @@
-"""
-Launch Boulder from the CLI
-===========================
+"""Launch Boulder from the CLI.
 
 This example shows how to start Boulder without writing any Python code.
 
@@ -10,5 +8,3 @@ This example shows how to start Boulder without writing any Python code.
     boulder some_file.yaml  # launches the server preloading a YAML config
 
 """
-
-

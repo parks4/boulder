@@ -9,5 +9,3 @@ API Reference
 
 .. automodule:: boulder.cli
    :members:
-
-
