@@ -19,6 +19,9 @@ app = dash.Dash(
         "https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js",
         "https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js",
         "https://cdn.jsdelivr.net/npm/cytoscape-edgehandles@4.0.1/cytoscape-edgehandles.min.js",
+        # Dagre layout dependencies for left-to-right graph orientation
+        "https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js",
+        "https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js",
     ],
     title="Boulder",
 )
