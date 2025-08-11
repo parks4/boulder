@@ -4,6 +4,9 @@ from typing import Any, Dict, List
 
 import dash_bootstrap_components as dbc  # type: ignore
 import dash_cytoscape as cyto  # type: ignore
+
+# Enable additional Cytoscape layouts packaged with dash-cytoscape
+cyto.load_extra_layouts()  # provides 'dagre', 'klay', 'cose-bilkent', etc.
 from dash import dcc, html
 
 from .config import THEME
@@ -451,12 +454,17 @@ def get_layout(
                                             # Not all Cytoscape layouts are supported by Dash.
                                             # see : https://dash.plotly.com/cytoscape/layout
                                             layout={
-                                                # "name": "breadthfirst",  # https://js.cytoscape.org/#layouts/breadthfirst
-                                                # "directed": True,
-                                                #
-                                                # "name": "grid",
-                                                #
-                                                "name": "cose",
+                                                # Use dagre for a predominantly horizontal, left-to-right
+                                                # layout
+                                                # Requires dagre + cytoscape-dagre scripts, added in app
+                                                # initialization
+                                                "name": "dagre",
+                                                "rankDir": "LR",  # Left-to-right
+                                                "rankSep": 120,  # Horizontal spacing between ranks
+                                                "nodeSep": 60,  # Minimum spacing between nodes on same rank
+                                                "edgeSep": 30,  # Separation between edges
+                                                "fit": True,
+                                                "padding": 20,
                                             },
                                             style={"width": "100%", "height": "360px"},
                                             elements=config_to_cyto_elements(
