@@ -249,6 +249,69 @@ connections:
     target: reactor2
 ```
 
+### 📁 grouped_nodes.yaml
+
+Group multiple reactors together so they are solved together and appear as a group in the Reactor Network (compound node):
+
+```yaml
+metadata:
+  name: "Grouped Reactors"
+  description: "Two reactors solved together, displayed under a common group"
+  version: "1.0"
+
+simulation:
+  mechanism: "gri30.yaml"
+
+components:
+  - id: res_in
+    Reservoir:
+      temperature: 300       # K
+      composition: "CH4:1,O2:2,N2:7.52"
+
+  - id: r1
+    IdealGasReactor:
+      temperature: 1000      # K
+      pressure: 101325       # Pa
+      composition: "CH4:1,O2:2,N2:7.52"
+      group: "Train A"       # <— group membership
+
+  - id: r2
+    IdealGasReactor:
+      temperature: 950       # K
+      pressure: 101325       # Pa
+      composition: "N2:1"
+      group: "Train A"       # <— same group; will appear inside one compound node
+
+  - id: res_out
+    Reservoir:
+      temperature: 300       # K
+      composition: "N2:1"
+
+connections:
+  - id: mfc_in
+    MassFlowController:
+      mass_flow_rate: 0.05   # kg/s
+    source: res_in
+    target: r1
+
+  - id: mfc_mid
+    MassFlowController:
+      mass_flow_rate: 0.05   # kg/s
+    source: r1
+    target: r2
+
+  - id: mfc_out
+    MassFlowController:
+      mass_flow_rate: 0.05   # kg/s
+    source: r2
+    target: res_out
+```
+
+Notes:
+
+- Reactors that share the same `group` (or `group_name`) are assigned to a compound node labeled with the group name in the Reactor Network view.
+- The simulation solver treats grouped reactors as individual Cantera reactors, but they are collected and handled together by analysis utilities (e.g., when building Sankey inputs) via their `group_name`.
+
 ## Property Reference
 
 ### Common Properties

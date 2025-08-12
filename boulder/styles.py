@@ -27,6 +27,22 @@ CYTOSCAPE_STYLESHEET_LIGHT = [
         },
     },
     {
+        # Style for compound group nodes
+        "selector": "node[isGroup]",
+        "style": {
+            "shape": "round-rectangle",
+            "background-opacity": 0.05,
+            "background-color": "#999",
+            "border-width": 2,
+            "border-color": "#999",
+            "text-valign": "top",
+            "text-halign": "center",
+            "padding": "20px",
+            "width": "label",
+            "height": "label",
+        },
+    },
+    {
         "selector": "[type = 'Reservoir']",
         "style": {
             "shape": "octagon",
@@ -70,6 +86,23 @@ CYTOSCAPE_STYLESHEET_DARK = [
             "height": "80px",
             "text-wrap": "wrap",
             "text-max-width": "80px",
+        },
+    },
+    {
+        # Style for compound group nodes
+        "selector": "node[isGroup]",
+        "style": {
+            "shape": "round-rectangle",
+            "background-opacity": 0.05,
+            "background-color": "#ccc",
+            "border-width": 2,
+            "border-color": "#ccc",
+            "text-valign": "top",
+            "text-halign": "center",
+            "padding": "20px",
+            "width": "label",
+            "height": "label",
+            "color": "#fff",
         },
     },
     {

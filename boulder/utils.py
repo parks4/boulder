@@ -5,18 +5,56 @@ from typing import Any, Dict, List
 
 
 def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Convert configuration to Cytoscape elements."""
-    elements = []
+    """Convert configuration to Cytoscape elements.
+
+    - Reactors and reservoirs become nodes
+    - Connections become edges
+    - Optional grouping: if a component property `group` (or `group_name`) is set,
+      components sharing the same group appear inside a compound parent node.
+    """
+    elements: List[Dict[str, Any]] = []
+
+    # Track created parent (group) nodes to avoid duplicates
+    created_groups: set[str] = set()
 
     # Add nodes (reactors)
     for component in config.get("components", []):
         properties = component.get("properties", {})
-        node_data = {
+
+        # Determine group (if any) from properties
+        group_name = (
+            str(properties.get("group", ""))
+            if properties.get("group") is not None
+            else str(properties.get("group_name", ""))
+        )
+        group_name = group_name.strip()
+
+        # If grouped, ensure a parent compound node exists
+        if group_name:
+            parent_id = f"group:{group_name}"
+            if parent_id not in created_groups:
+                created_groups.add(parent_id)
+                elements.append(
+                    {
+                        "data": {
+                            "id": parent_id,
+                            "label": group_name,
+                            "isGroup": True,
+                        }
+                    }
+                )
+
+        node_data: Dict[str, Any] = {
             "id": component["id"],
             "label": component["id"],
             "type": component["type"],
             "properties": properties,
         }
+
+        # Attach parent if grouped
+        if group_name:
+            node_data["parent"] = f"group:{group_name}"
+            node_data["group"] = group_name
 
         # Flatten commonly used properties for Cytoscape mapping
         # This allows Cytoscape selectors like "mapData(temperature, ...)" to work
@@ -34,7 +72,7 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Add edges (connections)
     for connection in config.get("connections", []):
         properties = connection.get("properties", {})
-        edge_data = {
+        edge_data: Dict[str, Any] = {
             "id": connection["id"],
             "source": connection["source"],
             "target": connection["target"],

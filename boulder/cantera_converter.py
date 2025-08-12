@@ -55,6 +55,17 @@ class CanteraConverter:
         # Set the reactor name to match the config ID
         reactor.name = reactor_config["id"]
 
+        # Optional grouping: propagate group name to reactor for downstream tools
+        props_group = reactor_config.get("properties", {}).get("group")
+        if props_group is None:
+            props_group = reactor_config.get("properties", {}).get("group_name", "")
+        try:
+            # Cantera Reactors allow arbitrary attributes in Python layer
+            reactor.group_name = str(props_group or "")
+        except Exception:
+            # Best-effort; ignore if backend forbids attribute
+            pass
+
         return reactor
 
     def create_connection(self, conn_config: Dict[str, Any]) -> ct.FlowDevice:
@@ -234,11 +245,29 @@ class DualCanteraConverter:
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasReactor(self.gas)
                 self.reactors[rid].name = rid
+                try:
+                    self.reactors[rid].group_name = str(
+                        props.get("group", props.get("group_name", ""))
+                    )
+                    self.code_lines.append(
+                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
+                    )
+                except Exception:
+                    pass
             elif typ == "Reservoir":
                 self.code_lines.append(f"{rid} = ct.Reservoir(gas)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.Reservoir(self.gas)
                 self.reactors[rid].name = rid
+                try:
+                    self.reactors[rid].group_name = str(
+                        props.get("group", props.get("group_name", ""))
+                    )
+                    self.code_lines.append(
+                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
+                    )
+                except Exception:
+                    pass
             else:
                 self.code_lines.append(f"# Unsupported reactor type: {typ}")
                 raise ValueError(f"Unsupported reactor type: {typ}")
