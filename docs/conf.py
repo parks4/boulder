@@ -8,6 +8,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 import boulder
 
@@ -79,6 +80,10 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # %% Options for Sphinx Gallery
 
+# Ensure Sphinx-Gallery backreferences directory exists before build
+BACKREF_DIR = Path(__file__).resolve().parent / "source" / "backreferences"
+BACKREF_DIR.mkdir(parents=True, exist_ok=True)
+
 sphinx_gallery_conf = {
     "examples_dirs": "../examples",  # path to your example scripts
     "gallery_dirs": "auto_examples",  # path to where to save gallery generated output
@@ -87,7 +92,7 @@ sphinx_gallery_conf = {
         "boulder": None,
     },
     # directory where function/class granular galleries are stored
-    "backreferences_dir": "source/backreferences",
+    "backreferences_dir": str(BACKREF_DIR),
     # Modules for which function/class level galleries are created. In
     # this case boulder, in a tuple of strings:
     "doc_module": ("boulder",),

@@ -33,6 +33,9 @@ dev = [
   "types-PyYAML>=6.0.0"
 ]
 
+[project.scripts]
+boulder = "boulder.cli:main"
+
 [tool.coverage.run]
 branch = true
 

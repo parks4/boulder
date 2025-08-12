@@ -13,7 +13,7 @@ A web-based tool for visually constructing and simulating Cantera ReactorNet sys
 - Simulation capabilities with time-series plots
 - YAML configuration files with 🪨 STONE standard (elegant format)
 
-![screenshot](https://private-user-images.githubusercontent.com/16088743/452821416-9d904892-a17c-4c60-8efa-c2aa7abf7da8.png?jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NDk0NjYzMDUsIm5iZiI6MTc0OTQ2NjAwNSwicGF0aCI6Ii8xNjA4ODc0My80NTI4MjE0MTYtOWQ5MDQ4OTItYTE3Yy00YzYwLThlZmEtYzJhYTdhYmY3ZGE4LnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNTA2MDklMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjUwNjA5VDEwNDY0NVomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWE5NTAzYzllYjVhODc2Njc1ZWM5N2NiODBkMjMxOWMwNmNjNzcyNDBlMThhY2U1YzlhMmFlZDVhOThhMzQ1ODYmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.P-wD297SHbNk1nuTgsBof3vmKukntOBWRnpgi7e774o)
+![screenshot](docs/mix_streams_example.png)
 
 ## Installation
 
@@ -30,17 +30,45 @@ pip install -e .         # install in editable mode
 
 ## Usage
 
-1. Start the application:
-   ```bash
-   python run.py
-   ```
-1. Open your web browser and navigate to `http://localhost:8050`
-1. Use the interface to:
-   - Upload existing configurations
-   - Create new reactor networks
-   - Edit properties
-   - Run simulations
-   - View results
+### From Python
+
+Start the application programmatically (as in `run.py`):
+
+```python
+from boulder.app import run_server
+
+if __name__ == "__main__":
+    run_server(debug=True)
+```
+
+### From the CLI
+
+After installation, use the `boulder` command:
+
+```bash
+boulder                 # launches the server & opens the interface
+boulder some_file.yaml  # launches the server & preloads the YAML into the UI
+```
+
+Optional flags:
+
+```bash
+boulder --host 0.0.0.0 --port 8050 --debug  # customize host/port and enable debug
+boulder some_file.yaml --no-open            # do not auto-open the browser
+```
+
+Notes:
+
+- You can also set `BOULDER_CONFIG_PATH` (or `BOULDER_CONFIG`) to preload a YAML file.
+- Default address is `http://127.0.0.1:8050`.
+
+Once running, use the interface to:
+
+- Upload existing configurations
+- Create new reactor networks
+- Edit properties
+- Run simulations
+- View results
 
 ## YAML Configuration with 🪨 STONE Standard
 
