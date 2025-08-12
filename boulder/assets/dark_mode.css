@@ -400,3 +400,38 @@ pre {
 * {
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
 }
+
+/* Simulation overlay visuals */
+#simulation-overlay {
+  backdrop-filter: blur(2px) brightness(0.95);
+  background: rgba(0,0,0,0.15);
+}
+
+#simulation-overlay .flowing-background {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(900px 900px at 0% 50%, rgba(13,110,253,0.18), transparent 60%),
+              radial-gradient(900px 900px at 100% 50%, rgba(25,135,84,0.18), transparent 60%),
+              linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.07), rgba(255,255,255,0.00));
+  animation: flowShift 1.6s linear infinite;
+  pointer-events: none;
+}
+
+#simulation-overlay .overlay-text {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  padding: 6px 10px;
+  background: rgba(13,110,253,0.20);
+  color: var(--text-primary);
+  border-radius: 6px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  box-shadow: 0 2px 6px var(--shadow);
+}
+
+@keyframes flowShift {
+  0% { background-position: -200px 0, 200px 0, -240px 0; }
+  50% { background-position: 0 0, 0 0, 0 0; }
+  100% { background-position: 200px 0, -200px 0, 240px 0; }
+}

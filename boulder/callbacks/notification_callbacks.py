@@ -80,8 +80,8 @@ def register_callbacks(app) -> None:  # type: ignore
                 "success",
             )
 
-        # Run simulation
+        # Run simulation: suppress success notification in normal mode
         if trigger == "run-simulation" and run_sim_click:
-            return True, "Simulation successfully started", "Success", "success"
+            return False, "", "", dash.no_update
 
         return False, "", "", "primary"

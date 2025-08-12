@@ -12,6 +12,7 @@ from dash import Input, Output, State
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
+    # Note: simulation-running is set to True immediately via a client-side callback
 
     # Callback to handle file upload for custom mechanism
     @app.callback(
@@ -65,7 +66,10 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("simulation-results-card", "style"),
             Output("simulation-data", "data"),
         ],
-        Input("run-simulation", "n_clicks"),
+        [
+            Input("run-simulation", "n_clicks"),
+            Input("theme-store", "data"),
+        ],
         [
             State("current-config", "data"),
             State("config-file-name", "data"),
@@ -77,6 +81,7 @@ def register_callbacks(app) -> None:  # type: ignore
     )
     def run_simulation(
         n_clicks: int,
+        theme: str,
         config: Dict[str, Any],
         config_filename: str,
         mechanism_select: str,
@@ -126,9 +131,6 @@ def register_callbacks(app) -> None:  # type: ignore
                 single_converter = CanteraConverter(mechanism=mechanism)
                 network, results = single_converter.build_network(config)
                 code_str = ""
-
-            # Get the current theme from the app's layout
-            theme = dash.get_app().layout["theme-store"].data
 
             # Create temperature plot
             temp_fig = go.Figure()
@@ -199,6 +201,17 @@ def register_callbacks(app) -> None:  # type: ignore
                 {"display": "none"},
                 {},
             )
+
+    # Overlay style now handled client-side for zero-lag responsiveness
+
+    # Stop running when simulation data updates (success or failure)
+    @app.callback(
+        Output("simulation-running", "data", allow_duplicate=True),
+        Input("simulation-data", "data"),
+        prevent_initial_call=True,
+    )
+    def stop_running_on_data(_: Dict[str, Any]) -> bool:
+        return False
 
     # Conditionally render Download .py button
     @app.callback(
