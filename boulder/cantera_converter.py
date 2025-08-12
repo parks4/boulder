@@ -120,42 +120,73 @@ class CanteraConverter:
         self.network.max_steps = 10000  # Increase maximum steps
 
         # Run simulation with smaller time steps
-        times = []
-        temperatures = []
-        pressures = []
-        species: Dict[str, List[float]] = {
-            species: [] for species in self.gas.species_names
-        }
+        times: List[float] = []
+
+        # Per-reactor capture using Cantera's native SolutionArray
+        # Note: We serialize minimal arrays for frontend consumption; no HDF needed here
+        reactors_series: Dict[str, Dict[str, Any]] = {}
+        sol_arrays: Dict[str, ct.SolutionArray] = {}
+        for reactor in reactor_list:
+            reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+            sol_arrays[reactor_id] = ct.SolutionArray(self.gas, shape=(0,))
+            reactors_series[reactor_id] = {
+                "T": [],
+                "P": [],
+                "X": {s: [] for s in self.gas.species_names},
+            }
 
         # Use smaller time steps and shorter simulation time
         for t in range(0, 10, 1):  # Simulate for 10 seconds with 1-second steps
             try:
                 self.network.advance(t)
                 times.append(t)
-                # Get results from the first reactor
-                first_reactor = reactor_list[0]
-                temperatures.append(first_reactor.thermo.T)
-                pressures.append(first_reactor.thermo.P)
-
-                for species_name in self.gas.species_names:
-                    species[species_name].append(
-                        first_reactor.thermo[species_name].X[0]
+                # Append state for each reactor
+                for reactor in reactor_list:
+                    reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+                    # Record to SolutionArray (native Cantera capture)
+                    sol_arrays[reactor_id].append(
+                        T=reactor.thermo.T,
+                        P=reactor.thermo.P,
+                        X=reactor.thermo.X,
                     )
+                    # Also keep a minimal numeric representation for the UI
+                    reactors_series[reactor_id]["T"].append(reactor.thermo.T)
+                    reactors_series[reactor_id]["P"].append(reactor.thermo.P)
+                    for species_name, x_value in zip(
+                        self.gas.species_names, reactor.thermo.X
+                    ):
+                        reactors_series[reactor_id]["X"][species_name].append(
+                            float(x_value)
+                        )
             except Exception as e:
                 logger.warning(f"Warning at t={t}: {str(e)}")
-                # If we hit an error, use the last successful values
+                # If we hit an error, duplicate the last successful values
                 if times:
                     times.append(t)
-                    temperatures.append(temperatures[-1])
-                    pressures.append(pressures[-1])
-                    for species_name in self.gas.species_names:
-                        species[species_name].append(species[species_name][-1])
+                    for reactor in reactor_list:
+                        reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+                        # Repeat last state in SolutionArray and numeric series
+                        last_idx = -1
+                        last_T = reactors_series[reactor_id]["T"][last_idx]
+                        last_P = reactors_series[reactor_id]["P"][last_idx]
+                        last_X = [
+                            reactors_series[reactor_id]["X"][s][last_idx]
+                            for s in self.gas.species_names
+                        ]
+                        sol_arrays[reactor_id].append(T=last_T, P=last_P, X=last_X)
+                        reactors_series[reactor_id]["T"].append(last_T)
+                        reactors_series[reactor_id]["P"].append(last_P)
+                        for species_name, x_value in zip(
+                            self.gas.species_names, last_X
+                        ):
+                            reactors_series[reactor_id]["X"][species_name].append(
+                                float(x_value)
+                            )
 
         results: Dict[str, Any] = {
             "time": times,
-            "temperature": temperatures,
-            "pressure": pressures,
-            "species": species,
+            # New structure: per-reactor series captured via SolutionArray, serialized minimally
+            "reactors": reactors_series,
         }
 
         # Store the successful network for later use (e.g., Sankey diagrams)
@@ -320,37 +351,62 @@ class DualCanteraConverter:
         # TOOD: add dual code directly in the simulation loop too.
 
         # Run simulation (same as CanteraConverter)
-        times = []
-        temperatures = []
-        pressures = []
-        species: Dict[str, List[float]] = {
-            species: [] for species in self.gas.species_names
-        }
+        times: List[float] = []
         reactor_list = [self.reactors[rid] for rid in reactor_ids]
+
+        # Per-reactor capture using SolutionArray
+        reactors_series: Dict[str, Dict[str, Any]] = {}
+        sol_arrays: Dict[str, ct.SolutionArray] = {}
+        for reactor in reactor_list:
+            reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+            sol_arrays[reactor_id] = ct.SolutionArray(self.gas, shape=(0,))
+            reactors_series[reactor_id] = {
+                "T": [],
+                "P": [],
+                "X": {s: [] for s in self.gas.species_names},
+            }
         for t in range(0, 10, 1):
             try:
                 self.network.advance(t)
                 times.append(t)
-                first_reactor = reactor_list[0]
-                temperatures.append(first_reactor.thermo.T)
-                pressures.append(first_reactor.thermo.P)
-                for species_name in self.gas.species_names:
-                    species[species_name].append(
-                        first_reactor.thermo[species_name].X[0]
+                for reactor in reactor_list:
+                    reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+                    sol_arrays[reactor_id].append(
+                        T=reactor.thermo.T, P=reactor.thermo.P, X=reactor.thermo.X
                     )
+                    reactors_series[reactor_id]["T"].append(reactor.thermo.T)
+                    reactors_series[reactor_id]["P"].append(reactor.thermo.P)
+                    for species_name, x_value in zip(
+                        self.gas.species_names, reactor.thermo.X
+                    ):
+                        reactors_series[reactor_id]["X"][species_name].append(
+                            float(x_value)
+                        )
             except Exception as e:
                 logger.warning(f"Warning at t={t}: {str(e)}")
                 if times:
                     times.append(t)
-                    temperatures.append(temperatures[-1])
-                    pressures.append(pressures[-1])
-                    for species_name in self.gas.species_names:
-                        species[species_name].append(species[species_name][-1])
+                    for reactor in reactor_list:
+                        reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+                        last_idx = -1
+                        last_T = reactors_series[reactor_id]["T"][last_idx]
+                        last_P = reactors_series[reactor_id]["P"][last_idx]
+                        last_X = [
+                            reactors_series[reactor_id]["X"][s][last_idx]
+                            for s in self.gas.species_names
+                        ]
+                        sol_arrays[reactor_id].append(T=last_T, P=last_P, X=last_X)
+                        reactors_series[reactor_id]["T"].append(last_T)
+                        reactors_series[reactor_id]["P"].append(last_P)
+                        for species_name, x_value in zip(
+                            self.gas.species_names, last_X
+                        ):
+                            reactors_series[reactor_id]["X"][species_name].append(
+                                float(x_value)
+                            )
         results: Dict[str, Any] = {
             "time": times,
-            "temperature": temperatures,
-            "pressure": pressures,
-            "species": species,
+            "reactors": reactors_series,
         }
 
         # Store the successful network for later use (e.g., Sankey diagrams)
