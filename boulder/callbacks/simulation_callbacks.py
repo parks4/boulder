@@ -132,47 +132,48 @@ def register_callbacks(app) -> None:  # type: ignore
                 network, results = single_converter.build_network(config)
                 code_str = ""
 
-            # Create temperature plot
+            # Build initial plots from the first available reactor (no strict need)
             temp_fig = go.Figure()
-            temp_fig.add_trace(
-                go.Scatter(
-                    x=results["time"], y=results["temperature"], name="Temperature"
-                )
-            )
-            temp_fig.update_layout(
-                title="Temperature vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Temperature (K)",
-            )
-            temp_fig = apply_theme_to_figure(temp_fig, theme)
-
-            # Create pressure plot
             press_fig = go.Figure()
-            press_fig.add_trace(
-                go.Scatter(x=results["time"], y=results["pressure"], name="Pressure")
-            )
-            press_fig.update_layout(
-                title="Pressure vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Pressure (Pa)",
-            )
-            press_fig = apply_theme_to_figure(press_fig, theme)
-
-            # Create species plot
             species_fig = go.Figure()
-            for species, concentrations in results["species"].items():
-                if (
-                    max(concentrations) > 0.01
-                ):  # Only show species with significant concentration
-                    species_fig.add_trace(
-                        go.Scatter(x=results["time"], y=concentrations, name=species)
-                    )
-            species_fig.update_layout(
-                title="Species Concentrations vs Time",
-                xaxis_title="Time (s)",
-                yaxis_title="Mole Fraction",
-            )
-            species_fig = apply_theme_to_figure(species_fig, theme)
+
+            reactors = results.get("reactors") or {}
+            if reactors:
+                first_id = next(iter(reactors.keys()))
+                series = reactors[first_id]
+                temp_fig.add_trace(
+                    go.Scatter(x=results["time"], y=series["T"], name=f"{first_id} T")
+                )
+                temp_fig.update_layout(
+                    title=f"Temperature vs Time — {first_id}",
+                    xaxis_title="Time (s)",
+                    yaxis_title="Temperature (K)",
+                )
+                temp_fig = apply_theme_to_figure(temp_fig, theme)
+
+                press_fig.add_trace(
+                    go.Scatter(x=results["time"], y=series["P"], name=f"{first_id} P")
+                )
+                press_fig.update_layout(
+                    title=f"Pressure vs Time — {first_id}",
+                    xaxis_title="Time (s)",
+                    yaxis_title="Pressure (Pa)",
+                )
+                press_fig = apply_theme_to_figure(press_fig, theme)
+
+                for species_name, concentrations in series["X"].items():
+                    if max(concentrations or [0]) > 0.01:
+                        species_fig.add_trace(
+                            go.Scatter(
+                                x=results["time"], y=concentrations, name=species_name
+                            )
+                        )
+                species_fig.update_layout(
+                    title=f"Species Concentrations vs Time — {first_id}",
+                    xaxis_title="Time (s)",
+                    yaxis_title="Mole Fraction",
+                )
+                species_fig = apply_theme_to_figure(species_fig, theme)
 
             # Store results for re-theming and other uses
             simulation_data = {"results": results, "code": code_str}
@@ -408,3 +409,81 @@ def register_callbacks(app) -> None:  # type: ignore
                 height=400,
             )
             return fig.to_dict()
+
+    # Update plots when a reactor node is selected in the graph
+    @app.callback(
+        [
+            Output("temperature-plot", "figure", allow_duplicate=True),
+            Output("pressure-plot", "figure", allow_duplicate=True),
+            Output("species-plot", "figure", allow_duplicate=True),
+        ],
+        [
+            Input("last-selected-element", "data"),
+            Input("simulation-data", "data"),
+            Input("theme-store", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_plots_for_selected_node(
+        last_selected: Dict[str, Any], simulation_data: Dict[str, Any], theme: str
+    ) -> Tuple[Any, Any, Any]:
+        import plotly.graph_objects as go
+
+        from ..utils import apply_theme_to_figure
+
+        # Only act if we have simulation results and a node selection
+        if not simulation_data or "results" not in simulation_data:
+            raise dash.exceptions.PreventUpdate
+
+        results = simulation_data["results"]
+        reactors = results.get("reactors") or {}
+
+        if not last_selected or last_selected.get("type") != "node":
+            # Keep current plots unchanged when selecting edges or clearing selection
+            return dash.no_update, dash.no_update, dash.no_update
+
+        node_id = (last_selected.get("data") or {}).get("id")
+        if not node_id or node_id not in reactors:
+            # Ignore selections that do not correspond to simulated reactors
+            return dash.no_update, dash.no_update, dash.no_update
+
+        times = results.get("time", [])
+        node_series = reactors[node_id]
+
+        # Temperature plot
+        temp_fig = go.Figure()
+        temp_fig.add_trace(go.Scatter(x=times, y=node_series["T"], name=f"{node_id} T"))
+        temp_fig.update_layout(
+            title=f"Temperature vs Time — {node_id}",
+            xaxis_title="Time (s)",
+            yaxis_title="Temperature (K)",
+        )
+        temp_fig = apply_theme_to_figure(temp_fig, theme)
+
+        # Pressure plot
+        press_fig = go.Figure()
+        press_fig.add_trace(
+            go.Scatter(x=times, y=node_series["P"], name=f"{node_id} P")
+        )
+        press_fig.update_layout(
+            title=f"Pressure vs Time — {node_id}",
+            xaxis_title="Time (s)",
+            yaxis_title="Pressure (Pa)",
+        )
+        press_fig = apply_theme_to_figure(press_fig, theme)
+
+        # Species plot
+        species_fig = go.Figure()
+        for species_name, concentrations in node_series["X"].items():
+            if max(concentrations or [0]) > 0.01:
+                species_fig.add_trace(
+                    go.Scatter(x=times, y=concentrations, name=species_name)
+                )
+        species_fig.update_layout(
+            title=f"Species Concentrations vs Time — {node_id}",
+            xaxis_title="Time (s)",
+            yaxis_title="Mole Fraction",
+        )
+        species_fig = apply_theme_to_figure(species_fig, theme)
+
+        return temp_fig.to_dict(), press_fig.to_dict(), species_fig.to_dict()
