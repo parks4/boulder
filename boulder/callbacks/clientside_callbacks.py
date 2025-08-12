@@ -36,3 +36,41 @@ def register_callbacks(app) -> None:  # type: ignore
         Input("reactor-graph", "id"),
         prevent_initial_call=False,
     )
+
+    # Immediately show simulation overlay on click (no server roundtrip)
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (!n_clicks) return window.dash_clientside.no_update;
+            try {
+                var overlay = document.getElementById('simulation-overlay');
+                if (overlay) {
+                    overlay.style.display = 'block';
+                    overlay.style.position = 'fixed';
+                    overlay.style.inset = 0;
+                    overlay.style.zIndex = 2000;
+                    overlay.style.pointerEvents = 'none';
+                }
+            } catch (e) {}
+            return true;
+        }
+        """,
+        Output("simulation-running", "data", allow_duplicate=True),
+        Input("run-simulation", "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+    # Hide overlay promptly when simulation-running becomes false
+    app.clientside_callback(
+        """
+        function(is_running) {
+            var overlay = document.getElementById('simulation-overlay');
+            if (!overlay) return window.dash_clientside.no_update;
+            overlay.style.display = is_running ? 'block' : 'none';
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("keyboard-trigger", "data", allow_duplicate=True),
+        Input("simulation-running", "data"),
+        prevent_initial_call=True,
+    )

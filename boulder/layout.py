@@ -45,6 +45,21 @@ def get_layout(
                 style={"display": "none"},
             ),
             html.H1("Boulder - Cantera ReactorNet Visualizer"),
+            # Fullscreen overlay for simulation in progress
+            html.Div(
+                id="simulation-overlay",
+                children=[
+                    html.Div(className="flowing-background"),
+                    html.Div("Simulating...", className="overlay-text"),
+                ],
+                style={
+                    "display": "none",
+                    "position": "fixed",
+                    "inset": 0,
+                    "zIndex": 2000,
+                    "pointerEvents": "none",
+                },
+            ),
             # Toast for notifications
             dbc.Toast(
                 id="notification-toast",
@@ -562,6 +577,10 @@ def get_layout(
             ),
             # Hidden div for storing current configuration
             dcc.Store(id="current-config", data=initial_config),
+            # Track simulation running state
+            dcc.Store(id="simulation-running", data=False),
+            # Control overlay visibility with a minimum display time (set client-side)
+            dcc.Store(id="overlay-visible", data=False),
             # Hidden div for toast trigger
             dcc.Store(id="toast-trigger", data={}),
             # Add a Store to keep track of edit mode
