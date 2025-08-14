@@ -479,36 +479,52 @@ def get_layout(
                             [
                                 dbc.CardHeader("Reactor Network"),
                                 dbc.CardBody(
-                                    cyto.Cytoscape(
-                                        id="reactor-graph",
-                                        # Not all Cytoscape layouts are supported by Dash.
-                                        # see : https://dash.plotly.com/cytoscape/layout
-                                        layout={
-                                            # Use dagre for a predominantly horizontal, left-to-right
-                                            # layout
-                                            # Requires dagre + cytoscape-dagre scripts, added in app
-                                            # initialization
-                                            "name": "dagre",
-                                            "rankDir": "LR",  # Left-to-right
-                                            "rankSep": 120,  # Horizontal spacing between ranks
-                                            "nodeSep": 60,  # Minimum spacing between nodes on same rank
-                                            "edgeSep": 30,  # Separation between edges
-                                            "fit": True,
-                                            "padding": 20,
-                                        },
-                                        style={"width": "100%", "height": "360px"},
-                                        elements=config_to_cyto_elements(
-                                            initial_config
+                                    [
+                                        # Resizable graph container
+                                        html.Div(
+                                            cyto.Cytoscape(
+                                                id="reactor-graph",
+                                                # Not all Cytoscape layouts are supported by Dash.
+                                                # see : https://dash.plotly.com/cytoscape/layout
+                                                layout={
+                                                    # Use dagre for a predominantly horizontal, left-to-right
+                                                    # layout
+                                                    # Requires dagre + cytoscape-dagre scripts, added in app
+                                                    # initialization
+                                                    "name": "dagre",
+                                                    "rankDir": "LR",  # Left-to-right
+                                                    "rankSep": 120,  # Horizontal spacing between ranks
+                                                    "nodeSep": 60,  # Minimum spacing between same-rank nodes
+                                                    "edgeSep": 30,  # Separation between edges
+                                                    "fit": True,
+                                                    "padding": 20,
+                                                },
+                                                style={
+                                                    "width": "100%",
+                                                    "height": "360px",
+                                                    "minHeight": "200px",
+                                                },
+                                                elements=config_to_cyto_elements(
+                                                    initial_config
+                                                ),
+                                                minZoom=0.5,
+                                                maxZoom=2,
+                                                stylesheet=cyto_stylesheet,
+                                                responsive=True,
+                                                # Use only supported properties:
+                                                userPanningEnabled=True,
+                                                userZoomingEnabled=True,
+                                                boxSelectionEnabled=True,
+                                            ),
+                                            id="graph-container",
+                                            style={
+                                                "position": "relative",
+                                                "border": "1px solid #ddd",
+                                                "borderRadius": "4px",
+                                                "overflow": "hidden",
+                                            },
                                         ),
-                                        minZoom=0.5,
-                                        maxZoom=2,
-                                        stylesheet=cyto_stylesheet,
-                                        responsive=True,
-                                        # Use only supported properties:
-                                        userPanningEnabled=True,
-                                        userZoomingEnabled=True,
-                                        boxSelectionEnabled=True,
-                                    )
+                                    ],
                                 ),
                             ],
                             className="mb-3",
