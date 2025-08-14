@@ -26,9 +26,9 @@ def register_callbacks(app) -> None:  # type: ignore
         if last_selected and last_selected.get("type") == "node":
             node_id = last_selected["data"]["id"]
             # Find the latest node data from config
-            for comp in config["components"]:
-                if comp["id"] == node_id:
-                    node_data = [comp]
+            for node in config["nodes"]:
+                if node["id"] == node_id:
+                    node_data = [node]
                     break
         elif last_selected and last_selected.get("type") == "edge":
             edge_id = last_selected["data"]["id"]
@@ -267,11 +267,11 @@ def register_callbacks(app) -> None:  # type: ignore
         if node_data:
             data = node_data[0]
             comp_id = data["id"]
-            new_components = []
-            for comp in config["components"]:
-                if comp["id"] == comp_id:
+            new_nodes = []
+            for node in config["nodes"]:
+                if node["id"] == comp_id:
                     # Ensure properties dict exists
-                    props = dict(comp.get("properties", {}))
+                    props = dict(node.get("properties", {}))
                     for v, i in zip(values, ids):
                         key = i["prop"]
                         # Convert to float if key is temperature or pressure
@@ -282,10 +282,10 @@ def register_callbacks(app) -> None:  # type: ignore
                                 props[key] = v
                         else:
                             props[key] = v
-                    new_components.append({**comp, "properties": props})
+                    new_nodes.append({**node, "properties": props})
                 else:
-                    new_components.append(comp)
-            return {**config, "components": new_components}
+                    new_nodes.append(node)
+            return {**config, "nodes": new_nodes}
         elif edge_data:
             data = edge_data[0]
             conn_id = data["id"]

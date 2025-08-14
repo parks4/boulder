@@ -232,9 +232,9 @@ components:
         internal_config = normalize_config(loaded_data)
 
         # Verify internal format is correct
-        assert internal_config["components"][0]["type"] == "IdealGasReactor"
-        assert "properties" in internal_config["components"][0]
-        assert internal_config["components"][0]["properties"]["temperature"] == 1200.0
+        assert internal_config["nodes"][0]["type"] == "IdealGasReactor"
+        assert "properties" in internal_config["nodes"][0]
+        assert internal_config["nodes"][0]["properties"]["temperature"] == 1200.0
 
         # Convert back to STONE format
         stone_config = convert_to_stone_format(internal_config)
@@ -311,22 +311,13 @@ components:
 
         # Load the final result to verify it's valid
         final_data = load_yaml_string_with_comments(final_yaml)
-
-        # Check both possible formats for robustness
-        if "IdealGasReactor" in final_data["components"][0]:
-            # STONE format
-            assert (
-                final_data["components"][0]["IdealGasReactor"]["temperature"] == 1200.0
-            )
-        elif "type" in final_data["components"][0]:
-            # Internal format (current behavior)
-            assert final_data["components"][0]["type"] == "IdealGasReactor"
-            assert final_data["components"][0]["properties"]["temperature"] == 1200.0
-        else:
-            # Unexpected format
-            pytest.fail(
-                f"Unexpected component format: {list(final_data['components'][0].keys())}"
-            )
+        # Check that the final data matches the expected STONE format
+        assert "nodes" in final_data
+        assert len(final_data["nodes"]) > 0
+        assert "IdealGasReactor" in final_data["nodes"][0]
+        assert final_data["nodes"][0]["id"] == "test_reactor"
+        assert final_data["nodes"][0]["IdealGasReactor"]["temperature"] == 1200.0
+        assert final_data["nodes"][0]["IdealGasReactor"]["pressure"] == 101325.0
 
 
 class TestYAMLCommentIntegration:

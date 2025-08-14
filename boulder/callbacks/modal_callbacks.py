@@ -50,9 +50,9 @@ def register_callbacks(app) -> None:  # type: ignore
             "Reservoir",
         ]
         options = [
-            {"label": comp["id"], "value": comp["id"]}
-            for comp in config.get("components", [])
-            if comp.get("type") in valid_types
+            {"label": node["id"], "value": node["id"]}
+            for node in config.get("nodes", [])
+            if node.get("type") in valid_types
         ]
         return options, options
 
@@ -225,7 +225,7 @@ def register_callbacks(app) -> None:  # type: ignore
         if not is_open:
             return dash.no_update
 
-        existing_ids = [comp.get("id", "") for comp in config.get("components", [])]
+        existing_ids = [node.get("id", "") for node in config.get("nodes", [])]
 
         i = 1
         while f"reactor_{i}" in existing_ids:
@@ -273,9 +273,9 @@ def register_callbacks(app) -> None:  # type: ignore
             return dash.no_update, dash.no_update, dash.no_update
 
         reactor_ids = [
-            comp.get("id")
-            for comp in config.get("components", [])
-            if comp.get("type")
+            node.get("id")
+            for node in config.get("nodes", [])
+            if node.get("type")
             in ["IdealGasReactor", "ConstVolReactor", "ConstPReactor", "Reservoir"]
         ]
 

@@ -3,10 +3,11 @@ metadata:
   description: "Two reactors solved together, displayed under a common group"
   version: "1.0"
 
-simulation:
-  mechanism: "gri30.yaml"
+phases:
+  gas:
+    mechanism: "gri30.yaml"
 
-components:
+nodes:
 - id: res_in
   Reservoir:
     temperature: 300         # K

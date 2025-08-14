@@ -18,8 +18,8 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     created_groups: set[str] = set()
 
     # Add nodes (reactors)
-    for component in config.get("components", []):
-        properties = component.get("properties", {})
+    for node in config.get("nodes", []):
+        properties = node.get("properties", {})
 
         # Determine group (if any) from properties
         group_name = (
@@ -45,9 +45,9 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
                 )
 
         node_data: Dict[str, Any] = {
-            "id": component["id"],
-            "label": component["id"],
-            "type": component["type"],
+            "id": node["id"],
+            "label": node["id"],
+            "type": node["type"],
             "properties": properties,
         }
 
