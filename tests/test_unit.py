@@ -224,16 +224,18 @@ class TestBoulderIntegration:
 
     def test_app_creation(self):
         """Test that the app can be created without errors."""
-        from boulder.app import app
+        from boulder.app import create_app
 
+        app = create_app()
         assert app is not None
         assert hasattr(app, "layout")
         assert hasattr(app, "callback_map")
 
     def test_callbacks_registration(self):
         """Test that all callbacks can be registered."""
-        from boulder.app import app
+        from boulder.app import create_app
 
+        app = create_app()
         # App should have callbacks registered during import
         assert len(app.callback_map) > 0
 
@@ -253,3 +255,32 @@ class TestBoulderIntegration:
         for style in CYTOSCAPE_STYLESHEET:
             assert "selector" in style
             assert "style" in style
+
+    def test_create_app_with_layout(self):
+        """Test that create_app properly sets up the layout with required elements."""
+        from boulder.app import create_app
+
+        app = create_app()
+
+        # Check that the layout is set
+        assert app.layout is not None
+
+        # Convert layout to string to check for component IDs
+        layout_str = str(app.layout)
+
+        # Check for the specific button that was causing the CI failure
+        assert "open-reactor-modal" in layout_str, (
+            "open-reactor-modal button not found in layout"
+        )
+
+        # Check for other key components
+        required_ids = [
+            "add-reactor-modal",
+            "reactor-graph",
+            "notification-toast",
+        ]
+
+        for component_id in required_ids:
+            assert component_id in layout_str, (
+                f"Component {component_id} not found in layout"
+            )

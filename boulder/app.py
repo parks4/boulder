@@ -68,24 +68,18 @@ except Exception as e:
 callbacks.register_callbacks(app)
 
 
-def run_server(debug: bool = False, host: str = "0.0.0.0", port: int = 8050) -> None:
-    """Run the Dash server.
+def create_app(debug: bool = False) -> dash.Dash:
+    """Create and configure the Boulder app for testing.
 
-    This function initializes and starts the Boulder Dash application server.
-    When debug mode is enabled, it also sets up console forwarding functionality
-    to capture browser console messages and display them in the server console.
+    This function sets up the app with the proper layout and configuration
+    without running the server, making it suitable for testing.
 
     Args:
-        debug: If True, enables debug mode with console forwarding and detailed
-               error reporting. Browser console messages will be forwarded to
-               the server console with timestamps and color coding.
-        host: The host interface to bind the server to (default: "0.0.0.0")
-        port: The port number to bind the server to (default: 8050)
+        debug: If True, enables debug mode with console forwarding
 
-    Debug Mode Features:
-        - Console forwarding: Browser console messages appear in server console
-        - Enhanced error reporting: More detailed error information
-        - Development tools: Additional debugging capabilities
+    Returns
+    -------
+        dash.Dash: The configured Dash application
     """
     global _debug_mode
     _debug_mode = debug
@@ -105,6 +99,32 @@ def run_server(debug: bool = False, host: str = "0.0.0.0", port: int = 8050) -> 
 
         console_callbacks.register_callbacks(app)
 
+    return app
+
+
+def run_server(debug: bool = False, host: str = "0.0.0.0", port: int = 8050) -> None:
+    """Run the Dash server.
+
+    This function initializes and starts the Boulder Dash application server.
+    When debug mode is enabled, it also sets up console forwarding functionality
+    to capture browser console messages and display them in the server console.
+
+    Args:
+        debug: If True, enables debug mode with console forwarding and detailed
+               error reporting. Browser console messages will be forwarded to
+               the server console with timestamps and color coding.
+        host: The host interface to bind the server to (default: "0.0.0.0")
+        port: The port number to bind the server to (default: 8050)
+
+    Debug Mode Features:
+        - Console forwarding: Browser console messages appear in server console
+        - Enhanced error reporting: More detailed error information
+        - Development tools: Additional debugging capabilities
+    """
+    # Configure the app using create_app
+    create_app(debug)
+
+    # Run the server
     app.run(debug=debug, host=host, port=port)
 
 

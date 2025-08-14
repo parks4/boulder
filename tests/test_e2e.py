@@ -449,9 +449,10 @@ class TestBoulderPerformance:
     @pytest.fixture
     def dash_duo(self, dash_duo):
         """Set up the app for testing."""
-        # Import the app directly
-        from boulder.app import app
+        # Import and create the app with layout
+        from boulder.app import create_app
 
+        app = create_app()
         dash_duo.start_server(app)
         return dash_duo
 
