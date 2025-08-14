@@ -16,6 +16,8 @@ from selenium.common.exceptions import (
 )
 from selenium.webdriver.common.keys import Keys
 
+from .test_utils import upload_test_config_to_app
+
 # Mark all tests in this module as e2e tests
 pytestmark = pytest.mark.e2e
 
@@ -64,6 +66,10 @@ class TestBoulderE2E:
 
             app = create_app()
             dash_duo.start_server(app)
+
+            # Upload a test config file to enable config editing tests
+            upload_test_config_to_app(dash_duo)
+
             return dash_duo
         except Exception as e:
             pytest.skip(f"Could not start app for E2E testing: {e}")
@@ -189,25 +195,7 @@ class TestBoulderE2E:
 
     def test_config_upload(self, app_setup):
         """Test configuration file upload."""
-        # Create a test config file
-        test_config = {
-            "components": [
-                {
-                    "id": "uploaded-reactor",
-                    "type": "IdealGasReactor",
-                    "properties": {
-                        "temperature": 300,
-                        "pressure": 101325,
-                        "composition": "O2:1,N2:3.76",
-                    },
-                }
-            ],
-            "connections": [],
-        }
-        test_config  # not used , until we have a way to upload the config file  #  TODO
-
-        # Upload config (this would need to be adapted based on how file upload is implemented)
-        # For now, test the config display
+        # Verify that config upload area is present
         app_setup.wait_for_element("#config-upload-area", timeout=10)
 
     def test_config_yaml_edit(self, app_setup):
@@ -221,9 +209,9 @@ class TestBoulderE2E:
         textarea = app_setup.find_element("#config-yaml-editor")
         assert textarea.is_displayed()
 
-        # Edit the YAML
+        # Edit the YAML - use end_time since our test config uses that
         original_yaml = textarea.get_attribute("value")
-        new_yaml = original_yaml.replace("max_time: 2", "max_time: 5")
+        new_yaml = original_yaml.replace("end_time: 2.0", "end_time: 5.0")
         textarea.clear()
         textarea.send_keys(new_yaml)
 
@@ -454,6 +442,11 @@ class TestBoulderPerformance:
 
         app = create_app()
         dash_duo.start_server(app)
+
+        # Upload a test config file to enable config editing tests
+        # (same as TestBoulderE2E class)
+        upload_test_config_to_app(dash_duo)
+
         return dash_duo
 
     def test_large_graph_performance(self, dash_duo):
