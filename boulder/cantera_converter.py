@@ -1,6 +1,9 @@
+import importlib
 import json
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+import os
+from importlib.metadata import entry_points
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cantera as ct  # type: ignore
 
@@ -8,6 +11,79 @@ from .config import CANTERA_MECHANISM
 from .sankey import generate_sankey_input_from_sim
 
 logger = logging.getLogger(__name__)
+
+
+# Extension registries for custom builders/hooks
+REACTOR_BUILDERS: Dict[
+    str, Callable[["CanteraConverter", Dict[str, Any]], ct.Reactor]
+] = {}
+CONNECTION_BUILDERS: Dict[
+    str, Callable[["CanteraConverter", Dict[str, Any]], ct.FlowDevice]
+] = {}
+POST_BUILD_HOOKS: List[Callable[["CanteraConverter", Dict[str, Any]], None]] = []
+
+
+def register_reactor_builder(
+    reactor_type: str,
+    builder: Callable[["CanteraConverter", Dict[str, Any]], ct.Reactor],
+) -> None:
+    REACTOR_BUILDERS[reactor_type] = builder
+
+
+def register_connection_builder(
+    conn_type: str,
+    builder: Callable[["CanteraConverter", Dict[str, Any]], ct.FlowDevice],
+) -> None:
+    CONNECTION_BUILDERS[conn_type] = builder
+
+
+def register_post_build_hook(
+    hook: Callable[["CanteraConverter", Dict[str, Any]], None],
+) -> None:
+    POST_BUILD_HOOKS.append(hook)
+
+
+def _load_plugins_from_entry_points() -> None:
+    """Discover and load plugins via Python entry points (boulder.plugins)."""
+    try:
+        eps = entry_points()
+        # Newer importlib.metadata returns a Selection object supporting .select
+        eps_group = getattr(eps, "select", None)
+        selected = (
+            eps_group(group="boulder.plugins")
+            if eps_group
+            else eps.get("boulder.plugins", [])
+        )
+        for ep in selected:
+            try:
+                obj = ep.load()
+                if callable(obj):
+                    obj()
+            except Exception as e:
+                logger.warning(f"Failed to load plugin entry point {ep}: {e}")
+    except Exception as e:
+        logger.debug(f"Entry point discovery failed: {e}")
+
+
+def _load_plugins_from_env() -> None:
+    """Load plugin modules listed in BOULDER_PLUGINS env var (comma-separated)."""
+    raw = os.environ.get("BOULDER_PLUGINS", "").strip()
+    if not raw:
+        return
+    for mod_name in [m.strip() for m in raw.replace(";", ",").split(",") if m.strip()]:
+        try:
+            mod = importlib.import_module(mod_name)
+            # If module exposes a callable registrar, invoke it; otherwise rely on import side-effects
+            registrar = getattr(mod, "register_plugins", None)
+            if callable(registrar):
+                registrar()
+        except Exception as e:
+            logger.warning(f"Failed to import BOULDER_PLUGINS module '{mod_name}': {e}")
+
+
+# Load plugins at import time so both GUI and API benefit
+_load_plugins_from_entry_points()
+_load_plugins_from_env()
 
 
 class CanteraConverter:
@@ -19,7 +95,9 @@ class CanteraConverter:
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
+        self.reactor_meta: Dict[str, Dict[str, Any]] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
+        self.walls: Dict[str, Any] = {}
         self.network: ct.ReactorNet = None
         self.last_network: ct.ReactorNet = (
             None  # Store the last successfully built network
@@ -45,8 +123,15 @@ class CanteraConverter:
             self.parse_composition(props.get("composition", "N2:1")),
         )
 
-        if reactor_type == "IdealGasReactor":
+        # Custom builder extension point
+        if reactor_type in REACTOR_BUILDERS:
+            reactor = REACTOR_BUILDERS[reactor_type](self, reactor_config)
+        elif reactor_type == "IdealGasReactor":
             reactor = ct.IdealGasReactor(self.gas)
+        elif reactor_type == "IdealGasConstPressureReactor":
+            reactor = ct.IdealGasConstPressureReactor(self.gas)
+        elif reactor_type == "IdealGasConstPressureMoleReactor":
+            reactor = ct.IdealGasConstPressureMoleReactor(self.gas)
         elif reactor_type == "Reservoir":
             reactor = ct.Reservoir(self.gas)
         else:
@@ -68,20 +153,45 @@ class CanteraConverter:
 
         return reactor
 
-    def create_connection(self, conn_config: Dict[str, Any]) -> ct.FlowDevice:
-        """Create a Cantera flow device from configuration."""
+    def create_connection(self, conn_config: Dict[str, Any]):
+        """Create a Cantera connection (flow device or wall) from configuration."""
         conn_type = conn_config["type"]
         props = conn_config["properties"]
 
-        source = self.reactors[conn_config["source"]]
-        target = self.reactors[conn_config["target"]]
+        # Ensure source/target exist (create placeholder Reservoirs if needed)
+        src_id = conn_config["source"]
+        tgt_id = conn_config["target"]
+        if src_id not in self.reactors:
+            # Create a benign reservoir for external sources like 'Electricity'/'Losses'
+            self.gas.TPX = (300, 101325, {"N2": 1.0})
+            self.reactors[src_id] = ct.Reservoir(self.gas)
+            self.reactors[src_id].name = src_id
+        if tgt_id not in self.reactors:
+            self.gas.TPX = (300, 101325, {"N2": 1.0})
+            self.reactors[tgt_id] = ct.Reservoir(self.gas)
+            self.reactors[tgt_id].name = tgt_id
+        source = self.reactors[src_id]
+        target = self.reactors[tgt_id]
 
-        if conn_type == "MassFlowController":
+        # Custom builder extension point
+        if conn_type in CONNECTION_BUILDERS:
+            device = CONNECTION_BUILDERS[conn_type](self, conn_config)
+        elif conn_type == "MassFlowController":
             device = ct.MassFlowController(source, target)
             device.mass_flow_rate = props.get("mass_flow_rate", 0.1)
         elif conn_type == "Valve":
             device = ct.Valve(source, target)
             device.valve_coeff = props.get("valve_coeff", 1.0)
+        elif conn_type == "Wall":
+            # Handle walls as energy connections (e.g., torch power or losses)
+            electric_power_kW = float(props.get("electric_power_kW", 0.0))
+            torch_eff = float(props.get("torch_eff", 1.0))
+            gen_eff = float(props.get("gen_eff", 1.0))
+            # Net heat rate into the target from the source (W)
+            Q_watts = electric_power_kW * 1e3 * torch_eff * gen_eff
+            wall = ct.Wall(source, target, A=1.0, Q=Q_watts, name=conn_config["id"])
+            self.walls[conn_config["id"]] = wall
+            return wall
         else:
             raise ValueError(f"Unsupported connection type: {conn_type}")
 
@@ -95,19 +205,23 @@ class CanteraConverter:
         self.reactors.clear()
         self.connections.clear()
 
-        # Create reactors
-        for comp in config["components"]:
-            if comp["type"] == "IdealGasReactor" or comp["type"] == "Reservoir":
-                self.reactors[comp["id"]] = self.create_reactor(comp)
+        # Create reactors (built-ins or via registered custom builders)
+        for node in config["nodes"]:
+            r = self.create_reactor(node)
+            r.name = node["id"]
+            self.reactors[node["id"]] = r
 
         # Create connections
         for conn in config["connections"]:
-            if conn["type"] == "MassFlowController" or conn["type"] == "Valve":
+            if conn["type"] in ("MassFlowController", "Valve"):
                 self.connections[conn["id"]] = self.create_connection(conn)
+            elif conn["type"] == "Wall":
+                # Create and track walls separately
+                self.create_connection(conn)
 
-        # Create network - only include IdealGasReactors, not Reservoirs
+        # Create network - include all Cantera reactors (exclude pure Reservoirs)
         reactor_list = [
-            r for r in self.reactors.values() if isinstance(r, ct.IdealGasReactor)
+            r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)
         ]
         if not reactor_list:
             raise ValueError("No IdealGasReactors found in the network")
@@ -118,6 +232,13 @@ class CanteraConverter:
         self.network.rtol = 1e-6  # Relaxed relative tolerance
         self.network.atol = 1e-8  # Relaxed absolute tolerance
         self.network.max_steps = 10000  # Increase maximum steps
+
+        # Run post-build hooks (e.g., PSR volume from t_res), provided by extensions
+        for hook in POST_BUILD_HOOKS:
+            try:
+                hook(self, config)
+            except Exception as e:
+                logger.warning(f"Post-build hook error: {e}")
 
         # Run simulation with smaller time steps
         times: List[float] = []
@@ -262,10 +383,10 @@ class DualCanteraConverter:
         self.network = None
 
         # Reactors
-        for comp in config["components"]:
-            rid = comp["id"]
-            typ = comp["type"]
-            props = comp["properties"]
+        for node in config["nodes"]:
+            rid = node["id"]
+            typ = node["type"]
+            props = node["properties"]
             temp = props.get("temperature", 300)
             pres = props.get("pressure", 101325)
             compo = props.get("composition", "N2:1")
@@ -330,9 +451,7 @@ class DualCanteraConverter:
 
         # ReactorNet
         reactor_ids = [
-            comp["id"]
-            for comp in config["components"]
-            if comp["type"] == "IdealGasReactor"
+            node["id"] for node in config["nodes"] if node["type"] == "IdealGasReactor"
         ]
         self.code_lines.append(f"network = ct.ReactorNet([{', '.join(reactor_ids)}])")
         self.network = ct.ReactorNet([self.reactors[rid] for rid in reactor_ids])
