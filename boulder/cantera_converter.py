@@ -5,7 +5,7 @@ import math
 import os
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import cantera as ct  # type: ignore
 
@@ -16,9 +16,15 @@ logger = logging.getLogger(__name__)
 
 
 # Custom builder/hook types
-ReactorBuilder = Callable[["CanteraConverter", Dict[str, Any]], ct.Reactor]
-ConnectionBuilder = Callable[["CanteraConverter", Dict[str, Any]], ct.FlowDevice]
-PostBuildHook = Callable[["CanteraConverter", Dict[str, Any]], None]
+ReactorBuilder = Callable[
+    [Union["CanteraConverter", "DualCanteraConverter"], Dict[str, Any]], ct.Reactor
+]
+ConnectionBuilder = Callable[
+    [Union["CanteraConverter", "DualCanteraConverter"], Dict[str, Any]], ct.FlowDevice
+]
+PostBuildHook = Callable[
+    [Union["CanteraConverter", "DualCanteraConverter"], Dict[str, Any]], None
+]
 
 
 @dataclass
