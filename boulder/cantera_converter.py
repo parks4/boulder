@@ -182,10 +182,10 @@ class CanteraConverter:
         elif conn_type == "MassFlowController":
             # Default MassFlowController implementation
             mfc = ct.MassFlowController(source, target)
-            mfc.mass_flow_rate = props.get("mass_flow_rate", 0.1)
+            mfc.mass_flow_rate = float(props.get("mass_flow_rate", 0.1))
         elif conn_type == "Valve":
             valve = ct.Valve(source, target)
-            valve.valve_coeff = props.get("valve_coeff", 1.0)
+            valve.valve_coeff = float(props.get("valve_coeff", 1.0))
         elif conn_type == "Wall":
             # Handle walls as energy connections (e.g., torch power or losses)
             electric_power_kW = float(props.get("electric_power_kW", 0.0))
@@ -460,7 +460,7 @@ class DualCanteraConverter:
                     f"# Plugin connection {typ} -> created as '{cid}'"
                 )
             elif typ == "MassFlowController":
-                mfr = props.get("mass_flow_rate", 0.1)
+                mfr = float(props.get("mass_flow_rate", 0.1))
                 self.code_lines.append(f"{cid} = ct.MassFlowController({src}, {tgt})")
                 self.code_lines.append(f"{cid}.mass_flow_rate = {mfr}")
                 self.connections[cid] = ct.MassFlowController(
@@ -468,7 +468,7 @@ class DualCanteraConverter:
                 )
                 self.connections[cid].mass_flow_rate = mfr
             elif typ == "Valve":
-                coeff = props.get("valve_coeff", 1.0)
+                coeff = float(props.get("valve_coeff", 1.0))
                 self.code_lines.append(f"{cid} = ct.Valve({src}, {tgt})")
                 self.code_lines.append(f"{cid}.valve_coeff = {coeff}")
                 self.connections[cid] = ct.Valve(self.reactors[src], self.reactors[tgt])
