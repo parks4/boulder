@@ -84,7 +84,7 @@ simulation:
   time_step: 0.001
   max_time: 10.0
 
-components:
+nodes:
   - id: reactor1
     IdealGasReactor:
       temperature: 1000      # K

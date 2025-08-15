@@ -79,7 +79,7 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     Example
     -------
 
-    🪨 STONE format::
+        🪨 STONE format::
 
         nodes:
           - id: reactor1
@@ -129,10 +129,6 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
             if settings and isinstance(settings, dict):
                 sim.update(settings)
             normalized["simulation"] = sim
-
-    # Convert components to nodes (internal format uses nodes)
-    if "components" in normalized:
-        normalized["nodes"] = normalized.pop("components")
 
     # Normalize nodes
     if "nodes" in normalized:
@@ -280,7 +276,7 @@ def convert_to_stone_format(config: dict) -> dict:
         if settings:
             stone_config["settings"] = settings
 
-    # Convert nodes (already in STONE format)
+    # Convert nodes to STONE format
     if "nodes" in config:
         stone_config["nodes"] = []
         for node in config["nodes"]:
