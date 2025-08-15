@@ -2,6 +2,7 @@ import importlib
 import json
 import logging
 import os
+from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -13,41 +14,39 @@ from .sankey import generate_sankey_input_from_sim
 logger = logging.getLogger(__name__)
 
 
-# Extension registries for custom builders/hooks
-REACTOR_BUILDERS: Dict[
-    str, Callable[["CanteraConverter", Dict[str, Any]], ct.Reactor]
-] = {}
-CONNECTION_BUILDERS: Dict[
-    str, Callable[["CanteraConverter", Dict[str, Any]], ct.FlowDevice]
-] = {}
-POST_BUILD_HOOKS: List[Callable[["CanteraConverter", Dict[str, Any]], None]] = []
+# Custom builder/hook types
+ReactorBuilder = Callable[["CanteraConverter", Dict[str, Any]], ct.Reactor]
+ConnectionBuilder = Callable[["CanteraConverter", Dict[str, Any]], ct.FlowDevice]
+PostBuildHook = Callable[["CanteraConverter", Dict[str, Any]], None]
 
 
-def register_reactor_builder(
-    reactor_type: str,
-    builder: Callable[["CanteraConverter", Dict[str, Any]], ct.Reactor],
-) -> None:
-    REACTOR_BUILDERS[reactor_type] = builder
+@dataclass
+class BoulderPlugins:
+    """A container for discovered Boulder plugins."""
+
+    reactor_builders: Dict[str, ReactorBuilder] = field(default_factory=dict)
+    connection_builders: Dict[str, ConnectionBuilder] = field(default_factory=dict)
+    post_build_hooks: List[PostBuildHook] = field(default_factory=list)
 
 
-def register_connection_builder(
-    conn_type: str,
-    builder: Callable[["CanteraConverter", Dict[str, Any]], ct.FlowDevice],
-) -> None:
-    CONNECTION_BUILDERS[conn_type] = builder
+# Global cache to ensure plugins are discovered only once
+_PLUGIN_CACHE: Optional[BoulderPlugins] = None
 
 
-def register_post_build_hook(
-    hook: Callable[["CanteraConverter", Dict[str, Any]], None],
-) -> None:
-    POST_BUILD_HOOKS.append(hook)
+def get_plugins() -> BoulderPlugins:
+    """Discover and load all Boulder plugins, returning them in a container.
 
+    This function is idempotent and caches the results.
+    """
+    global _PLUGIN_CACHE
+    if _PLUGIN_CACHE is not None:
+        return _PLUGIN_CACHE
 
-def _load_plugins_from_entry_points() -> None:
-    """Discover and load plugins via Python entry points (boulder.plugins)."""
+    plugins = BoulderPlugins()
+
+    # Discover from entry points
     try:
         eps = entry_points()
-        # Newer importlib.metadata returns a Selection object supporting .select
         eps_group = getattr(eps, "select", None)
         selected = (
             eps_group(group="boulder.plugins")
@@ -56,40 +55,43 @@ def _load_plugins_from_entry_points() -> None:
         )
         for ep in selected:
             try:
-                obj = ep.load()
-                if callable(obj):
-                    obj()
+                plugin_func = ep.load()
+                if callable(plugin_func):
+                    plugin_func(plugins)
             except Exception as e:
                 logger.warning(f"Failed to load plugin entry point {ep}: {e}")
     except Exception as e:
         logger.debug(f"Entry point discovery failed: {e}")
 
-
-def _load_plugins_from_env() -> None:
-    """Load plugin modules listed in BOULDER_PLUGINS env var (comma-separated)."""
+    # Discover from environment variable
     raw = os.environ.get("BOULDER_PLUGINS", "").strip()
-    if not raw:
-        return
-    for mod_name in [m.strip() for m in raw.replace(";", ",").split(",") if m.strip()]:
-        try:
-            mod = importlib.import_module(mod_name)
-            # If module exposes a callable registrar, invoke it; otherwise rely on import side-effects
-            registrar = getattr(mod, "register_plugins", None)
-            if callable(registrar):
-                registrar()
-        except Exception as e:
-            logger.warning(f"Failed to import BOULDER_PLUGINS module '{mod_name}': {e}")
+    if raw:
+        for mod_name in [
+            m.strip() for m in raw.replace(";", ",").split(",") if m.strip()
+        ]:
+            try:
+                mod = importlib.import_module(mod_name)
+                registrar = getattr(mod, "register_plugins", None)
+                if callable(registrar):
+                    registrar(plugins)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to import BOULDER_PLUGINS module '{mod_name}': {e}"
+                )
 
-
-# Load plugins at import time so both GUI and API benefit
-_load_plugins_from_entry_points()
-_load_plugins_from_env()
+    _PLUGIN_CACHE = plugins
+    return plugins
 
 
 class CanteraConverter:
-    def __init__(self, mechanism: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        mechanism: Optional[str] = None,
+        plugins: Optional[BoulderPlugins] = None,
+    ) -> None:
         # Use provided mechanism or fall back to config default
         self.mechanism = mechanism or CANTERA_MECHANISM
+        self.plugins = plugins or get_plugins()
         try:
             self.gas = ct.Solution(self.mechanism)
         except Exception as e:
@@ -124,8 +126,8 @@ class CanteraConverter:
         )
 
         # Custom builder extension point
-        if reactor_type in REACTOR_BUILDERS:
-            reactor = REACTOR_BUILDERS[reactor_type](self, reactor_config)
+        if reactor_type in self.plugins.reactor_builders:
+            reactor = self.plugins.reactor_builders[reactor_type](self, reactor_config)
         elif reactor_type == "IdealGasReactor":
             reactor = ct.IdealGasReactor(self.gas)
         elif reactor_type == "IdealGasConstPressureReactor":
@@ -174,14 +176,15 @@ class CanteraConverter:
         target = self.reactors[tgt_id]
 
         # Custom builder extension point
-        if conn_type in CONNECTION_BUILDERS:
-            device = CONNECTION_BUILDERS[conn_type](self, conn_config)
+        if conn_type in self.plugins.connection_builders:
+            flow_device = self.plugins.connection_builders[conn_type](self, conn_config)
         elif conn_type == "MassFlowController":
-            device = ct.MassFlowController(source, target)
-            device.mass_flow_rate = props.get("mass_flow_rate", 0.1)
+            # Default MassFlowController implementation
+            mfc = ct.MassFlowController(source, target)
+            mfc.mass_flow_rate = props.get("mass_flow_rate", 0.1)
         elif conn_type == "Valve":
-            device = ct.Valve(source, target)
-            device.valve_coeff = props.get("valve_coeff", 1.0)
+            valve = ct.Valve(source, target)
+            valve.valve_coeff = props.get("valve_coeff", 1.0)
         elif conn_type == "Wall":
             # Handle walls as energy connections (e.g., torch power or losses)
             electric_power_kW = float(props.get("electric_power_kW", 0.0))
@@ -195,7 +198,7 @@ class CanteraConverter:
         else:
             raise ValueError(f"Unsupported connection type: {conn_type}")
 
-        return device
+        return flow_device
 
     def build_network(
         self, config: Dict[str, Any]
@@ -233,12 +236,9 @@ class CanteraConverter:
         self.network.atol = 1e-8  # Relaxed absolute tolerance
         self.network.max_steps = 10000  # Increase maximum steps
 
-        # Run post-build hooks (e.g., PSR volume from t_res), provided by extensions
-        for hook in POST_BUILD_HOOKS:
-            try:
-                hook(self, config)
-            except Exception as e:
-                logger.warning(f"Post-build hook error: {e}")
+        # Apply post-build hooks for custom modifications
+        for hook in self.plugins.post_build_hooks:
+            hook(self, config)
 
         # Run simulation with smaller time steps
         times: List[float] = []

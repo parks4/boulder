@@ -101,7 +101,8 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if "nodes" not in normalized:
             raise ValueError(
                 "STONE format required: top-level 'nodes' missing. "
-                "Please update your YAML configuration to use the new STONE schema with 'nodes', 'phases', and 'settings'."
+                "Please update your YAML configuration to use the new STONE schema with 'nodes', "
+                "'phases', and 'settings'."
             )
         # Merge phases/settings into simulation
         phases = normalized.pop("phases", None)

@@ -88,7 +88,8 @@ def register_callbacks(app) -> None:  # type: ignore
         custom_mechanism: str,
         uploaded_filename: str,
     ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any]]:
-        from ..cantera_converter import CanteraConverter, DualCanteraConverter
+        from ..app import CONVERTER
+        from ..cantera_converter import DualCanteraConverter
         from ..config import USE_DUAL_CONVERTER
         from ..utils import apply_theme_to_figure
 
@@ -128,8 +129,9 @@ def register_callbacks(app) -> None:  # type: ignore
                     config
                 )
             else:
-                single_converter = CanteraConverter(mechanism=mechanism)
-                network, results = single_converter.build_network(config)
+                # Use the shared converter instance, updating its mechanism
+                CONVERTER.mechanism = mechanism
+                network, results = CONVERTER.build_network(config)
                 code_str = ""
 
             # Build initial plots from the first available reactor (no strict need)
