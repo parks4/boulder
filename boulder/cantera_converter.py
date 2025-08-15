@@ -1,6 +1,7 @@
 import importlib
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -532,42 +533,32 @@ class DualCanteraConverter:
         for t in range(0, 10, 1):
             try:
                 self.network.advance(t)
-                times.append(t)
-                for reactor in reactor_list:
-                    reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                    sol_arrays[reactor_id].append(
-                        T=reactor.thermo.T, P=reactor.thermo.P, X=reactor.thermo.X
-                    )
-                    reactors_series[reactor_id]["T"].append(reactor.thermo.T)
-                    reactors_series[reactor_id]["P"].append(reactor.thermo.P)
-                    for species_name, x_value in zip(
-                        self.gas.species_names, reactor.thermo.X
-                    ):
-                        reactors_series[reactor_id]["X"][species_name].append(
-                            float(x_value)
-                        )
             except Exception as e:
-                logger.warning(f"Warning at t={t}: {str(e)}")
-                if times:
-                    times.append(t)
-                    for reactor in reactor_list:
-                        reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                        last_idx = -1
-                        last_T = reactors_series[reactor_id]["T"][last_idx]
-                        last_P = reactors_series[reactor_id]["P"][last_idx]
-                        last_X = [
-                            reactors_series[reactor_id]["X"][s][last_idx]
-                            for s in self.gas.species_names
-                        ]
-                        sol_arrays[reactor_id].append(T=last_T, P=last_P, X=last_X)
-                        reactors_series[reactor_id]["T"].append(last_T)
-                        reactors_series[reactor_id]["P"].append(last_P)
-                        for species_name, x_value in zip(
-                            self.gas.species_names, last_X
-                        ):
-                            reactors_series[reactor_id]["X"][species_name].append(
-                                float(x_value)
-                            )
+                # Fail fast for Dual converter so the GUI shows the error immediately
+                raise RuntimeError(f"Cantera advance failed at t={t}s: {e}") from e
+
+            times.append(t)
+            for reactor in reactor_list:
+                reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+                T = reactor.thermo.T
+                P = reactor.thermo.P
+                X_vec = reactor.thermo.X
+                # Detect non-finite states early and fail fast
+                if not (
+                    math.isfinite(T)
+                    and math.isfinite(P)
+                    and all(math.isfinite(float(x)) for x in X_vec)
+                ):
+                    raise RuntimeError(
+                        f"Non-finite state detected at t={t}s for reactor '{reactor_id}'"
+                    )
+                sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
+                reactors_series[reactor_id]["T"].append(T)
+                reactors_series[reactor_id]["P"].append(P)
+                for species_name, x_value in zip(self.gas.species_names, X_vec):
+                    reactors_series[reactor_id]["X"][species_name].append(
+                        float(x_value)
+                    )
         results: Dict[str, Any] = {
             "time": times,
             "reactors": reactors_series,
