@@ -1,22 +1,23 @@
 """Shared test utilities for Boulder test suite."""
 
 import base64
-import yaml
+
 from selenium.common.exceptions import TimeoutException
 
 
 def upload_test_config_to_app(dash_duo):
     """Upload a test config file to enable config editing functionality.
-    
+
     This utility function uploads a realistic test configuration that includes:
     - Multiple reactors with proper STONE format
-    - Simulation parameters 
+    - Simulation parameters
     - Comments and units (as they would appear in real configs)
-    
+
     Args:
         dash_duo: The dash_duo fixture from pytest-dash
-        
-    Returns:
+
+    Returns
+    -------
         bool: True if upload was successful, False otherwise
     """
     # Use a realistic config similar to what's in the YAML comment system tests
@@ -29,14 +30,17 @@ metadata:
   description: "Configuration for automated testing"
   version: "1.0"
 
-# Simulation parameters
-simulation:
+# Chemistry and simulation settings in STONE schema
+phases:
+  gas:
+    mechanism: "gri30.yaml"
+
+settings:
   end_time: 2.0      # seconds - total simulation duration
-  dt: 0.01          # seconds - integration time step
-  mechanism: "gri30.yaml"
+  dt: 0.01           # seconds - integration time step
 
 # Reactor components with detailed comments
-components:
+nodes:
   - id: "test-reactor"
     # Primary test reactor for automated testing
     IdealGasReactor:
@@ -63,15 +67,15 @@ connections:
 
     # Encode as base64 (mimicking file upload)
     encoded_content = base64.b64encode(test_config_yaml.encode("utf-8")).decode("utf-8")
-    
+
     # Create the upload data format expected by Dash
     upload_data = f"data:text/yaml;base64,{encoded_content}"
-    
+
     # Wait for the upload element to be available
     try:
         dash_duo.wait_for_element("#upload-config", timeout=10)
         print("Upload element found, attempting to upload test config...")
-        
+
         # Multiple attempts to trigger the upload
         for attempt in range(3):
             try:
@@ -86,7 +90,7 @@ connections:
                         'filename': 'test_config.yaml',
                         'last_modified': Date.now()
                     }};
-                    
+
                     // Try multiple methods to trigger the callback
                     if (uploadElement._dashprivate_setProps) {{
                         console.log('Using _dashprivate_setProps');
@@ -108,30 +112,33 @@ connections:
                     return 'element_not_found';
                 }}
                 """
-                
+
                 result = dash_duo.driver.execute_script(script)
                 print(f"Upload script result: {result}")
-                
+
                 # Wait a bit longer for the upload to process
                 import time
+
                 time.sleep(2)
-                
+
                 # Check if the config file name appeared
                 try:
                     dash_duo.wait_for_element("#config-file-name-span", timeout=5)
                     print("Config upload successful!")
                     return True  # Success
                 except TimeoutException:
-                    print(f"Config upload attempt {attempt + 1} failed, config file name not found")
+                    print(
+                        f"Config upload attempt {attempt + 1} failed, config file name not found"
+                    )
                     continue
-                    
+
             except Exception as e:
                 print(f"Config upload attempt {attempt + 1} failed with error: {e}")
                 continue
-        
+
         print("All config upload attempts failed")
         return False
-        
+
     except Exception as e:
         # If upload fails, that's okay - tests will handle gracefully
         print(f"Config upload failed: {e}")

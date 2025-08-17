@@ -319,38 +319,3 @@ class TestBoulderIntegration:
             assert component_id in layout_str, (
                 f"Component {component_id} not found in layout"
             )
-
-
-@pytest.mark.unit
-class TestBoulderCtutils:
-    """Unit tests for ctutils functions."""
-
-    def test_division_by_zero_handling(self):
-        """Test that division by zero is handled gracefully."""
-        # This test verifies that our fix for the RuntimeWarning works
-        # We can't easily test the actual function without Cantera, but we can
-        # verify that the logic structure is correct
-
-        # Test the logic pattern we implemented
-        Y_fuel = 0
-        h2_minus_h1 = 100
-
-        if Y_fuel == 0:
-            LHV = float("inf") if h2_minus_h1 != 0 else 0
-        else:
-            LHV = -h2_minus_h1 / Y_fuel
-
-        assert LHV == float("inf"), (
-            "Should return inf for non-zero numerator with zero denominator"
-        )
-
-        # Test zero numerator case
-        Y_fuel = 0
-        h2_minus_h1 = 0
-
-        if Y_fuel == 0:
-            LHV = float("inf") if h2_minus_h1 != 0 else 0
-        else:
-            LHV = -h2_minus_h1 / Y_fuel
-
-        assert LHV == 0, "Should return 0 for zero numerator with zero denominator"
