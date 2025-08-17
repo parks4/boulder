@@ -575,16 +575,7 @@ def get_layout(
                                                                                     ),
                                                                                     html.Pre(
                                                                                         id="thermo-report",
-                                                                                        style={
-                                                                                            "height": "500px",
-                                                                                            "overflow": "auto",
-                                                                                            "fontSize": "11px",
-                                                                                            "backgroundColor": "#f8f9fa",
-                                                                                            "padding": "15px",
-                                                                                            "border": "1px solid #dee2e6",
-                                                                                            "borderRadius": "4px",
-                                                                                            "fontFamily": "monospace",
-                                                                                        },
+                                                                                        className="thermo",
                                                                                     ),
                                                                                 ],
                                                                                 width=12,

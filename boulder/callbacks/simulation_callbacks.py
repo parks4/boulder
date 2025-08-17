@@ -196,20 +196,22 @@ def register_callbacks(app) -> None:  # type: ignore
                         reactor_report = reactor.report()
                     except Exception:
                         reactor_report = ""
-                    
+
                     try:
                         thermo_report = reactor.thermo.report()
                     except Exception:
                         # Canterasupports calling the object directly
                         try:
                             thermo_callable = getattr(reactor.thermo, "__call__", None)
-                            thermo_report = thermo_callable() if callable(thermo_callable) else ""
+                            thermo_report = (
+                                thermo_callable() if callable(thermo_callable) else ""
+                            )
                         except Exception:
                             thermo_report = ""
-                    
+
                     reactor_reports[reactor_id] = {
                         "reactor_report": reactor_report,
-                        "thermo_report": thermo_report
+                        "thermo_report": thermo_report,
                     }
             except Exception:
                 reactor_reports = {}
