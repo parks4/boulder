@@ -199,7 +199,7 @@ def get_layout(
                                 ),
                                 dbc.Row(
                                     [
-                                        dbc.Label("Composition", width=4),
+                                        dbc.Label("Thermo Report", width=4),
                                         dbc.Col(
                                             dbc.Input(
                                                 id="reactor-composition",
@@ -450,7 +450,7 @@ def get_layout(
                             ),
                             dbc.Card(
                                 [
-                                    dbc.CardHeader("Properties"),
+                                    dbc.CardHeader("Input Properties"),
                                     dbc.CardBody(id="properties-panel"),
                                 ],
                                 className="mb-3",
@@ -554,6 +554,33 @@ def get_layout(
                                                                         style={
                                                                             "height": "600px"
                                                                         },
+                                                                    ),
+                                                                ],
+                                                                className="mt-3",
+                                                            )
+                                                        ],
+                                                    ),
+                                                    dbc.Tab(
+                                                        label="Thermo Report",
+                                                        tab_id="thermo-report-tab",
+                                                        children=[
+                                                            html.Div(
+                                                                [
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    html.H5(
+                                                                                        "Thermodynamic Report"
+                                                                                    ),
+                                                                                    html.Pre(
+                                                                                        id="thermo-report",
+                                                                                        className="thermo",
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ]
                                                                     ),
                                                                 ],
                                                                 className="mt-3",

@@ -137,11 +137,13 @@ def register_callbacks(app) -> None:  # type: ignore
                 network, results, code_str = dual_converter.build_network_and_code(
                     config
                 )
+                reactors_dict = dual_converter.reactors
             else:
                 # Build using a fresh converter with discovered plugins
                 converter = CanteraConverter(mechanism=mechanism, plugins=get_plugins())
                 network, results = converter.build_network(config)
                 code_str = ""
+                reactors_dict = converter.reactors
 
             # Build initial plots from the first available reactor (no strict need)
             temp_fig = go.Figure()
@@ -186,8 +188,41 @@ def register_callbacks(app) -> None:  # type: ignore
                 )
                 species_fig = apply_theme_to_figure(species_fig, theme)
 
+            # Generate reactor reports during simulation to avoid storing heavy objects
+            reactor_reports = {}
+            try:
+                for reactor_id, reactor in reactors_dict.items():
+                    try:
+                        reactor_report = reactor.report()
+                    except Exception:
+                        reactor_report = ""
+
+                    try:
+                        thermo_report = reactor.thermo.report()
+                    except Exception:
+                        # Canterasupports calling the object directly
+                        try:
+                            thermo_callable = getattr(reactor.thermo, "__call__", None)
+                            thermo_report = (
+                                thermo_callable() if callable(thermo_callable) else ""
+                            )
+                        except Exception:
+                            thermo_report = ""
+
+                    reactor_reports[reactor_id] = {
+                        "reactor_report": reactor_report,
+                        "thermo_report": thermo_report,
+                    }
+            except Exception:
+                reactor_reports = {}
+
             # Store results for re-theming and other uses
-            simulation_data = {"results": results, "code": code_str}
+            simulation_data = {
+                "results": results,
+                "code": code_str,
+                "mechanism": mechanism,
+                "reactor_reports": reactor_reports,
+            }
 
             return (
                 temp_fig.to_dict(),
@@ -508,3 +543,49 @@ def register_callbacks(app) -> None:  # type: ignore
         species_fig = apply_theme_to_figure(species_fig, theme)
 
         return temp_fig.to_dict(), press_fig.to_dict(), species_fig.to_dict()
+
+    # Update composition plot and thermo report when a reactor node is selected
+    @app.callback(
+        [
+            Output("thermo-report", "children"),
+        ],
+        [
+            Input("last-selected-element", "data"),
+            Input("simulation-data", "data"),
+            Input("theme-store", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_composition_for_selected_node(
+        last_selected: Dict[str, Any], simulation_data: Dict[str, Any], theme: str
+    ) -> Tuple[str]:
+        # Only act if we have simulation results and a node selection
+        if not simulation_data or "results" not in simulation_data:
+            return ("No simulation data available.",)
+
+        if not last_selected or last_selected.get("type") != "node":
+            return ("Select a reactor node to view thermodynamic data.",)
+
+        node_id = (last_selected.get("data") or {}).get("id")
+        if not node_id:
+            return ("No node selected.",)
+
+        # Use the pre-generated reactor reports from simulation data
+        reactor_reports = simulation_data.get("reactor_reports", {})
+        if node_id not in reactor_reports:
+            return (
+                f"Thermo report unavailable for {node_id}. Please re-run the simulation.",
+            )
+
+        reports = reactor_reports[node_id]
+        reactor_report = reports.get("reactor_report", "")
+        thermo_report = reports.get("thermo_report", "")
+
+        combined = (
+            f"THERMODYNAMIC REPORT — {node_id}\n"
+            f"{'=' * 70}\n\n"
+            f"[Reactor]\n{reactor_report}\n"
+            f"\n[Gas (Solution)]\n{thermo_report}"
+        )
+
+        return (combined,)
