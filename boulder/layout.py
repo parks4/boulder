@@ -199,7 +199,7 @@ def get_layout(
                                 ),
                                 dbc.Row(
                                     [
-                                        dbc.Label("Composition", width=4),
+                                        dbc.Label("Thermo Report", width=4),
                                         dbc.Col(
                                             dbc.Input(
                                                 id="reactor-composition",
@@ -561,8 +561,8 @@ def get_layout(
                                                         ],
                                                     ),
                                                     dbc.Tab(
-                                                        label="Composition",
-                                                        tab_id="composition-tab",
+                                                        label="Thermo Report",
+                                                        tab_id="thermo-report-tab",
                                                         children=[
                                                             html.Div(
                                                                 [

@@ -9,8 +9,6 @@ import dash
 import plotly.graph_objects as go  # type: ignore
 from dash import Input, Output, State
 
-_LAST_REACTORS: Dict[str, Any] = {}
-
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
@@ -190,18 +188,38 @@ def register_callbacks(app) -> None:  # type: ignore
                 )
                 species_fig = apply_theme_to_figure(species_fig, theme)
 
-            # Store references to the latest reactor objects for downstream reporting
-            global _LAST_REACTORS
+            # Generate reactor reports during simulation to avoid storing heavy objects
+            reactor_reports = {}
             try:
-                _LAST_REACTORS = dict(reactors_dict)
+                for reactor_id, reactor in reactors_dict.items():
+                    try:
+                        reactor_report = reactor.report()
+                    except Exception:
+                        reactor_report = ""
+                    
+                    try:
+                        thermo_report = reactor.thermo.report()
+                    except Exception:
+                        # Canterasupports calling the object directly
+                        try:
+                            thermo_callable = getattr(reactor.thermo, "__call__", None)
+                            thermo_report = thermo_callable() if callable(thermo_callable) else ""
+                        except Exception:
+                            thermo_report = ""
+                    
+                    reactor_reports[reactor_id] = {
+                        "reactor_report": reactor_report,
+                        "thermo_report": thermo_report
+                    }
             except Exception:
-                _LAST_REACTORS = {}
+                reactor_reports = {}
 
             # Store results for re-theming and other uses
             simulation_data = {
                 "results": results,
                 "code": code_str,
                 "mechanism": mechanism,
+                "reactor_reports": reactor_reports,
             }
 
             return (
@@ -550,28 +568,16 @@ def register_callbacks(app) -> None:  # type: ignore
         if not node_id:
             return ("No node selected.",)
 
-        # Use the existing Reactor object from the last simulation
-        reactor = _LAST_REACTORS.get(node_id)
-        if reactor is None:
+        # Use the pre-generated reactor reports from simulation data
+        reactor_reports = simulation_data.get("reactor_reports", {})
+        if node_id not in reactor_reports:
             return (
                 f"Thermo report unavailable for {node_id}. Please re-run the simulation.",
             )
 
-        # Prefer Reactor.report() and the underlying Solution.report() to avoid manual listings
-        try:
-            reactor_report = reactor.report()
-        except Exception:
-            reactor_report = ""
-
-        try:
-            thermo_report = reactor.thermo.report()
-        except Exception:
-            # Some Cantera versions support calling the object directly
-            try:
-                thermo_callable = getattr(reactor.thermo, "__call__", None)
-                thermo_report = thermo_callable() if callable(thermo_callable) else ""
-            except Exception:
-                thermo_report = ""
+        reports = reactor_reports[node_id]
+        reactor_report = reports.get("reactor_report", "")
+        thermo_report = reports.get("thermo_report", "")
 
         combined = (
             f"THERMODYNAMIC REPORT — {node_id}\n"
