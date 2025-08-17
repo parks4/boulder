@@ -450,7 +450,7 @@ def get_layout(
                             ),
                             dbc.Card(
                                 [
-                                    dbc.CardHeader("Properties"),
+                                    dbc.CardHeader("Input Properties"),
                                     dbc.CardBody(id="properties-panel"),
                                 ],
                                 className="mb-3",
@@ -554,6 +554,42 @@ def get_layout(
                                                                         style={
                                                                             "height": "600px"
                                                                         },
+                                                                    ),
+                                                                ],
+                                                                className="mt-3",
+                                                            )
+                                                        ],
+                                                    ),
+                                                    dbc.Tab(
+                                                        label="Composition",
+                                                        tab_id="composition-tab",
+                                                        children=[
+                                                            html.Div(
+                                                                [
+                                                                    dbc.Row(
+                                                                        [
+                                                                            dbc.Col(
+                                                                                [
+                                                                                    html.H5(
+                                                                                        "Thermodynamic Report"
+                                                                                    ),
+                                                                                    html.Pre(
+                                                                                        id="thermo-report",
+                                                                                        style={
+                                                                                            "height": "500px",
+                                                                                            "overflow": "auto",
+                                                                                            "fontSize": "11px",
+                                                                                            "backgroundColor": "#f8f9fa",
+                                                                                            "padding": "15px",
+                                                                                            "border": "1px solid #dee2e6",
+                                                                                            "borderRadius": "4px",
+                                                                                            "fontFamily": "monospace",
+                                                                                        },
+                                                                                    ),
+                                                                                ],
+                                                                                width=12,
+                                                                            ),
+                                                                        ]
                                                                     ),
                                                                 ],
                                                                 className="mt-3",
