@@ -57,6 +57,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.config:
         os.environ["BOULDER_CONFIG_PATH"] = args.config
 
+    # Import cantera_converter early to ensure plugins are loaded at app startup
+    from . import cantera_converter  # noqa: F401
+
     # Import after environment is set so app initialization can read it
     from .app import run_server
 

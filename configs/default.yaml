@@ -3,15 +3,18 @@ metadata:
   description: "Simple configuration with one reactor and one reservoir"
   version: "1.0"
 
-simulation:
-  mechanism: "gri30.yaml"
+phases:
+  gas:
+    mechanism: "gri30.yaml"
+
+settings:
   time_step: 0.001  # s
   max_time: 10.0    # s
   solver: "CVODE_BDF"
   relative_tolerance: 1.0e-6
   absolute_tolerance: 1.0e-9
 
-components:
+nodes:
 - id: reactor1
   IdealGasReactor:
     temperature: 1000        # K

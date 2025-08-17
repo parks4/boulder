@@ -3,7 +3,11 @@ import os
 import dash
 import dash_bootstrap_components as dbc
 
-from . import callbacks
+# Import cantera_converter early to ensure plugins are loaded at app startup
+from . import (
+    callbacks,
+    cantera_converter,  # noqa: F401
+)
 from .config import (
     get_config_from_path_with_comments,
     get_initial_config,
@@ -11,6 +15,11 @@ from .config import (
 )
 from .layout import get_layout
 from .styles import CYTOSCAPE_STYLESHEET
+
+# Create a single, shared converter instance for the app
+# This ensures that the same set of discovered plugins is used everywhere.
+CONVERTER = cantera_converter.CanteraConverter()
+
 
 # Initialize the Dash app with Bootstrap
 app = dash.Dash(

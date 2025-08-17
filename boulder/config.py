@@ -64,35 +64,88 @@ def load_config_file_with_comments(config_path: str):
 def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize configuration from YAML with 🪨 STONE standard to internal format.
 
-    The 🪨 STONE standard uses component types as keys:
-    - id: reactor1
-      IdealGasReactor:
-        temperature: 1000
+    The 🪨 STONE standard format:
+    - nodes: list of components (reactors, reservoirs, etc.)
+    - connections: list of connections between nodes
+    - phases: chemistry/phase configuration (e.g., gas mechanisms)
+    - settings: simulation-level settings
+    - metadata: optional configuration metadata
 
-    Converts to internal format:
-    - id: reactor1
-      type: IdealGasReactor
-      properties:
-        temperature: 1000
+    Converted to the internal format used by converters:
+    - nodes: list with { id, type, properties }
+    - connections: list with { id, type, properties, source, target }
+    - simulation: dict with mechanism selections and settings
+
+    Example
+    -------
+
+        🪨 STONE format::
+
+        nodes:
+          - id: reactor1
+            IdealGasReactor:
+                temperature: 1000
+
+    Internal format::
+
+        nodes:
+          - id: reactor1
+            type: IdealGasReactor
+            properties:
+                temperature: 1000
     """
     normalized = config.copy()
 
-    # Normalize components
-    if "components" in normalized:
-        for component in normalized["components"]:
-            if "type" not in component:
+    # Require new STONE schema keys
+    if isinstance(normalized, dict):
+        if "nodes" not in normalized:
+            raise ValueError(
+                "STONE format required: top-level 'nodes' missing. "
+                "Please update your YAML configuration to use the new STONE schema with 'nodes', "
+                "'phases', and 'settings'."
+            )
+        # Merge phases/settings into simulation
+        phases = normalized.pop("phases", None)
+        settings = normalized.pop("settings", None)
+        if phases or settings:
+            sim = dict(normalized.get("simulation", {}) or {})
+            if phases and isinstance(phases, dict):
+                sim["phases"] = phases
+                # Flatten gas mechanisms for downstream consumers
+                gas = (
+                    phases.get("gas", {})
+                    if isinstance(phases.get("gas", {}), dict)
+                    else {}
+                )
+                mech = gas.get("mechanism")
+                mech_reac = gas.get("mechanism_reac")
+                mech_torch = gas.get("mechanism_torch")
+                if mech is not None:
+                    sim.setdefault("mechanism", mech)
+                if mech_reac is not None:
+                    sim.setdefault("mechanism_reac", mech_reac)
+                if mech_torch is not None:
+                    sim.setdefault("mechanism_torch", mech_torch)
+            if settings and isinstance(settings, dict):
+                sim.update(settings)
+            normalized["simulation"] = sim
+
+    # Normalize nodes
+    if "nodes" in normalized:
+        for node in normalized["nodes"]:
+            if "type" not in node:
                 # Find the type key (anything that's not id, metadata, etc.)
                 standard_fields = {"id", "metadata"}
-                type_keys = [k for k in component.keys() if k not in standard_fields]
+                type_keys = [k for k in node.keys() if k not in standard_fields]
 
                 if type_keys:
                     type_name = type_keys[0]  # Use the first type key found
-                    properties = component[type_name]
+                    properties = node[type_name]
 
                     # Remove the type key and add type + properties
-                    del component[type_name]
-                    component["type"] = type_name
-                    component["properties"] = (
+                    del node[type_name]
+                    node["type"] = type_name
+                    node["properties"] = (
                         properties if isinstance(properties, dict) else {}
                     )
 
@@ -200,32 +253,46 @@ def get_config_from_path_with_comments(config_path: str) -> tuple[Dict[str, Any]
 
 
 def convert_to_stone_format(config: dict) -> dict:
-    """Convert internal format back to YAML with 🪨 STONE standard for file saving."""
+    """Convert internal format back to new STONE schema for file saving."""
     stone_config = {}
 
-    # Copy metadata and simulation sections as-is
+    # Copy metadata section as-is
     if "metadata" in config:
         stone_config["metadata"] = config["metadata"]
-    if "simulation" in config:
-        stone_config["simulation"] = config["simulation"]
 
-    # Convert components
-    if "components" in config:
-        stone_config["components"] = []
-        for component in config["components"]:
-            # Build component with id first, then type
-            component_type = component.get("type", "IdealGasReactor")
-            stone_component = {
-                "id": component["id"],
-                component_type: component.get("properties", {}),
+    # Extract phases and settings from simulation section
+    simulation = config.get("simulation", {})
+    if simulation:
+        # Extract phases information
+        if "phases" in simulation:
+            stone_config["phases"] = simulation["phases"]
+
+        # Extract settings (everything except phases and mechanism info)
+        settings = {}
+        for key, value in simulation.items():
+            if key not in ["phases", "mechanism", "mechanism_reac", "mechanism_torch"]:
+                settings[key] = value
+
+        if settings:
+            stone_config["settings"] = settings
+
+    # Convert nodes to STONE format
+    if "nodes" in config:
+        stone_config["nodes"] = []
+        for node in config["nodes"]:
+            # Build node with id first, then type as key containing properties
+            node_type = node.get("type", "IdealGasReactor")
+            stone_node = {
+                "id": node["id"],
+                node_type: node.get("properties", {}),
             }
-            stone_config["components"].append(stone_component)
+            stone_config["nodes"].append(stone_node)
 
-    # Convert connections
+    # Convert connections (same structure in new format)
     if "connections" in config:
         stone_config["connections"] = []
         for connection in config["connections"]:
-            # Build connection with id first, then type, then source/target
+            # Build connection with id first, then type as key, then source/target
             connection_type = connection.get("type", "MassFlowController")
             stone_connection = {
                 "id": connection["id"],
@@ -392,7 +459,7 @@ def _update_yaml_array_preserving_comments(original_array, new_array):
 def _update_yaml_item_preserving_comments(original_item, new_item):
     """Update a single YAML item while preserving its STONE format structure.
 
-    This function handles the specific case of components and connections
+    This function handles the specific case of nodes and connections
     which have a special structure in STONE format.
     """
     from ruamel.yaml.comments import CommentedMap

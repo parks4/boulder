@@ -65,6 +65,7 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("simulation-error-display", "style"),
             Output("simulation-results-card", "style"),
             Output("simulation-data", "data"),
+            Output("simulation-running", "data", allow_duplicate=True),
         ],
         [
             Input("run-simulation", "n_clicks"),
@@ -87,8 +88,14 @@ def register_callbacks(app) -> None:  # type: ignore
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-    ) -> Tuple[Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any]]:
-        from ..cantera_converter import CanteraConverter, DualCanteraConverter
+    ) -> Tuple[
+        Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any], bool
+    ]:
+        from ..cantera_converter import (
+            CanteraConverter,
+            DualCanteraConverter,
+            get_plugins,
+        )
         from ..config import USE_DUAL_CONVERTER
         from ..utils import apply_theme_to_figure
 
@@ -102,6 +109,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 {"display": "none"},
                 {"display": "none"},
                 {},
+                False,
             )
 
         # Determine the mechanism to use
@@ -123,13 +131,16 @@ def register_callbacks(app) -> None:  # type: ignore
 
         try:
             if USE_DUAL_CONVERTER:
-                dual_converter = DualCanteraConverter(mechanism=mechanism)
+                dual_converter = DualCanteraConverter(
+                    mechanism=mechanism, plugins=get_plugins()
+                )
                 network, results, code_str = dual_converter.build_network_and_code(
                     config
                 )
             else:
-                single_converter = CanteraConverter(mechanism=mechanism)
-                network, results = single_converter.build_network(config)
+                # Build using a fresh converter with discovered plugins
+                converter = CanteraConverter(mechanism=mechanism, plugins=get_plugins())
+                network, results = converter.build_network(config)
                 code_str = ""
 
             # Build initial plots from the first available reactor (no strict need)
@@ -187,11 +198,14 @@ def register_callbacks(app) -> None:  # type: ignore
                 {"display": "none"},
                 {"display": "block"},
                 simulation_data,
+                False,
             )
 
         except Exception as e:
             message = f"Error during simulation: {str(e)}"
             print(f"ERROR: {message}")
+            # IMPORTANT: update simulation-data with a non-empty payload so the
+            # overlay-clearing callback (listening to simulation-data) fires.
             return (
                 go.Figure(),
                 go.Figure(),
@@ -200,8 +214,15 @@ def register_callbacks(app) -> None:  # type: ignore
                 message,
                 {"display": "block", "color": "red"},
                 {"display": "none"},
-                {},
+                {"error": message},
+                False,
             )
+        finally:
+            # Safety net: if any future refactor throws before returns,
+            # the overlay will still be cleared by downstream callback since we
+            # always return a value in both success and error paths above.
+            # No-op here intentionally.
+            ...
 
     # Overlay style now handled client-side for zero-lag responsiveness
 

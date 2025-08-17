@@ -13,7 +13,7 @@
 **Traditional YAML format:**
 
 ```yaml
-components:
+nodes:
   - id: reactor1
     type: IdealGasReactor
     properties:
@@ -24,7 +24,7 @@ components:
 **YAML with 🪨 STONE standard:**
 
 ```yaml
-components:
+nodes:
   - id: reactor1
     IdealGasReactor:
       temperature: 1000      # K
@@ -57,7 +57,7 @@ simulation:
   relative_tolerance: 1.0e-6
   absolute_tolerance: 1.0e-9
 
-components:
+nodes:
   - id: component_id
     ComponentType:
       property1: value1
@@ -78,7 +78,7 @@ connections:
 #### IdealGasReactor
 
 ```yaml
-components:
+nodes:
   - id: reactor1
     IdealGasReactor:
       temperature: 1000      # K
@@ -90,7 +90,7 @@ components:
 #### Reservoir
 
 ```yaml
-components:
+nodes:
   - id: inlet
     Reservoir:
       temperature: 300       # K
@@ -140,7 +140,7 @@ simulation:
   max_time: 10.0
   solver: "CVODE_BDF"
 
-components:
+nodes:
   - id: reactor1
     IdealGasReactor:
       temperature: 1000      # K
@@ -162,7 +162,7 @@ connections:
 
 ### 📁 sample_configs2.yaml
 
-Extended configuration with multiple components:
+Extended configuration with multiple nodes:
 
 ```yaml
 metadata:
@@ -170,7 +170,7 @@ metadata:
   description: "Multi-component reactor system with different flow controllers"
   version: "2.0"
 
-components:
+nodes:
   - id: reactor1
     IdealGasReactor:
       temperature: 1200      # K
@@ -213,7 +213,7 @@ metadata:
   description: "Complex multi-reactor network with interconnected streams"
   version: "3.0"
 
-components:
+nodes:
   - id: reactor1
     IdealGasReactor:
       temperature: 1100      # K
@@ -262,7 +262,7 @@ metadata:
 simulation:
   mechanism: "gri30.yaml"
 
-components:
+nodes:
   - id: res_in
     Reservoir:
       temperature: 300       # K

@@ -46,7 +46,7 @@ simulation:
   dt: 0.01       # seconds - integration time step
 
 # Reactor components with detailed comments and units
-components:
+nodes:
   - id: "reactor1"
     # Primary combustion chamber - high temperature operation
     IdealGasReactor:
@@ -126,8 +126,8 @@ connections:
 
         # Verify the data structure is loaded correctly
         assert result["metadata"]["name"] == "Test Configuration"
-        assert result["components"][0]["id"] == "reactor1"
-        assert result["components"][0]["IdealGasReactor"]["temperature"] == 1000.0
+        assert result["nodes"][0]["id"] == "reactor1"
+        assert result["nodes"][0]["IdealGasReactor"]["temperature"] == 1000.0
         assert result["connections"][0]["id"] == "mfc1"
         assert result["connections"][0]["MassFlowController"]["mass_flow_rate"] == 0.001
 
@@ -142,7 +142,7 @@ connections:
         # Verify it's a valid YAML string with substantial content
         assert isinstance(result, str)
         assert "metadata:" in result
-        assert "components:" in result
+        assert "nodes:" in result
         assert "connections:" in result
         assert len(result) > 100
 
@@ -159,7 +159,7 @@ connections:
                 "version": "2.0",
             },
             "simulation": {"end_time": 2.0, "dt": 0.02},
-            "components": [
+            "nodes": [
                 {
                     "id": "reactor1",
                     "IdealGasReactor": {
@@ -178,17 +178,15 @@ connections:
         assert updated_data["metadata"]["name"] == "Updated Configuration"
         assert updated_data["metadata"]["version"] == "2.0"
         assert updated_data["simulation"]["end_time"] == 2.0
-        assert updated_data["components"][0]["IdealGasReactor"]["temperature"] == 1100.0
+        assert updated_data["nodes"][0]["IdealGasReactor"]["temperature"] == 1100.0
 
     def test_preserves_numeric_types(self, sample_yaml_with_comments):
         """Test that numeric types are preserved correctly."""
         data = load_yaml_string_with_comments(sample_yaml_with_comments)
 
         # Check that numbers are loaded as proper types
-        assert isinstance(
-            data["components"][0]["IdealGasReactor"]["temperature"], float
-        )
-        assert isinstance(data["components"][0]["IdealGasReactor"]["pressure"], float)
+        assert isinstance(data["nodes"][0]["IdealGasReactor"]["temperature"], float)
+        assert isinstance(data["nodes"][0]["IdealGasReactor"]["pressure"], float)
         assert isinstance(data["simulation"]["end_time"], float)
         assert isinstance(data["simulation"]["dt"], float)
 
@@ -198,8 +196,8 @@ connections:
 
         # Check that strings are loaded correctly
         assert isinstance(data["metadata"]["name"], str)
-        assert isinstance(data["components"][0]["id"], str)
-        assert isinstance(data["components"][0]["IdealGasReactor"]["composition"], str)
+        assert isinstance(data["nodes"][0]["id"], str)
+        assert isinstance(data["nodes"][0]["IdealGasReactor"]["composition"], str)
 
 
 class TestYAMLCommentRoundTrip:
@@ -216,7 +214,7 @@ metadata:
 simulation:
   end_time: 1.0  # seconds
 
-components:
+nodes:
   - id: "test_reactor"
     IdealGasReactor:
       temperature: 1200.0  # K
@@ -232,16 +230,16 @@ components:
         internal_config = normalize_config(loaded_data)
 
         # Verify internal format is correct
-        assert internal_config["components"][0]["type"] == "IdealGasReactor"
-        assert "properties" in internal_config["components"][0]
-        assert internal_config["components"][0]["properties"]["temperature"] == 1200.0
+        assert internal_config["nodes"][0]["type"] == "IdealGasReactor"
+        assert "properties" in internal_config["nodes"][0]
+        assert internal_config["nodes"][0]["properties"]["temperature"] == 1200.0
 
         # Convert back to STONE format
         stone_config = convert_to_stone_format(internal_config)
 
         # Verify STONE format
-        assert "IdealGasReactor" in stone_config["components"][0]
-        assert stone_config["components"][0]["id"] == "test_reactor"
+        assert "IdealGasReactor" in stone_config["nodes"][0]
+        assert stone_config["nodes"][0]["id"] == "test_reactor"
 
         # Convert to YAML string
         yaml_string = yaml_to_string_with_comments(stone_config)
@@ -286,47 +284,36 @@ components:
         assert "1300" in result_yaml  # Updated temperature
         assert "Updated Round Trip Test" in result_yaml
 
-    def test_stone_format_integration_with_comments(self, sample_yaml_with_comments):
-        """Test integration between STONE format and comment preservation."""
+    def test_stone_format_round_trip_with_comments(self, sample_yaml_with_comments):
+        """Test that STONE format configurations survive round-trip processing with comment preservation.
+
+        Expectation: After converting STONE→internal→STONE→comment preservation→YAML→reload,
+        the final configuration should contain the original reactor data with correct values.
+        """
         from boulder.config import normalize_config
 
-        # Load original YAML with comments
+        # Simulate the full application workflow for config processing
         original_data = load_yaml_string_with_comments(sample_yaml_with_comments)
-
-        # Convert to internal format (as the app does)
         internal_config = normalize_config(original_data)
-
-        # Convert back to STONE format (for editing)
         stone_config = convert_to_stone_format(internal_config)
-
-        # Update preserving original structure
         updated_data = _update_yaml_preserving_comments(original_data, stone_config)
-
-        # Convert back to YAML string
         final_yaml = yaml_to_string_with_comments(updated_data)
-
-        # Verify content is preserved
-        assert "test_reactor" in final_yaml
-        assert "1200" in final_yaml
-
-        # Load the final result to verify it's valid
         final_data = load_yaml_string_with_comments(final_yaml)
 
-        # Check both possible formats for robustness
-        if "IdealGasReactor" in final_data["components"][0]:
-            # STONE format
-            assert (
-                final_data["components"][0]["IdealGasReactor"]["temperature"] == 1200.0
-            )
-        elif "type" in final_data["components"][0]:
-            # Internal format (current behavior)
-            assert final_data["components"][0]["type"] == "IdealGasReactor"
-            assert final_data["components"][0]["properties"]["temperature"] == 1200.0
-        else:
-            # Unexpected format
-            pytest.fail(
-                f"Unexpected component format: {list(final_data['components'][0].keys())}"
-            )
+        # Single expectation: The test_reactor should exist with correct temperature and pressure values
+        assert "nodes" in final_data, "Final data should have nodes section"
+        assert len(final_data["nodes"]) > 0, "Should have at least one node"
+
+        node = final_data["nodes"][0]
+        assert node["id"] == "test_reactor", "Node ID should be preserved"
+
+        # After round-trip processing, we expect internal format (type and properties)
+        assert node["type"] == "IdealGasReactor", "Node type should be IdealGasReactor"
+        assert "properties" in node, "Node should have properties section"
+
+        reactor_data = node["properties"]
+        assert reactor_data["temperature"] == 1200.0, "Temperature should be preserved"
+        assert reactor_data["pressure"] == 101325.0, "Pressure should be preserved"
 
 
 class TestYAMLCommentIntegration:
@@ -341,7 +328,7 @@ class TestYAMLCommentIntegration:
             assert len(original_yaml) > 0
 
             # Verify the original YAML contains expected sections
-            if "components:" in original_yaml:
+            if "nodes:" in original_yaml:
                 assert "metadata:" in original_yaml
 
         except FileNotFoundError:
@@ -355,7 +342,7 @@ class TestYAMLCommentIntegration:
         sample_yaml = """# Test upload
 metadata:
   name: "Upload Test"
-components:
+nodes:
   - id: "upload_reactor"
     IdealGasReactor:
       temperature: 900.0  # K
@@ -374,7 +361,7 @@ components:
 
         # Verify the data loaded correctly
         assert decoded["metadata"]["name"] == "Upload Test"
-        assert decoded["components"][0]["IdealGasReactor"]["temperature"] == 900.0
+        assert decoded["nodes"][0]["IdealGasReactor"]["temperature"] == 900.0
 
         # Verify we can convert back with comments preserved
         yaml_output = yaml_to_string_with_comments(decoded)
@@ -426,7 +413,7 @@ metadata:
         empty_sections_yaml = """# Config with empty sections
 metadata:
   name: "Empty Sections"
-components: []  # no components
+nodes: []  # no nodes
 connections: []  # no connections
 """
 
@@ -439,7 +426,7 @@ connections: []  # no connections
     def test_units_preservation_examples(self):
         """Test preservation of various unit formats in comments."""
         units_yaml = """# Configuration with various unit formats
-components:
+nodes:
   - id: "test"
     IdealGasReactor:
       temperature: 1000.0    # K (Kelvin)
@@ -455,7 +442,7 @@ components:
 
         # Verify numeric values are preserved correctly
         reloaded = load_yaml_string_with_comments(result)
-        reactor_props = reloaded["components"][0]["IdealGasReactor"]
+        reactor_props = reloaded["nodes"][0]["IdealGasReactor"]
 
         assert reactor_props["temperature"] == 1000.0
         assert reactor_props["pressure"] == 101325
@@ -485,7 +472,7 @@ simulation:
   dt: 0.01       # seconds - time step
 
 # Reactor components with detailed comments
-components:
+nodes:
   - id: "file_reactor"
     # Ideal gas reactor for file testing
     IdealGasReactor:
@@ -505,7 +492,7 @@ components:
 
         # Verify the data was loaded correctly
         assert loaded_data["metadata"]["name"] == "File Test Configuration"
-        assert loaded_data["components"][0]["IdealGasReactor"]["temperature"] == 1000.0
+        assert loaded_data["nodes"][0]["IdealGasReactor"]["temperature"] == 1000.0
 
 
 if __name__ == "__main__":

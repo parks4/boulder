@@ -77,11 +77,11 @@ def register_callbacks(app) -> None:  # type: ignore
             "type": trigger_data["type"],
             "properties": trigger_data["properties"],
         }
-        if any(comp["id"] == new_reactor["id"] for comp in config["components"]):
+        if any(node["id"] == new_reactor["id"] for node in config["nodes"]):
             return dash.no_update
 
-        new_components = [*config.get("components", []), new_reactor]
-        new_config = {**config, "components": new_components}
+        new_nodes = [*config.get("nodes", []), new_reactor]
+        new_config = {**config, "nodes": new_nodes}
         return new_config
 
     # STEP 1: Trigger MFC addition and close modal immediately

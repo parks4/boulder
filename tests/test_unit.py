@@ -19,20 +19,20 @@ class TestBoulderConfig:
         config = get_initial_config()
 
         assert isinstance(config, dict)
-        assert "components" in config
+        assert "nodes" in config
         assert "connections" in config
-        assert isinstance(config["components"], list)
+        assert isinstance(config["nodes"], list)
         assert isinstance(config["connections"], list)
 
     def test_get_initial_config_components(self):
         """Test initial config components have required fields."""
         config = get_initial_config()
 
-        for component in config["components"]:
-            assert "id" in component
-            assert "type" in component
-            assert "properties" in component
-            assert isinstance(component["properties"], dict)
+        for node in config["nodes"]:
+            assert "id" in node
+            assert "type" in node
+            assert "properties" in node
+            assert isinstance(node["properties"], dict)
 
 
 @pytest.mark.unit
@@ -41,14 +41,14 @@ class TestBoulderUtils:
 
     def test_config_to_cyto_elements_empty_config(self):
         """Test config conversion with empty config."""
-        config = {"components": [], "connections": []}
+        config = {"nodes": [], "connections": []}
         elements = config_to_cyto_elements(config)
         assert elements == []
 
     def test_config_to_cyto_elements_with_connection(self):
         """Test config conversion with reactor and connection."""
         config = {
-            "components": [
+            "nodes": [
                 {"id": "reactor1", "type": "IdealGasReactor", "properties": {}},
                 {"id": "reactor2", "type": "IdealGasReactor", "properties": {}},
             ],
@@ -109,23 +109,19 @@ class TestBoulderCallbacks:
     def test_duplicate_reactor_detection(self):
         """Test duplicate reactor ID detection logic."""
         config = {
-            "components": [
+            "nodes": [
                 {"id": "existing-reactor", "type": "IdealGasReactor", "properties": {}}
             ]
         }
 
         # Test adding reactor with existing ID
         new_reactor_id = "existing-reactor"
-        has_duplicate = any(
-            comp["id"] == new_reactor_id for comp in config["components"]
-        )
+        has_duplicate = any(node["id"] == new_reactor_id for node in config["nodes"])
         assert has_duplicate is True
 
         # Test adding reactor with new ID
         new_reactor_id = "new-reactor"
-        has_duplicate = any(
-            comp["id"] == new_reactor_id for comp in config["components"]
-        )
+        has_duplicate = any(node["id"] == new_reactor_id for node in config["nodes"])
         assert has_duplicate is False
 
     def test_mfc_validation_logic(self):
@@ -171,19 +167,19 @@ class TestBoulderCallbacks:
         """Test JSON configuration validation."""
         # Test valid JSON
         valid_json = (
-            '{"components": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}], '
+            '{"nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}], '
             '"connections": []}'
         )
         try:
             parsed = json.loads(valid_json)
-            assert "components" in parsed
+            assert "nodes" in parsed
             assert "connections" in parsed
-            assert len(parsed["components"]) == 1
+            assert len(parsed["nodes"]) == 1
         except json.JSONDecodeError:
             pytest.fail("Valid JSON should parse successfully")
 
         # Test invalid JSON
-        invalid_json = '{"components": [}, "connections": []}'
+        invalid_json = '{"nodes": [}, "connections": []}'
         with pytest.raises(json.JSONDecodeError):
             json.loads(invalid_json)
 
