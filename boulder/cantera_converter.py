@@ -201,9 +201,11 @@ class CanteraConverter:
             # Default MassFlowController implementation
             mfc = ct.MassFlowController(source, target)
             mfc.mass_flow_rate = float(props.get("mass_flow_rate", 0.1))
+            flow_device = mfc
         elif conn_type == "Valve":
             valve = ct.Valve(source, target)
             valve.valve_coeff = float(props.get("valve_coeff", 1.0))
+            flow_device = valve
         elif conn_type == "Wall":
             # Handle walls as energy connections (e.g., torch power or losses)
             # After validation, electric_power_kW is converted to kilowatts if it had units
