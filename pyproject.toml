@@ -36,6 +36,7 @@ dev = [
 
 [project.scripts]
 boulder = "boulder.cli:main"
+sim2stone = "boulder.sim2stone_cli:main"
 
 [tool.coverage.run]
 branch = true
