@@ -1,0 +1,9 @@
+# Invalid: duplicate node id
+nodes:
+- id: r1
+  IdealGasReactor:
+    temperature: 300
+- id: r1
+  IdealGasReactor:
+    temperature: 400
+connections: []

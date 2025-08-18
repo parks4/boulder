@@ -5,6 +5,10 @@ import base64
 import dash
 from dash import Input, Output, State
 
+from ..verbose_utils import get_verbose_logger, is_verbose_mode
+
+logger = get_verbose_logger(__name__)
+
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register notification-related callbacks."""
@@ -44,13 +48,30 @@ def register_callbacks(app) -> None:  # type: ignore
 
         # Config upload
         if trigger == "upload-config" and upload_contents:
+            if is_verbose_mode():
+                logger.info(f"Processing uploaded config file: {upload_filename}")
             try:
                 import yaml
 
                 content_type, content_string = upload_contents.split(",")
                 decoded_string = base64.b64decode(content_string).decode("utf-8")
+
+                if is_verbose_mode():
+                    logger.info(
+                        f"File content preview (first 200 chars): {decoded_string[:200]}..."
+                    )
+
                 # Validate as YAML (STONE standard) instead of JSON
-                yaml.safe_load(decoded_string)
+                parsed_yaml = yaml.safe_load(decoded_string)
+
+                if is_verbose_mode():
+                    keys_info = (
+                        list(parsed_yaml.keys())
+                        if isinstance(parsed_yaml, dict)
+                        else "Not a dict"
+                    )
+                    logger.info(f"YAML parsed successfully. Keys: {keys_info}")
+
                 return (
                     True,
                     f"✅ Configuration loaded from {upload_filename}",
@@ -59,7 +80,13 @@ def register_callbacks(app) -> None:  # type: ignore
                 )
             except Exception as e:
                 message = f"Could not parse file {upload_filename}. Error: {e}"
-                print(f"ERROR: {message}")
+                if is_verbose_mode():
+                    logger.error(
+                        f"File upload failed for {upload_filename}: {message}",
+                        exc_info=True,
+                    )
+                else:
+                    print(f"ERROR: {message}")
                 return (
                     True,
                     message,

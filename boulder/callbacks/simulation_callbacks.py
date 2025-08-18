@@ -9,6 +9,12 @@ import dash
 import plotly.graph_objects as go  # type: ignore
 from dash import Input, Output, State
 
+from ..verbose_utils import get_verbose_logger, is_verbose_mode
+
+logger = get_verbose_logger(__name__)
+
+REPORT_FRACTION_TRESHOLD = 1e-7  # 0.1 ppm cutoff for thermo report
+
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
@@ -89,7 +95,15 @@ def register_callbacks(app) -> None:  # type: ignore
         custom_mechanism: str,
         uploaded_filename: str,
     ) -> Tuple[
-        Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any], bool
+        Any,
+        Any,
+        Any,
+        str,
+        Any,
+        Dict[str, str],
+        Dict[str, str],
+        Dict[str, Any],
+        bool,
     ]:
         from ..cantera_converter import (
             CanteraConverter,
@@ -98,6 +112,14 @@ def register_callbacks(app) -> None:  # type: ignore
         )
         from ..config import USE_DUAL_CONVERTER
         from ..utils import apply_theme_to_figure
+
+        if is_verbose_mode():
+            logger.info(
+                f"Starting simulation with config: {config_filename or 'default'}"
+            )
+            logger.info(
+                f"Mechanism: {mechanism_select}, Custom mechanism: {bool(custom_mechanism)}"
+            )
 
         if not n_clicks or not config:
             return (
@@ -160,7 +182,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 temp_fig.update_layout(
                     title=f"Temperature vs Time — {first_id}",
                     xaxis_title="Time (s)",
-                    yaxis_title="Temperature (K)",
+                    yaxis_title="Temperature (°C)",
                 )
                 temp_fig = apply_theme_to_figure(temp_fig, theme)
 
@@ -193,24 +215,15 @@ def register_callbacks(app) -> None:  # type: ignore
             try:
                 for reactor_id, reactor in reactors_dict.items():
                     try:
-                        reactor_report = reactor.report()
+                        thermo_report = reactor.thermo.report(
+                            threshold=REPORT_FRACTION_TRESHOLD
+                        )
                     except Exception:
-                        reactor_report = ""
-
-                    try:
-                        thermo_report = reactor.thermo.report()
-                    except Exception:
-                        # Canterasupports calling the object directly
-                        try:
-                            thermo_callable = getattr(reactor.thermo, "__call__", None)
-                            thermo_report = (
-                                thermo_callable() if callable(thermo_callable) else ""
-                            )
-                        except Exception:
-                            thermo_report = ""
+                        # Cantera supports calling the object directly
+                        thermo_report = ""
 
                     reactor_reports[reactor_id] = {
-                        "reactor_report": reactor_report,
+                        "reactor_report": str(reactor),
                         "thermo_report": thermo_report,
                     }
             except Exception:
@@ -238,7 +251,10 @@ def register_callbacks(app) -> None:  # type: ignore
 
         except Exception as e:
             message = f"Error during simulation: {str(e)}"
-            print(f"ERROR: {message}")
+            if is_verbose_mode():
+                logger.error(f"Simulation failed: {message}", exc_info=True)
+            else:
+                print(f"ERROR: {message}")
             # IMPORTANT: update simulation-data with a non-empty payload so the
             # overlay-clearing callback (listening to simulation-data) fires.
             return (
@@ -248,7 +264,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 "",
                 message,
                 {"display": "block", "color": "red"},
-                {"display": "none"},
+                {"display": "block"},
                 {"error": message},
                 False,
             )
@@ -512,7 +528,7 @@ def register_callbacks(app) -> None:  # type: ignore
         temp_fig.update_layout(
             title=f"Temperature vs Time — {node_id}",
             xaxis_title="Time (s)",
-            yaxis_title="Temperature (K)",
+            yaxis_title="Temperature (°C)",
         )
         temp_fig = apply_theme_to_figure(temp_fig, theme)
 

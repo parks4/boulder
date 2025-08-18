@@ -24,6 +24,7 @@ from boulder.config import (
     normalize_config,
     yaml_to_string_with_comments,
 )
+from boulder.validation import validate_normalized_config
 
 
 class TestYAMLCommentCore:
@@ -228,6 +229,8 @@ nodes:
 
         # Normalize to internal format
         internal_config = normalize_config(loaded_data)
+        # Validate post-normalization
+        validate_normalized_config(internal_config)
 
         # Verify internal format is correct
         assert internal_config["nodes"][0]["type"] == "IdealGasReactor"
@@ -295,6 +298,8 @@ nodes:
         # Simulate the full application workflow for config processing
         original_data = load_yaml_string_with_comments(sample_yaml_with_comments)
         internal_config = normalize_config(original_data)
+        # Validate post-normalization
+        validate_normalized_config(internal_config)
         stone_config = convert_to_stone_format(internal_config)
         updated_data = _update_yaml_preserving_comments(original_data, stone_config)
         final_yaml = yaml_to_string_with_comments(updated_data)

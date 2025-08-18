@@ -192,7 +192,7 @@ def label_with_unit(key: str) -> str:
     unit_map = {
         "pressure": "pressure (Pa)",
         "composition": "composition (%mol)",
-        "temperature": "temperature (K)",
+        "temperature": "temperature (°C)",
         "mass_flow_rate": "mass flow rate (kg/s)",
         "volume": "volume (m³)",
         "valve_coeff": "valve coefficient (-)",

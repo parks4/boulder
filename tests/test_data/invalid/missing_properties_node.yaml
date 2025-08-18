@@ -1,0 +1,6 @@
+# Invalid: properties not a mapping in normalized form
+nodes:
+- id: r1
+  type: IdealGasReactor
+  properties: 42
+connections: []

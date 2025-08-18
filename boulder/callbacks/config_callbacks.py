@@ -6,6 +6,10 @@ import dash
 import yaml
 from dash import Input, Output, State, dcc, html
 
+from ..verbose_utils import get_verbose_logger, is_verbose_mode
+
+logger = get_verbose_logger(__name__)
+
 # Configure YAML to preserve dict order without Python tags
 yaml.add_representer(
     dict,
@@ -87,6 +91,7 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("current-config", "data"),
             Output("config-file-name", "data"),
             Output("original-yaml-with-comments", "data"),
+            Output("upload-config", "contents"),  # Add this to reset upload contents
         ],
         [
             Input("upload-config", "contents"),
@@ -119,6 +124,7 @@ def register_callbacks(app) -> None:  # type: ignore
                     from ..config import (
                         load_yaml_string_with_comments,
                         normalize_config,
+                        validate_config,
                     )
 
                     # Use comment-preserving YAML loader
@@ -130,18 +136,27 @@ def register_callbacks(app) -> None:  # type: ignore
 
                     # Normalize from YAML with 🪨 STONE standard to internal format
                     normalized = normalize_config(decoded)
-                    return normalized, upload_filename, decoded_string
+                    # Validate the configuration (this will also convert units)
+                    normalized = validate_config(normalized)
+                    if is_verbose_mode():
+                        logger.info(
+                            f"Successfully loaded configuration file: {upload_filename}"
+                        )
+                    return normalized, upload_filename, decoded_string, dash.no_update
                 else:
                     print(
                         "Only YAML format with 🪨 STONE standard (.yaml/.yml) files are supported. Got:"
                         f" {upload_filename}"
                     )
-                    return dash.no_update, "", ""
+                    return dash.no_update, "", "", dash.no_update
             except Exception as e:
-                print(f"Error processing uploaded file: {e}")
-                return dash.no_update, "", ""
+                if is_verbose_mode():
+                    logger.error(f"Error processing uploaded file: {e}", exc_info=True)
+                else:
+                    print(f"Error processing uploaded file: {e}")
+                return dash.no_update, "", "", dash.no_update
         elif trigger == "delete-config-file" and delete_n_clicks:
-            return get_initial_config(), "", ""
+            return get_initial_config(), "", "", None  # Reset upload contents to None
         else:
             raise dash.exceptions.PreventUpdate
 

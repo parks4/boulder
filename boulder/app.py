@@ -1,3 +1,4 @@
+import logging
 import os
 
 import dash
@@ -10,7 +11,6 @@ from . import (
 )
 from .config import (
     get_config_from_path_with_comments,
-    get_initial_config,
     get_initial_config_with_comments,
 )
 from .layout import get_layout
@@ -43,24 +43,20 @@ app = dash.Dash(
 server = app.server  # Expose the server for deployment
 
 # Load initial configuration with optional override via environment variable
-try:
-    # Allow overriding the initial configuration via environment variable
-    # Use either BOULDER_CONFIG_PATH or BOULDER_CONFIG for convenience
-    env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
-        "BOULDER_CONFIG"
-    )
+# Allow overriding the initial configuration via environment variable
+# Use either BOULDER_CONFIG_PATH or BOULDER_CONFIG for convenience
+env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
+    "BOULDER_CONFIG"
+)
 
-    if env_config_path and env_config_path.strip():
-        cleaned = env_config_path.strip()
-        initial_config, original_yaml = get_config_from_path_with_comments(cleaned)
-        # When a specific file is provided, propagate its base name to the UI store
-        provided_filename = os.path.basename(cleaned)
-    else:
-        initial_config, original_yaml = get_initial_config_with_comments()
-except Exception as e:
-    print(f"Warning: Could not load config with comments, using standard loader: {e}")
-    initial_config = get_initial_config()
-    original_yaml = ""
+if env_config_path and env_config_path.strip():
+    cleaned = env_config_path.strip()
+    initial_config, original_yaml = get_config_from_path_with_comments(cleaned)
+    # When a specific file is provided, propagate its base name to the UI store
+    provided_filename = os.path.basename(cleaned)
+else:
+    initial_config, original_yaml = get_initial_config_with_comments()
+
 
 # Set the layout
 app.layout = get_layout(
@@ -74,6 +70,41 @@ app.layout = get_layout(
 callbacks.register_callbacks(app)
 
 
-def run_server(debug: bool = False, host: str = "0.0.0.0", port: int = 8050) -> None:
+def run_server(
+    debug: bool = False, host: str = "0.0.0.0", port: int = 8050, verbose: bool = False
+) -> None:
     """Run the Dash server."""
+    if verbose:
+        # Configure logging for verbose output
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        logger = logging.getLogger(__name__)
+        logger.info("Boulder server starting in verbose mode")
+        logger.info(f"Server configuration: host={host}, port={port}, debug={debug}")
+
+        # Check for potential port conflicts and log them
+        import socket
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, port))
+                logger.info(f"Port {port} is available for binding")
+        except OSError as e:
+            logger.warning(
+                f"Port {port} binding check failed: {e} "
+                f"(this is normal if CLI already handled port conflicts)"
+            )
+
+        # Log initial configuration details
+        env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
+            "BOULDER_CONFIG"
+        )
+        if env_config_path:
+            logger.info(f"Loading configuration from: {env_config_path}")
+        else:
+            logger.info("Using default configuration")
+
     app.run(debug=debug, host=host, port=port)

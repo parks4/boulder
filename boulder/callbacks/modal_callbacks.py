@@ -118,31 +118,23 @@ def register_callbacks(app) -> None:  # type: ignore
 
             # If we have original YAML with comments, try to preserve them
             if original_yaml and original_yaml.strip():
-                try:
-                    # Load original YAML with comments
-                    original_data = load_yaml_string_with_comments(original_yaml)
+                # Load original YAML with comments
+                original_data = load_yaml_string_with_comments(original_yaml)
 
-                    # Check if the config has actually changed by comparing the original with new stone config
-                    original_normalized = normalize_config(original_data)
-                    if original_normalized == config:
-                        # Config hasn't changed, use original YAML directly
-                        yaml_str = original_yaml
-                    else:
-                        # Config has changed, update while preserving comments
-                        updated_data = _update_yaml_preserving_comments(
-                            original_data, stone_config
-                        )
-                        yaml_str = yaml_to_string_with_comments(updated_data)
-                except Exception as e:
-                    print(f"Warning: Could not preserve comments: {e}")
-                    # Fallback to standard format
-                    yaml_str = yaml_to_string_with_comments(stone_config)
+                # Check if the config has actually changed by comparing the original with new stone config
+                original_normalized = normalize_config(original_data)
+                if original_normalized == config:
+                    # Config hasn't changed, use original YAML directly
+                    yaml_str = original_yaml
+                else:
+                    # Config has changed, update while preserving comments
+                    updated_data = _update_yaml_preserving_comments(
+                        original_data, stone_config
+                    )
+                    yaml_str = yaml_to_string_with_comments(updated_data)
             else:
                 # No original YAML, use standard format
-                try:
-                    yaml_str = yaml_to_string_with_comments(stone_config)
-                except Exception:
-                    yaml_str = yaml.dump(stone_config, sort_keys=False, indent=2)
+                yaml_str = yaml_to_string_with_comments(stone_config)
 
             textarea = dcc.Textarea(
                 id="config-yaml-editor",
@@ -180,7 +172,11 @@ def register_callbacks(app) -> None:  # type: ignore
             raise dash.exceptions.PreventUpdate
 
         try:
-            from ..config import load_yaml_string_with_comments, normalize_config
+            from ..config import (
+                load_yaml_string_with_comments,
+                normalize_config,
+                validate_config,
+            )
 
             # Try to use comment-preserving YAML loader first
             try:
@@ -190,8 +186,9 @@ def register_callbacks(app) -> None:  # type: ignore
                 new_config = yaml.safe_load(yaml_str)
 
             normalized_config = normalize_config(new_config)
+            validated_config = validate_config(normalized_config)
             # Update the original YAML store with the new YAML string to preserve comments for future edits
-            return normalized_config, False, yaml_str
+            return validated_config, False, yaml_str
         except yaml.YAMLError as e:
             print(f"YAML Error on save: {e}")
             # In a real app, you'd show an error to the user here

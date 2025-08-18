@@ -5,6 +5,7 @@ channels:
 dependencies:
 - cantera
 - dash
+- dash-bootstrap-components
 - dash-core-components
 - dash-extensions
 - dash-html-components
@@ -14,9 +15,11 @@ dependencies:
 - myst-parser
 - numpy
 - pandas
+- pint
 - pip
 - plotly
 - pre-commit
+- pydantic>=2.0.0
 - pydata-sphinx-theme
 - pytest
 - pytest-cov
@@ -30,4 +33,5 @@ dependencies:
   - pytest-html>=3.0.0
   - pytest-mock>=3.0.0
   - pytest-xvfb
+  - types-PyYAML>=6.0.0
 name: boulder
