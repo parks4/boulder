@@ -303,18 +303,31 @@ class NormalizedConfigModel(BaseModel):
                 else self.simulation.__dict__
             )
 
-            # Process each field
+            # Process each field and mirror updates into __dict__ for compatibility
+            coerced_updates: Dict[str, Any] = {}
             for key, value in sim_data.items():
                 if isinstance(value, str):
                     coerced = _coerce_value(value, key)
                     try:
                         setattr(self.simulation, key, coerced)
+                        # Ensure __dict__ contains coerced values for downstream consumers
+                        coerced_updates[key] = coerced
                     except Exception as e:
                         import logging
 
                         logging.warning(
                             f"Failed to set attribute '{key}' on simulation: {e}"
                         )
+
+            # In pydantic v2, extras may live outside __dict__. Update __dict__ for consumers
+            # that expect direct dict access (e.g., tests using model.simulation.__dict__).
+            if coerced_updates:
+                try:
+                    self.simulation.__dict__.update(coerced_updates)
+                except Exception:
+                    # Best-effort: if __dict__ is not writable, ignore silently
+                    # (attributes have already been set above).
+                    pass
 
 
 def validate_normalized_config(config: Dict[str, Any]) -> NormalizedConfigModel:
