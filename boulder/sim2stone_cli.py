@@ -140,6 +140,17 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Always print the created file path so callers can capture/chain it
     print(f"🪨 STONE file created in {output_path}")
+
+    # Validate the generated YAML (fail fast on errors)
+    from .config import load_config_file, normalize_config, validate_config
+
+    cfg = load_config_file(output_path)
+    normalized = normalize_config(cfg)
+    validated = validate_config(normalized)
+    num_nodes = len(validated.get("nodes", []))
+    num_conns = len(validated.get("connections", []))
+    print(f"Validated STONE YAML ({num_nodes} nodes, {num_conns} connections)")
+
     if args.verbose:
         print(f"[sim2stone] Done: {output_path}")
     return 0
