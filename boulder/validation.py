@@ -13,6 +13,21 @@ from typing import Any, Dict, List, Optional, Set
 from pint import UnitRegistry
 from pydantic import BaseModel, Field, validator
 
+# Unit suggestions for error messages
+UNIT_SUGGESTIONS = {
+    "celsius": "temperature units like 'degC', 'degF', 'K'",
+    "kelvin": "temperature units like 'degC', 'degF', 'K'",
+    "pascal": "pressure units like 'atm', 'bar', 'Pa', 'psi'",
+    "kilogram": "mass units like 'kg', 'g', 'lb'",
+    "meter**3": "volume units like 'm3', 'L', 'mL', 'ft3'",
+    "kilogram/second": "flow rate units like 'kg/s', 'g/min', 'lb/hr'",
+    "second": "time units like 's', 'ms', 'min', 'hr'",
+    "watt": "power units like 'W', 'kW', 'MW', 'hp'",
+    "kilowatt": "power units like 'kW', 'W', 'MW', 'hp'",
+    "joule": "energy units like 'J', 'kJ', 'cal', 'BTU'",
+    "meter": "length units like 'm', 'cm', 'ft', 'in'",
+}
+
 
 class SimulationModel(BaseModel):
     """Simulation section of the normalized config.
@@ -180,10 +195,20 @@ class NormalizedConfigModel(BaseModel):
                     if target_unit in ["kelvin", "celsius"]:
                         import re
 
-                        match = re.match(r"([+-]?\d*\.?\d+)\s*(\w+)", val.strip())
+                        match = re.match(
+                            r"([+-]?\d*\.?\d+)\s*([a-zA-Z°]+(?:[ -]?[a-zA-Z]+)*)",
+                            val.strip(),
+                        )
                         if match:
                             value, temp_unit = match.groups()
-                            value = float(value)
+                            try:
+                                value = float(value)
+                            except ValueError:
+                                raise ValueError(
+                                    f"Could not convert '{value}' to a float for property '{property_name}'. "
+                                    "Please ensure the value is a valid number followed by a "
+                                    "temperature unit, e.g. '25 degC', '77 degF', or '298 K'."
+                                )
                             temp_unit = temp_unit.lower()
 
                             # Convert to target temperature unit
@@ -212,20 +237,7 @@ class NormalizedConfigModel(BaseModel):
                     # Provide helpful error message with suggested units
                     # First try to get suggestions based on target unit
                     if target_unit:
-                        unit_suggestions = {
-                            "celsius": "temperature units like 'degC', 'degF', 'K'",
-                            "kelvin": "temperature units like 'degC', 'degF', 'K'",
-                            "pascal": "pressure units like 'atm', 'bar', 'Pa', 'psi'",
-                            "kilogram": "mass units like 'kg', 'g', 'lb'",
-                            "meter**3": "volume units like 'm3', 'L', 'mL', 'ft3'",
-                            "kilogram/second": "flow rate units like 'kg/s', 'g/min', 'lb/hr'",
-                            "second": "time units like 's', 'ms', 'min', 'hr'",
-                            "watt": "power units like 'W', 'kW', 'MW', 'hp'",
-                            "kilowatt": "power units like 'kW', 'W', 'MW', 'hp'",
-                            "joule": "energy units like 'J', 'kJ', 'cal', 'BTU'",
-                            "meter": "length units like 'm', 'cm', 'ft', 'in'",
-                        }
-                        suggestion = unit_suggestions.get(
+                        suggestion = UNIT_SUGGESTIONS.get(
                             target_unit, f"units compatible with {target_unit}"
                         )
                     else:
@@ -281,15 +293,28 @@ class NormalizedConfigModel(BaseModel):
         # Process simulation properties dynamically
         if isinstance(self.simulation, SimulationModel):
             # For simulation, we need to handle it differently since it's a Pydantic model
-            # with extra fields allowed. We'll process the __dict__ directly.
-            sim_dict = self.simulation.__dict__
-            for key, value in sim_dict.items():
+            # with extra fields allowed. In Pydantic v1, extra fields are stored in __fields_set__
+            # and accessible via dict() method or direct attribute access.
+
+            # Get all the simulation data as a dict
+            sim_data = (
+                self.simulation.dict()
+                if hasattr(self.simulation, "dict")
+                else self.simulation.__dict__
+            )
+
+            # Process each field
+            for key, value in sim_data.items():
                 if isinstance(value, str):
                     coerced = _coerce_value(value, key)
                     try:
                         setattr(self.simulation, key, coerced)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        import logging
+
+                        logging.warning(
+                            f"Failed to set attribute '{key}' on simulation: {e}"
+                        )
 
 
 def validate_normalized_config(config: Dict[str, Any]) -> NormalizedConfigModel:
