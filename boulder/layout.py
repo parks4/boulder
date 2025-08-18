@@ -171,7 +171,7 @@ def get_layout(
                                 ),
                                 dbc.Row(
                                     [
-                                        dbc.Label("Initial Temperature (K)", width=4),
+                                        dbc.Label("Initial Temperature (°C)", width=4),
                                         dbc.Col(
                                             dbc.Input(
                                                 id="reactor-temp",

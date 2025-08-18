@@ -206,10 +206,12 @@ class CanteraConverter:
             valve.valve_coeff = float(props.get("valve_coeff", 1.0))
         elif conn_type == "Wall":
             # Handle walls as energy connections (e.g., torch power or losses)
+            # After validation, electric_power_kW is converted to kilowatts if it had units
             electric_power_kW = float(props.get("electric_power_kW", 0.0))
             torch_eff = float(props.get("torch_eff", 1.0))
             gen_eff = float(props.get("gen_eff", 1.0))
             # Net heat rate into the target from the source (W)
+            # Convert from kW to W
             Q_watts = electric_power_kW * 1e3 * torch_eff * gen_eff
             wall = ct.Wall(source, target, A=1.0, Q=Q_watts, name=conn_config["id"])
             self.walls[conn_config["id"]] = wall
@@ -493,9 +495,11 @@ class DualCanteraConverter:
                 self.connections[cid].valve_coeff = coeff
             elif typ == "Wall":
                 # Handle walls as energy connections (e.g., torch power or losses)
+                # After validation, electric_power_kW is converted to kilowatts if it had units
                 electric_power_kW = float(props.get("electric_power_kW", 0.0))
                 torch_eff = float(props.get("torch_eff", 1.0))
                 gen_eff = float(props.get("gen_eff", 1.0))
+                # Convert from kW to W
                 Q_watts = electric_power_kW * 1e3 * torch_eff * gen_eff
                 self.code_lines.append(
                     f"{cid} = ct.Wall({src}, {tgt}, A=1.0, Q={Q_watts}, name='{cid}')"

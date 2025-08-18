@@ -65,9 +65,12 @@ def register_callbacks(app) -> None:  # type: ignore
                 parsed_yaml = yaml.safe_load(decoded_string)
 
                 if is_verbose_mode():
-                    logger.info(
-                        f"YAML parsed successfully. Keys: {list(parsed_yaml.keys()) if isinstance(parsed_yaml, dict) else 'Not a dict'}"
+                    keys_info = (
+                        list(parsed_yaml.keys())
+                        if isinstance(parsed_yaml, dict)
+                        else "Not a dict"
                     )
+                    logger.info(f"YAML parsed successfully. Keys: {keys_info}")
 
                 return (
                     True,

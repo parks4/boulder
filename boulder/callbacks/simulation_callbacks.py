@@ -174,7 +174,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 temp_fig.update_layout(
                     title=f"Temperature vs Time — {first_id}",
                     xaxis_title="Time (s)",
-                    yaxis_title="Temperature (K)",
+                    yaxis_title="Temperature (°C)",
                 )
                 temp_fig = apply_theme_to_figure(temp_fig, theme)
 
@@ -520,7 +520,7 @@ def register_callbacks(app) -> None:  # type: ignore
         temp_fig.update_layout(
             title=f"Temperature vs Time — {node_id}",
             xaxis_title="Time (s)",
-            yaxis_title="Temperature (K)",
+            yaxis_title="Temperature (°C)",
         )
         temp_fig = apply_theme_to_figure(temp_fig, theme)
 

@@ -94,7 +94,8 @@ def run_server(
                 logger.info(f"Port {port} is available for binding")
         except OSError as e:
             logger.warning(
-                f"Port {port} binding check failed: {e} (this is normal if CLI already handled port conflicts)"
+                f"Port {port} binding check failed: {e} "
+                f"(this is normal if CLI already handled port conflicts)"
             )
 
         # Log initial configuration details

@@ -36,7 +36,7 @@ def verbose_print(*args, **kwargs) -> None:
 
 
 def log_function_call(logger: logging.Logger) -> Callable:
-    """Decorator to log function calls in verbose mode."""
+    """Log function calls in verbose mode."""
 
     def decorator(func: Callable) -> Callable:
         @wraps(func)

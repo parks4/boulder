@@ -102,10 +102,135 @@ def test_unit_coercion_ctwrap_compatibility() -> None:
     normalized = normalize_config(data)
     model = validate_normalized_config(normalized)
 
-    # temperature: 500 degC = 773.15 K
-    assert abs(model.nodes[0].properties["temperature"] - 773.15) < 1e-6
+    # temperature: 500 degC = 500 C (no conversion needed, already in target unit)
+    assert abs(model.nodes[0].properties["temperature"] - 500.0) < 1e-6
     # pressure: 1 atm = 101325 Pa
     assert abs(model.nodes[0].properties["pressure"] - 101325.0) < 1e-6
     # dt: 10 ms = 0.01 s
     assert model.simulation is not None
     assert abs(getattr(model.simulation, "dt") - 0.01) < 1e-12
+
+
+@pytest.mark.unit
+def test_power_unit_coercion() -> None:
+    """Power units like kilowatt are properly converted to kilowatts."""
+    data = {
+        "nodes": [
+            {
+                "id": "r1",
+                "type": "IdealGasReactor",
+                "properties": {"temperature": "500 K", "pressure": "1 atm"},
+            },
+            {
+                "id": "r2",
+                "type": "IdealGasReactor",
+                "properties": {"temperature": "300 K", "pressure": "1 atm"},
+            },
+        ],
+        "connections": [
+            {
+                "id": "wall1",
+                "type": "Wall",
+                "source": "r1",
+                "target": "r2",
+                "properties": {
+                    "electric_power_kW": "550 kilowatt",  # This should work now
+                },
+            }
+        ],
+    }
+
+    normalized = normalize_config(data)
+    model = validate_normalized_config(normalized)
+
+    # electric_power_kW: 550 kilowatt = 550 kW (stays in kW due to special mapping)
+    assert abs(model.connections[0].properties["electric_power_kW"] - 550.0) < 1e-6
+
+
+@pytest.mark.unit
+def test_invalid_unit_error_message() -> None:
+    """Invalid units should provide helpful error messages with suggestions."""
+    data = {
+        "nodes": [
+            {
+                "id": "r1",
+                "type": "IdealGasReactor",
+                "properties": {
+                    "temperature": "500 invalid_unit",  # This should fail with helpful message
+                },
+            }
+        ],
+        "connections": [],
+    }
+
+    normalized = normalize_config(data)
+
+    with pytest.raises(ValueError) as exc_info:
+        validate_normalized_config(normalized)
+
+    error_msg = str(exc_info.value)
+    assert "Could not convert '500 invalid_unit'" in error_msg
+    assert "temperature units like 'degC', 'degF', 'K'" in error_msg
+    assert "for property 'temperature'" in error_msg
+
+
+@pytest.mark.unit
+def test_dynamic_unit_system_flexibility() -> None:
+    """Test that the dynamic unit system can handle various unit types without hardcoding."""
+    data = {
+        "nodes": [
+            {
+                "id": "r1",
+                "type": "IdealGasReactor",
+                "properties": {
+                    "temperature": "300 K",  # Already in target unit
+                    "pressure": "2 bar",  # Different pressure unit
+                    "mass": "5 g",  # Mass in grams
+                    "volume": "2 L",  # Volume in liters
+                    "custom_length": "10 cm",  # Custom property with length units
+                    "custom_energy": "1 kJ",  # Custom property with energy units
+                },
+            }
+        ],
+        "connections": [
+            {
+                "id": "mfc1",
+                "type": "MassFlowController",
+                "source": "r1",
+                "target": "r1",
+                "properties": {
+                    "mass_flow_rate": "0.1 g/min",  # Flow rate in different units
+                    "custom_power": "500 W",  # Custom power property
+                },
+            }
+        ],
+        "simulation": {
+            "dt": "1 ms",  # Time in milliseconds
+            "end_time": "10 min",  # Time in minutes
+        },
+    }
+
+    normalized = normalize_config(data)
+    model = validate_normalized_config(normalized)
+
+    # Check that all units were converted to their canonical forms
+    node = model.nodes[0]
+    assert abs(node.properties["temperature"] - 26.85) < 1e-6  # 300 K = 26.85 C
+    assert abs(node.properties["pressure"] - 200000.0) < 1e-6  # 2 bar = 200000 Pa
+    assert abs(node.properties["mass"] - 0.005) < 1e-6  # 5 g = 0.005 kg
+    assert abs(node.properties["volume"] - 0.002) < 1e-6  # 2 L = 0.002 m³
+    assert abs(node.properties["custom_length"] - 0.1) < 1e-6  # 10 cm = 0.1 m
+    assert abs(node.properties["custom_energy"] - 1000.0) < 1e-6  # 1 kJ = 1000 J
+
+    conn = model.connections[0]
+    assert (
+        abs(conn.properties["mass_flow_rate"] - 0.1 / 60 / 1000) < 1e-9
+    )  # 0.1 g/min to kg/s
+    assert (
+        abs(conn.properties["custom_power"] - 500.0) < 1e-6
+    )  # 500 W (no conversion needed)
+
+    # Check simulation properties
+    sim_dict = model.simulation.__dict__
+    assert abs(sim_dict["dt"] - 0.001) < 1e-6  # 1 ms = 0.001 s
+    assert abs(sim_dict["end_time"] - 600.0) < 1e-6  # 10 min = 600 s

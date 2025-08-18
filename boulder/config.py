@@ -181,7 +181,7 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     from .validation import validate_normalized_config
 
     model = validate_normalized_config(config)
-    return model.model_dump()
+    return model.dict()
 
 
 def get_initial_config() -> Dict[str, Any]:
