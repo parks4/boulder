@@ -7,8 +7,9 @@ from typing import Any, Dict, List, Tuple, Union
 
 import dash
 import plotly.graph_objects as go  # type: ignore
-from dash import Input, Output, State
+from dash import Input, Output, State, dcc
 
+from ..simulation_worker import get_simulation_worker
 from ..verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
@@ -60,22 +61,14 @@ def register_callbacks(app) -> None:  # type: ignore
                 "color": "red",
             }
 
-    # Callback to run simulation and update plots
+    # Callback to start streaming simulation
     @app.callback(
         [
-            Output("temperature-plot", "figure"),
-            Output("pressure-plot", "figure"),
-            Output("species-plot", "figure"),
-            Output("last-sim-python-code", "data"),
-            Output("simulation-error-display", "children"),
-            Output("simulation-error-display", "style"),
-            Output("simulation-results-card", "style"),
-            Output("simulation-data", "data"),
+            Output("simulation-progress-interval", "disabled"),
             Output("simulation-running", "data", allow_duplicate=True),
         ],
         [
             Input("run-simulation", "n_clicks"),
-            Input("theme-store", "data"),
         ],
         [
             State("current-config", "data"),
@@ -86,53 +79,32 @@ def register_callbacks(app) -> None:  # type: ignore
         ],
         prevent_initial_call=True,
     )
-    def run_simulation(
+    def start_streaming_simulation(
         n_clicks: int,
-        theme: str,
         config: Dict[str, Any],
         config_filename: str,
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-    ) -> Tuple[
-        Any,
-        Any,
-        Any,
-        str,
-        Any,
-        Dict[str, str],
-        Dict[str, str],
-        Dict[str, Any],
-        bool,
-    ]:
+    ) -> Tuple[bool, bool]:
+        """Start a background simulation with streaming updates."""
         from ..cantera_converter import (
             CanteraConverter,
             DualCanteraConverter,
             get_plugins,
         )
         from ..config import USE_DUAL_CONVERTER
-        from ..utils import apply_theme_to_figure
 
         if is_verbose_mode():
             logger.info(
-                f"Starting simulation with config: {config_filename or 'default'}"
+                f"Starting streaming simulation with config: {config_filename or 'default'}"
             )
             logger.info(
                 f"Mechanism: {mechanism_select}, Custom mechanism: {bool(custom_mechanism)}"
             )
 
         if not n_clicks or not config:
-            return (
-                go.Figure(),
-                go.Figure(),
-                go.Figure(),
-                "",
-                dash.no_update,
-                {"display": "none"},
-                {"display": "none"},
-                {},
-                False,
-            )
+            return False, False  # Keep interval disabled, not running
 
         # Determine the mechanism to use
         if mechanism_select == "custom-name":
@@ -152,128 +124,166 @@ def register_callbacks(app) -> None:  # type: ignore
             mechanism = mechanism_select
 
         try:
+            # Create converter
             if USE_DUAL_CONVERTER:
-                dual_converter = DualCanteraConverter(
+                converter = DualCanteraConverter(
                     mechanism=mechanism, plugins=get_plugins()
                 )
-                network, results, code_str = dual_converter.build_network_and_code(
-                    config
-                )
-                reactors_dict = dual_converter.reactors
             else:
-                # Build using a fresh converter with discovered plugins
                 converter = CanteraConverter(mechanism=mechanism, plugins=get_plugins())
-                network, results = converter.build_network(config)
-                code_str = ""
-                reactors_dict = converter.reactors
 
-            # Build initial plots from the first available reactor (no strict need)
-            temp_fig = go.Figure()
-            press_fig = go.Figure()
-            species_fig = go.Figure()
-
-            reactors = results.get("reactors") or {}
-            if reactors:
-                first_id = next(iter(reactors.keys()))
-                series = reactors[first_id]
-                temp_fig.add_trace(
-                    go.Scatter(x=results["time"], y=series["T"], name=f"{first_id} T")
-                )
-                temp_fig.update_layout(
-                    title=f"Temperature vs Time — {first_id}",
-                    xaxis_title="Time (s)",
-                    yaxis_title="Temperature (°C)",
-                )
-                temp_fig = apply_theme_to_figure(temp_fig, theme)
-
-                press_fig.add_trace(
-                    go.Scatter(x=results["time"], y=series["P"], name=f"{first_id} P")
-                )
-                press_fig.update_layout(
-                    title=f"Pressure vs Time — {first_id}",
-                    xaxis_title="Time (s)",
-                    yaxis_title="Pressure (Pa)",
-                )
-                press_fig = apply_theme_to_figure(press_fig, theme)
-
-                for species_name, concentrations in series["X"].items():
-                    if max(concentrations or [0]) > 0.01:
-                        species_fig.add_trace(
-                            go.Scatter(
-                                x=results["time"], y=concentrations, name=species_name
-                            )
-                        )
-                species_fig.update_layout(
-                    title=f"Species Concentrations vs Time — {first_id}",
-                    xaxis_title="Time (s)",
-                    yaxis_title="Mole Fraction",
-                )
-                species_fig = apply_theme_to_figure(species_fig, theme)
-
-            # Generate reactor reports during simulation to avoid storing heavy objects
-            reactor_reports = {}
-            try:
-                for reactor_id, reactor in reactors_dict.items():
-                    try:
-                        thermo_report = reactor.thermo.report(
-                            threshold=REPORT_FRACTION_TRESHOLD
-                        )
-                    except Exception:
-                        # Cantera supports calling the object directly
-                        thermo_report = ""
-
-                    reactor_reports[reactor_id] = {
-                        "reactor_report": str(reactor),
-                        "thermo_report": thermo_report,
-                    }
-            except Exception:
-                reactor_reports = {}
-
-            # Store results for re-theming and other uses
-            simulation_data = {
-                "results": results,
-                "code": code_str,
-                "mechanism": mechanism,
-                "reactor_reports": reactor_reports,
-            }
-
-            return (
-                temp_fig.to_dict(),
-                press_fig.to_dict(),
-                species_fig.to_dict(),
-                code_str,
-                dash.no_update,
-                {"display": "none"},
-                {"display": "block"},
-                simulation_data,
-                False,
+            # Start background simulation
+            worker = get_simulation_worker()
+            worker.start_simulation(
+                converter=converter,
+                config=config,
+                simulation_time=10.0,  # 10 seconds
+                time_step=1.0,  # 1 second steps
             )
 
+            logger.info("Background simulation started successfully")
+            return False, True  # Enable interval, set running to True
+
         except Exception as e:
-            message = f"Error during simulation: {str(e)}"
-            if is_verbose_mode():
-                logger.error(f"Simulation failed: {message}", exc_info=True)
-            else:
-                print(f"ERROR: {message}")
-            # IMPORTANT: update simulation-data with a non-empty payload so the
-            # overlay-clearing callback (listening to simulation-data) fires.
+            logger.error(f"Failed to start simulation: {e}", exc_info=True)
+            return True, False  # Keep interval disabled, not running
+
+    # Streaming update callback - updates plots as simulation progresses
+    @app.callback(
+        [
+            Output("temperature-plot", "figure", allow_duplicate=True),
+            Output("pressure-plot", "figure", allow_duplicate=True),
+            Output("species-plot", "figure", allow_duplicate=True),
+            Output("last-sim-python-code", "data", allow_duplicate=True),
+            Output("simulation-error-display", "children", allow_duplicate=True),
+            Output("simulation-error-display", "style", allow_duplicate=True),
+            Output("simulation-results-card", "style", allow_duplicate=True),
+            Output("simulation-data", "data", allow_duplicate=True),
+            Output("simulation-progress-interval", "disabled", allow_duplicate=True),
+            Output("simulation-running", "data", allow_duplicate=True),
+        ],
+        [
+            Input("simulation-progress-interval", "n_intervals"),
+            Input("theme-store", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_streaming_simulation(
+        n_intervals: int,
+        theme: str,
+    ) -> Tuple[
+        Any,
+        Any,
+        Any,
+        str,
+        Any,
+        Dict[str, str],
+        Dict[str, str],
+        Dict[str, Any],
+        bool,
+        bool,
+    ]:
+        """Update plots with streaming simulation data."""
+        from ..utils import apply_theme_to_figure
+
+        worker = get_simulation_worker()
+        progress = worker.get_progress()
+
+        # If simulation not running, disable interval
+        if not progress.is_running and not progress.is_complete:
             return (
                 go.Figure(),
                 go.Figure(),
                 go.Figure(),
                 "",
-                message,
-                {"display": "block", "color": "red"},
-                {"display": "block"},
-                {"error": message},
-                False,
+                dash.no_update,
+                {"display": "none"},
+                {"display": "none"},
+                {},
+                True,  # Disable interval
+                False,  # Not running
             )
-        finally:
-            # Safety net: if any future refactor throws before returns,
-            # the overlay will still be cleared by downstream callback since we
-            # always return a value in both success and error paths above.
-            # No-op here intentionally.
-            ...
+
+        # Build plots from current progress
+        temp_fig = go.Figure()
+        press_fig = go.Figure()
+        species_fig = go.Figure()
+
+        if progress.reactors_series and progress.times:
+            # Use first reactor for initial plots
+            first_id = next(iter(progress.reactors_series.keys()))
+            series = progress.reactors_series[first_id]
+
+            temp_fig.add_trace(
+                go.Scatter(x=progress.times, y=series["T"], name=f"{first_id} T")
+            )
+            temp_fig.update_layout(
+                title=f"Temperature vs Time — {first_id} (Live)",
+                xaxis_title="Time (s)",
+                yaxis_title="Temperature (°C)",
+            )
+            temp_fig = apply_theme_to_figure(temp_fig, theme)
+
+            press_fig.add_trace(
+                go.Scatter(x=progress.times, y=series["P"], name=f"{first_id} P")
+            )
+            press_fig.update_layout(
+                title=f"Pressure vs Time — {first_id} (Live)",
+                xaxis_title="Time (s)",
+                yaxis_title="Pressure (Pa)",
+            )
+            press_fig = apply_theme_to_figure(press_fig, theme)
+
+            for species_name, concentrations in series["X"].items():
+                if max(concentrations or [0]) > 0.01:
+                    species_fig.add_trace(
+                        go.Scatter(
+                            x=progress.times, y=concentrations, name=species_name
+                        )
+                    )
+            species_fig.update_layout(
+                title=f"Species Concentrations vs Time — {first_id} (Live)",
+                xaxis_title="Time (s)",
+                yaxis_title="Mole Fraction",
+            )
+            species_fig = apply_theme_to_figure(species_fig, theme)
+
+        # Prepare simulation data
+        results = {
+            "time": progress.times,
+            "reactors": progress.reactors_series,
+        }
+
+        simulation_data = {
+            "results": results,
+            "code": progress.code_str,
+            "mechanism": progress.mechanism,
+            "reactor_reports": progress.reactor_reports,
+        }
+
+        # Handle errors
+        error_message = ""
+        error_style = {"display": "none"}
+        if progress.error_message:
+            error_message = f"Simulation warning: {progress.error_message}"
+            error_style = {"display": "block", "color": "orange"}
+
+        # Check if simulation is complete
+        interval_disabled = progress.is_complete
+        simulation_running = progress.is_running
+
+        return (
+            temp_fig.to_dict(),
+            press_fig.to_dict(),
+            species_fig.to_dict(),
+            progress.code_str,
+            error_message,
+            error_style,
+            {"display": "block"},
+            simulation_data,
+            interval_disabled,
+            simulation_running,
+        )
 
     # Overlay style now handled client-side for zero-lag responsiveness
 
@@ -294,7 +304,6 @@ def register_callbacks(app) -> None:  # type: ignore
     )
     def show_download_button(code_str: str) -> List[Any]:
         import dash_bootstrap_components as dbc  # type: ignore
-        from dash import dcc
 
         from ..config import USE_DUAL_CONVERTER
 

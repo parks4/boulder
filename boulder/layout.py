@@ -35,6 +35,13 @@ def get_layout(
                     dcc.Upload(id="upload-config", style={"display": "none"}),
                     html.Div(id="init-dummy-output", style={"display": "none"}),
                     dcc.Interval(id="init-interval"),
+                    # Simulation progress interval for streaming updates
+                    dcc.Interval(
+                        id="simulation-progress-interval",
+                        interval=500,  # Update every 500ms
+                        n_intervals=0,
+                        disabled=True,
+                    ),
                     # Light/Dark mode store
                     dcc.Store(id="theme-store", data=THEME),
                     # Intermediate stores for chained callbacks
