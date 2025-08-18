@@ -435,11 +435,6 @@ def get_layout(
                                                 # Triggered by Ctrl + Enter see clientside_callback
                                             ),
                                             html.Div(
-                                                id="simulation-error-display",
-                                                className="mb-2",
-                                                style={"display": "none"},
-                                            ),
-                                            html.Div(
                                                 id="download-python-code-btn-container",
                                                 children=[],
                                             ),
@@ -504,6 +499,11 @@ def get_layout(
                                     dbc.CardHeader("Simulation Results"),
                                     dbc.CardBody(
                                         children=[
+                                            html.Div(
+                                                id="simulation-error-display",
+                                                className="mb-2",
+                                                style={"display": "none"},
+                                            ),
                                             dbc.Tabs(
                                                 [
                                                     dbc.Tab(
@@ -590,7 +590,7 @@ def get_layout(
                                                 ],
                                                 id="results-tabs",
                                                 active_tab="plots-tab",
-                                            )
+                                            ),
                                         ]
                                     ),
                                 ],

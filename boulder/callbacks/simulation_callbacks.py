@@ -95,7 +95,15 @@ def register_callbacks(app) -> None:  # type: ignore
         custom_mechanism: str,
         uploaded_filename: str,
     ) -> Tuple[
-        Any, Any, Any, str, Any, Dict[str, str], Dict[str, str], Dict[str, Any], bool
+        Any,
+        Any,
+        Any,
+        str,
+        Any,
+        Dict[str, str],
+        Dict[str, str],
+        Dict[str, Any],
+        bool,
     ]:
         from ..cantera_converter import (
             CanteraConverter,
@@ -256,7 +264,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 "",
                 message,
                 {"display": "block", "color": "red"},
-                {"display": "none"},
+                {"display": "block"},
                 {"error": message},
                 False,
             )
