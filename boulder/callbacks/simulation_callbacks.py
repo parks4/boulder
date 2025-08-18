@@ -178,12 +178,16 @@ def register_callbacks(app) -> None:  # type: ignore
             Input("theme-store", "data"),
             Input("simulation-running", "data"),
         ],
+        [
+            State("last-selected-element", "data"),
+        ],
         prevent_initial_call=True,
     )
     def update_streaming_simulation(
         n_intervals: int,
         theme: str,
         simulation_running: bool,
+        last_selected: Dict[str, Any],
     ) -> Tuple[
         Any,
         Any,
@@ -234,25 +238,34 @@ def register_callbacks(app) -> None:  # type: ignore
         species_fig = go.Figure()
 
         if progress.reactors_series and progress.times:
-            # Use first reactor for initial plots
-            first_id = next(iter(progress.reactors_series.keys()))
-            series = progress.reactors_series[first_id]
+            # Determine which reactor to show based on selection
+            selected_node_id = None
+            if last_selected and last_selected.get("type") == "node":
+                selected_node_id = (last_selected.get("data") or {}).get("id")
+
+            # Use selected node if available and exists in data, otherwise use first reactor
+            if selected_node_id and selected_node_id in progress.reactors_series:
+                reactor_id = selected_node_id
+            else:
+                reactor_id = next(iter(progress.reactors_series.keys()))
+
+            series = progress.reactors_series[reactor_id]
 
             temp_fig.add_trace(
-                go.Scatter(x=progress.times, y=series["T"], name=f"{first_id} T")
+                go.Scatter(x=progress.times, y=series["T"], name=f"{reactor_id} T")
             )
             temp_fig.update_layout(
-                title=f"Temperature vs Time — {first_id} (Live)",
+                title=f"Temperature vs Time — {reactor_id}",
                 xaxis_title="Time (s)",
                 yaxis_title="Temperature (°C)",
             )
             temp_fig = apply_theme_to_figure(temp_fig, theme)
 
             press_fig.add_trace(
-                go.Scatter(x=progress.times, y=series["P"], name=f"{first_id} P")
+                go.Scatter(x=progress.times, y=series["P"], name=f"{reactor_id} P")
             )
             press_fig.update_layout(
-                title=f"Pressure vs Time — {first_id} (Live)",
+                title=f"Pressure vs Time — {reactor_id}",
                 xaxis_title="Time (s)",
                 yaxis_title="Pressure (Pa)",
             )
@@ -266,7 +279,7 @@ def register_callbacks(app) -> None:  # type: ignore
                         )
                     )
             species_fig.update_layout(
-                title=f"Species Concentrations vs Time — {first_id} (Live)",
+                title=f"Species Concentrations vs Time — {reactor_id}",
                 xaxis_title="Time (s)",
                 yaxis_title="Mole Fraction",
             )
