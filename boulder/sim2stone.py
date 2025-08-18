@@ -132,10 +132,16 @@ def sim_to_internal_config(
             # Prefer attribute if available; Cantera exposes mass_flow_rate as a property
             try:
                 props["mass_flow_rate"] = float(dev.mass_flow_rate)
-            except Exception as exc:  # noqa: BLE001
-                raise RuntimeError(
-                    f"Unable to read mass flow rate for connection {src_id}->{tgt_id}: {exc}"
-                ) from exc
+            except Exception:
+                # Fallbacks: some backends require initialized networks; try alternate attributes
+                mdot_attr = getattr(dev, "mdot", None)
+                try:
+                    mdot_value = mdot_attr() if callable(mdot_attr) else mdot_attr
+                except Exception:
+                    mdot_value = None
+                if isinstance(mdot_value, (int, float)):
+                    props["mass_flow_rate"] = float(mdot_value)
+                # Else: omit property; builder will use its default
         elif isinstance(dev, ct.Valve):
             # Capture valve coefficient if available
             coeff = None

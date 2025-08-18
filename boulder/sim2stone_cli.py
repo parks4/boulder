@@ -138,6 +138,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     write_sim_as_yaml(network, output_path, default_mechanism=args.mechanism)
 
+    # Always print the created file path so callers can capture/chain it
+    print(f"🪨 STONE file created in {output_path}")
     if args.verbose:
         print(f"[sim2stone] Done: {output_path}")
     return 0
