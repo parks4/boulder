@@ -14,7 +14,8 @@ from ruamel.yaml import YAML
 USE_TEMPERATURE_SCALE = True
 
 # Global variable to control which converter to use
-USE_DUAL_CONVERTER = True
+# Unified converter architecture - no longer needed
+# USE_DUAL_CONVERTER = True
 
 # Global variable for the Cantera mechanism to use consistently across the application
 CANTERA_MECHANISM = "gri30.yaml"

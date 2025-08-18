@@ -1,12 +1,10 @@
-"""Background simulation worker for streaming results."""
+"""Background simulation worker for streaming updates."""
 
-import math
 import threading
-import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import cantera as ct
+import cantera as ct  # type: ignore
 
 from .verbose_utils import get_verbose_logger
 
@@ -15,28 +13,23 @@ logger = get_verbose_logger(__name__)
 
 @dataclass
 class SimulationProgress:
-    """Container for simulation progress and partial results."""
+    """Thread-safe container for simulation progress data."""
 
-    # Simulation state
-    is_running: bool = False
-    is_complete: bool = False
-    current_time: float = 0.0
-    total_time: float = 10.0
-    error_message: Optional[str] = None
-
-    # Results data
-    times: List[float] = field(default_factory=list)
-    reactors_series: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    sol_arrays: Dict[str, ct.SolutionArray] = field(default_factory=dict)
-
-    # Network info
+    # Network and converter state
     network: Optional[ct.ReactorNet] = None
     reactors_dict: Dict[str, ct.Reactor] = field(default_factory=dict)
-
-    # Metadata
     mechanism: str = ""
+
+    # Simulation data
+    times: List[float] = field(default_factory=list)
+    reactors_series: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     code_str: str = ""
-    reactor_reports: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    reactor_reports: Dict[str, Any] = field(default_factory=dict)
+
+    # Status flags
+    is_running: bool = False
+    is_complete: bool = False
+    error_message: Optional[str] = None
 
 
 class SimulationWorker:
@@ -44,273 +37,189 @@ class SimulationWorker:
 
     def __init__(self):
         self.progress = SimulationProgress()
-        self._lock = threading.RLock()  # Reentrant lock for nested access
-        self._worker_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._worker_thread: Optional[threading.Thread] = None
 
     def start_simulation(
         self,
-        converter,
+        converter: Any,
         config: Dict[str, Any],
         simulation_time: float = 10.0,
         time_step: float = 1.0,
     ) -> None:
-        """Start background simulation with streaming updates."""
-        # Stop any existing simulation
-        self.stop_simulation()
+        """Start a background simulation."""
+        if self._worker_thread and self._worker_thread.is_alive():
+            logger.warning("Simulation already running, stopping previous simulation")
+            self.stop_simulation()
 
-        # Reset progress
+        # Reset state
+        self._stop_event.clear()
         with self._lock:
             self.progress = SimulationProgress()
-            self.progress.total_time = simulation_time
-            self.progress.is_running = True
 
         # Start worker thread
-        self._stop_event.clear()
         self._worker_thread = threading.Thread(
-            target=self._run_simulation_worker,
+            target=self._run_simulation,
             args=(converter, config, simulation_time, time_step),
             daemon=True,
         )
         self._worker_thread.start()
+        logger.info("Background simulation started")
 
     def stop_simulation(self) -> None:
-        """Stop the background simulation."""
+        """Stop the current simulation."""
         self._stop_event.set()
-        if self._worker_thread and self._worker_thread.is_alive():
-            self._worker_thread.join(timeout=2.0)  # Wait up to 2 seconds
+        if self._worker_thread:
+            self._worker_thread.join(timeout=5.0)
+            if self._worker_thread.is_alive():
+                logger.warning("Worker thread did not stop gracefully")
+
+        with self._lock:
+            self.progress.is_running = False
+        logger.info("Simulation stopped")
 
     def get_progress(self) -> SimulationProgress:
-        """Get current simulation progress (thread-safe)."""
+        """Get current simulation progress (thread-safe copy)."""
         with self._lock:
             # Return a copy to avoid race conditions
             return SimulationProgress(
-                is_running=self.progress.is_running,
-                is_complete=self.progress.is_complete,
-                current_time=self.progress.current_time,
-                total_time=self.progress.total_time,
-                error_message=self.progress.error_message,
+                network=self.progress.network,
+                reactors_dict=self.progress.reactors_dict.copy(),
+                mechanism=self.progress.mechanism,
                 times=self.progress.times.copy(),
                 reactors_series={
-                    rid: {
-                        "T": series["T"].copy(),
-                        "P": series["P"].copy(),
-                        "X": {s: conc.copy() for s, conc in series["X"].items()},
+                    k: {
+                        "T": v["T"].copy(),
+                        "P": v["P"].copy(),
+                        "X": {s: v["X"][s].copy() for s in v["X"]},
                     }
-                    for rid, series in self.progress.reactors_series.items()
+                    for k, v in self.progress.reactors_series.items()
                 },
-                network=self.progress.network,
-                reactors_dict=self.progress.reactors_dict,
-                mechanism=self.progress.mechanism,
                 code_str=self.progress.code_str,
                 reactor_reports=self.progress.reactor_reports.copy(),
+                is_running=self.progress.is_running,
+                is_complete=self.progress.is_complete,
+                error_message=self.progress.error_message,
             )
 
-    def _run_simulation_worker(
+    def _run_simulation(
         self,
-        converter,
+        converter: Any,
         config: Dict[str, Any],
         simulation_time: float,
         time_step: float,
     ) -> None:
         """Background worker function that runs the actual simulation."""
         try:
-            # Build network
+            # Build network using the unified converter
             logger.info("Building Cantera network in background...")
 
-            if hasattr(converter, "build_network_and_code"):
-                # DualCanteraConverter
-                network, initial_results, code_str = converter.build_network_and_code(
-                    config
-                )
-            else:
-                # Regular CanteraConverter
-                network, initial_results = converter.build_network(config)
-                code_str = ""
+            # Build the network first
+            network = converter.build_network(config)
+            logger.info("Network built successfully, starting streaming simulation...")
 
-            # Update progress with initial setup
+            # Define progress callback for streaming updates
+            def progress_callback(progress_data, current_time, total_time):
+                """Update progress during simulation."""
+                if self._stop_event.is_set():
+                    return  # Don't update if stopping
+
+                with self._lock:
+                    self.progress.times = progress_data["time"]
+                    self.progress.reactors_series = progress_data["reactors"]
+                    # Calculate progress percentage
+                    progress_pct = (
+                        (current_time / total_time) * 100 if total_time > 0 else 0
+                    )
+                    logger.debug(
+                        f"Simulation progress: {progress_pct:.1f}% (t={current_time:.1f}s)"
+                    )
+
+            # Initialize progress
             with self._lock:
                 self.progress.network = network
                 self.progress.reactors_dict = converter.reactors
                 self.progress.mechanism = converter.mechanism
-                self.progress.code_str = code_str
-
-                # Initialize reactor series
-                reactor_list = [
-                    r
-                    for r in converter.reactors.values()
-                    if not isinstance(r, ct.Reservoir)
-                ]
-
-                for reactor in reactor_list:
-                    reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                    self.progress.sol_arrays[reactor_id] = ct.SolutionArray(
-                        converter.gas, shape=(0,)
-                    )
-                    self.progress.reactors_series[reactor_id] = {
-                        "T": [],
-                        "P": [],
-                        "X": {s: [] for s in converter.gas.species_names},
-                    }
+                self.progress.times = []
+                self.progress.reactors_series = {}
+                self.progress.code_str = ""
+                self.progress.reactor_reports = {}
+                self.progress.is_running = True
+                self.progress.is_complete = False
+                self.progress.error_message = None
 
             logger.info(
-                f"Starting simulation loop (0 to {simulation_time}s, step={time_step}s)"
+                f"Starting streaming simulation: {simulation_time}s with {time_step}s steps"
             )
 
-            # Run simulation with streaming updates
-            num_steps = int(simulation_time / time_step)
-            for step in range(num_steps):
-                if self._stop_event.is_set():
-                    logger.info("Simulation stopped by user")
-                    break
+            # Run the streaming simulation using the converter's method
+            results, code_str = converter.run_streaming_simulation(
+                simulation_time=simulation_time,
+                time_step=time_step,
+                progress_callback=progress_callback,
+            )
 
-                t = step * time_step
-
-                try:
-                    # Advance simulation
-                    network.advance(t)
-
-                    # Update progress with new data
-                    with self._lock:
-                        self.progress.current_time = t
-                        self.progress.times.append(t)
-
-                        # Capture reactor states
-                        for reactor in reactor_list:
-                            reactor_id = getattr(reactor, "name", "") or str(
-                                id(reactor)
-                            )
-                            T = reactor.thermo.T
-                            P = reactor.thermo.P
-                            X_vec = reactor.thermo.X
-
-                            # Check for non-finite states
-                            if not (
-                                math.isfinite(T)
-                                and math.isfinite(P)
-                                and all(math.isfinite(float(x)) for x in X_vec)
-                            ):
-                                logger.warning(
-                                    f"Non-finite state at t={t}s for reactor '{reactor_id}'"
-                                )
-                                # Use last valid state or defaults
-                                if self.progress.reactors_series[reactor_id]["T"]:
-                                    T = self.progress.reactors_series[reactor_id]["T"][
-                                        -1
-                                    ]
-                                    P = self.progress.reactors_series[reactor_id]["P"][
-                                        -1
-                                    ]
-                                    X_vec = [
-                                        self.progress.reactors_series[reactor_id]["X"][
-                                            s
-                                        ][-1]
-                                        for s in converter.gas.species_names
-                                    ]
-                                else:
-                                    T, P = 300.0, 101325.0
-                                    X_vec = [0.0] * len(converter.gas.species_names)
-
-                            # Store data
-                            self.progress.sol_arrays[reactor_id].append(
-                                T=T, P=P, X=X_vec
-                            )
-                            self.progress.reactors_series[reactor_id]["T"].append(T)
-                            self.progress.reactors_series[reactor_id]["P"].append(P)
-
-                            for species_name, x_value in zip(
-                                converter.gas.species_names, X_vec
-                            ):
-                                self.progress.reactors_series[reactor_id]["X"][
-                                    species_name
-                                ].append(float(x_value))
-
-                    logger.debug(f"Completed time step t={t}s")
-
-                except Exception as e:
-                    logger.warning(f"Error at t={t}s: {e}")
-
-                    with self._lock:
-                        self.progress.error_message = f"Error at t={t}s: {str(e)}"
-                        self.progress.current_time = t
-
-                        # Still add the time point with last valid data
-                        if self.progress.times:
-                            self.progress.times.append(t)
-                            # Duplicate last successful values for all reactors
-                            for reactor in reactor_list:
-                                reactor_id = getattr(reactor, "name", "") or str(
-                                    id(reactor)
-                                )
-                                if self.progress.reactors_series[reactor_id]["T"]:
-                                    last_T = self.progress.reactors_series[reactor_id][
-                                        "T"
-                                    ][-1]
-                                    last_P = self.progress.reactors_series[reactor_id][
-                                        "P"
-                                    ][-1]
-                                    last_X = [
-                                        self.progress.reactors_series[reactor_id]["X"][
-                                            s
-                                        ][-1]
-                                        for s in converter.gas.species_names
-                                    ]
-
-                                    self.progress.sol_arrays[reactor_id].append(
-                                        T=last_T, P=last_P, X=last_X
-                                    )
-                                    self.progress.reactors_series[reactor_id][
-                                        "T"
-                                    ].append(last_T)
-                                    self.progress.reactors_series[reactor_id][
-                                        "P"
-                                    ].append(last_P)
-
-                                    for species_name, x_value in zip(
-                                        converter.gas.species_names, last_X
-                                    ):
-                                        self.progress.reactors_series[reactor_id]["X"][
-                                            species_name
-                                        ].append(float(x_value))
-
-                    # Continue simulation despite error
-                    continue
-
-                # Small delay to prevent overwhelming the UI
-                time.sleep(0.01)
-
-            # Generate reactor reports
-            try:
-                reactor_reports = {}
-                for reactor_id, reactor in converter.reactors.items():
-                    try:
-                        thermo_report = reactor.thermo.report(threshold=1e-7)
-                    except Exception:
-                        thermo_report = ""
-
-                    reactor_reports[reactor_id] = {
-                        "reactor_report": str(reactor),
-                        "thermo_report": thermo_report,
-                    }
-
-                with self._lock:
-                    self.progress.reactor_reports = reactor_reports
-            except Exception as e:
-                logger.warning(f"Error generating reactor reports: {e}")
-
-            # Mark completion
+            # Finalize results
+            logger.info(f"Simulation completed: {len(results['time'])} time points")
             with self._lock:
-                self.progress.is_complete = True
+                self.progress.times = results["time"]
+                self.progress.reactors_series = results["reactors"]
+                self.progress.code_str = code_str
+                # Generate reactor reports for thermo analysis
+                self.progress.reactor_reports = self._generate_reactor_reports(
+                    converter, results
+                )
                 self.progress.is_running = False
-
-            logger.info("Background simulation completed successfully")
+                self.progress.is_complete = True
 
         except Exception as e:
-            logger.error(f"Fatal error in simulation worker: {e}", exc_info=True)
+            logger.error(f"Simulation failed: {e}", exc_info=True)
             with self._lock:
-                self.progress.error_message = f"Fatal error: {str(e)}"
+                self.progress.error_message = str(e)
                 self.progress.is_running = False
-                self.progress.is_complete = True
+                self.progress.is_complete = False
+
+    def _generate_reactor_reports(
+        self, converter: Any, results: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate reactor reports for thermo analysis."""
+        reactor_reports = {}
+
+        try:
+            # Generate reports for each reactor
+            for reactor_id, reactor in converter.reactors.items():
+                if isinstance(reactor, ct.Reservoir):
+                    continue  # Skip reservoirs
+
+                # Get final state data
+                if reactor_id in results["reactors"]:
+                    reactor_data = results["reactors"][reactor_id]
+                    if reactor_data["T"] and reactor_data["P"]:
+                        # Use final state
+                        final_T = reactor_data["T"][-1]
+                        final_P = reactor_data["P"][-1]
+                        final_X = {
+                            s: reactor_data["X"][s][-1] for s in reactor_data["X"]
+                        }
+
+                        # Set gas state to final conditions
+                        converter.gas.TPX = final_T, final_P, list(final_X.values())
+
+                        # Generate thermo report
+                        reactor_reports[reactor_id] = {
+                            "T": final_T,
+                            "P": final_P,
+                            "X": final_X,
+                            "species_names": converter.gas.species_names,
+                            "molecular_weights": converter.gas.molecular_weights,
+                            "mass_fractions": converter.gas.Y.copy(),
+                        }
+
+        except Exception as e:
+            logger.warning(f"Failed to generate reactor reports: {e}")
+
+        return reactor_reports
 
 
 # Global worker instance

@@ -21,6 +21,8 @@ def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
     # Note: simulation-running is set to True immediately via a client-side callback
 
+    # Note: Debug logging moved to start_streaming_simulation callback
+
     # Callback to handle file upload for custom mechanism
     @app.callback(
         [
@@ -65,7 +67,7 @@ def register_callbacks(app) -> None:  # type: ignore
     @app.callback(
         [
             Output("simulation-progress-interval", "disabled"),
-            Output("simulation-running", "data", allow_duplicate=True),
+            Output("simulation-error-display", "children", allow_duplicate=True),
         ],
         [
             Input("run-simulation", "n_clicks"),
@@ -86,14 +88,21 @@ def register_callbacks(app) -> None:  # type: ignore
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-    ) -> Tuple[bool, bool]:
+    ) -> Tuple[bool, str]:
         """Start a background simulation with streaming updates."""
         from ..cantera_converter import (
-            CanteraConverter,
             DualCanteraConverter,
             get_plugins,
         )
-        from ..config import USE_DUAL_CONVERTER
+
+        # Always log callback invocation for debugging
+        logger.info("🚀 start_streaming_simulation callback triggered!")
+        logger.info(f"  n_clicks: {n_clicks}")
+        logger.info(
+            f"  config: {config is not None} (has {len(config.get('nodes', [])) if config else 0} nodes)"
+        )
+        logger.info(f"  config_filename: {config_filename}")
+        logger.info(f"  mechanism_select: {mechanism_select}")
 
         if is_verbose_mode():
             logger.info(
@@ -104,7 +113,13 @@ def register_callbacks(app) -> None:  # type: ignore
             )
 
         if not n_clicks or not config:
-            return False, False  # Keep interval disabled, not running
+            logger.warning(
+                f"❌ Simulation not started: n_clicks={n_clicks}, config={config is not None}"
+            )
+            return (
+                True,
+                f"Debug: Callback triggered but not started (n_clicks={n_clicks})",
+            )
 
         # Determine the mechanism to use
         if mechanism_select == "custom-name":
@@ -124,13 +139,8 @@ def register_callbacks(app) -> None:  # type: ignore
             mechanism = mechanism_select
 
         try:
-            # Create converter
-            if USE_DUAL_CONVERTER:
-                converter = DualCanteraConverter(
-                    mechanism=mechanism, plugins=get_plugins()
-                )
-            else:
-                converter = CanteraConverter(mechanism=mechanism, plugins=get_plugins())
+            # Create unified converter
+            converter = DualCanteraConverter(mechanism=mechanism, plugins=get_plugins())
 
             # Start background simulation
             worker = get_simulation_worker()
@@ -141,12 +151,13 @@ def register_callbacks(app) -> None:  # type: ignore
                 time_step=1.0,  # 1 second steps
             )
 
-            logger.info("Background simulation started successfully")
-            return False, True  # Enable interval, set running to True
+            logger.info("✅ Background simulation started successfully")
+            logger.info("📡 Enabling interval updates (500ms)")
+            return False, "Debug: Simulation started successfully!"
 
         except Exception as e:
-            logger.error(f"Failed to start simulation: {e}", exc_info=True)
-            return True, False  # Keep interval disabled, not running
+            logger.error(f"❌ Failed to start simulation: {e}", exc_info=True)
+            return True, f"Debug: Error starting simulation: {str(e)}"
 
     # Streaming update callback - updates plots as simulation progresses
     @app.callback(
@@ -165,12 +176,14 @@ def register_callbacks(app) -> None:  # type: ignore
         [
             Input("simulation-progress-interval", "n_intervals"),
             Input("theme-store", "data"),
+            Input("simulation-running", "data"),
         ],
         prevent_initial_call=True,
     )
     def update_streaming_simulation(
         n_intervals: int,
         theme: str,
+        simulation_running: bool,
     ) -> Tuple[
         Any,
         Any,
@@ -186,8 +199,19 @@ def register_callbacks(app) -> None:  # type: ignore
         """Update plots with streaming simulation data."""
         from ..utils import apply_theme_to_figure
 
+        # Log every streaming update for debugging
+        logger.info(f"📊 update_streaming_simulation called (interval #{n_intervals})")
+        logger.info(f"  simulation_running from client: {simulation_running}")
+
         worker = get_simulation_worker()
         progress = worker.get_progress()
+
+        logger.info(
+            f"  Progress: running={progress.is_running}, complete={progress.is_complete}"
+        )
+        logger.info(
+            f"  Data: {len(progress.times)} time points, {len(progress.reactors_series)} reactors"
+        )
 
         # If simulation not running, disable interval
         if not progress.is_running and not progress.is_complete:
@@ -287,15 +311,6 @@ def register_callbacks(app) -> None:  # type: ignore
 
     # Overlay style now handled client-side for zero-lag responsiveness
 
-    # Stop running when simulation data updates (success or failure)
-    @app.callback(
-        Output("simulation-running", "data", allow_duplicate=True),
-        Input("simulation-data", "data"),
-        prevent_initial_call=True,
-    )
-    def stop_running_on_data(_: Dict[str, Any]) -> bool:
-        return False
-
     # Conditionally render Download .py button
     @app.callback(
         Output("download-python-code-btn-container", "children"),
@@ -305,23 +320,20 @@ def register_callbacks(app) -> None:  # type: ignore
     def show_download_button(code_str: str) -> List[Any]:
         import dash_bootstrap_components as dbc  # type: ignore
 
-        from ..config import USE_DUAL_CONVERTER
+        # Always show download button with unified converter
+        return [
+            dbc.Button(
+                "Download .py",
+                id="download-python-code-btn",
+                color="secondary",
+                className="mb-2 w-100",
+                n_clicks=0,
+                disabled=not (code_str and code_str.strip()),
+            ),
+            dcc.Download(id="download-python-code"),
+        ]
 
-        if USE_DUAL_CONVERTER:
-            return [
-                dbc.Button(
-                    "Download .py",
-                    id="download-python-code-btn",
-                    color="secondary",
-                    className="mb-2 w-100",
-                    n_clicks=0,
-                    disabled=not (code_str and code_str.strip()),
-                ),
-                dcc.Download(id="download-python-code"),
-            ]
-        return []
-
-    # Only enable/disable Download .py button if DualCanteraConverter is used
+    # Enable/disable Download .py button based on code availability
     @app.callback(
         [
             Output("download-python-code-btn", "disabled"),
@@ -331,10 +343,7 @@ def register_callbacks(app) -> None:  # type: ignore
         prevent_initial_call=False,
     )
     def toggle_download_button(code_str: str) -> Tuple[bool, str]:
-        from ..config import USE_DUAL_CONVERTER
-
-        if not USE_DUAL_CONVERTER:
-            return True, "secondary"
+        # Always enable if we have code (unified converter always generates code)
         if code_str and code_str.strip():
             return False, "primary"  # enabled, darker
         return True, "secondary"  # disabled, light/grey
