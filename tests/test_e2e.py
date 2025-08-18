@@ -16,6 +16,8 @@ from selenium.common.exceptions import (
 )
 from selenium.webdriver.common.keys import Keys
 
+from tests.test_utils import upload_test_config_to_app
+
 # Mark all tests in this module as e2e tests
 pytestmark = pytest.mark.e2e
 
@@ -33,6 +35,16 @@ class TestBoulderE2E:
             select_element,
             value,
         )
+
+
+
+
+
+
+
+
+
+
 
     def _wait_for_modal_close(self, dash_duo, modal_id, timeout=10):
         """Wait for a modal to close by checking if it's hidden."""
@@ -64,6 +76,10 @@ class TestBoulderE2E:
 
             app = create_app()
             dash_duo.start_server(app)
+
+            # Upload a test config file to enable config editing tests
+            upload_test_config_to_app(dash_duo)
+
             return dash_duo
         except Exception as e:
             pytest.skip(f"Could not start app for E2E testing: {e}")
@@ -112,6 +128,9 @@ class TestBoulderE2E:
             "Modal should close after successful submission"
         )
 
+
+
+
         # Verify reactor appears in graph (with fallback)
         try:
             app_setup.wait_for_element(
@@ -131,6 +150,9 @@ class TestBoulderE2E:
         # Try to submit empty form using JavaScript click
         add_button = app_setup.find_element("#add-reactor")
         app_setup.driver.execute_script("arguments[0].click();", add_button)
+
+
+
 
         # The modal closes regardless of validation (see modal_callbacks.py)
         # Check that validation failed by verifying no reactor was added to the graph
@@ -189,25 +211,7 @@ class TestBoulderE2E:
 
     def test_config_upload(self, app_setup):
         """Test configuration file upload."""
-        # Create a test config file
-        test_config = {
-            "components": [
-                {
-                    "id": "uploaded-reactor",
-                    "type": "IdealGasReactor",
-                    "properties": {
-                        "temperature": 300,
-                        "pressure": 101325,
-                        "composition": "O2:1,N2:3.76",
-                    },
-                }
-            ],
-            "connections": [],
-        }
-        test_config  # not used , until we have a way to upload the config file  #  TODO
-
-        # Upload config (this would need to be adapted based on how file upload is implemented)
-        # For now, test the config display
+        # Verify that config upload area is present
         app_setup.wait_for_element("#config-upload-area", timeout=10)
 
     def test_config_yaml_edit(self, app_setup):
@@ -221,9 +225,9 @@ class TestBoulderE2E:
         textarea = app_setup.find_element("#config-yaml-editor")
         assert textarea.is_displayed()
 
-        # Edit the YAML
+        # Edit the YAML - use end_time since our test config uses that
         original_yaml = textarea.get_attribute("value")
-        new_yaml = original_yaml.replace("max_time: 2", "max_time: 5")
+        new_yaml = original_yaml.replace("end_time: 2.0", "end_time: 5.0")
         textarea.clear()
         textarea.send_keys(new_yaml)
 
@@ -234,6 +238,7 @@ class TestBoulderE2E:
         # Wait for modal to close and re-open to verify changes
         app_setup.wait_for_element_to_be_removed("#config-yaml-modal")
         config_button.click()
+
         app_setup.wait_for_element("#config-yaml-modal")
         updated_textarea = app_setup.find_element("#config-yaml-editor")
         assert updated_textarea.get_attribute("value") == new_yaml
@@ -396,6 +401,9 @@ class TestBoulderE2E:
             f"Modal should close after adding reactor {reactor_id}"
         )
 
+
+
+
         # Verify reactor appears in graph (with longer timeout and fallback)
         try:
             dash_duo.wait_for_element(
@@ -449,10 +457,16 @@ class TestBoulderPerformance:
     @pytest.fixture
     def dash_duo(self, dash_duo):
         """Set up the app for testing."""
-        # Import the app directly
-        from boulder.app import app
+        # Import and create the app with layout
+        from boulder.app import create_app
 
+        app = create_app()
         dash_duo.start_server(app)
+
+        # Upload a test config file to enable config editing tests
+        # (same as TestBoulderE2E class)
+        upload_test_config_to_app(dash_duo)
+
         return dash_duo
 
     def test_large_graph_performance(self, dash_duo):
@@ -515,6 +529,9 @@ class TestBoulderPerformance:
         # Submit using JavaScript click to avoid interception
         add_button = dash_duo.find_element("#add-reactor")
         dash_duo.driver.execute_script("arguments[0].click();", add_button)
+
+
+
 
         # Wait for modal to close (indicates success)
         assert self._wait_for_modal_close(dash_duo, "add-reactor-modal"), (

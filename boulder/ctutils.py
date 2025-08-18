@@ -165,8 +165,14 @@ def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg"):
     gas.TPX = None, None, X_products
     Y_H2O = gas["H2O"].Y[0]
     h2 = gas.enthalpy_mass
-    LHV = -(h2 - h1) / Y_fuel
-    HHV = -(h2 - h1 + (h_liquid - h_gas) * Y_H2O) / Y_fuel
+
+    # Check for division by zero
+    if Y_fuel == 0:
+        LHV = float("inf") if (h2 - h1) != 0 else 0
+        HHV = float("inf") if (h2 - h1 + (h_liquid - h_gas) * Y_H2O) != 0 else 0
+    else:
+        LHV = -(h2 - h1) / Y_fuel
+        HHV = -(h2 - h1 + (h_liquid - h_gas) * Y_H2O) / Y_fuel
 
     if return_unit != "J/kg":
         raise NotImplementedError(f"return_unit: {return_unit}")

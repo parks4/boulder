@@ -20,6 +20,8 @@ from .styles import CYTOSCAPE_STYLESHEET
 # This ensures that the same set of discovered plugins is used everywhere.
 CONVERTER = cantera_converter.CanteraConverter()
 
+# Global variable to track debug mode
+_debug_mode = False
 
 # Initialize the Dash app with Bootstrap
 app = dash.Dash(
@@ -62,18 +64,70 @@ except Exception as e:
     initial_config = get_initial_config()
     original_yaml = ""
 
-# Set the layout
-app.layout = get_layout(
-    initial_config,
-    CYTOSCAPE_STYLESHEET,
-    original_yaml,
-    config_filename=locals().get("provided_filename", ""),
-)
-
 # Register all callbacks
 callbacks.register_callbacks(app)
 
 
+def create_app(debug: bool = False) -> dash.Dash:
+    """Create and configure the Boulder app for testing.
+
+    This function sets up the app with the proper layout and configuration
+    without running the server, making it suitable for testing.
+
+    Args:
+        debug: If True, enables debug mode with console forwarding
+
+    Returns
+    -------
+        dash.Dash: The configured Dash application
+    """
+    global _debug_mode
+    _debug_mode = debug
+
+    # Set the layout with debug mode
+    app.layout = get_layout(
+        initial_config,
+        CYTOSCAPE_STYLESHEET,
+        original_yaml,
+        config_filename=locals().get("provided_filename", ""),
+        debug=debug,
+    )
+
+    # If debug mode is enabled, register console callbacks
+    if debug:
+        from .callbacks import console_callbacks
+
+        console_callbacks.register_callbacks(app)
+
+    return app
+
+
 def run_server(debug: bool = False, host: str = "0.0.0.0", port: int = 8050) -> None:
-    """Run the Dash server."""
+    """Run the Dash server.
+
+    This function initializes and starts the Boulder Dash application server.
+    When debug mode is enabled, it also sets up console forwarding functionality
+    to capture browser console messages and display them in the server console.
+
+    Args:
+        debug: If True, enables debug mode with console forwarding and detailed
+               error reporting. Browser console messages will be forwarded to
+               the server console with timestamps and color coding.
+        host: The host interface to bind the server to (default: "0.0.0.0")
+        port: The port number to bind the server to (default: 8050)
+
+    Debug Mode Features:
+        - Console forwarding: Browser console messages appear in server console
+        - Enhanced error reporting: More detailed error information
+        - Development tools: Additional debugging capabilities
+    """
+    # Configure the app using create_app
+    create_app(debug)
+
+    # Run the server
     app.run(debug=debug, host=host, port=port)
+
+
+def is_debug_mode() -> bool:
+    """Check if the app is running in debug mode."""
+    return _debug_mode

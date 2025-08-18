@@ -435,3 +435,46 @@ pre {
   50% { background-position: 0 0, 0 0, 0 0; }
   100% { background-position: 200px 0, -200px 0, 240px 0; }
 }
+
+/* Resizable graph container styles */
+#graph-container {
+  position: relative;
+  transition: all 0.3s ease;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#graph-container:hover {
+  box-shadow: 0 4px 12px var(--shadow-hover);
+}
+
+/* Custom resize handle styling */
+#resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background: linear-gradient(90deg, transparent 0%, var(--border-color) 20%, var(--border-color) 80%, transparent 100%);
+  cursor: ns-resize;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+}
+
+#graph-container:hover #resize-handle {
+  opacity: 1;
+}
+
+/* Visual feedback during resize */
+#graph-container.resizing {
+  box-shadow: 0 6px 16px var(--shadow-hover);
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 768px) {
+  #graph-container {
+    margin: 0 -15px;
+  }
+}
