@@ -47,6 +47,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Do not open the browser automatically",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output in server console",
+    )
     return parser.parse_args(argv)
 
 
@@ -56,6 +61,10 @@ def main(argv: list[str] | None = None) -> None:
     # If a config path is provided, propagate it via environment for app initialization
     if args.config:
         os.environ["BOULDER_CONFIG_PATH"] = args.config
+
+    # Set verbose mode via environment variable for app initialization
+    if args.verbose:
+        os.environ["BOULDER_VERBOSE"] = "1"
 
     # Import cantera_converter early to ensure plugins are loaded at app startup
     from . import cantera_converter  # noqa: F401
@@ -71,7 +80,7 @@ def main(argv: list[str] | None = None) -> None:
         except Exception:
             pass
 
-    run_server(debug=args.debug, host=args.host, port=args.port)
+    run_server(debug=args.debug, host=args.host, port=args.port, verbose=args.verbose)
 
 
 if __name__ == "__main__":

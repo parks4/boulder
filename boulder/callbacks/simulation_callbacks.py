@@ -9,6 +9,10 @@ import dash
 import plotly.graph_objects as go  # type: ignore
 from dash import Input, Output, State
 
+from ..verbose_utils import get_verbose_logger, is_verbose_mode
+
+logger = get_verbose_logger(__name__)
+
 REPORT_FRACTION_TRESHOLD = 1e-7  # 0.1 ppm cutoff for thermo report
 
 
@@ -100,6 +104,14 @@ def register_callbacks(app) -> None:  # type: ignore
         )
         from ..config import USE_DUAL_CONVERTER
         from ..utils import apply_theme_to_figure
+
+        if is_verbose_mode():
+            logger.info(
+                f"Starting simulation with config: {config_filename or 'default'}"
+            )
+            logger.info(
+                f"Mechanism: {mechanism_select}, Custom mechanism: {bool(custom_mechanism)}"
+            )
 
         if not n_clicks or not config:
             return (
@@ -231,7 +243,10 @@ def register_callbacks(app) -> None:  # type: ignore
 
         except Exception as e:
             message = f"Error during simulation: {str(e)}"
-            print(f"ERROR: {message}")
+            if is_verbose_mode():
+                logger.error(f"Simulation failed: {message}", exc_info=True)
+            else:
+                print(f"ERROR: {message}")
             # IMPORTANT: update simulation-data with a non-empty payload so the
             # overlay-clearing callback (listening to simulation-data) fires.
             return (

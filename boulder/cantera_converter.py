@@ -1,6 +1,5 @@
 import importlib
 import json
-import logging
 import math
 import os
 from dataclasses import dataclass, field
@@ -11,8 +10,9 @@ import cantera as ct  # type: ignore
 
 from .config import CANTERA_MECHANISM
 from .sankey import generate_sankey_input_from_sim
+from .verbose_utils import get_verbose_logger, is_verbose_mode
 
-logger = logging.getLogger(__name__)
+logger = get_verbose_logger(__name__)
 
 
 # Custom builder/hook types
@@ -47,8 +47,12 @@ def get_plugins() -> BoulderPlugins:
     """
     global _PLUGIN_CACHE
     if _PLUGIN_CACHE is not None:
+        if is_verbose_mode():
+            logger.info("Using cached plugins")
         return _PLUGIN_CACHE
 
+    if is_verbose_mode():
+        logger.info("Discovering Boulder plugins...")
     plugins = BoulderPlugins()
 
     # Discover from entry points
@@ -87,6 +91,14 @@ def get_plugins() -> BoulderPlugins:
                 )
 
     _PLUGIN_CACHE = plugins
+
+    if is_verbose_mode():
+        logger.info(
+            f"Plugin discovery complete: {len(plugins.reactor_builders)} reactor builders, "
+            f"{len(plugins.connection_builders)} connection builders, "
+            f"{len(plugins.post_build_hooks)} post-build hooks"
+        )
+
     return plugins
 
 

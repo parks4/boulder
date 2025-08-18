@@ -1,3 +1,4 @@
+import logging
 import os
 
 import dash
@@ -69,6 +70,28 @@ app.layout = get_layout(
 callbacks.register_callbacks(app)
 
 
-def run_server(debug: bool = False, host: str = "0.0.0.0", port: int = 8050) -> None:
+def run_server(
+    debug: bool = False, host: str = "0.0.0.0", port: int = 8050, verbose: bool = False
+) -> None:
     """Run the Dash server."""
+    if verbose:
+        # Configure logging for verbose output
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        logger = logging.getLogger(__name__)
+        logger.info("Boulder server starting in verbose mode")
+        logger.info(f"Server configuration: host={host}, port={port}, debug={debug}")
+
+        # Log initial configuration details
+        env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
+            "BOULDER_CONFIG"
+        )
+        if env_config_path:
+            logger.info(f"Loading configuration from: {env_config_path}")
+        else:
+            logger.info("Using default configuration")
+
     app.run(debug=debug, host=host, port=port)

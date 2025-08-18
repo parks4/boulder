@@ -6,6 +6,10 @@ import dash
 import yaml
 from dash import Input, Output, State, dcc, html
 
+from ..verbose_utils import get_verbose_logger, is_verbose_mode
+
+logger = get_verbose_logger(__name__)
+
 # Configure YAML to preserve dict order without Python tags
 yaml.add_representer(
     dict,
@@ -130,6 +134,10 @@ def register_callbacks(app) -> None:  # type: ignore
 
                     # Normalize from YAML with 🪨 STONE standard to internal format
                     normalized = normalize_config(decoded)
+                    if is_verbose_mode():
+                        logger.info(
+                            f"Successfully loaded configuration file: {upload_filename}"
+                        )
                     return normalized, upload_filename, decoded_string
                 else:
                     print(
@@ -138,7 +146,10 @@ def register_callbacks(app) -> None:  # type: ignore
                     )
                     return dash.no_update, "", ""
             except Exception as e:
-                print(f"Error processing uploaded file: {e}")
+                if is_verbose_mode():
+                    logger.error(f"Error processing uploaded file: {e}", exc_info=True)
+                else:
+                    print(f"Error processing uploaded file: {e}")
                 return dash.no_update, "", ""
         elif trigger == "delete-config-file" and delete_n_clicks:
             return get_initial_config(), "", ""
