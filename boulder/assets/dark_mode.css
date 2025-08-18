@@ -137,6 +137,17 @@ body {
   color: var(--text-primary) !important;
 }
 
+/* Main app container */
+#app-container {
+  position: relative;
+  z-index: 1;
+}
+
+/* Simulation overlay - behind everything */
+#simulation-overlay {
+  z-index: -1 !important;
+}
+
 /* Cards and panels */
 .card {
   background-color: var(--card-bg) !important;
@@ -401,13 +412,41 @@ pre {
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
 }
 
-/* Simulation overlay visuals */
-#simulation-overlay {
+/* Simulation overlay visuals - Light mode */
+[data-theme="light"] #simulation-overlay {
+  backdrop-filter: blur(2px) brightness(1.05);
+  background: rgba(255,255,255,0.15);
+}
+
+[data-theme="light"] #simulation-overlay .flowing-background {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(900px 900px at 0% 50%, rgba(13,110,253,0.12), transparent 60%),
+              radial-gradient(900px 900px at 100% 50%, rgba(25,135,84,0.12), transparent 60%),
+              linear-gradient(90deg, rgba(0,0,0,0.00), rgba(0,0,0,0.05), rgba(0,0,0,0.00));
+  animation: flowShift 1.6s linear infinite;
+  pointer-events: none;
+}
+
+[data-theme="light"] #simulation-overlay .overlay-text {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  padding: 6px 10px;
+  background: rgba(13,110,253,0.15);
+  color: var(--text-primary);
+  border-radius: 6px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* Simulation overlay visuals - Dark mode */
+[data-theme="dark"] #simulation-overlay {
   backdrop-filter: blur(2px) brightness(0.95);
   background: rgba(0,0,0,0.15);
 }
 
-#simulation-overlay .flowing-background {
+[data-theme="dark"] #simulation-overlay .flowing-background {
   position: absolute;
   inset: 0;
   background: radial-gradient(900px 900px at 0% 50%, rgba(13,110,253,0.18), transparent 60%),
@@ -417,7 +456,7 @@ pre {
   pointer-events: none;
 }
 
-#simulation-overlay .overlay-text {
+[data-theme="dark"] #simulation-overlay .overlay-text {
   position: absolute;
   top: 20px;
   right: 20px;

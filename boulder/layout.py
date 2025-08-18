@@ -63,7 +63,6 @@ def get_layout(
                     "display": "none",
                     "position": "fixed",
                     "inset": 0,
-                    "zIndex": 2000,
                     "pointerEvents": "none",
                 },
             ),
