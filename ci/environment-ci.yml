@@ -24,3 +24,5 @@ dependencies:
   - pytest-xvfb
   - pytest-mock>=3.0.0
   - types-PyYAML>=6.0.0
+  - pint
+  - pydantic>=2.0.0

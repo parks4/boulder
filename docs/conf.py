@@ -40,6 +40,7 @@ extensions = [
 # Intersphinx: Reference other packages
 intersphinx_mapping = {
     "cantera": ("https://www.cantera.org/documentation/docs-2.6/sphinx/html/", None),
+    "ctwrap": ("https://microcombustion.github.io/ctwrap/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "matplotlib": ("https://matplotlib.org/stable/", None),
     "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", None),

@@ -1,0 +1,11 @@
+# Invalid: connection references unknown nodes
+nodes:
+- id: r1
+  IdealGasReactor:
+    temperature: 300
+connections:
+- id: c1
+  source: r1
+  target: r2    # r2 does not exist
+  MassFlowController:
+    mass_flow_rate: 0.001

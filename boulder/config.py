@@ -171,6 +171,19 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate a normalized config using Pydantic schema and return a plain dict.
+
+    This performs structural validation and cross-references (IDs, source/target) without
+    building any network.
+    """
+    # Import locally to avoid import costs when not needed
+    from .validation import validate_normalized_config
+
+    model = validate_normalized_config(config)
+    return model.model_dump()
+
+
 def get_initial_config() -> Dict[str, Any]:
     """Load the initial configuration in YAML format with 🪨 STONE standard.
 
@@ -182,7 +195,8 @@ def get_initial_config() -> Dict[str, Any]:
 
     if os.path.exists(stone_config_path):
         config = load_config_file(stone_config_path)
-        return normalize_config(config)
+        normalized = normalize_config(config)
+        return validate_config(normalized)
     else:
         raise FileNotFoundError(
             f"YAML configuration file with 🪨 STONE standard not found: {stone_config_path}"
@@ -202,19 +216,19 @@ def get_initial_config_with_comments() -> tuple[Dict[str, Any], str]:
 
     if os.path.exists(stone_config_path):
         # Load with comments preserved
-        try:
-            config_with_comments = load_config_file_with_comments(stone_config_path)
-            # Also read the raw file content to preserve original formatting
-            with open(stone_config_path, "r", encoding="utf-8") as f:
-                original_yaml = f.read()
+        config_with_comments = load_config_file_with_comments(
+            stone_config_path
+        )  # load YAML
+        # Also read the raw file content to preserve original formatting
+        with open(stone_config_path, "r", encoding="utf-8") as f:
+            original_yaml = f.read()
 
-            normalized_config = normalize_config(config_with_comments)
-            return normalized_config, original_yaml
-        except Exception as e:
-            print(f"Warning: Could not load with comments preserved: {e}")
-            # Fallback to standard loading
-            config = load_config_file(stone_config_path)
-            return normalize_config(config), ""
+        normalized_config = normalize_config(
+            config_with_comments
+        )  # convert to STONE format
+        validated = validate_config(normalized_config)  # validate inputs
+        return validated, original_yaml
+
     else:
         raise FileNotFoundError(
             f"YAML configuration file with 🪨 STONE standard not found: {stone_config_path}"
@@ -226,8 +240,9 @@ def get_config_from_path(config_path: str) -> Dict[str, Any]:
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-    config = load_config_file(config_path)
-    return normalize_config(config)
+    config = load_config_file(config_path)  # load YAML
+    normalized = normalize_config(config)  # convert to STONE format
+    return validate_config(normalized)  # validate inputs
 
 
 def get_config_from_path_with_comments(config_path: str) -> tuple[Dict[str, Any], str]:
@@ -241,15 +256,13 @@ def get_config_from_path_with_comments(config_path: str) -> tuple[Dict[str, Any]
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-    try:
-        config_with_comments = load_config_file_with_comments(config_path)
-        with open(config_path, "r", encoding="utf-8") as f:
-            original_yaml = f.read()
-        return normalize_config(config_with_comments), original_yaml
-    except Exception:
-        # Fallback to standard loader
-        config = load_config_file(config_path)
-        return normalize_config(config), ""
+    config_with_comments = load_config_file_with_comments(config_path)  # load YAML
+    with open(config_path, "r", encoding="utf-8") as f:
+        original_yaml = f.read()
+    normalized = normalize_config(
+        config_with_comments
+    )  # convert to STONE format with comments
+    return validate_config(normalized), original_yaml  # validate inputs
 
 
 def convert_to_stone_format(config: dict) -> dict:

@@ -8,6 +8,7 @@ from boulder.config import get_initial_config
 from boulder.layout import get_layout
 from boulder.styles import CYTOSCAPE_STYLESHEET
 from boulder.utils import config_to_cyto_elements
+from boulder.validation import validate_normalized_config
 
 
 @pytest.mark.unit
@@ -23,6 +24,26 @@ class TestBoulderConfig:
         assert "connections" in config
         assert isinstance(config["nodes"], list)
         assert isinstance(config["connections"], list)
+
+    def test_validate_normalized_config(self):
+        """Validate config post-normalization without building network."""
+        config = {
+            "nodes": [
+                {"id": "r1", "type": "IdealGasReactor", "properties": {}},
+                {"id": "r2", "type": "IdealGasReactor", "properties": {}},
+            ],
+            "connections": [
+                {
+                    "id": "c1",
+                    "type": "MassFlowController",
+                    "source": "r1",
+                    "target": "r2",
+                    "properties": {},
+                }
+            ],
+        }
+        model = validate_normalized_config(config)
+        assert model.nodes[0].id == "r1"
 
     def test_get_initial_config_components(self):
         """Test initial config components have required fields."""
