@@ -12,21 +12,18 @@ nodes:
   Reservoir:
     temperature: 300         # K
     composition: "CH4:1,O2:2,N2:7.52"
-
 - id: r1
   IdealGasReactor:
     temperature: 1000        # K
     pressure: 101325         # Pa
     composition: "CH4:1,O2:2,N2:7.52"
     group: "Train A"         # group membership
-
 - id: r2
   IdealGasReactor:
     temperature: 950         # K
     pressure: 101325         # Pa
     composition: "N2:1"
     group: "Train A"         # same group; will appear inside one compound node
-
 - id: res_out
   Reservoir:
     temperature: 300         # K
@@ -38,13 +35,11 @@ connections:
     mass_flow_rate: 0.05     # kg/s
   source: res_in
   target: r1
-
 - id: mfc_mid
   MassFlowController:
     mass_flow_rate: 0.05     # kg/s
   source: r1
   target: r2
-
 - id: mfc_out
   MassFlowController:
     mass_flow_rate: 0.05     # kg/s

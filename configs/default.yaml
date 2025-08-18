@@ -20,7 +20,6 @@ nodes:
     temperature: 1000        # K
     pressure: 101325         # Pa
     composition: "CH4:1,O2:2,N2:7.52"
-
 - id: res1
   Reservoir:
     temperature: 300         # K

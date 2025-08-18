@@ -4,23 +4,24 @@ metadata:
   version: "3.0"
   author: "Boulder Configuration System"
 
-simulation:
-  mechanism: "gri30.yaml"
+phases:
+  gas:
+    mechanism: gri30.yaml
+settings:
   time_step: 0.0005    # s
   max_time: 2.0        # s
   solver: "CVODE_BDF"
-  relative_tolerance: 1.0e-8
+  relative_tolerance: 1.0e-08
   absolute_tolerance: 1.0e-12
   max_steps: 20000
 
-components:
+nodes:
 - id: reactor1
   IdealGasReactor:
     temperature: 1100      # K
     pressure: 101325       # Pa
     composition: "CH4:0.8,O2:1.6,N2:6.0"
     volume: 0.005          # m³
-
 - id: reactor2
   IdealGasReactor:
     temperature: 900       # K
@@ -32,13 +33,11 @@ components:
   Reservoir:
     temperature: 300       # K
     composition: "CH4:1,N2:2"
-
 - id: res2
   Reservoir:
     temperature: 320       # K
     pressure: 151987       # Pa
     composition: "O2:1,N2:3.76"
-
 - id: mixer1
   IdealGasReactor:
     temperature: 400       # K
@@ -52,19 +51,16 @@ connections:
     mass_flow_rate: 0.03    # kg/s
   source: res1
   target: reactor1
-
 - id: mfc2
   MassFlowController:
     mass_flow_rate: 0.04    # kg/s
   source: res2
   target: reactor1
-
 - id: mfc3
   MassFlowController:
     mass_flow_rate: 0.025   # kg/s
   source: reactor1
   target: mixer1
-
 - id: mfc4
   MassFlowController:
     mass_flow_rate: 0.035   # kg/s
