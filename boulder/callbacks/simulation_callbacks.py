@@ -9,6 +9,8 @@ import dash
 import plotly.graph_objects as go  # type: ignore
 from dash import Input, Output, State
 
+REPORT_FRACTION_TRESHOLD = 1e-7  # 0.1 ppm cutoff for thermo report
+
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
@@ -193,24 +195,15 @@ def register_callbacks(app) -> None:  # type: ignore
             try:
                 for reactor_id, reactor in reactors_dict.items():
                     try:
-                        reactor_report = reactor.report()
+                        thermo_report = reactor.thermo.report(
+                            threshold=REPORT_FRACTION_TRESHOLD
+                        )
                     except Exception:
-                        reactor_report = ""
-
-                    try:
-                        thermo_report = reactor.thermo.report()
-                    except Exception:
-                        # Canterasupports calling the object directly
-                        try:
-                            thermo_callable = getattr(reactor.thermo, "__call__", None)
-                            thermo_report = (
-                                thermo_callable() if callable(thermo_callable) else ""
-                            )
-                        except Exception:
-                            thermo_report = ""
+                        # Cantera supports calling the object directly
+                        thermo_report = ""
 
                     reactor_reports[reactor_id] = {
-                        "reactor_report": reactor_report,
+                        "reactor_report": str(reactor),
                         "thermo_report": thermo_report,
                     }
             except Exception:
