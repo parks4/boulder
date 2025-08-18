@@ -85,6 +85,18 @@ def run_server(
         logger.info("Boulder server starting in verbose mode")
         logger.info(f"Server configuration: host={host}, port={port}, debug={debug}")
 
+        # Check for potential port conflicts and log them
+        import socket
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.bind((host, port))
+                logger.info(f"Port {port} is available for binding")
+        except OSError as e:
+            logger.warning(
+                f"Port {port} binding check failed: {e} (this is normal if CLI already handled port conflicts)"
+            )
+
         # Log initial configuration details
         env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
             "BOULDER_CONFIG"
