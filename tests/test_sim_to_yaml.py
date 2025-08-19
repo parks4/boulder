@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import cantera as ct  # type: ignore
 
-from boulder.cantera_converter import CanteraConverter
+from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import (
     load_yaml_string_with_comments,
     normalize_config,
@@ -65,8 +65,8 @@ def test_roundtrip_sim_to_yaml_and_back():
     phases = validated.get("phases", {})
     gas = phases.get("gas", {}) if isinstance(phases, dict) else {}
     mechanism = gas.get("mechanism", "gri30.yaml")
-    converter = CanteraConverter(mechanism=mechanism)
-    network, results = converter.build_network(validated)
+    converter = DualCanteraConverter(mechanism=mechanism)
+    network = converter.build_network(validated)
 
     # Node parity: same set of reactor IDs
     original_ids = {n["id"] for n in internal["nodes"]}

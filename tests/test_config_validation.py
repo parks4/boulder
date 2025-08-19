@@ -82,7 +82,7 @@ def test_unit_coercion_ctwrap_compatibility() -> None:
 
     - temperature strings (e.g., "500 degC") become Kelvin magnitudes
     - pressure strings (e.g., "1 atm") become Pascals
-    - simulation dt strings (e.g., "10 ms") become seconds
+    - settings dt strings (e.g., "10 ms") become seconds
     """
     data = {
         "nodes": [
@@ -96,7 +96,7 @@ def test_unit_coercion_ctwrap_compatibility() -> None:
             }
         ],
         "connections": [],
-        "simulation": {"dt": "10 ms"},
+        "settings": {"dt": "10 ms"},
     }
 
     normalized = normalize_config(data)
@@ -107,8 +107,8 @@ def test_unit_coercion_ctwrap_compatibility() -> None:
     # pressure: 1 atm = 101325 Pa
     assert abs(model.nodes[0].properties["pressure"] - 101325.0) < 1e-6
     # dt: 10 ms = 0.01 s
-    assert model.simulation is not None
-    assert abs(getattr(model.simulation, "dt") - 0.01) < 1e-12
+    assert model.settings is not None
+    assert abs(getattr(model.settings, "dt") - 0.01) < 1e-12
 
 
 @pytest.mark.unit
@@ -204,7 +204,7 @@ def test_dynamic_unit_system_flexibility() -> None:
                 },
             }
         ],
-        "simulation": {
+        "settings": {
             "dt": "1 ms",  # Time in milliseconds
             "end_time": "10 min",  # Time in minutes
         },
@@ -230,7 +230,7 @@ def test_dynamic_unit_system_flexibility() -> None:
         abs(conn.properties["custom_power"] - 500.0) < 1e-6
     )  # 500 W (no conversion needed)
 
-    # Check simulation properties
-    sim_dict = model.simulation.__dict__
+    # Check settings properties
+    sim_dict = model.settings.__dict__
     assert abs(sim_dict["dt"] - 0.001) < 1e-6  # 1 ms = 0.001 s
     assert abs(sim_dict["end_time"] - 600.0) < 1e-6  # 10 min = 600 s

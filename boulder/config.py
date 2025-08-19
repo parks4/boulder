@@ -107,7 +107,6 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
                 "'phases', and 'settings'."
             )
         # Keep phases and settings as separate top-level sections (STONE standard)
-        # No longer merge into deprecated 'simulation' section
 
     # Normalize nodes
     if "nodes" in normalized:

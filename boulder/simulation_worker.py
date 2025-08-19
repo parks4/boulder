@@ -173,7 +173,6 @@ class SimulationWorker:
                 simulation_time=simulation_time,
                 time_step=time_step,
                 progress_callback=progress_callback,
-                config=config,
             )
 
             # Finalize results

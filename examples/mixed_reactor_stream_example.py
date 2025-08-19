@@ -19,7 +19,7 @@ contain all species that might be present in any upstream reactor.
 import cantera as ct
 
 # For regeneration (see end of file)
-from boulder.cantera_converter import CanteraConverter
+from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import load_config_file, normalize_config, validate_config
 
 # %%
@@ -122,8 +122,8 @@ validated = validate_config(normalized)
 phases = validated.get("phases", {})
 gas = phases.get("gas", {}) if isinstance(phases, dict) else {}
 mechanism = gas.get("mechanism", "gri30.yaml")
-converter = CanteraConverter(mechanism=mechanism)
-network, results = converter.build_network(validated)
+converter = DualCanteraConverter(mechanism=mechanism)
+network = converter.build_network(validated)
 print(
     f"Rebuilt network with {len(converter.reactors)} nodes and "
     f"{len(converter.connections)} connections."
