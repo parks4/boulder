@@ -38,7 +38,9 @@ def test_sim2stone_preserves_per_node_mechanisms() -> None:
     loaded = load_yaml_string_with_comments(yaml_str)
     normalized = normalize_config(loaded)
 
-    mech_by_id = {node["id"]: node["properties"].get("mechanism") for node in normalized["nodes"]}
+    mech_by_id = {
+        node["id"]: node["properties"].get("mechanism") for node in normalized["nodes"]
+    }
     global_mech = normalized.get("simulation", {}).get("mechanism", None)
 
     # R1 matches global, so mechanism may be omitted at node level
@@ -47,5 +49,3 @@ def test_sim2stone_preserves_per_node_mechanisms() -> None:
 
     # R2 uses gri30, so mechanism override must be present at node level after normalization
     assert mech_by_id.get("R2") == "gri30.yaml"
-
-

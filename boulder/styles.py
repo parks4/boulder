@@ -60,8 +60,26 @@ CYTOSCAPE_STYLESHEET_LIGHT = [
             "target-arrow-shape": "triangle",
             "target-arrow-color": "#555",
             "line-color": "#555",
+            # Ensure we can control draw order of edges
+            "z-index-compare": "manual",
+            # Keep default edges below walls
+            "z-index": 5,
+            # Slightly wider so they remain visible under walls
+            "width": 6,
             "text-wrap": "wrap",
             "text-max-width": "80px",
+        },
+    },
+    {
+        # Emphasize Walls with a distinct color visible in light mode
+        "selector": "edge[type = 'Wall']",
+        "style": {
+            "line-color": "#D0021B",
+            "target-arrow-color": "#D0021B",
+            # Draw walls on top
+            "z-index": 20,
+            # Slightly narrower so default edges peek around them
+            "width": 4,
         },
     },
 ]
@@ -123,9 +141,27 @@ CYTOSCAPE_STYLESHEET_DARK = [
             "target-arrow-shape": "triangle",
             "target-arrow-color": "#ccc",
             "line-color": "#ccc",
+            # Ensure we can control draw order of edges
+            "z-index-compare": "manual",
+            # Keep default edges below walls
+            "z-index": 5,
             "text-wrap": "wrap",
             "text-max-width": "80px",
             "color": "#fff",
+            # Slightly wider so they remain visible under walls
+            "width": 6,
+        },
+    },
+    {
+        # Emphasize Walls with a distinct color visible in dark mode
+        "selector": "edge[type = 'Wall']",
+        "style": {
+            "line-color": "#FF4D4D",
+            "target-arrow-color": "#FF4D4D",
+            # Draw walls on top
+            "z-index": 20,
+            # Slightly narrower so default edges peek around them
+            "width": 3,
         },
     },
 ]
