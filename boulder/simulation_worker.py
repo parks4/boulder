@@ -128,6 +128,8 @@ class SimulationWorker:
                 with self._lock:
                     self.progress.times = progress_data["time"]
                     self.progress.reactors_series = progress_data["reactors"]
+                    # Forward error messages if present (so UI can display immediately)
+                    self.progress.error_message = progress_data.get("error_message")
                     # Calculate progress percentage
                     progress_pct = (
                         (current_time / total_time) * 100 if total_time > 0 else 0
@@ -172,6 +174,9 @@ class SimulationWorker:
                 )
                 self.progress.is_running = False
                 self.progress.is_complete = True
+                # Carry through final error message if present in results
+                if isinstance(results, dict) and results.get("error_message"):
+                    self.progress.error_message = results.get("error_message")
 
         except Exception as e:
             logger.error(f"Simulation failed: {e}", exc_info=True)

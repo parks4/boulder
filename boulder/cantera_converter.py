@@ -339,9 +339,12 @@ class DualCanteraConverter:
         # Add simulation loop code generation
         sim_time = int(simulation_time)
         step_time = int(time_step)
+        # Generate compact, line-length compliant code lines for the demo script
+        self.code_lines.append("# Run the simulation")
+        self.code_lines.append(f"for t in range(0, {sim_time}, {step_time}):")
+        self.code_lines.append("    network.advance(t)")
         self.code_lines.append(
-            f"""# Run the simulation\nfor t in range(0, {sim_time}, {step_time}):\n    network.advance(t)\n    """
-            + """print(f\"t={t}, T={[r.thermo.T for r in network.reactors]}\")"""
+            '    print(f"t={t}, T={[r.thermo.T for r in network.reactors]}")'
         )
 
         # Initialize data structures
@@ -353,6 +356,7 @@ class DualCanteraConverter:
         # Per-reactor capture using SolutionArray
         reactors_series: Dict[str, Dict[str, Any]] = {}
         sol_arrays: Dict[str, ct.SolutionArray] = {}
+        last_error_message: str = ""
         for reactor in reactor_list:
             reactor_id = getattr(reactor, "name", "") or str(id(reactor))
             sol_arrays[reactor_id] = ct.SolutionArray(self.gas, shape=(0,))
@@ -369,14 +373,35 @@ class DualCanteraConverter:
                 self.network.advance(current_time)
             except Exception as e:
                 # Log warning but continue with partial results
-                logger.warning(f"Cantera advance failed at t={current_time}s: {e}")
+                last_error_message = str(e)
+                logger.warning(
+                    f"Cantera advance failed at t={current_time}s: {last_error_message}"
+                )
                 if len(times) == 0:
                     # If we haven't captured any data yet, this is a real failure
                     raise RuntimeError(
-                        f"Cantera advance failed at t={current_time}s: {e}"
+                        f"Cantera advance failed at t={current_time}s: {last_error_message}"
                     ) from e
                 # Otherwise, break and return partial results
                 logger.warning(f"Returning partial results up to t={times[-1]}s")
+                # Provide a partial-progress callback update containing the error
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "time": times.copy(),
+                            "reactors": {
+                                k: {
+                                    "T": v["T"].copy(),
+                                    "P": v["P"].copy(),
+                                    "X": {s: v["X"][s].copy() for s in v["X"]},
+                                }
+                                for k, v in reactors_series.items()
+                            },
+                            "error_message": last_error_message,
+                        },
+                        current_time,
+                        simulation_time,
+                    )
                 break
 
             times.append(current_time)
@@ -394,6 +419,9 @@ class DualCanteraConverter:
                     and math.isfinite(P)
                     and all(math.isfinite(float(x)) for x in X_vec)
                 ):
+                    last_error_message = (
+                        "Non-finite state detected (T/P/X) — using previous values"
+                    )
                     logger.warning(
                         f"Non-finite state detected at t={current_time}s for reactor "
                         f"'{reactor_id}', using previous values"
@@ -434,12 +462,16 @@ class DualCanteraConverter:
                         for k, v in reactors_series.items()
                     },
                 }
+                if last_error_message:
+                    progress_data["error_message"] = last_error_message
                 progress_callback(progress_data, current_time, simulation_time)
 
             current_time += time_step
 
         # Finalize results
         results = self.finalize_results(times, reactors_series)
+        if last_error_message:
+            results["error_message"] = last_error_message
         return results, "\n".join(self.code_lines)
 
     def finalize_results(

@@ -66,8 +66,9 @@ def register_callbacks(app) -> None:  # type: ignore
     # Callback to start streaming simulation
     @app.callback(
         [
-            Output("simulation-progress-interval", "disabled"),
-            Output("simulation-error-display", "children", allow_duplicate=True),
+            Output("simulation-progress-interval", "disabled", allow_duplicate=True),
+            Output("error-tab-pane", "tab_style", allow_duplicate=True),
+            Output("simulation-error-pane", "children", allow_duplicate=True),
         ],
         [
             Input("run-simulation", "n_clicks"),
@@ -88,7 +89,7 @@ def register_callbacks(app) -> None:  # type: ignore
         mechanism_select: str,
         custom_mechanism: str,
         uploaded_filename: str,
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, Dict[str, str], str]:
         """Start a background simulation with streaming updates."""
         from ..cantera_converter import (
             DualCanteraConverter,
@@ -116,10 +117,7 @@ def register_callbacks(app) -> None:  # type: ignore
             logger.warning(
                 f"❌ Simulation not started: n_clicks={n_clicks}, config={config is not None}"
             )
-            return (
-                True,
-                f"Debug: Callback triggered but not started (n_clicks={n_clicks})",
-            )
+            return (True, {"display": "none"}, "")
 
         # Determine the mechanism to use
         if mechanism_select == "custom-name":
@@ -153,11 +151,11 @@ def register_callbacks(app) -> None:  # type: ignore
 
             logger.info("✅ Background simulation started successfully")
             logger.info("📡 Enabling interval updates (500ms)")
-            return False, "Debug: Simulation started successfully!"
+            return (False, {"display": "none"}, "")
 
         except Exception as e:
             logger.error(f"❌ Failed to start simulation: {e}", exc_info=True)
-            return True, f"Debug: Error starting simulation: {str(e)}"
+            return (True, {"display": "none"}, "")
 
     # Streaming update callback - updates plots as simulation progresses
     @app.callback(
@@ -166,10 +164,10 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("pressure-plot", "figure", allow_duplicate=True),
             Output("species-plot", "figure", allow_duplicate=True),
             Output("last-sim-python-code", "data", allow_duplicate=True),
-            Output("simulation-error-display", "children", allow_duplicate=True),
-            Output("simulation-error-display", "style", allow_duplicate=True),
             Output("simulation-results-card", "style", allow_duplicate=True),
             Output("simulation-data", "data", allow_duplicate=True),
+            Output("simulation-error-pane", "children", allow_duplicate=True),
+            Output("error-tab-pane", "tab_style", allow_duplicate=True),
             Output("simulation-progress-interval", "disabled", allow_duplicate=True),
             Output("simulation-running", "data", allow_duplicate=True),
         ],
@@ -193,10 +191,10 @@ def register_callbacks(app) -> None:  # type: ignore
         Any,
         Any,
         str,
-        Any,
-        Dict[str, str],
         Dict[str, str],
         Dict[str, Any],
+        Any,
+        Dict[str, str],
         bool,
         bool,
     ]:
@@ -217,17 +215,26 @@ def register_callbacks(app) -> None:  # type: ignore
             f"  Data: {len(progress.times)} time points, {len(progress.reactors_series)} reactors"
         )
 
-        # If simulation not running, disable interval
+        # If simulation not running and not complete, show error if present and disable interval
         if not progress.is_running and not progress.is_complete:
+            error_children = dash.no_update
+            error_tab_style = {"display": "none"}
+            results_card_style = {"display": "none"}
+            if progress.error_message:
+                error_children = f"Simulation error: {progress.error_message}"
+                error_tab_style = {"display": "block"}
+                # Ensure the results pane is visible so the error is noticeable
+                results_card_style = {"display": "block"}
+
             return (
                 go.Figure(),
                 go.Figure(),
                 go.Figure(),
                 "",
-                dash.no_update,
-                {"display": "none"},
-                {"display": "none"},
+                results_card_style,
                 {},
+                (progress.error_message or ""),
+                error_tab_style,
                 True,  # Disable interval
                 False,  # Not running
             )
@@ -298,12 +305,9 @@ def register_callbacks(app) -> None:  # type: ignore
             "reactor_reports": progress.reactor_reports,
         }
 
-        # Handle errors
-        error_message = ""
-        error_style = {"display": "none"}
-        if progress.error_message:
-            error_message = f"Simulation warning: {progress.error_message}"
-            error_style = {"display": "block", "color": "orange"}
+        # Handle non-fatal warnings (runtime notices)
+        error_message = progress.error_message or ""
+        error_tab_style = {"display": "block"} if error_message else {"display": "none"}
 
         # Check if simulation is complete
         interval_disabled = progress.is_complete
@@ -314,10 +318,10 @@ def register_callbacks(app) -> None:  # type: ignore
             press_fig.to_dict(),
             species_fig.to_dict(),
             progress.code_str,
-            error_message,
-            error_style,
             {"display": "block"},
             simulation_data,
+            (progress.error_message or ""),
+            error_tab_style,
             interval_disabled,
             simulation_running,
         )
