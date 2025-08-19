@@ -166,6 +166,12 @@ def sim_to_internal_config(
                 if isinstance(mdot_value, (int, float)):
                     props["mass_flow_rate"] = float(mdot_value)
                 # Else: omit property; builder will use its default
+            # If mass flow is negative, re-orient the connection and take absolute value
+            mfr = props.get("mass_flow_rate")
+            if isinstance(mfr, (int, float)) and mfr < 0:
+                props["mass_flow_rate"] = abs(float(mfr))
+                # swap
+                src_id, tgt_id = tgt_id, src_id
         elif isinstance(dev, ct.Valve):
             # Capture valve coefficient if available
             coeff = None
@@ -214,9 +220,14 @@ def sim_to_internal_config(
         # Convert current heat rate to an equivalent electric power in kW (best effort)
         try:
             q_watts = float(getattr(w, "heat_rate"))
-            electric_power_kW = q_watts / 1e3
         except Exception:
-            electric_power_kW = 0.0
+            q_watts = 0.0
+        # If heat flows from right to left (negative), invert orientation and use positive magnitude
+        if q_watts < 0:
+            electric_power_kW = (-q_watts) / 1e3
+            l_id, r_id = r_id, l_id
+        else:
+            electric_power_kW = q_watts / 1e3
 
         connections.append(
             {
