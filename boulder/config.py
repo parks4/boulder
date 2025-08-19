@@ -135,7 +135,7 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         for node in normalized["nodes"]:
             if "type" not in node:
                 # Find the type key (anything that's not id, metadata, etc.)
-                standard_fields = {"id", "metadata"}
+                standard_fields = {"id", "metadata", "mechanism"}
                 type_keys = [k for k in node.keys() if k not in standard_fields]
 
                 if type_keys:
@@ -148,6 +148,11 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
                     node["properties"] = (
                         properties if isinstance(properties, dict) else {}
                     )
+            # If a node-level mechanism is present, move it into properties for internal use
+            if "mechanism" in node:
+                props = node.setdefault("properties", {})
+                if "mechanism" not in props:
+                    props["mechanism"] = node["mechanism"]
 
     # Normalize connections
     if "connections" in normalized:
@@ -295,10 +300,11 @@ def convert_to_stone_format(config: dict) -> dict:
         for node in config["nodes"]:
             # Build node with id first, then type as key containing properties
             node_type = node.get("type", "IdealGasReactor")
-            stone_node = {
-                "id": node["id"],
-                node_type: node.get("properties", {}),
-            }
+            props = dict(node.get("properties", {}) or {})
+            mech_override = props.pop("mechanism", None)
+            stone_node = {"id": node["id"], node_type: props}
+            if mech_override is not None:
+                stone_node["mechanism"] = mech_override
             stone_config["nodes"].append(stone_node)
 
     # Convert connections (same structure in new format)
