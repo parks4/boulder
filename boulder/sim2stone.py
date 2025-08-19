@@ -9,12 +9,27 @@ equivalent topology (same nodes and connections) when reconstructed by
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cantera as ct  # type: ignore
 
 from .config import CANTERA_MECHANISM, yaml_to_string_with_comments
 from .ctutils import collect_all_reactors_and_reservoirs
+
+
+def _mechanism_from_thermo(thermo: ct.ThermoPhase) -> Optional[str]:
+    """Try to read the mechanism file name from the ThermoPhase.
+
+    Prefer attributes exposed by Cantera (e.g., `source`, `input_name`). Returns
+    a basename like 'gri30.yaml' when possible.
+    """
+    for attr in ("source", "input_name"):
+        val = getattr(thermo, attr, None)
+        if isinstance(val, str) and val:
+            base = os.path.basename(val)
+            return base or val
+    return None
 
 
 def _composition_to_string(thermo: ct.ThermoPhase, min_fraction: float = 1e-12) -> str:
@@ -103,11 +118,20 @@ def sim_to_internal_config(
     nodes: List[Dict[str, Any]] = []
     for r in all_reactors:
         node_type = _infer_node_type(r)
+        # Capture mechanism override if present on reactor object (set by builder)
+        mech_override = getattr(r, "_boulder_mechanism", None)
+
         props: Dict[str, Any] = {
             "temperature": float(r.thermo.T),
             "pressure": float(r.thermo.P),
             "composition": _composition_to_string(r.thermo),
         }
+        if isinstance(mech_override, str) and mech_override:
+            props["mechanism"] = mech_override
+        else:
+            guessed = _mechanism_from_thermo(r.thermo)
+            if guessed:
+                props["mechanism"] = guessed
         # Optional group propagation if present
         group_name = getattr(r, "group_name", "")
         if isinstance(group_name, str) and group_name:
@@ -255,7 +279,16 @@ def sim_to_stone_yaml(
     for node in internal.get("nodes", []):
         node_cm = CommentedMap()
         node_cm["id"] = node["id"]
-        node_cm[node["type"]] = node.get("properties", {})
+        # Copy properties to avoid mutating internal
+        props = dict(node.get("properties", {}) or {})
+        # Extract per-node mechanism and emit at node level (not inside class block)
+        node_mech = props.pop("mechanism", None)
+        # Drop per-node mechanism if it matches the global phases gas mechanism
+        if node_mech == mechanism:
+            node_mech = None
+        node_cm[node["type"]] = props
+        if node_mech is not None:
+            node_cm["mechanism"] = node_mech
         nodes_seq.append(node_cm)
     stone_cm["nodes"] = nodes_seq
     # blank line before nodes

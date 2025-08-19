@@ -137,8 +137,21 @@ class CanteraConverter:
         reactor_type = reactor_config["type"]
         props = reactor_config["properties"]
 
+        # Determine mechanism for this node (override allowed via properties.mechanism)
+        mechanism_override = props.get("mechanism")
+        if mechanism_override:
+            try:
+                gas_obj = ct.Solution(mechanism_override)
+            except Exception as e:  # fail-fast with clear message
+                raise ValueError(
+                    f"Failed to load per-node mechanism '{mechanism_override}' for node "
+                    f"'{reactor_config.get('id', '<unknown>')}': {e}"
+                ) from e
+        else:
+            gas_obj = self.gas
+
         # Set gas state
-        self.gas.TPX = (
+        gas_obj.TPX = (
             props.get("temperature", 300),
             props.get("pressure", 101325),
             self.parse_composition(props.get("composition", "N2:1")),
@@ -148,18 +161,24 @@ class CanteraConverter:
         if reactor_type in self.plugins.reactor_builders:
             reactor = self.plugins.reactor_builders[reactor_type](self, reactor_config)
         elif reactor_type == "IdealGasReactor":
-            reactor = ct.IdealGasReactor(self.gas)
+            reactor = ct.IdealGasReactor(gas_obj)
         elif reactor_type == "IdealGasConstPressureReactor":
-            reactor = ct.IdealGasConstPressureReactor(self.gas)
+            reactor = ct.IdealGasConstPressureReactor(gas_obj)
         elif reactor_type == "IdealGasConstPressureMoleReactor":
-            reactor = ct.IdealGasConstPressureMoleReactor(self.gas)
+            reactor = ct.IdealGasConstPressureMoleReactor(gas_obj)
         elif reactor_type == "Reservoir":
-            reactor = ct.Reservoir(self.gas)
+            reactor = ct.Reservoir(gas_obj)
         else:
             raise ValueError(f"Unsupported reactor type: {reactor_type}")
 
         # Set the reactor name to match the config ID
         reactor.name = reactor_config["id"]
+
+        # Track per-node mechanism for downstream tools (e.g., sim2stone)
+        try:
+            reactor._boulder_mechanism = mechanism_override or self.mechanism  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         # Optional grouping: propagate group name to reactor for downstream tools
         props_group = reactor_config.get("properties", {}).get("group")
