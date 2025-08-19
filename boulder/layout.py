@@ -519,6 +519,11 @@ def get_layout(
                                     dbc.CardHeader("Simulation Results"),
                                     dbc.CardBody(
                                         children=[
+                                            html.Div(
+                                                id="simulation-error-display",
+                                                className="mb-2",
+                                                style={"display": "none"},
+                                            ),
                                             dbc.Tabs(
                                                 [
                                                     dbc.Tab(
@@ -559,36 +564,6 @@ def get_layout(
                                                         ],
                                                     ),
                                                     dbc.Tab(
-                                                        label="⚠️ Error",
-                                                        tab_id="error-tab",
-                                                        id="error-tab-pane",
-                                                        tab_style={"display": "none"},
-                                                        children=[
-                                                            html.Div(
-                                                                [
-                                                                    html.Div(
-                                                                        [
-                                                                            html.B(
-                                                                                "⚠️ Error"
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    html.Pre(
-                                                                        id="simulation-error-pane",
-                                                                        className="text-danger",
-                                                                        style={
-                                                                            "whiteSpace": "pre-wrap",
-                                                                            "fontFamily": "monospace",
-                                                                            "fontSize": "0.9rem",
-                                                                        },
-                                                                    ),
-                                                                ],
-                                                                className="mt-3",
-                                                            )
-                                                        ],
-                                                    ),
-                                                    dbc.Tab(
                                                         label="Sankey Diagram",
                                                         tab_id="sankey-tab",
                                                         children=[
@@ -626,6 +601,36 @@ def get_layout(
                                                                                 width=12,
                                                                             ),
                                                                         ]
+                                                                    ),
+                                                                ],
+                                                                className="mt-3",
+                                                            )
+                                                        ],
+                                                    ),
+                                                    dbc.Tab(
+                                                        label="⚠️ Error",
+                                                        tab_id="error-tab",
+                                                        id="error-tab-pane",
+                                                        tab_style={"display": "none"},
+                                                        children=[
+                                                            html.Div(
+                                                                [
+                                                                    html.Div(
+                                                                        [
+                                                                            html.B(
+                                                                                "⚠️ Error Details"
+                                                                            ),
+                                                                        ],
+                                                                        className="mb-2",
+                                                                    ),
+                                                                    html.Pre(
+                                                                        id="simulation-error-pane",
+                                                                        className="text-danger",
+                                                                        style={
+                                                                            "whiteSpace": "pre-wrap",
+                                                                            "fontFamily": "monospace",
+                                                                            "fontSize": "0.9rem",
+                                                                        },
                                                                     ),
                                                                 ],
                                                                 className="mt-3",

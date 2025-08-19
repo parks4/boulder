@@ -166,6 +166,8 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("last-sim-python-code", "data", allow_duplicate=True),
             Output("simulation-results-card", "style", allow_duplicate=True),
             Output("simulation-data", "data", allow_duplicate=True),
+            Output("simulation-error-display", "children", allow_duplicate=True),
+            Output("simulation-error-display", "style", allow_duplicate=True),
             Output("simulation-error-pane", "children", allow_duplicate=True),
             Output("error-tab-pane", "tab_style", allow_duplicate=True),
             Output("simulation-progress-interval", "disabled", allow_duplicate=True),
@@ -195,6 +197,8 @@ def register_callbacks(app) -> None:  # type: ignore
         Dict[str, Any],
         Any,
         Dict[str, str],
+        Any,
+        Dict[str, str],
         bool,
         bool,
     ]:
@@ -217,14 +221,43 @@ def register_callbacks(app) -> None:  # type: ignore
 
         # If simulation not running and not complete, show error if present and disable interval
         if not progress.is_running and not progress.is_complete:
-            error_children = dash.no_update
             error_tab_style = {"display": "none"}
             results_card_style = {"display": "none"}
             if progress.error_message:
-                error_children = f"Simulation error: {progress.error_message}"
                 error_tab_style = {"display": "block"}
                 # Ensure the results pane is visible so the error is noticeable
                 results_card_style = {"display": "block"}
+
+            # One-line banner content/style (CSS handles ellipsis)
+            if progress.error_message:
+                # Build a concise one-liner from the first meaningful lines
+                stripped_lines = [
+                    line.strip()
+                    for line in progress.error_message.splitlines()
+                    if line.strip()
+                ]
+                # Drop decorative lines like ******
+                core_lines = [line for line in stripped_lines if set(line) != {"*"}]
+                summary = ""
+                for line in core_lines[:4]:  # consider first few lines
+                    candidate = (summary + " — " + line) if summary else line
+                    if len(candidate) > 200:
+                        summary = candidate[:200]
+                        break
+                    summary = candidate
+                if not summary and stripped_lines:
+                    summary = stripped_lines[0]
+                banner_text = f"⚠️ {summary}"
+                banner_style = {
+                    "display": "block",
+                    "color": "#dc3545",
+                    "whiteSpace": "nowrap",
+                    "overflow": "hidden",
+                    "textOverflow": "ellipsis",
+                }
+            else:
+                banner_text = dash.no_update
+                banner_style = {"display": "none"}
 
             return (
                 go.Figure(),
@@ -233,6 +266,8 @@ def register_callbacks(app) -> None:  # type: ignore
                 "",
                 results_card_style,
                 {},
+                banner_text,
+                banner_style,
                 (progress.error_message or ""),
                 error_tab_style,
                 True,  # Disable interval
@@ -308,6 +343,29 @@ def register_callbacks(app) -> None:  # type: ignore
         # Handle non-fatal warnings (runtime notices)
         error_message = progress.error_message or ""
         error_tab_style = {"display": "block"} if error_message else {"display": "none"}
+        if error_message:
+            stripped_lines = [line.strip() for line in error_message.splitlines() if line.strip()]
+            core_lines = [line for line in stripped_lines if set(line) != {"*"}]
+            summary = ""
+            for line in core_lines[:4]:
+                candidate = (summary + " — " + line) if summary else line
+                if len(candidate) > 200:
+                    summary = candidate[:200]
+                    break
+                summary = candidate
+            if not summary and stripped_lines:
+                summary = stripped_lines[0]
+            banner_text = f"⚠️ {summary}"
+            banner_style = {
+                "display": "block",
+                "color": "#dc3545",
+                "whiteSpace": "nowrap",
+                "overflow": "hidden",
+                "textOverflow": "ellipsis",
+            }
+        else:
+            banner_text = dash.no_update
+            banner_style = {"display": "none"}
 
         # Check if simulation is complete
         interval_disabled = progress.is_complete
@@ -320,6 +378,8 @@ def register_callbacks(app) -> None:  # type: ignore
             progress.code_str,
             {"display": "block"},
             simulation_data,
+            banner_text,
+            banner_style,
             (progress.error_message or ""),
             error_tab_style,
             interval_disabled,
