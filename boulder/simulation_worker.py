@@ -137,6 +137,19 @@ class SimulationWorker:
                     logger.debug(
                         f"Simulation progress: {progress_pct:.1f}% (t={current_time:.1f}s)"
                     )
+                    # Stream updated thermo reports so Thermo tab reflects latest state
+                    try:
+                        interim_results = {
+                            "time": self.progress.times,
+                            "reactors": self.progress.reactors_series,
+                        }
+                        self.progress.reactor_reports = self._generate_reactor_reports(
+                            converter, interim_results
+                        )
+                    except Exception as stream_err:
+                        logger.debug(
+                            f"Streaming reactor report generation failed: {stream_err}"
+                        )
 
             # Initialize progress
             with self._lock:
@@ -219,6 +232,10 @@ class SimulationWorker:
                             "species_names": converter.gas.species_names,
                             "molecular_weights": converter.gas.molecular_weights,
                             "mass_fractions": converter.gas.Y.copy(),
+                            # Generate formatted reports for UI display
+                            "reactor_report": f"Temperature: {final_T:.2f} K\nPressure: "
+                            f"{final_P:.2e} Pa\nVolume: {reactor.volume:.2e} m³",
+                            "thermo_report": converter.gas.report(),
                         }
 
         except Exception as e:

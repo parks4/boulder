@@ -344,7 +344,9 @@ def register_callbacks(app) -> None:  # type: ignore
         error_message = progress.error_message or ""
         error_tab_style = {"display": "block"} if error_message else {"display": "none"}
         if error_message:
-            stripped_lines = [line.strip() for line in error_message.splitlines() if line.strip()]
+            stripped_lines = [
+                line.strip() for line in error_message.splitlines() if line.strip()
+            ]
             core_lines = [line for line in stripped_lines if set(line) != {"*"}]
             summary = ""
             for line in core_lines[:4]:
