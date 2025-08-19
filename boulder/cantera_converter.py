@@ -144,6 +144,21 @@ class DualCanteraConverter:
             comp_dict[species] = float(value)
         return comp_dict
 
+    def _set_reactor_volume(
+        self, reactor: ct.Reactor, props: Dict[str, Any], reactor_id: str
+    ) -> None:
+        """Set reactor volume if specified in properties."""
+        volume = props.get("volume")
+        if volume is not None and not isinstance(reactor, ct.Reservoir):
+            try:
+                volume_val = float(volume)
+                if volume_val > 0:
+                    reactor.volume = volume_val
+                    self.code_lines.append(f"{reactor_id}.volume = {volume_val}")
+                    logger.debug(f"Set volume for {reactor_id}: {volume_val} m³")
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.warning(f"Failed to set volume for {reactor_id}: {e}")
+
     def build_network(self, config: Dict[str, Any]) -> ct.ReactorNet:
         """Build the Cantera network without running simulation."""
         self.code_lines = []
@@ -174,6 +189,8 @@ class DualCanteraConverter:
                 reactor = self.plugins.reactor_builders[typ](self, node)
                 reactor.name = rid
                 self.reactors[rid] = reactor
+                # Set volume if specified (plugins may support volume)
+                self._set_reactor_volume(self.reactors[rid], props, rid)
                 try:
                     self.reactors[rid].group_name = str(
                         props.get("group", props.get("group_name", ""))
@@ -187,6 +204,8 @@ class DualCanteraConverter:
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasReactor(self.gas)
                 self.reactors[rid].name = rid
+                # Set volume if specified
+                self._set_reactor_volume(self.reactors[rid], props, rid)
                 try:
                     self.reactors[rid].group_name = str(
                         props.get("group", props.get("group_name", ""))
@@ -201,6 +220,8 @@ class DualCanteraConverter:
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasConstPressureReactor(self.gas)
                 self.reactors[rid].name = rid
+                # Set volume if specified
+                self._set_reactor_volume(self.reactors[rid], props, rid)
                 try:
                     self.reactors[rid].group_name = str(
                         props.get("group", props.get("group_name", ""))
@@ -217,6 +238,8 @@ class DualCanteraConverter:
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasConstPressureMoleReactor(self.gas)
                 self.reactors[rid].name = rid
+                # Set volume if specified
+                self._set_reactor_volume(self.reactors[rid], props, rid)
                 try:
                     self.reactors[rid].group_name = str(
                         props.get("group", props.get("group_name", ""))
@@ -232,6 +255,8 @@ class DualCanteraConverter:
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasMoleReactor(self.gas)  # type: ignore[attr-defined]
                 self.reactors[rid].name = rid
+                # Set volume if specified
+                self._set_reactor_volume(self.reactors[rid], props, rid)
                 try:
                     self.reactors[rid].group_name = str(
                         props.get("group", props.get("group_name", ""))
@@ -331,10 +356,54 @@ class DualCanteraConverter:
         simulation_time: float = 10.0,
         time_step: float = 1.0,
         progress_callback=None,
+        config: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], str]:
         """Run simulation with streaming progress updates."""
         if self.network is None:
             raise RuntimeError("Network not built. Call build_network() first.")
+
+        # Override parameters from config if provided
+        if config:
+            # Only use 'settings' section with 'end_time' and 'dt'
+            settings_config = config.get("settings", {})
+
+            # Check for deprecated keys and raise errors
+            deprecated_keys = []
+            if "simulation" in config:
+                deprecated_keys.append("'simulation' section (use 'settings' instead)")
+            if "max_time" in settings_config:
+                deprecated_keys.append(
+                    "'max_time' in settings (use 'end_time' instead)"
+                )
+            if "time_step" in settings_config:
+                deprecated_keys.append("'time_step' in settings (use 'dt' instead)")
+
+            if deprecated_keys:
+                raise ValueError(
+                    f"Deprecated configuration keys found: {', '.join(deprecated_keys)}. "
+                    "Please update your YAML to use 'settings' section with 'end_time' and 'dt' keys only."
+                )
+
+            # Extract values from settings section only
+            config_simulation_time = settings_config.get("end_time")
+            config_time_step = settings_config.get("dt")
+
+            # Use config values if valid, otherwise keep defaults
+            if config_simulation_time is not None and config_simulation_time > 0:
+                simulation_time = float(config_simulation_time)
+            if config_time_step is not None and config_time_step > 0:
+                time_step = float(config_time_step)
+
+            # Validate time_step is not greater than simulation_time
+            if time_step > simulation_time:
+                logger.warning(
+                    f"time_step ({time_step}s) > simulation_time ({simulation_time}s), adjusting time_step"
+                )
+                time_step = simulation_time / 10.0  # Use 10 steps minimum
+
+            logger.info(
+                f"🕐 Using config parameters: time={simulation_time}s, step={time_step}s"
+            )
 
         # Add simulation loop code generation
         sim_time = int(simulation_time)

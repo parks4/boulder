@@ -126,6 +126,16 @@ def sim_to_internal_config(
             "pressure": float(r.thermo.P),
             "composition": _composition_to_string(r.thermo),
         }
+
+        # Add volume for non-Reservoir reactors (Reservoirs have infinite volume)
+        if not isinstance(r, ct.Reservoir):
+            try:
+                volume = float(r.volume)
+                if volume > 0:  # Only include positive volumes
+                    props["volume"] = volume
+            except (AttributeError, ValueError, TypeError):
+                # Volume attribute may not be available or accessible
+                pass
         if isinstance(mech_override, str) and mech_override:
             props["mechanism"] = mech_override
         else:
