@@ -367,10 +367,18 @@ class DualCanteraConverter:
             # Only use 'settings' section with 'end_time' and 'dt'
             settings_config = config.get("settings", {})
 
-            # Check for deprecated keys and raise errors
+            # Check for deprecated keys and raise errors only if they contain values
             deprecated_keys = []
-            if "simulation" in config:
+
+            print("\n" * 5)
+            print("DEBUG: config", config)
+
+            # Only error if simulation section exists and has content
+            simulation_section = config.get("simulation", {})
+            if simulation_section:  # Only if not empty
                 deprecated_keys.append("'simulation' section (use 'settings' instead)")
+
+            # Only error if deprecated keys exist in settings
             if "max_time" in settings_config:
                 deprecated_keys.append(
                     "'max_time' in settings (use 'end_time' instead)"

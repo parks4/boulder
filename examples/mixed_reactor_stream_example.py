@@ -118,9 +118,11 @@ write_sim_as_yaml(sim, "mixed_reactor_stream.yaml", default_mechanism="gri30.yam
 loaded = load_config_file("mixed_reactor_stream.yaml")
 normalized = normalize_config(loaded)
 validated = validate_config(normalized)
-converter = CanteraConverter(
-    mechanism=validated.get("simulation", {}).get("mechanism", "gri30.yaml")
-)
+# Get mechanism from phases.gas.mechanism (STONE standard)
+phases = validated.get("phases", {})
+gas = phases.get("gas", {}) if isinstance(phases, dict) else {}
+mechanism = gas.get("mechanism", "gri30.yaml")
+converter = CanteraConverter(mechanism=mechanism)
 network, results = converter.build_network(validated)
 print(
     f"Rebuilt network with {len(converter.reactors)} nodes and "

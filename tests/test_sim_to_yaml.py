@@ -61,10 +61,11 @@ def test_roundtrip_sim_to_yaml_and_back():
     normalized = normalize_config(loaded_with_comments)
     validated = validate_config(normalized)
 
-    # Rebuild via CanteraConverter
-    converter = CanteraConverter(
-        mechanism=validated.get("simulation", {}).get("mechanism", "gri30.yaml")
-    )
+    # Rebuild via CanteraConverter - get mechanism from phases.gas.mechanism (STONE standard)
+    phases = validated.get("phases", {})
+    gas = phases.get("gas", {}) if isinstance(phases, dict) else {}
+    mechanism = gas.get("mechanism", "gri30.yaml")
+    converter = CanteraConverter(mechanism=mechanism)
     network, results = converter.build_network(validated)
 
     # Node parity: same set of reactor IDs

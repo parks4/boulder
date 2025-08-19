@@ -29,14 +29,18 @@ UNIT_SUGGESTIONS = {
 }
 
 
-class SimulationModel(BaseModel):
-    """Simulation section of the normalized config.
-
-    Open schema by design: accept arbitrary keys (e.g., mechanisms, time settings).
-    """
+class PhasesModel(BaseModel):
+    """Phases section of the STONE config (chemistry/phase configuration)."""
 
     class Config:
-        extra = "allow"
+        extra = "allow"  # Allow arbitrary phase types
+
+
+class SettingsModel(BaseModel):
+    """Settings section of the STONE config (simulation-level settings)."""
+
+    class Config:
+        extra = "allow"  # Allow arbitrary settings
 
 
 class NodeModel(BaseModel):
@@ -75,7 +79,8 @@ class NormalizedConfigModel(BaseModel):
     """Top-level normalized configuration model."""
 
     metadata: Optional[Dict[str, Any]] = None
-    simulation: Optional[SimulationModel] = None
+    phases: Optional[PhasesModel] = None
+    settings: Optional[SettingsModel] = None
     nodes: List[NodeModel]
     connections: List[ConnectionModel] = Field(default_factory=list)
 
@@ -290,40 +295,40 @@ class NormalizedConfigModel(BaseModel):
             for key, value in conn.properties.items():
                 conn.properties[key] = _coerce_value(value, key)
 
-        # Process simulation properties dynamically
-        if isinstance(self.simulation, SimulationModel):
-            # For simulation, we need to handle it differently since it's a Pydantic model
+        # Process settings properties dynamically
+        if isinstance(self.settings, SettingsModel):
+            # For settings, we need to handle it differently since it's a Pydantic model
             # with extra fields allowed. In Pydantic v1, extra fields are stored in __fields_set__
             # and accessible via dict() method or direct attribute access.
 
-            # Get all the simulation data as a dict
-            sim_data = (
-                self.simulation.dict()
-                if hasattr(self.simulation, "dict")
-                else self.simulation.__dict__
+            # Get all the settings data as a dict
+            settings_data = (
+                self.settings.dict()
+                if hasattr(self.settings, "dict")
+                else self.settings.__dict__
             )
 
             # Process each field and mirror updates into __dict__ for compatibility
             coerced_updates: Dict[str, Any] = {}
-            for key, value in sim_data.items():
+            for key, value in settings_data.items():
                 if isinstance(value, str):
                     coerced = _coerce_value(value, key)
                     try:
-                        setattr(self.simulation, key, coerced)
+                        setattr(self.settings, key, coerced)
                         # Ensure __dict__ contains coerced values for downstream consumers
                         coerced_updates[key] = coerced
                     except Exception as e:
                         import logging
 
                         logging.warning(
-                            f"Failed to set attribute '{key}' on simulation: {e}"
+                            f"Failed to set attribute '{key}' on settings: {e}"
                         )
 
             # In pydantic v2, extras may live outside __dict__. Update __dict__ for consumers
-            # that expect direct dict access (e.g., tests using model.simulation.__dict__).
+            # that expect direct dict access (e.g., tests using model.settings.__dict__).
             if coerced_updates:
                 try:
-                    self.simulation.__dict__.update(coerced_updates)
+                    self.settings.__dict__.update(coerced_updates)
                 except Exception:
                     # Best-effort: if __dict__ is not writable, ignore silently
                     # (attributes have already been set above).

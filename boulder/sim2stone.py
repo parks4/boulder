@@ -259,7 +259,7 @@ def sim_to_internal_config(
     internal: Dict[str, Any] = {
         "nodes": nodes,
         "connections": connections,
-        "simulation": {"mechanism": mechanism},
+        "phases": {"gas": {"mechanism": mechanism}},
     }
 
     return internal
@@ -276,12 +276,10 @@ def sim_to_stone_yaml(
     """
     internal = sim_to_internal_config(sim, default_mechanism=default_mechanism)
 
-    # Determine mechanism for phases/gas
-    mechanism = (
-        (internal.get("simulation") or {}).get("mechanism")
-        or default_mechanism
-        or CANTERA_MECHANISM
-    )
+    # Determine mechanism from phases.gas.mechanism (STONE standard)
+    phases = internal.get("phases", {})
+    gas = phases.get("gas", {}) if isinstance(phases, dict) else {}
+    mechanism = gas.get("mechanism") or default_mechanism or CANTERA_MECHANISM
 
     # Build STONE format using ruamel structures to control formatting
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
