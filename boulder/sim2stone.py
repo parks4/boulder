@@ -151,7 +151,7 @@ def sim_to_internal_config(
         tgt_id = getattr(tgt, "name", None) or f"reactor_{id(tgt)}"
 
         conn_type = _infer_connection_type(dev)
-        props: Dict[str, Any] = {}
+        conn_props: Dict[str, Any] = {}
         if isinstance(dev, ct.MassFlowController):
             # Prefer attribute if available; Cantera exposes mass_flow_rate as a property
             try:
@@ -167,9 +167,9 @@ def sim_to_internal_config(
                     props["mass_flow_rate"] = float(mdot_value)
                 # Else: omit property; builder will use its default
             # If mass flow is negative, re-orient the connection and take absolute value
-            mfr = props.get("mass_flow_rate")
+            mfr = conn_props.get("mass_flow_rate")
             if isinstance(mfr, (int, float)) and mfr < 0:
-                props["mass_flow_rate"] = abs(float(mfr))
+                conn_props["mass_flow_rate"] = abs(float(mfr))
                 # swap
                 src_id, tgt_id = tgt_id, src_id
         elif isinstance(dev, ct.Valve):
@@ -181,7 +181,7 @@ def sim_to_internal_config(
                 coeff = getattr(dev, "K")
             if coeff is not None:
                 try:
-                    props["valve_coeff"] = float(coeff)
+                    conn_props["valve_coeff"] = float(coeff)
                 except Exception:
                     pass
 
@@ -197,7 +197,7 @@ def sim_to_internal_config(
             {
                 "id": cid,
                 "type": conn_type,
-                "properties": props,
+                "properties": conn_props,
                 "source": src_id,
                 "target": tgt_id,
             }
@@ -213,9 +213,11 @@ def sim_to_internal_config(
         l_id = getattr(left, "name", None) or f"reactor_{id(left)}"
         r_id = getattr(right, "name", None) or f"reactor_{id(right)}"
 
-        cid = getattr(w, "name", None)
-        if not isinstance(cid, str) or not cid:
+        cid_raw = getattr(w, "name", None)
+        if not isinstance(cid_raw, str) or not cid_raw:
             cid = f"Wall_{l_id}_to_{r_id}"
+        else:
+            cid = cid_raw
 
         # Convert current heat rate to an equivalent electric power in kW (best effort)
         try:
