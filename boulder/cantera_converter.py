@@ -34,6 +34,7 @@ class BoulderPlugins:
     reactor_builders: Dict[str, ReactorBuilder] = field(default_factory=dict)
     connection_builders: Dict[str, ConnectionBuilder] = field(default_factory=dict)
     post_build_hooks: List[PostBuildHook] = field(default_factory=list)
+    mechanism_path_resolver: Optional[Callable[[str], str]] = None
 
 
 # Global cache to ensure plugins are discovered only once
@@ -112,7 +113,14 @@ class CanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         self.plugins = plugins or get_plugins()
         try:
-            self.gas = ct.Solution(self.mechanism)
+            # Use plugin mechanism path resolver if available
+            if self.plugins.mechanism_path_resolver:
+                resolved_mechanism = self.plugins.mechanism_path_resolver(
+                    self.mechanism
+                )
+            else:
+                resolved_mechanism = self.mechanism
+            self.gas = ct.Solution(resolved_mechanism)
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         self.reactors: Dict[str, ct.Reactor] = {}
@@ -141,7 +149,14 @@ class CanteraConverter:
         mechanism_override = props.get("mechanism")
         if mechanism_override:
             try:
-                gas_obj = ct.Solution(mechanism_override)
+                # Use plugin mechanism path resolver if available
+                if self.plugins.mechanism_path_resolver:
+                    resolved_mechanism = self.plugins.mechanism_path_resolver(
+                        mechanism_override
+                    )
+                else:
+                    resolved_mechanism = mechanism_override
+                gas_obj = ct.Solution(resolved_mechanism)
             except Exception as e:  # fail-fast with clear message
                 raise ValueError(
                     f"Failed to load per-node mechanism '{mechanism_override}' for node "
@@ -162,6 +177,8 @@ class CanteraConverter:
             reactor = self.plugins.reactor_builders[reactor_type](self, reactor_config)
         elif reactor_type == "IdealGasReactor":
             reactor = ct.IdealGasReactor(gas_obj)
+        elif reactor_type == "IdealGasMoleReactor":
+            reactor = ct.IdealGasMoleReactor(gas_obj)
         elif reactor_type == "IdealGasConstPressureReactor":
             reactor = ct.IdealGasConstPressureReactor(gas_obj)
         elif reactor_type == "IdealGasConstPressureMoleReactor":
@@ -392,11 +409,18 @@ class DualCanteraConverter:
         """
         # Use provided mechanism or fall back to config default
         self.mechanism = mechanism or CANTERA_MECHANISM
+        self.plugins = plugins or get_plugins()
         try:
-            self.gas = ct.Solution(self.mechanism)
+            # Use plugin mechanism path resolver if available
+            if self.plugins.mechanism_path_resolver:
+                resolved_mechanism = self.plugins.mechanism_path_resolver(
+                    self.mechanism
+                )
+            else:
+                resolved_mechanism = self.mechanism
+            self.gas = ct.Solution(resolved_mechanism)
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
-        self.plugins = plugins or get_plugins()
         self.reactors: Dict[str, ct.Reactor] = {}
         self.reactor_meta: Dict[str, Dict[str, Any]] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
@@ -458,6 +482,51 @@ class DualCanteraConverter:
                 self.code_lines.append(f"{rid} = ct.IdealGasReactor(gas)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasReactor(self.gas)
+                self.reactors[rid].name = rid
+                try:
+                    self.reactors[rid].group_name = str(
+                        props.get("group", props.get("group_name", ""))
+                    )
+                    self.code_lines.append(
+                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
+                    )
+                except Exception:
+                    pass
+            elif typ == "IdealGasConstPressureReactor":
+                self.code_lines.append(f"{rid} = ct.IdealGasConstPressureReactor(gas)")
+                self.code_lines.append(f"{rid}.name = '{rid}'")
+                self.reactors[rid] = ct.IdealGasConstPressureReactor(self.gas)
+                self.reactors[rid].name = rid
+                try:
+                    self.reactors[rid].group_name = str(
+                        props.get("group", props.get("group_name", ""))
+                    )
+                    self.code_lines.append(
+                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
+                    )
+                except Exception:
+                    pass
+            elif typ == "IdealGasConstPressureMoleReactor":
+                self.code_lines.append(
+                    f"{rid} = ct.IdealGasConstPressureMoleReactor(gas)"
+                )
+                self.code_lines.append(f"{rid}.name = '{rid}'")
+                self.reactors[rid] = ct.IdealGasConstPressureMoleReactor(self.gas)
+                self.reactors[rid].name = rid
+                try:
+                    self.reactors[rid].group_name = str(
+                        props.get("group", props.get("group_name", ""))
+                    )
+                    self.code_lines.append(
+                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
+                    )
+                except Exception:
+                    pass
+            elif typ == "IdealGasMoleReactor":
+                # Available in Cantera 3.x
+                self.code_lines.append(f"{rid} = ct.IdealGasMoleReactor(gas)")
+                self.code_lines.append(f"{rid}.name = '{rid}'")
+                self.reactors[rid] = ct.IdealGasMoleReactor(self.gas)  # type: ignore[attr-defined]
                 self.reactors[rid].name = rid
                 try:
                     self.reactors[rid].group_name = str(
