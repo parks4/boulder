@@ -8,6 +8,7 @@ import dash_bootstrap_components as dbc
 from . import (
     callbacks,
     cantera_converter,  # noqa: F401
+    output_pane_plugins,  # noqa: F401
 )
 from .config import (
     get_config_from_path_with_comments,
@@ -18,7 +19,7 @@ from .styles import CYTOSCAPE_STYLESHEET
 
 # Create a single, shared converter instance for the app
 # This ensures that the same set of discovered plugins is used everywhere.
-CONVERTER = cantera_converter.CanteraConverter()
+CONVERTER = cantera_converter.DualCanteraConverter()
 
 
 # Initialize the Dash app with Bootstrap

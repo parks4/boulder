@@ -22,7 +22,7 @@ def get_mechanism_path(mechanism_str) -> str:
     Examples
     --------
 
-    .. minigallery:: bloc.utils.get_mechanism_path
+    .. minigallery:: boulder.utils.get_mechanism_path
     """
     mechanism = Path(mechanism_str)
 

@@ -42,7 +42,7 @@ metadata:
   version: "1.0"
 
 # Simulation parameters with detailed comments
-simulation:
+settings:
   end_time: 1.0  # seconds - total simulation duration
   dt: 0.01       # seconds - integration time step
 
@@ -159,7 +159,7 @@ connections:
                 "description": "Updated description",
                 "version": "2.0",
             },
-            "simulation": {"end_time": 2.0, "dt": 0.02},
+            "settings": {"end_time": 2.0, "dt": 0.02},
             "nodes": [
                 {
                     "id": "reactor1",
@@ -178,7 +178,7 @@ connections:
         # Verify updates were applied
         assert updated_data["metadata"]["name"] == "Updated Configuration"
         assert updated_data["metadata"]["version"] == "2.0"
-        assert updated_data["simulation"]["end_time"] == 2.0
+        assert updated_data["settings"]["end_time"] == 2.0
         assert updated_data["nodes"][0]["IdealGasReactor"]["temperature"] == 1100.0
 
     def test_preserves_numeric_types(self, sample_yaml_with_comments):
@@ -188,8 +188,8 @@ connections:
         # Check that numbers are loaded as proper types
         assert isinstance(data["nodes"][0]["IdealGasReactor"]["temperature"], float)
         assert isinstance(data["nodes"][0]["IdealGasReactor"]["pressure"], float)
-        assert isinstance(data["simulation"]["end_time"], float)
-        assert isinstance(data["simulation"]["dt"], float)
+        assert isinstance(data["settings"]["end_time"], float)
+        assert isinstance(data["settings"]["dt"], float)
 
     def test_preserves_string_types(self, sample_yaml_with_comments):
         """Test that string types are preserved correctly."""

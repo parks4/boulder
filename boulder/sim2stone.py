@@ -126,6 +126,16 @@ def sim_to_internal_config(
             "pressure": float(r.thermo.P),
             "composition": _composition_to_string(r.thermo),
         }
+
+        # Add volume for non-Reservoir reactors (Reservoirs have infinite volume)
+        if not isinstance(r, ct.Reservoir):
+            try:
+                volume = float(r.volume)
+                if volume > 0:  # Only include positive volumes
+                    props["volume"] = volume
+            except (AttributeError, ValueError, TypeError):
+                # Volume attribute may not be available or accessible
+                pass
         if isinstance(mech_override, str) and mech_override:
             props["mechanism"] = mech_override
         else:
@@ -249,7 +259,7 @@ def sim_to_internal_config(
     internal: Dict[str, Any] = {
         "nodes": nodes,
         "connections": connections,
-        "simulation": {"mechanism": mechanism},
+        "phases": {"gas": {"mechanism": mechanism}},
     }
 
     return internal
@@ -266,12 +276,10 @@ def sim_to_stone_yaml(
     """
     internal = sim_to_internal_config(sim, default_mechanism=default_mechanism)
 
-    # Determine mechanism for phases/gas
-    mechanism = (
-        (internal.get("simulation") or {}).get("mechanism")
-        or default_mechanism
-        or CANTERA_MECHANISM
-    )
+    # Determine mechanism from phases.gas.mechanism (STONE standard)
+    phases = internal.get("phases", {})
+    gas = phases.get("gas", {}) if isinstance(phases, dict) else {}
+    mechanism = gas.get("mechanism") or default_mechanism or CANTERA_MECHANISM
 
     # Build STONE format using ruamel structures to control formatting
     from ruamel.yaml.comments import CommentedMap, CommentedSeq

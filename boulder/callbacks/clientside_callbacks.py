@@ -74,3 +74,22 @@ def register_callbacks(app) -> None:  # type: ignore
         Input("simulation-running", "data"),
         prevent_initial_call=True,
     )
+
+    # Show the results card immediately when starting a simulation
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (!n_clicks) return window.dash_clientside.no_update;
+            try {
+                var card = document.getElementById('simulation-results-card');
+                if (card) {
+                    card.style.display = 'block';
+                }
+            } catch (e) {}
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("keyboard-trigger", "data", allow_duplicate=True),
+        Input("run-simulation", "n_clicks"),
+        prevent_initial_call=True,
+    )

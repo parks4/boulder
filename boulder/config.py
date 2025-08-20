@@ -14,7 +14,8 @@ from ruamel.yaml import YAML
 USE_TEMPERATURE_SCALE = True
 
 # Global variable to control which converter to use
-USE_DUAL_CONVERTER = True
+# Unified converter architecture - no longer needed
+# USE_DUAL_CONVERTER = True
 
 # Global variable for the Cantera mechanism to use consistently across the application
 CANTERA_MECHANISM = "gri30.yaml"
@@ -74,7 +75,8 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     Converted to the internal format used by converters:
     - nodes: list with { id, type, properties }
     - connections: list with { id, type, properties, source, target }
-    - simulation: dict with mechanism selections and settings
+    - phases: chemistry/phase configuration (preserved)
+    - settings: simulation-level settings (preserved)
 
     Example
     -------
@@ -104,31 +106,7 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
                 "Please update your YAML configuration to use the new STONE schema with 'nodes', "
                 "'phases', and 'settings'."
             )
-        # Merge phases/settings into simulation
-        phases = normalized.pop("phases", None)
-        settings = normalized.pop("settings", None)
-        if phases or settings:
-            sim = dict(normalized.get("simulation", {}) or {})
-            if phases and isinstance(phases, dict):
-                sim["phases"] = phases
-                # Flatten gas mechanisms for downstream consumers
-                gas = (
-                    phases.get("gas", {})
-                    if isinstance(phases.get("gas", {}), dict)
-                    else {}
-                )
-                mech = gas.get("mechanism")
-                mech_reac = gas.get("mechanism_reac")
-                mech_torch = gas.get("mechanism_torch")
-                if mech is not None:
-                    sim.setdefault("mechanism", mech)
-                if mech_reac is not None:
-                    sim.setdefault("mechanism_reac", mech_reac)
-                if mech_torch is not None:
-                    sim.setdefault("mechanism_torch", mech_torch)
-            if settings and isinstance(settings, dict):
-                sim.update(settings)
-            normalized["simulation"] = sim
+        # Keep phases and settings as separate top-level sections (STONE standard)
 
     # Normalize nodes
     if "nodes" in normalized:
@@ -278,21 +256,12 @@ def convert_to_stone_format(config: dict) -> dict:
     if "metadata" in config:
         stone_config["metadata"] = config["metadata"]
 
-    # Extract phases and settings from simulation section
-    simulation = config.get("simulation", {})
-    if simulation:
-        # Extract phases information
-        if "phases" in simulation:
-            stone_config["phases"] = simulation["phases"]
+    # Copy phases and settings sections directly (STONE standard)
+    if "phases" in config:
+        stone_config["phases"] = config["phases"]
 
-        # Extract settings (everything except phases and mechanism info)
-        settings = {}
-        for key, value in simulation.items():
-            if key not in ["phases", "mechanism", "mechanism_reac", "mechanism_torch"]:
-                settings[key] = value
-
-        if settings:
-            stone_config["settings"] = settings
+    if "settings" in config:
+        stone_config["settings"] = config["settings"]
 
     # Convert nodes to STONE format
     if "nodes" in config:

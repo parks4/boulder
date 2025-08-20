@@ -41,7 +41,10 @@ def test_sim2stone_preserves_per_node_mechanisms() -> None:
     mech_by_id = {
         node["id"]: node["properties"].get("mechanism") for node in normalized["nodes"]
     }
-    global_mech = normalized.get("simulation", {}).get("mechanism", None)
+    # Get global mechanism from phases.gas.mechanism (STONE standard)
+    phases = normalized.get("phases", {})
+    gas = phases.get("gas", {}) if isinstance(phases, dict) else {}
+    global_mech = gas.get("mechanism")
 
     # R1 matches global, so mechanism may be omitted at node level
     assert global_mech == "air.yaml"
