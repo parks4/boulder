@@ -21,6 +21,10 @@ def register_callbacks(app) -> None:  # type: ignore
     def show_properties_editable(last_selected, edit_mode, config):
         from ..utils import label_with_unit
 
+        def _to_celsius(val_K):
+            # assume incoming config temperature is in Kelvin (numeric or numeric string)
+            return val_K - 273.15
+
         node_data = None
         edge_data = None
         if last_selected and last_selected.get("type") == "node":
@@ -48,7 +52,9 @@ def register_callbacks(app) -> None:  # type: ignore
                             dbc.Col(
                                 dcc.Input(
                                     id={"type": "prop-edit", "prop": k},
-                                    value=str(v),
+                                    value=str(_to_celsius(v))
+                                    if k == "temperature"
+                                    else str(v),
                                     type="text",
                                     style={"width": "100%"},
                                 ),
@@ -94,7 +100,12 @@ def register_callbacks(app) -> None:  # type: ignore
                         [
                             dbc.Col(html.Label(label_with_unit(k)), width=6),
                             dbc.Col(
-                                html.Div(str(v), style={"wordBreak": "break-all"}),
+                                html.Div(
+                                    str(_to_celsius(v))
+                                    if k == "temperature"
+                                    else str(v),
+                                    style={"wordBreak": "break-all"},
+                                ),
                                 width=6,
                             ),
                         ],
@@ -277,7 +288,11 @@ def register_callbacks(app) -> None:  # type: ignore
                         # Convert to float if key is temperature or pressure
                         if key in ("temperature", "pressure"):
                             try:
-                                props[key] = float(v)
+                                if key == "temperature":
+                                    # convert from °C (UI) back to K (config)
+                                    props[key] = float(v) + 273.15
+                                else:
+                                    props[key] = float(v)
                             except Exception:
                                 props[key] = v
                         else:
