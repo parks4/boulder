@@ -140,13 +140,39 @@ def register_callbacks(app) -> None:  # type: ignore
             # Create unified converter
             converter = DualCanteraConverter(mechanism=mechanism, plugins=get_plugins())
 
+            # Read simulation parameters from settings (STONE schema)
+            settings: Dict[str, Any] = {}
+            try:
+                if isinstance(config, dict):
+                    settings = config.get("settings") or {}
+            except Exception:
+                settings = {}
+
+            # dt (seconds) and end_time (seconds) with sensible fallbacks
+            try:
+                time_step = float(settings.get("dt", 1.0))
+            except Exception:
+                time_step = 1.0
+            try:
+                simulation_time = float(
+                    settings.get("end_time", settings.get("max_time", 10.0))
+                )
+            except Exception:
+                simulation_time = 10.0
+
+            # Clamp to safe ranges
+            if time_step <= 0:
+                time_step = 1.0
+            if simulation_time <= 0:
+                simulation_time = 10.0
+
             # Start background simulation
             worker = get_simulation_worker()
             worker.start_simulation(
                 converter=converter,
                 config=config,
-                simulation_time=10.0,  # 10 seconds
-                time_step=1.0,  # 1 second steps
+                simulation_time=simulation_time,
+                time_step=time_step,
             )
 
             logger.info("✅ Background simulation started successfully")
@@ -229,6 +255,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 results_card_style = {"display": "block"}
 
             # One-line banner content/style (CSS handles ellipsis)
+            banner_text: Any
             if progress.error_message:
                 # Build a concise one-liner from the first meaningful lines
                 stripped_lines = [
