@@ -8,6 +8,7 @@ import dash_bootstrap_components as dbc
 from . import (
     callbacks,
     cantera_converter,  # noqa: F401
+    output_pane_plugins,  # noqa: F401
 )
 from .config import (
     get_config_from_path_with_comments,

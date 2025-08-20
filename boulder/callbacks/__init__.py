@@ -6,6 +6,7 @@ from . import (
     graph_callbacks,
     modal_callbacks,
     notification_callbacks,
+    plugin_callbacks,
     properties_callbacks,
     resize_callbacks,
     simulation_callbacks,
@@ -24,3 +25,4 @@ def register_callbacks(app) -> None:  # type: ignore
     notification_callbacks.register_callbacks(app)
     clientside_callbacks.register_callbacks(app)
     theme_callbacks.register_callbacks(app)
+    plugin_callbacks.register_callbacks(app)

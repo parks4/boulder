@@ -186,18 +186,18 @@ def register_callbacks(app) -> None:  # type: ignore
     # Streaming update callback - updates plots as simulation progresses
     @app.callback(
         [
-            Output("temperature-plot", "figure", allow_duplicate=True),
-            Output("pressure-plot", "figure", allow_duplicate=True),
-            Output("species-plot", "figure", allow_duplicate=True),
-            Output("last-sim-python-code", "data", allow_duplicate=True),
-            Output("simulation-results-card", "style", allow_duplicate=True),
-            Output("simulation-data", "data", allow_duplicate=True),
-            Output("simulation-error-display", "children", allow_duplicate=True),
-            Output("simulation-error-display", "style", allow_duplicate=True),
-            Output("simulation-error-pane", "children", allow_duplicate=True),
-            Output("error-tab-pane", "tab_style", allow_duplicate=True),
-            Output("simulation-progress-interval", "disabled", allow_duplicate=True),
-            Output("simulation-running", "data", allow_duplicate=True),
+            Output("temperature-plot", "figure"),
+            Output("pressure-plot", "figure"),
+            Output("species-plot", "figure"),
+            Output("last-sim-python-code", "data"),
+            Output("simulation-results-card", "style"),
+            Output("simulation-data", "data"),
+            Output("simulation-error-display", "children"),
+            Output("simulation-error-display", "style"),
+            Output("simulation-error-pane", "children"),
+            Output("error-tab-pane", "tab_style"),
+            Output("simulation-progress-interval", "disabled"),
+            Output("simulation-running", "data"),
         ],
         [
             Input("simulation-progress-interval", "n_intervals"),
@@ -367,6 +367,30 @@ def register_callbacks(app) -> None:  # type: ignore
             "reactor_reports": progress.reactor_reports,
         }
 
+        # Store live objects in global singleton to avoid serialization issues
+        from ..live_simulation import clear_live_simulation, update_live_simulation
+
+        if progress.is_complete and not progress.is_running and progress.network:
+            try:
+                # Store live objects in singleton
+                update_live_simulation(
+                    network=progress.network,
+                    reactors=progress.reactors_dict,
+                    mechanism=progress.mechanism,
+                )
+                logger.info(
+                    "✅ Stored live simulation objects in singleton for spatial analysis"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Could not store live simulation objects: {e}")
+                clear_live_simulation()
+        elif not progress.is_running and not progress.is_complete:
+            # Clear on simulation reset/failure
+            clear_live_simulation()
+
+        # No longer need to pass live objects through Dash store
+        live_simulation = None
+
         # Handle non-fatal warnings (runtime notices)
         error_message = progress.error_message or ""
         error_tab_style = {"display": "block"} if error_message else {"display": "none"}
@@ -396,8 +420,8 @@ def register_callbacks(app) -> None:  # type: ignore
             banner_text = dash.no_update
             banner_style = {"display": "none"}
 
-        # Check if simulation is complete
-        interval_disabled = progress.is_complete
+        # Check if simulation is complete - disable interval when done
+        interval_disabled = progress.is_complete or not progress.is_running
         simulation_running = progress.is_running
 
         return (
@@ -414,6 +438,8 @@ def register_callbacks(app) -> None:  # type: ignore
             interval_disabled,
             simulation_running,
         )
+
+    print("✅ [SIMULATION CALLBACKS] Streaming update callback registered successfully")
 
     # Overlay style now handled client-side for zero-lag responsiveness
 
@@ -486,6 +512,10 @@ def register_callbacks(app) -> None:  # type: ignore
     )
     def hide_results_on_config_change(*_: Any) -> Tuple[Dict[str, str], Dict[str, Any]]:
         """Hide plots and Sankey diagrams when configuration changes."""
+        # Also clear singleton when config changes
+        from ..live_simulation import clear_live_simulation
+
+        clear_live_simulation()
         return {"display": "none"}, {}
 
     # Download .py file when button is clicked
@@ -627,20 +657,19 @@ def register_callbacks(app) -> None:  # type: ignore
 
         from ..utils import apply_theme_to_figure
 
-        # Only act if we have simulation results and a node selection
-        if not simulation_data or "results" not in simulation_data:
-            raise dash.exceptions.PreventUpdate
-
-        results = simulation_data["results"]
-        reactors = results.get("reactors") or {}
-
         if not last_selected or last_selected.get("type") != "node":
             # Keep current plots unchanged when selecting edges or clearing selection
             return dash.no_update, dash.no_update, dash.no_update
 
         node_id = (last_selected.get("data") or {}).get("id")
-        if not node_id or node_id not in reactors:
+        if not node_id or not simulation_data or "results" not in simulation_data:
             # Ignore selections that do not correspond to simulated reactors
+            return dash.no_update, dash.no_update, dash.no_update
+
+        results = simulation_data["results"]
+        reactors = results.get("reactors") or {}
+
+        if node_id not in reactors:
             return dash.no_update, dash.no_update, dash.no_update
 
         times = results.get("time", [])

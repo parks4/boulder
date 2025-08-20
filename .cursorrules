@@ -1,7 +1,17 @@
-These are Lead developer instructions for AI Agents :
-- avoid except:pass handles, better crash with a clear error message than hide the problems.
-- Use testing-driven development.
-- Fix library code, not tests
-- Never perform git commits
+These are the Lead developer instructions.
+
+Follow the development guidelines :
+
+CODING
 - Keep line length under 110 characters
-- Finish your changes by running `make qa` in the boulder conda env.
+- Don't wrap code in try except blocks unless you're catching a specific exception.
+- Better raise a clear error message than hide the problems/fix in the back of the user.
+
+TESTING
+- Use test-driven development
+- Fix library code, not tests
+- Run tests in 'boulder' conda env
+- After successful tests, use `make qa` for code quality.
+
+VERSIONING
+- Never perform git commits

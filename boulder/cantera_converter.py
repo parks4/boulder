@@ -28,6 +28,9 @@ class BoulderPlugins:
     connection_builders: Dict[str, ConnectionBuilder] = field(default_factory=dict)
     post_build_hooks: List[PostBuildHook] = field(default_factory=list)
     mechanism_path_resolver: Optional[Callable[[str], str]] = None
+    output_pane_plugins: List[Any] = field(
+        default_factory=list
+    )  # Import will be handled dynamically
 
 
 # Global cache to ensure plugins are discovered only once
@@ -84,13 +87,23 @@ def get_plugins() -> BoulderPlugins:
                     f"Failed to import BOULDER_PLUGINS module '{mod_name}': {e}"
                 )
 
+    # Load output pane plugins from the global registry
+    try:
+        from .output_pane_plugins import get_output_pane_registry
+
+        registry = get_output_pane_registry()
+        plugins.output_pane_plugins = registry.plugins.copy()
+    except ImportError as e:
+        logger.debug(f"Output pane plugins not available: {e}")
+
     _PLUGIN_CACHE = plugins
 
     if is_verbose_mode():
         logger.info(
             f"Plugin discovery complete: {len(plugins.reactor_builders)} reactor builders, "
             f"{len(plugins.connection_builders)} connection builders, "
-            f"{len(plugins.post_build_hooks)} post-build hooks"
+            f"{len(plugins.post_build_hooks)} post-build hooks, "
+            f"{len(plugins.output_pane_plugins)} output pane plugins"
         )
 
     return plugins

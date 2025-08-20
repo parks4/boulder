@@ -13,6 +13,165 @@ from .utils import config_to_cyto_elements, get_available_cantera_mechanisms
 cyto.load_extra_layouts()  # provides 'dagre', 'klay', 'cose-bilkent', etc.
 
 
+def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
+    """Generate the results tabs including plugin tabs."""
+    # Standard tabs
+    tabs = [
+        dbc.Tab(
+            label="Plots",
+            tab_id="plots-tab",
+            children=[
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dcc.Graph(id="temperature-plot"),
+                            width=6,
+                        ),
+                        dbc.Col(
+                            dcc.Graph(id="pressure-plot"),
+                            width=6,
+                        ),
+                    ],
+                    className="mb-2 mt-3",
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dcc.Graph(id="species-plot"),
+                            width=6,
+                        ),
+                        dbc.Col(
+                            html.Div(),
+                            width=6,
+                        ),
+                    ]
+                ),
+            ],
+        ),
+        dbc.Tab(
+            label="Sankey Diagram",
+            tab_id="sankey-tab",
+            children=[
+                html.Div(
+                    [
+                        dcc.Graph(
+                            id="sankey-plot",
+                            style={"height": "600px"},
+                        ),
+                    ],
+                    className="mt-3",
+                )
+            ],
+        ),
+        dbc.Tab(
+            label="Thermo Report",
+            tab_id="thermo-report-tab",
+            children=[
+                html.Div(
+                    [
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    [
+                                        html.H5("Thermodynamic Report"),
+                                        html.Pre(
+                                            id="thermo-report",
+                                            className="thermo",
+                                        ),
+                                    ],
+                                    width=12,
+                                ),
+                            ]
+                        ),
+                    ],
+                    className="mt-3",
+                )
+            ],
+        ),
+        dbc.Tab(
+            label="⚠️ Error",
+            tab_id="error-tab",
+            id="error-tab-pane",
+            tab_style={"display": "none"},
+            children=[
+                html.Div(
+                    [
+                        html.Div(
+                            [
+                                html.B("⚠️ Error Details"),
+                            ],
+                            className="mb-2",
+                        ),
+                        html.Pre(
+                            id="simulation-error-pane",
+                            className="text-danger",
+                            style={
+                                "whiteSpace": "pre-wrap",
+                                "fontFamily": "monospace",
+                                "fontSize": "0.9rem",
+                            },
+                        ),
+                    ],
+                    className="mt-3",
+                )
+            ],
+        ),
+    ]
+
+    # Add plugin tabs - always create tabs, handle availability dynamically
+    try:
+        from .output_pane_plugins import get_output_pane_registry
+
+        registry = get_output_pane_registry()
+        print(f"🏗️  [LAYOUT] Found {len(registry.plugins)} plugins in registry")
+
+        # Create tabs for ALL plugins, not just available ones
+        for plugin in registry.plugins:
+            print(f"🏗️  [LAYOUT] Creating tab for plugin: {plugin.plugin_id}")
+
+            # For dbc.Tab, label must be a string, not a component
+            tab_label = plugin.tab_label
+            if plugin.tab_icon:
+                # Use a simple string with icon class name for now
+                tab_label = (
+                    f"📊 {plugin.tab_label}"  # Using emoji instead of Bootstrap icon
+                )
+
+            plugin_tab = dbc.Tab(
+                label=tab_label,
+                tab_id=f"plugin-{plugin.plugin_id}-tab",
+                children=[
+                    html.Div(
+                        id=f"plugin-{plugin.plugin_id}-content",
+                        className="mt-3",
+                        children=[
+                            html.Div(
+                                [
+                                    html.H5(f"{plugin.tab_label}"),
+                                    html.P(
+                                        "Select an element in the network to use this plugin."
+                                    ),
+                                ]
+                            )
+                        ],
+                    )
+                ],
+            )
+            tabs.append(plugin_tab)
+            print(f"✅ [LAYOUT] Added tab for plugin: {plugin.plugin_id}")
+
+        print(f"🏗️  [LAYOUT] Created {len(registry.plugins)} plugin tabs")
+
+    except ImportError as e:
+        print(f"⚠️  [LAYOUT] Output pane plugins not available: {e}")
+        pass
+    except Exception as e:
+        print(f"❌ [LAYOUT] Error adding plugin tabs: {e}")
+        pass
+
+    return tabs
+
+
 def get_layout(
     initial_config: Dict[str, Any],
     cyto_stylesheet: List[Dict[str, Any]],
@@ -525,119 +684,7 @@ def get_layout(
                                                 style={"display": "none"},
                                             ),
                                             dbc.Tabs(
-                                                [
-                                                    dbc.Tab(
-                                                        label="Plots",
-                                                        tab_id="plots-tab",
-                                                        children=[
-                                                            dbc.Row(
-                                                                [
-                                                                    dbc.Col(
-                                                                        dcc.Graph(
-                                                                            id="temperature-plot"
-                                                                        ),
-                                                                        width=6,
-                                                                    ),
-                                                                    dbc.Col(
-                                                                        dcc.Graph(
-                                                                            id="pressure-plot"
-                                                                        ),
-                                                                        width=6,
-                                                                    ),
-                                                                ],
-                                                                className="mb-2 mt-3",
-                                                            ),
-                                                            dbc.Row(
-                                                                [
-                                                                    dbc.Col(
-                                                                        dcc.Graph(
-                                                                            id="species-plot"
-                                                                        ),
-                                                                        width=6,
-                                                                    ),
-                                                                    dbc.Col(
-                                                                        html.Div(),
-                                                                        width=6,
-                                                                    ),
-                                                                ]
-                                                            ),
-                                                        ],
-                                                    ),
-                                                    dbc.Tab(
-                                                        label="Sankey Diagram",
-                                                        tab_id="sankey-tab",
-                                                        children=[
-                                                            html.Div(
-                                                                [
-                                                                    dcc.Graph(
-                                                                        id="sankey-plot",
-                                                                        style={
-                                                                            "height": "600px"
-                                                                        },
-                                                                    ),
-                                                                ],
-                                                                className="mt-3",
-                                                            )
-                                                        ],
-                                                    ),
-                                                    dbc.Tab(
-                                                        label="Thermo Report",
-                                                        tab_id="thermo-report-tab",
-                                                        children=[
-                                                            html.Div(
-                                                                [
-                                                                    dbc.Row(
-                                                                        [
-                                                                            dbc.Col(
-                                                                                [
-                                                                                    html.H5(
-                                                                                        "Thermodynamic Report"
-                                                                                    ),
-                                                                                    html.Pre(
-                                                                                        id="thermo-report",
-                                                                                        className="thermo",
-                                                                                    ),
-                                                                                ],
-                                                                                width=12,
-                                                                            ),
-                                                                        ]
-                                                                    ),
-                                                                ],
-                                                                className="mt-3",
-                                                            )
-                                                        ],
-                                                    ),
-                                                    dbc.Tab(
-                                                        label="⚠️ Error",
-                                                        tab_id="error-tab",
-                                                        id="error-tab-pane",
-                                                        tab_style={"display": "none"},
-                                                        children=[
-                                                            html.Div(
-                                                                [
-                                                                    html.Div(
-                                                                        [
-                                                                            html.B(
-                                                                                "⚠️ Error Details"
-                                                                            ),
-                                                                        ],
-                                                                        className="mb-2",
-                                                                    ),
-                                                                    html.Pre(
-                                                                        id="simulation-error-pane",
-                                                                        className="text-danger",
-                                                                        style={
-                                                                            "whiteSpace": "pre-wrap",
-                                                                            "fontFamily": "monospace",
-                                                                            "fontSize": "0.9rem",
-                                                                        },
-                                                                    ),
-                                                                ],
-                                                                className="mt-3",
-                                                            )
-                                                        ],
-                                                    ),
-                                                ],
+                                                get_results_tabs(initial_config),
                                                 id="results-tabs",
                                                 active_tab="plots-tab",
                                             ),
