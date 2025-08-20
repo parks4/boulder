@@ -388,9 +388,6 @@ def register_callbacks(app) -> None:  # type: ignore
             # Clear on simulation reset/failure
             clear_live_simulation()
 
-        # No longer need to pass live objects through Dash store
-        live_simulation = None
-
         # Handle non-fatal warnings (runtime notices)
         error_message = progress.error_message or ""
         error_tab_style = {"display": "block"} if error_message else {"display": "none"}

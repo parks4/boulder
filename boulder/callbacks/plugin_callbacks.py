@@ -8,17 +8,17 @@ plugin-specific implementation details.
 Plugin Callback Structure:
     Each plugin's get_callbacks() method should return a list of tuples:
     [(outputs, inputs, callback_function), ...]
-    
+
     Where:
     - outputs: List of Dash Output components
-    - inputs: List of Dash Input and State components  
+    - inputs: List of Dash Input and State components
     - callback_function: The callback function to execute
 """
 
 from typing import Any, Dict, List
 
 import dash
-from dash import Input, Output, State
+from dash import Input, Output
 
 from ..output_pane_plugins import OutputPaneContext, get_output_pane_registry
 
@@ -105,15 +105,19 @@ def register_callbacks(app) -> None:
                 if len(callback_spec) == 3:
                     outputs, inputs, callback_func = callback_spec
                     # Register the callback with prevent_initial_call=True for pattern-matching callbacks
-                    app.callback(outputs, inputs, prevent_initial_call=True)(callback_func)
+                    app.callback(outputs, inputs, prevent_initial_call=True)(
+                        callback_func
+                    )
                     print(f"✅ Registered callback for plugin '{plugin.plugin_id}'")
                 else:
-                    print(f"⚠️ Invalid callback specification for plugin '{plugin.plugin_id}': expected 3 elements, got {len(callback_spec)}")
+                    print(
+                        f"⚠️ Invalid callback specification for plugin '{plugin.plugin_id}': "
+                        f"expected 3 elements, got {len(callback_spec)}"
+                    )
         except Exception as e:
             print(
                 f"⚠️ Could not register callbacks for plugin '{plugin.plugin_id}': {e}"
             )
             import traceback
+
             traceback.print_exc()
-
-
