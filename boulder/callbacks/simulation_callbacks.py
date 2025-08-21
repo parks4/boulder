@@ -218,7 +218,7 @@ def register_callbacks(app) -> None:  # type: ignore
         Any,
         Any,
         Any,
-        str,
+        Any,
         Dict[str, str],
         Dict[str, Any],
         Any,

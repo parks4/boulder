@@ -120,7 +120,9 @@ class SimulationWorker:
             logger.info("Network built successfully, starting streaming simulation...")
 
             # Define progress callback for streaming updates
-            def progress_callback(progress_data, current_time, total_time):
+            def progress_callback(
+                progress_data: Dict[str, Any], current_time: float, total_time: float
+            ) -> None:
                 """Update progress during simulation."""
                 if self._stop_event.is_set():
                     return  # Don't update if stopping

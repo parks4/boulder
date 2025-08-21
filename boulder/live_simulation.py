@@ -22,7 +22,7 @@ class LiveSimulation:
 
     def update(
         self, network: ct.ReactorNet, reactors: Dict[str, ct.Reactor], mechanism: str
-    ):
+    ) -> None:
         """Update the stored simulation objects."""
         with self._lock:
             self._network = network
@@ -30,7 +30,7 @@ class LiveSimulation:
             self._mechanism = mechanism
             self._available = True
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear stored objects."""
         with self._lock:
             self._network = None
@@ -70,12 +70,12 @@ def get_live_simulation() -> LiveSimulation:
 
 def update_live_simulation(
     network: ct.ReactorNet, reactors: Dict[str, ct.Reactor], mechanism: str
-):
+) -> None:
     """Update the global live simulation objects."""
     _live_simulation.update(network, reactors, mechanism)
 
 
-def clear_live_simulation():
+def clear_live_simulation() -> None:
     """Clear the global live simulation objects."""
     _live_simulation.clear()
 
