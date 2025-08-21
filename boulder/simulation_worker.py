@@ -120,7 +120,9 @@ class SimulationWorker:
             logger.info("Network built successfully, starting streaming simulation...")
 
             # Define progress callback for streaming updates
-            def progress_callback(progress_data, current_time, total_time):
+            def progress_callback(
+                progress_data: Dict[str, Any], current_time: float, total_time: float
+            ) -> None:
                 """Update progress during simulation."""
                 if self._stop_event.is_set():
                     return  # Don't update if stopping
@@ -221,21 +223,20 @@ class SimulationWorker:
                             s: reactor_data["X"][s][-1] for s in reactor_data["X"]
                         }
 
-                        # Set gas state to final conditions
-                        converter.gas.TPX = final_T, final_P, list(final_X.values())
-
-                        # Generate thermo report
+                        # Generate thermo report (display temperature in °C)
+                        final_T_c = final_T - 273.15
                         reactor_reports[reactor_id] = {
                             "T": final_T,
                             "P": final_P,
                             "X": final_X,
-                            "species_names": converter.gas.species_names,
-                            "molecular_weights": converter.gas.molecular_weights,
-                            "mass_fractions": converter.gas.Y.copy(),
+                            "species_names": reactor.thermo.species_names,
+                            "molecular_weights": reactor.thermo.molecular_weights,
+                            "mass_fractions": reactor.thermo.Y.copy(),
                             # Generate formatted reports for UI display
-                            "reactor_report": f"Temperature: {final_T:.2f} K\nPressure: "
+                            "reactor_report": f"Temperature: {final_T_c:.2f} °C\nPressure: "
                             f"{final_P:.2e} Pa\nVolume: {reactor.volume:.2e} m³",
-                            "thermo_report": converter.gas.report(),
+                            # Use the reactor's own thermo to ensure mechanism matches reactor
+                            "thermo_report": reactor.thermo.report(),
                         }
 
         except Exception as e:

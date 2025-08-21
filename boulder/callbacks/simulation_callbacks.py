@@ -218,7 +218,7 @@ def register_callbacks(app) -> None:  # type: ignore
         Any,
         Any,
         Any,
-        str,
+        Any,
         Dict[str, str],
         Dict[str, Any],
         Any,
@@ -310,7 +310,25 @@ def register_callbacks(app) -> None:  # type: ignore
             # Determine which reactor to show based on selection
             selected_node_id = None
             if last_selected and last_selected.get("type") == "node":
-                selected_node_id = (last_selected.get("data") or {}).get("id")
+                sel_data = last_selected.get("data") or {}
+                node_kind = (sel_data.get("type") or "").lower()
+                if node_kind in {"reservoir", "massflowcontroller", "valve", "wall"}:
+                    # Do not show plots for non-reactors
+                    return (
+                        go.Figure(),
+                        go.Figure(),
+                        go.Figure(),
+                        dash.no_update,
+                        {"display": "none"},
+                        {},
+                        dash.no_update,
+                        {"display": "none"},
+                        dash.no_update,
+                        {"display": "none"},
+                        True,
+                        False,
+                    )
+                selected_node_id = sel_data.get("id")
 
             # Use selected node if available and exists in data, otherwise use first reactor
             if selected_node_id and selected_node_id in progress.reactors_series:
@@ -320,13 +338,16 @@ def register_callbacks(app) -> None:  # type: ignore
 
             series = progress.reactors_series[reactor_id]
 
+            # Convert temperature from K to °C for display
+            temp_c = [float(t) - 273.15 for t in (series.get("T") or [])]
             temp_fig.add_trace(
-                go.Scatter(x=progress.times, y=series["T"], name=f"{reactor_id} T")
+                go.Scatter(x=progress.times, y=temp_c, name=f"{reactor_id} T")
             )
             temp_fig.update_layout(
                 title=f"Temperature vs Time — {reactor_id}",
-                xaxis_title="Time (s)",
-                yaxis_title="Temperature (°C)",
+                xaxis=dict(title=dict(text="Time (s)", font=dict(size=16))),
+                yaxis=dict(title=dict(text="Temperature (°C)", font=dict(size=16))),
+                margin=dict(t=0, b=40, l=60, r=20),
             )
             temp_fig = apply_theme_to_figure(temp_fig, theme)
 
@@ -335,8 +356,9 @@ def register_callbacks(app) -> None:  # type: ignore
             )
             press_fig.update_layout(
                 title=f"Pressure vs Time — {reactor_id}",
-                xaxis_title="Time (s)",
-                yaxis_title="Pressure (Pa)",
+                xaxis=dict(title=dict(text="Time (s)", font=dict(size=16))),
+                yaxis=dict(title=dict(text="Pressure (Pa)", font=dict(size=16))),
+                margin=dict(t=0, b=40, l=60, r=20),
             )
             press_fig = apply_theme_to_figure(press_fig, theme)
 
@@ -349,8 +371,9 @@ def register_callbacks(app) -> None:  # type: ignore
                     )
             species_fig.update_layout(
                 title=f"Species Concentrations vs Time — {reactor_id}",
-                xaxis_title="Time (s)",
-                yaxis_title="Mole Fraction",
+                xaxis=dict(title=dict(text="Time (s)", font=dict(size=16))),
+                yaxis=dict(title=dict(text="Mole Fraction", font=dict(size=16))),
+                margin=dict(t=0, b=40, l=60, r=20),
             )
             species_fig = apply_theme_to_figure(species_fig, theme)
 
@@ -655,10 +678,21 @@ def register_callbacks(app) -> None:  # type: ignore
         from ..utils import apply_theme_to_figure
 
         if not last_selected or last_selected.get("type") != "node":
-            # Keep current plots unchanged when selecting edges or clearing selection
-            return dash.no_update, dash.no_update, dash.no_update
+            # Clear plots when nothing appropriate is selected
+            empty = go.Figure().to_dict()
+            return empty, empty, empty
 
         node_id = (last_selected.get("data") or {}).get("id")
+        node_type = (last_selected.get("data") or {}).get("type") or ""
+        # Only show plots for actual reactors; clear otherwise
+        if isinstance(node_type, str) and node_type.lower() in {
+            "reservoir",
+            "massflowcontroller",
+            "valve",
+            "wall",
+        }:
+            empty = go.Figure().to_dict()
+            return empty, empty, empty
         if not node_id or not simulation_data or "results" not in simulation_data:
             # Ignore selections that do not correspond to simulated reactors
             return dash.no_update, dash.no_update, dash.no_update
@@ -674,11 +708,14 @@ def register_callbacks(app) -> None:  # type: ignore
 
         # Temperature plot
         temp_fig = go.Figure()
-        temp_fig.add_trace(go.Scatter(x=times, y=node_series["T"], name=f"{node_id} T"))
+        # Convert temperature from K to °C for display
+        temp_c_sel = [float(t) - 273.15 for t in (node_series.get("T") or [])]
+        temp_fig.add_trace(go.Scatter(x=times, y=temp_c_sel, name=f"{node_id} T"))
         temp_fig.update_layout(
             title=f"Temperature vs Time — {node_id}",
-            xaxis_title="Time (s)",
-            yaxis_title="Temperature (°C)",
+            xaxis=dict(title=dict(text="Time (s)", font=dict(size=16))),
+            yaxis=dict(title=dict(text="Temperature (°C)", font=dict(size=16))),
+            margin=dict(t=0, b=40, l=60, r=20),
         )
         temp_fig = apply_theme_to_figure(temp_fig, theme)
 
@@ -689,8 +726,9 @@ def register_callbacks(app) -> None:  # type: ignore
         )
         press_fig.update_layout(
             title=f"Pressure vs Time — {node_id}",
-            xaxis_title="Time (s)",
-            yaxis_title="Pressure (Pa)",
+            xaxis=dict(title=dict(text="Time (s)", font=dict(size=16))),
+            yaxis=dict(title=dict(text="Pressure (Pa)", font=dict(size=16))),
+            margin=dict(t=0, b=40, l=60, r=20),
         )
         press_fig = apply_theme_to_figure(press_fig, theme)
 
@@ -703,8 +741,9 @@ def register_callbacks(app) -> None:  # type: ignore
                 )
         species_fig.update_layout(
             title=f"Species Concentrations vs Time — {node_id}",
-            xaxis_title="Time (s)",
-            yaxis_title="Mole Fraction",
+            xaxis=dict(title=dict(text="Time (s)", font=dict(size=16))),
+            yaxis=dict(title=dict(text="Mole Fraction", font=dict(size=16))),
+            margin=dict(t=0, b=40, l=60, r=20),
         )
         species_fig = apply_theme_to_figure(species_fig, theme)
 

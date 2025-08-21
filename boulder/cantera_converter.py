@@ -140,6 +140,8 @@ class DualCanteraConverter:
             self.gas = ct.Solution(resolved_mechanism)
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
+        # Cache of mechanisms -> Solution to support per-node overrides
+        self._gases_by_mech: Dict[str, ct.Solution] = {resolved_mechanism: self.gas}
         self.reactors: Dict[str, ct.Reactor] = {}
         self.reactor_meta: Dict[str, Dict[str, Any]] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
@@ -176,13 +178,29 @@ class DualCanteraConverter:
         """Build the Cantera network without running simulation."""
         self.code_lines = []
         self.code_lines.append("import cantera as ct")
-        self.code_lines.append(f"gas = ct.Solution('{self.mechanism}')")
+        self.code_lines.append(f"gas_default = ct.Solution('{self.mechanism}')")
         try:
             self.gas = ct.Solution(self.mechanism)
         except Exception as e:
             logger.error(
                 f"[ERROR] Failed to reload mechanism '{self.mechanism}' in build_network: {e}"
             )
+        # Reset cache for this build
+        self._gases_by_mech = {}
+
+        # Helper to resolve and cache gas per mechanism
+        def _get_gas_for_mech(mech_name: str) -> ct.Solution:
+            resolved = (
+                self.plugins.mechanism_path_resolver(mech_name)
+                if self.plugins.mechanism_path_resolver
+                else mech_name
+            )
+            if resolved in self._gases_by_mech:
+                return self._gases_by_mech[resolved]
+            gas_obj = ct.Solution(resolved)
+            self._gases_by_mech[resolved] = gas_obj
+            return gas_obj
+
         self.reactors = {}
         self.connections = {}
         self.network = None
@@ -195,8 +213,15 @@ class DualCanteraConverter:
             temp = props.get("temperature", 300)
             pres = props.get("pressure", 101325)
             compo = props.get("composition", "N2:1")
-            self.code_lines.append(f"gas.TPX = ({temp}, {pres}, '{compo}')")
-            self.gas.TPX = (temp, pres, self.parse_composition(compo))
+            # Determine mechanism: node-level override, else global
+            node_mech = (
+                node.get("mechanism") or props.get("mechanism") or self.mechanism
+            )
+            gas_for_node = _get_gas_for_mech(str(node_mech))
+            gas_for_node.TPX = (temp, pres, self.parse_composition(compo))
+            # Keep converter.gas referencing the last used gas (for back-compat),
+            # but store per-reactor association in reactor_meta
+            self.gas = gas_for_node
             # Plugin-backed custom reactor types
             if typ in self.plugins.reactor_builders:
                 reactor = self.plugins.reactor_builders[typ](self, node)
@@ -213,9 +238,9 @@ class DualCanteraConverter:
                 # Code gen: note plugin usage
                 self.code_lines.append(f"# Plugin reactor {typ} -> created as '{rid}'")
             elif typ == "IdealGasReactor":
-                self.code_lines.append(f"{rid} = ct.IdealGasReactor(gas)")
+                self.code_lines.append(f"{rid} = ct.IdealGasReactor(gas_default)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasReactor(self.gas)
+                self.reactors[rid] = ct.IdealGasReactor(gas_for_node)
                 self.reactors[rid].name = rid
                 # Set volume if specified
                 self._set_reactor_volume(self.reactors[rid], props, rid)
@@ -229,9 +254,11 @@ class DualCanteraConverter:
                 except Exception:
                     pass
             elif typ == "IdealGasConstPressureReactor":
-                self.code_lines.append(f"{rid} = ct.IdealGasConstPressureReactor(gas)")
+                self.code_lines.append(
+                    f"{rid} = ct.IdealGasConstPressureReactor(gas_default)"
+                )
                 self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasConstPressureReactor(self.gas)
+                self.reactors[rid] = ct.IdealGasConstPressureReactor(gas_for_node)
                 self.reactors[rid].name = rid
                 # Set volume if specified
                 self._set_reactor_volume(self.reactors[rid], props, rid)
@@ -246,10 +273,10 @@ class DualCanteraConverter:
                     pass
             elif typ == "IdealGasConstPressureMoleReactor":
                 self.code_lines.append(
-                    f"{rid} = ct.IdealGasConstPressureMoleReactor(gas)"
+                    f"{rid} = ct.IdealGasConstPressureMoleReactor(gas_default)"
                 )
                 self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasConstPressureMoleReactor(self.gas)
+                self.reactors[rid] = ct.IdealGasConstPressureMoleReactor(gas_for_node)
                 self.reactors[rid].name = rid
                 # Set volume if specified
                 self._set_reactor_volume(self.reactors[rid], props, rid)
@@ -264,9 +291,9 @@ class DualCanteraConverter:
                     pass
             elif typ == "IdealGasMoleReactor":
                 # Available in Cantera 3.x
-                self.code_lines.append(f"{rid} = ct.IdealGasMoleReactor(gas)")
+                self.code_lines.append(f"{rid} = ct.IdealGasMoleReactor(gas_default)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasMoleReactor(self.gas)  # type: ignore[attr-defined]
+                self.reactors[rid] = ct.IdealGasMoleReactor(gas_for_node)  # type: ignore[attr-defined]
                 self.reactors[rid].name = rid
                 # Set volume if specified
                 self._set_reactor_volume(self.reactors[rid], props, rid)
@@ -280,9 +307,9 @@ class DualCanteraConverter:
                 except Exception:
                     pass
             elif typ == "Reservoir":
-                self.code_lines.append(f"{rid} = ct.Reservoir(gas)")
+                self.code_lines.append(f"{rid} = ct.Reservoir(gas_default)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.Reservoir(self.gas)
+                self.reactors[rid] = ct.Reservoir(gas_for_node)
                 self.reactors[rid].name = rid
                 try:
                     self.reactors[rid].group_name = str(
