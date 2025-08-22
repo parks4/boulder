@@ -25,6 +25,7 @@ class SimulationProgress:
     reactors_series: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     code_str: str = ""
     reactor_reports: Dict[str, Any] = field(default_factory=dict)
+    summary: List[Dict[str, Any]] = field(default_factory=list)
 
     # Status flags
     is_running: bool = False
@@ -98,6 +99,7 @@ class SimulationWorker:
                 },
                 code_str=self.progress.code_str,
                 reactor_reports=self.progress.reactor_reports.copy(),
+                summary=self.progress.summary.copy(),
                 is_running=self.progress.is_running,
                 is_complete=self.progress.is_complete,
                 error_message=self.progress.error_message,
@@ -175,6 +177,7 @@ class SimulationWorker:
                 simulation_time=simulation_time,
                 time_step=time_step,
                 progress_callback=progress_callback,
+                config=config,
             )
 
             # Finalize results
@@ -183,6 +186,8 @@ class SimulationWorker:
                 self.progress.times = results["time"]
                 self.progress.reactors_series = results["reactors"]
                 self.progress.code_str = code_str
+                # Store summary if present
+                self.progress.summary = results.get("summary", [])
                 # Generate reactor reports for thermo analysis
                 self.progress.reactor_reports = self._generate_reactor_reports(
                     converter, results

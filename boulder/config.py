@@ -290,6 +290,10 @@ def convert_to_stone_format(config: dict) -> dict:
             }
             stone_config["connections"].append(stone_connection)
 
+    # Carry-through `output` section (STONE standard extension)
+    if "output" in config:
+        stone_config["output"] = config["output"]
+
     return stone_config
 
 

@@ -83,6 +83,9 @@ class NormalizedConfigModel(BaseModel):
     settings: Optional[SettingsModel] = None
     nodes: List[NodeModel]
     connections: List[ConnectionModel] = Field(default_factory=list)
+    # Preserve top-level `output` block (flexible shape). Validation of its content
+    # is handled by feature-specific parsers; we just carry it through here.
+    output: Optional[Any] = None
 
     def __init__(self, **data):
         super().__init__(**data)

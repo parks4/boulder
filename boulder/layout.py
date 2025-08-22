@@ -89,6 +89,30 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
             ],
         ),
         dbc.Tab(
+            label="Summary",
+            tab_id="summary-tab",
+            children=[
+                html.Div(
+                    [
+                        html.Pre(
+                            id="summary-text",
+                            children="No simulation data available.",
+                            style={
+                                "fontFamily": "monospace",
+                                "fontSize": "14px",
+                                "whiteSpace": "pre-wrap",
+                                "padding": "15px",
+                                "backgroundColor": "#f8f9fa",
+                                "border": "1px solid #dee2e6",
+                                "borderRadius": "4px",
+                            },
+                        )
+                    ],
+                    className="mt-3",
+                )
+            ],
+        ),
+        dbc.Tab(
             label="⚠️ Error",
             tab_id="error-tab",
             id="error-tab-pane",
@@ -126,7 +150,18 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
         print(f"🏗️  [LAYOUT] Found {len(registry.plugins)} plugins in registry")
 
         # Create tabs for ALL plugins, not just available ones
-        for plugin in registry.plugins:
+        # Ensure Summary tab (if present) is listed first among plugins
+        plugin_list = registry.plugins[:]
+        try:
+            plugin_list.sort(
+                key=lambda p: 0
+                if getattr(p, "plugin_id", "") == "summary-output-pane"
+                else 1
+            )
+        except Exception:
+            plugin_list = registry.plugins
+
+        for plugin in plugin_list:
             print(f"🏗️  [LAYOUT] Creating tab for plugin: {plugin.plugin_id}")
 
             # For dbc.Tab, label must be a string, not a component

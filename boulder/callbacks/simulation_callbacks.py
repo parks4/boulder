@@ -381,6 +381,7 @@ def register_callbacks(app) -> None:  # type: ignore
         results = {
             "time": progress.times,
             "reactors": progress.reactors_series,
+            "summary": progress.summary,
         }
 
         simulation_data = {
@@ -748,6 +749,37 @@ def register_callbacks(app) -> None:  # type: ignore
         species_fig = apply_theme_to_figure(species_fig, theme)
 
         return temp_fig.to_dict(), press_fig.to_dict(), species_fig.to_dict()
+
+    # Populate Summary text when Summary tab is active
+    @app.callback(
+        Output("summary-text", "children"),
+        [
+            Input("results-tabs", "active_tab"),
+            Input("simulation-data", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_summary_text(active_tab: str, simulation_data: Dict[str, Any]):
+        import dash
+
+        from ..output_summary import format_summary_text
+
+        if active_tab != "summary-tab":
+            return dash.no_update
+        if not simulation_data or "results" not in simulation_data:
+            return "No simulation data available."
+
+        results = simulation_data["results"]
+        summary = results.get("summary") or []
+
+        if not summary:
+            return (
+                "No output summary configured.\n\n"
+                "Add an 'output:' section to your YAML config:\n\n"
+                "output:\n  reactor_id: temperature\n  reactor_id: pressure, bar"
+            )
+
+        return format_summary_text(summary)
 
     # Update composition plot and thermo report when a reactor node is selected
     @app.callback(

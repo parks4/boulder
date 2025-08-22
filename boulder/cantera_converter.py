@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import cantera as ct  # type: ignore
 
 from .config import CANTERA_MECHANISM
+from .output_summary import evaluate_output_items, parse_output_block
 from .sankey import generate_sankey_input_from_sim
 from .verbose_utils import get_verbose_logger, is_verbose_mode
 
@@ -151,6 +152,8 @@ class DualCanteraConverter:
         self.last_network: ct.ReactorNet = (
             None  # Store the last successfully built network
         )
+        # Preserve last config for post-processing (e.g., output summary)
+        self._last_config: Optional[Dict[str, Any]] = None
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -176,6 +179,8 @@ class DualCanteraConverter:
 
     def build_network(self, config: Dict[str, Any]) -> ct.ReactorNet:
         """Build the Cantera network without running simulation."""
+        # Store config for later post-processing
+        self._last_config = config
         self.code_lines = []
         self.code_lines.append("import cantera as ct")
         self.code_lines.append(f"gas_default = ct.Solution('{self.mechanism}')")
@@ -617,6 +622,26 @@ class DualCanteraConverter:
             logger.error(f"Error generating Sankey diagram: {e}")
             results["sankey_links"] = None
             results["sankey_nodes"] = None
+
+        # Evaluate custom output summary if configured
+        try:
+            cfg = self._last_config or {}
+            output_block = cfg.get("output") if isinstance(cfg, dict) else None
+
+            if output_block is not None:
+                items = parse_output_block(output_block)
+                summary = evaluate_output_items(items, results)
+                results["summary"] = summary
+
+                # Log summary in verbose mode
+                if is_verbose_mode():
+                    from .output_summary import format_summary_text
+
+                    summary_text = format_summary_text(summary)
+                    logger.info(f"📊 Output Summary:\n{summary_text}")
+        except Exception as e:
+            # Do not fail the simulation due to summary issues; log and continue
+            logger.warning(f"Failed to evaluate custom output summary: {e}")
 
         return results
 
