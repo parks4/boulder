@@ -32,6 +32,9 @@ class BoulderPlugins:
     output_pane_plugins: List[Any] = field(
         default_factory=list
     )  # Import will be handled dynamically
+    summary_builders: Dict[str, Any] = field(
+        default_factory=dict
+    )  # Summary builder plugins
 
 
 # Global cache to ensure plugins are discovered only once
@@ -97,6 +100,15 @@ def get_plugins() -> BoulderPlugins:
     except ImportError as e:
         logger.debug(f"Output pane plugins not available: {e}")
 
+    # Load summary builder plugins from the global registry
+    try:
+        from .summary_builder import get_summary_builder_registry
+
+        registry = get_summary_builder_registry()
+        plugins.summary_builders = registry.builders.copy()
+    except ImportError as e:
+        logger.debug(f"Summary builder plugins not available: {e}")
+
     _PLUGIN_CACHE = plugins
 
     if is_verbose_mode():
@@ -104,7 +116,8 @@ def get_plugins() -> BoulderPlugins:
             f"Plugin discovery complete: {len(plugins.reactor_builders)} reactor builders, "
             f"{len(plugins.connection_builders)} connection builders, "
             f"{len(plugins.post_build_hooks)} post-build hooks, "
-            f"{len(plugins.output_pane_plugins)} output pane plugins"
+            f"{len(plugins.output_pane_plugins)} output pane plugins, "
+            f"{len(plugins.summary_builders)} summary builders"
         )
 
     return plugins
@@ -479,6 +492,11 @@ class DualCanteraConverter:
         reactors_series: Dict[str, Dict[str, Any]] = {}
         sol_arrays: Dict[str, ct.SolutionArray] = {}
         last_error_message: str = ""
+        # DEBUG: Print mechanism info before creating solution arrays
+        print(f"DEBUG: Creating solution arrays with mechanism: {self.gas.source}")
+        print(f"DEBUG: Number of species: {len(self.gas.species_names)}")
+        print(f"DEBUG: First 5 species: {self.gas.species_names[:5]}")
+
         for reactor in reactor_list:
             reactor_id = getattr(reactor, "name", "") or str(id(reactor))
             sol_arrays[reactor_id] = ct.SolutionArray(self.gas, shape=(0,))
@@ -563,6 +581,19 @@ class DualCanteraConverter:
                             1.0 if s == "N2" else 0.0 for s in self.gas.species_names
                         ]
 
+                # DEBUG: Print species info before appending
+                print(f"DEBUG: About to append to {reactor_id}")
+                print(f"DEBUG: X_vec length: {len(X_vec)}")
+                print(
+                    f"DEBUG: self.gas.species_names length: {len(self.gas.species_names)}"
+                )
+                print(
+                    f"DEBUG: SolutionArray mechanism: {sol_arrays[reactor_id]._phase.source}"
+                )
+                print(
+                    f"DEBUG: SolutionArray species count: {len(sol_arrays[reactor_id]._phase.species_names)}"
+                )
+
                 sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
                 reactors_series[reactor_id]["T"].append(T)
                 reactors_series[reactor_id]["P"].append(P)
@@ -628,17 +659,44 @@ class DualCanteraConverter:
             cfg = self._last_config or {}
             output_block = cfg.get("output") if isinstance(cfg, dict) else None
 
-            if output_block is not None:
+            # Check if custom summary builder is specified
+            summary_builder_id = None
+            if isinstance(output_block, dict):
+                summary_builder_id = output_block.get("summary_builder")
+
+            if summary_builder_id:
+                # Use custom summary builder
+                from .summary_builder import build_summary_from_simulation
+
+                summary = build_summary_from_simulation(
+                    simulation=self.last_network,
+                    config=cfg,
+                    simulation_data=results,
+                    builder_id=summary_builder_id,
+                )
+                results["summary"] = summary
+            elif output_block is not None:
+                # Use traditional output block parsing
                 items = parse_output_block(output_block)
                 summary = evaluate_output_items(items, results)
                 results["summary"] = summary
+            else:
+                # Use default summary builder if no output configuration
+                from .summary_builder import build_summary_from_simulation
 
-                # Log summary in verbose mode
-                if is_verbose_mode():
-                    from .output_summary import format_summary_text
+                summary = build_summary_from_simulation(
+                    simulation=self.last_network,
+                    config=cfg,
+                    simulation_data=results,
+                )
+                results["summary"] = summary
 
-                    summary_text = format_summary_text(summary)
-                    logger.info(f"📊 Output Summary:\n{summary_text}")
+            # Log summary in verbose mode
+            if is_verbose_mode():
+                from .output_summary import format_summary_text
+
+                summary_text = format_summary_text(results.get("summary", []))
+                logger.info(f"📊 Output Summary:\n{summary_text}")
         except Exception as e:
             # Do not fail the simulation due to summary issues; log and continue
             logger.warning(f"Failed to evaluate custom output summary: {e}")

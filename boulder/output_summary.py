@@ -84,11 +84,11 @@ def evaluate_output_items(
     items: List[OutputItem], results: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
     """Evaluate output items against simulation results."""
-    evaluated = []
+    evaluated: List[Dict[str, Any]] = []
     reactors = results.get("reactors", {})
 
     for item in items:
-        entry = {
+        entry: Dict[str, Any] = {
             "reactor": item.reactor,
             "quantity": item.quantity,
             "unit": item.unit,
@@ -105,7 +105,7 @@ def evaluate_output_items(
                 final_pa = reactors[item.reactor]["P"][-1]
                 entry["value"] = _convert_pressure(final_pa, item.unit)
 
-            elif item.quantity == "formula":
+            elif item.quantity == "formula" and item.expression:
                 entry["value"] = _evaluate_formula(item.expression, results)
 
         except Exception as e:

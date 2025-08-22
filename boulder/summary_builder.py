@@ -92,7 +92,7 @@ class DefaultSummaryBuilder(SummaryBuilder):
 
     def build_summary(self, context: SummaryContext) -> List[Dict[str, Any]]:
         """Build default summary from reactor states."""
-        summary = []
+        summary: List[Dict[str, Any]] = []
 
         if not context.simulation:
             return summary
