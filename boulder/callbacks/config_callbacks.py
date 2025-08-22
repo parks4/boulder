@@ -68,20 +68,40 @@ def register_callbacks(app) -> None:  # type: ignore
             )
         else:
             return (
-                dcc.Upload(
-                    id="upload-config",
-                    children=html.Div(["Drop or ", html.A("Select Config File")]),
-                    style={
-                        "width": "100%",
-                        "height": "60px",
-                        "lineHeight": "60px",
-                        "borderWidth": "1px",
-                        "borderStyle": "dashed",
-                        "borderRadius": "5px",
-                        "textAlign": "center",
-                        "margin": "10px 0",
-                    },
-                    multiple=False,
+                html.Div(
+                    [
+                        dcc.Upload(
+                            id="upload-config",
+                            children=html.Div(
+                                ["Drop or ", html.A("Select Config File")]
+                            ),
+                            style={
+                                "width": "100%",
+                                "height": "60px",
+                                "lineHeight": "60px",
+                                "borderWidth": "1px",
+                                "borderStyle": "dashed",
+                                "borderRadius": "5px",
+                                "textAlign": "center",
+                                "margin": "10px 0",
+                            },
+                            multiple=False,
+                        ),
+                        # Always include delete button but hide it when no file is loaded
+                        html.Button(
+                            "✕",
+                            id="delete-config-file",
+                            n_clicks=0,
+                            style={
+                                "color": "red",
+                                "border": "none",
+                                "background": "none",
+                                "fontSize": 18,
+                                "cursor": "pointer",
+                                "display": "none",  # Hidden when no file is loaded
+                            },
+                        ),
+                    ]
                 ),
             )
 
