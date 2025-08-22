@@ -185,9 +185,6 @@ def get_layout(
             # Hidden dummy elements for callback IDs (always present)
             html.Div(
                 [
-                    html.Button(
-                        "✕", id="delete-config-file", style={"display": "none"}
-                    ),
                     html.Span(
                         "", id="config-file-name-span", style={"display": "none"}
                     ),
