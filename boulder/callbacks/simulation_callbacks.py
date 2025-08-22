@@ -382,6 +382,10 @@ def register_callbacks(app) -> None:  # type: ignore
             "time": progress.times,
             "reactors": progress.reactors_series,
         }
+        # Attach Sankey data if available from the background worker
+        if progress.sankey_links and progress.sankey_nodes:
+            results["sankey_links"] = progress.sankey_links
+            results["sankey_nodes"] = progress.sankey_nodes
 
         simulation_data = {
             "results": results,

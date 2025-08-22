@@ -1,6 +1,7 @@
 import importlib
 import math
 import os
+import time
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -9,7 +10,10 @@ import cantera as ct  # type: ignore
 
 from .config import CANTERA_MECHANISM
 from .sankey import generate_sankey_input_from_sim
-from .verbose_utils import get_verbose_logger, is_verbose_mode
+from .verbose_utils import (
+    get_verbose_logger,
+    is_verbose_mode,
+)
 
 logger = get_verbose_logger(__name__)
 
@@ -120,6 +124,7 @@ class DualCanteraConverter:
         self,
         mechanism: Optional[str] = None,
         plugins: Optional[BoulderPlugins] = None,
+        verbose: Optional[int] = None,
     ) -> None:
         """Initialize CanteraConverter.
 
@@ -129,6 +134,15 @@ class DualCanteraConverter:
         # Use provided mechanism or fall back to config default
         self.mechanism = mechanism or CANTERA_MECHANISM
         self.plugins = plugins or get_plugins()
+        # Determine numeric verbose level
+        try:
+            if verbose is None:
+                raw_level = os.environ.get("BOULDER_VERBOSE", "").strip()
+                self.verbose = int(raw_level) if raw_level else 0
+            else:
+                self.verbose = int(verbose)
+        except Exception:
+            self.verbose = 0
         try:
             # Use plugin mechanism path resolver if available
             if self.plugins.mechanism_path_resolver:
@@ -137,7 +151,12 @@ class DualCanteraConverter:
                 )
             else:
                 resolved_mechanism = self.mechanism
+            if self.verbose >= 2:
+                t0 = time.perf_counter()
             self.gas = ct.Solution(resolved_mechanism)
+            if self.verbose >= 2:
+                dt_ms = (time.perf_counter() - t0) * 1000.0
+                logger.info(f"[SOLUTION LOAD] '{resolved_mechanism}' in {dt_ms:.1f} ms")
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         # Cache of mechanisms -> Solution to support per-node overrides
@@ -180,7 +199,21 @@ class DualCanteraConverter:
         self.code_lines.append("import cantera as ct")
         self.code_lines.append(f"gas_default = ct.Solution('{self.mechanism}')")
         try:
-            self.gas = ct.Solution(self.mechanism)
+            # Resolve mechanism path consistently using plugin resolver
+            resolved_mech = (
+                self.plugins.mechanism_path_resolver(self.mechanism)
+                if self.plugins and self.plugins.mechanism_path_resolver
+                else self.mechanism
+            )
+            logger.info(
+                f"[MECHANISM RESOLVER] Resolved '{self.mechanism}' -> '{resolved_mech}'"
+            )
+            if self.verbose >= 2:
+                t0 = time.perf_counter()
+            self.gas = ct.Solution(resolved_mech)
+            if self.verbose >= 2:
+                dt_ms = (time.perf_counter() - t0) * 1000.0
+                logger.info(f"[SOLUTION LOAD] '{resolved_mech}' in {dt_ms:.1f} ms")
         except Exception as e:
             logger.error(
                 f"[ERROR] Failed to reload mechanism '{self.mechanism}' in build_network: {e}"
@@ -192,12 +225,17 @@ class DualCanteraConverter:
         def _get_gas_for_mech(mech_name: str) -> ct.Solution:
             resolved = (
                 self.plugins.mechanism_path_resolver(mech_name)
-                if self.plugins.mechanism_path_resolver
+                if self.plugins and self.plugins.mechanism_path_resolver
                 else mech_name
             )
             if resolved in self._gases_by_mech:
                 return self._gases_by_mech[resolved]
+            if self.verbose >= 2:
+                t0 = time.perf_counter()
             gas_obj = ct.Solution(resolved)
+            if self.verbose >= 2:
+                dt_ms = (time.perf_counter() - t0) * 1000.0
+                logger.info(f"[SOLUTION LOAD] '{resolved}' in {dt_ms:.1f} ms")
             self._gases_by_mech[resolved] = gas_obj
             return gas_obj
 
@@ -605,11 +643,18 @@ class DualCanteraConverter:
 
         # Generate Sankey data
         try:
+            logger.info("Generating Sankey")
+            t0 = time.perf_counter()
             links, nodes = generate_sankey_input_from_sim(
                 self.last_network,
                 show_species=["H2", "CH4"],
-                verbose=False,
-                mechanism=self.mechanism,
+                verbose=(self.verbose >= 1),
+            )
+            dt_ms = (time.perf_counter() - t0) * 1000.0
+            num_links = len(links.get("value", [])) if isinstance(links, dict) else 0
+            num_nodes = len(nodes) if isinstance(nodes, list) else 0
+            logger.info(
+                f"Sankey generated: nodes={num_nodes}, links={num_links} in {dt_ms:.1f} ms"
             )
             results["sankey_links"] = links
             results["sankey_nodes"] = nodes

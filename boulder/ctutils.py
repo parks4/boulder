@@ -7,6 +7,10 @@ import cantera as ct
 import numpy as np
 import pandas as pd
 
+from .verbose_utils import get_verbose_level, get_verbose_logger
+
+logger = get_verbose_logger(__name__)
+
 
 def get_mechanism_path(mechanism_str) -> str:
     """Return path (str) of Cantera mechanism.
@@ -134,8 +138,18 @@ def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg"):
     """
     # TODO: validate we get correct LHV; HHV values; add a test for known fuels.
     mechanism_path = get_mechanism_path(mechanism)
+    verbose = get_verbose_level()
 
+    if verbose >= 2:
+        import time as _time
+
+        _t0 = _time.perf_counter()
     gas = ct.Solution(mechanism_path)
+
+    if verbose >= 2:
+        _dt_ms = (_time.perf_counter() - _t0) * 1000.0
+        logger.info(f"[SOLUTION LOAD] '{mechanism_path}' in {_dt_ms:.1f} ms")
+
     gas.TP = 298, ct.one_atm
     try:
         gas.set_equivalence_ratio(1.0, fuel.mole_fraction_dict(), "O2:1.0")

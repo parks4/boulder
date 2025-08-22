@@ -26,6 +26,10 @@ class SimulationProgress:
     code_str: str = ""
     reactor_reports: Dict[str, Any] = field(default_factory=dict)
 
+    # Sankey data (populated when simulation completes)
+    sankey_links: Optional[Dict[str, Any]] = None
+    sankey_nodes: Optional[List[Any]] = None
+
     # Status flags
     is_running: bool = False
     is_complete: bool = False
@@ -98,6 +102,16 @@ class SimulationWorker:
                 },
                 code_str=self.progress.code_str,
                 reactor_reports=self.progress.reactor_reports.copy(),
+                sankey_links=(
+                    self.progress.sankey_links.copy()
+                    if isinstance(self.progress.sankey_links, dict)
+                    else None
+                ),
+                sankey_nodes=(
+                    self.progress.sankey_nodes.copy()
+                    if isinstance(self.progress.sankey_nodes, list)
+                    else None
+                ),
                 is_running=self.progress.is_running,
                 is_complete=self.progress.is_complete,
                 error_message=self.progress.error_message,
@@ -183,6 +197,13 @@ class SimulationWorker:
                 self.progress.times = results["time"]
                 self.progress.reactors_series = results["reactors"]
                 self.progress.code_str = code_str
+                # Carry generated Sankey data forward to the UI store
+                try:
+                    self.progress.sankey_links = results.get("sankey_links")
+                    self.progress.sankey_nodes = results.get("sankey_nodes")
+                except Exception:
+                    self.progress.sankey_links = None
+                    self.progress.sankey_nodes = None
                 # Generate reactor reports for thermo analysis
                 self.progress.reactor_reports = self._generate_reactor_reports(
                     converter, results

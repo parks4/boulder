@@ -6,9 +6,32 @@ from functools import wraps
 from typing import Any, Callable
 
 
+def get_verbose_level() -> int:
+    """Return numeric verbose level from BOULDER_VERBOSE.
+
+    Levels:
+    - 0: silent (default)
+    - 1: verbose info
+    - 2: very verbose (timings, heavy diagnostics)
+    """
+    raw = os.environ.get("BOULDER_VERBOSE", "").strip()
+    if not raw:
+        return 0
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        # Support truthy strings like "true"/"on" -> level 1
+        return 1
+
+
 def is_verbose_mode() -> bool:
-    """Check if verbose mode is enabled via environment variable."""
-    return os.environ.get("BOULDER_VERBOSE", "").strip() == "1"
+    """Check if verbose mode (level >= 1) is enabled via environment variable."""
+    return get_verbose_level() >= 1
+
+
+def is_verbose_level_at_least(level: int) -> bool:
+    """Check if current verbose level is at least the specified level."""
+    return get_verbose_level() >= int(level)
 
 
 def get_verbose_logger(name: str) -> logging.Logger:
@@ -25,6 +48,8 @@ def get_verbose_logger(name: str) -> logging.Logger:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
+        # Avoid duplicate logs via root logger
+        logger.propagate = False
 
     return logger
 

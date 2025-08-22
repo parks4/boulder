@@ -105,7 +105,7 @@ def generate_sankey_input_from_sim(
     flow_type="hhv",
     show_species=["H2"],
     verbose=False,
-    mechanism="gri30.yaml",
+    mechanism=None,
 ):
     """Generate input data for sankey plot from a Cantera Reactor Net simulation.
 
@@ -122,11 +122,12 @@ def generate_sankey_input_from_sim(
     show_species : list of str
         List of species to show in the sankey diagram. Default is ["H2", "C(s)"].
         Set to [] not to show any species.
-    mechanism : str
-        Cantera mechanism file to use for heating value calculations. Default is "gri30.yaml".
 
     Other Parameters
     ----------------
+    mechanism : str
+        Cantera mechanism file to use for heating value calculations instead of the
+        reactor's mechanism. Default is "gri30.yaml".
     verbose : bool
         if True, print details about Sankey network generation.
 
@@ -202,8 +203,14 @@ def generate_sankey_input_from_sim(
                     # -------------------------
                     from .ctutils import heating_values
 
+                    # Prefer the exact mechanism used by the upstream reactor's thermo
+                    if mechanism is not None:
+                        local_mechanism = mechanism
+                    else:
+                        local_mechanism = outlet.upstream.thermo.source
+
                     lhv, hhv = heating_values(
-                        outlet.upstream.thermo, mechanism=mechanism
+                        outlet.upstream.thermo, mechanism=local_mechanism
                     )  # J/kg
                     # TODO define temperature reference when computing HHV
                     # (and make it consistent with the one used in sensible enthalpy)
@@ -214,12 +221,12 @@ def generate_sankey_input_from_sim(
 
                         if s == "H2":
                             lhv_s, hhv_s = heating_values(
-                                ct.Hydrogen(), mechanism=mechanism
+                                ct.Hydrogen(), mechanism=local_mechanism
                             )  # J/kg
                             links["color"] += ["H2"]
                         elif s == "CH4":
                             lhv_s, hhv_s = heating_values(
-                                ct.Methane(), mechanism=mechanism
+                                ct.Methane(), mechanism=local_mechanism
                             )  # J/kg
                             links["color"] += ["CH4"]
                         elif s == "C(s)":  # Carbon
