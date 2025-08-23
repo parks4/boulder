@@ -41,6 +41,8 @@ stone2sim = "boulder.stone2sim_cli:main"
 
 [tool.coverage.run]
 branch = true
+parallel = true
+concurrency = ["multiprocessing"]
 
 [tool.mypy]
 strict = true
