@@ -12,6 +12,9 @@ TESTING
 - Fix library code, not tests
 - Run tests in 'boulder' conda env
 - After successful tests, use `make qa` for code quality.
+- Do not implement mock tests, only real tests.
+- Explicit describe in the test docstrings what is asserted in the test.
+
 
 VERSIONING
 - Never perform git commits

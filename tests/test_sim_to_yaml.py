@@ -5,6 +5,7 @@ import tempfile
 import textwrap
 
 import cantera as ct  # type: ignore
+import pytest
 
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import (

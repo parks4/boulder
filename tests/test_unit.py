@@ -16,7 +16,15 @@ class TestBoulderConfig:
     """Unit tests for configuration functionality."""
 
     def test_get_initial_config_structure(self):
-        """Test initial configuration has correct structure."""
+        """Test initial configuration has correct structure.
+
+        Assertions:
+        1. Config is a dictionary (isinstance(config, dict))
+        2. Config contains "nodes" key
+        3. Config contains "connections" key
+        4. Config["nodes"] is a list (isinstance(config["nodes"], list))
+        5. Config["connections"] is a list (isinstance(config["connections"], list))
+        """
         config = get_initial_config()
 
         assert isinstance(config, dict)
@@ -26,7 +34,12 @@ class TestBoulderConfig:
         assert isinstance(config["connections"], list)
 
     def test_validate_normalized_config(self):
-        """Validate config post-normalization without building network."""
+        """Validate config post-normalization without building network.
+
+        Assertions:
+        1. Validation function accepts normalized config with 2 reactors and 1 connection
+        2. Returned model has correct first node ID (model.nodes[0].id == "r1")
+        """
         config = {
             "nodes": [
                 {"id": "r1", "type": "IdealGasReactor", "properties": {}},
@@ -46,7 +59,14 @@ class TestBoulderConfig:
         assert model.nodes[0].id == "r1"
 
     def test_get_initial_config_components(self):
-        """Test initial config components have required fields."""
+        """Test initial config components have required fields.
+
+        Assertions for each node in initial config:
+        1. Node contains "id" key
+        2. Node contains "type" key
+        3. Node contains "properties" key
+        4. Node["properties"] is a dictionary (isinstance(node["properties"], dict))
+        """
         config = get_initial_config()
 
         for node in config["nodes"]:
@@ -61,13 +81,26 @@ class TestBoulderUtils:
     """Unit tests for utility functions."""
 
     def test_config_to_cyto_elements_empty_config(self):
-        """Test config conversion with empty config."""
+        """Test config conversion with empty config.
+
+        Assertions:
+        1. Empty config (no nodes, no connections) returns empty list (elements == [])
+        """
         config = {"nodes": [], "connections": []}
         elements = config_to_cyto_elements(config)
         assert elements == []
 
     def test_config_to_cyto_elements_with_connection(self):
-        """Test config conversion with reactor and connection."""
+        """Test config conversion with reactor and connection.
+
+        Assertions:
+        1. Config with 2 reactors + 1 connection produces 3 cytoscape elements (len(elements) == 3)
+        2. Elements contain exactly 2 nodes (len(nodes) == 2)
+        3. Elements contain exactly 1 edge (len(edges) == 1)
+        4. Edge has correct source reactor (edge["data"]["source"] == "reactor1")
+        5. Edge has correct target reactor (edge["data"]["target"] == "reactor2")
+        6. Edge has correct ID (edge["data"]["id"] == "mfc1")
+        """
         config = {
             "nodes": [
                 {"id": "reactor1", "type": "IdealGasReactor", "properties": {}},
