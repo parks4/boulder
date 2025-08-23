@@ -16,16 +16,16 @@ regeneration of reactor networks.
 import sys
 from pathlib import Path
 
-# Add the examples directory to the path to import mix1
-examples_dir = Path(__file__).parent
-sys.path.insert(0, str(examples_dir))
-
-import mix1  # import any file where there is a simulation object `sim`
-
 # For regeneration and Boulder functionality
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import load_config_file, normalize_config, validate_config
 from boulder.sim2stone import write_sim_as_yaml
+
+# Add the examples directory to the path to import mix1
+examples_dir = Path(__file__).parent
+sys.path.insert(0, str(examples_dir))
+
+import mix1  # import any file where there is a simulation object `sim`  # noqa: E402
 
 # %%
 # Boulder functionality: Serialize to STONE YAML

@@ -8,11 +8,13 @@ import cantera as ct  # type: ignore
 
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import (
+    load_config_file,
     load_yaml_string_with_comments,
     normalize_config,
     validate_config,
 )
 from boulder.sim2stone import sim_to_internal_config, sim_to_stone_yaml
+from boulder.validation import validate_normalized_config
 
 
 def _build_test_network():
@@ -237,3 +239,208 @@ def test_smart_detection_no_source_file():
     # (but may contain basic metadata)
     assert "Create main reactor" not in yaml_str
     assert "Mass flow controller" not in yaml_str
+
+
+def test_sim2stone_yaml_validation():
+    """Test that sim2stone generated YAML passes Boulder config validation."""
+    sim, _ = _build_test_network()
+
+    # Generate YAML with sim2stone
+    yaml_str = sim_to_stone_yaml(sim, default_mechanism="gri30.yaml")
+
+    # Test that the generated YAML can be loaded
+    loaded = load_yaml_string_with_comments(yaml_str)
+    assert loaded is not None
+
+    # Test that it passes normalization
+    normalized = normalize_config(loaded)
+    assert normalized is not None
+
+    # Test that it passes Boulder's validation
+    validate_normalized_config(normalized)  # Should not raise
+
+    # Test that it passes the legacy validate_config as well
+    validated = validate_config(normalized)
+    assert validated is not None
+
+
+def test_sim2stone_yaml_validation_with_comments():
+    """Test that sim2stone generated YAML with comments passes validation."""
+    # Create a temporary Python file with comments
+    python_content = textwrap.dedent('''
+        """
+        Test validation network
+        =======================
+
+        A network designed to test YAML validation with comments.
+        """
+        import cantera as ct
+
+        # Main gas solution
+        gas = ct.Solution('gri30.yaml')
+        gas.TPX = 300.0, ct.one_atm, 'CH4:1, O2:2, N2:7.52'
+
+        # Primary reactor for validation testing
+        reactor = ct.IdealGasReactor(gas, name="Validation Reactor")
+
+        # Inlet reservoir for testing
+        inlet_gas = ct.Solution('gri30.yaml')
+        inlet_gas.TPX = 300.0, ct.one_atm, 'CH4:1'
+        inlet = ct.Reservoir(inlet_gas, name="Test Inlet")
+
+        # Flow controller for validation
+        mfc = ct.MassFlowController(inlet, reactor, mdot=0.05, name="Test MFC")
+
+        sim = ct.ReactorNet([reactor])
+    ''')
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(python_content)
+        f.flush()
+        temp_name = f.name
+
+    try:
+        # Execute the Python file to create the network
+        exec_globals = {}
+        with open(temp_name, "r") as file:
+            exec(file.read(), exec_globals)
+
+        sim = exec_globals["sim"]
+
+        # Generate YAML with comments using sim2stone
+        yaml_str = sim_to_stone_yaml(
+            sim,
+            default_mechanism="gri30.yaml",
+            source_file=temp_name,
+            include_comments=True,
+        )
+
+        # Test that the generated YAML can be loaded
+        loaded = load_yaml_string_with_comments(yaml_str)
+        assert loaded is not None
+
+        # Test that it passes normalization
+        normalized = normalize_config(loaded)
+        assert normalized is not None
+
+        # Test that it passes Boulder's validation
+        validate_normalized_config(normalized)  # Should not raise
+
+        # Test that it passes the legacy validate_config as well
+        validated = validate_config(normalized)
+        assert validated is not None
+
+        # Verify metadata is preserved through validation
+        assert "metadata" in validated
+        assert "title" in validated["metadata"]
+        assert "description" in validated["metadata"]
+
+    finally:
+        try:
+            os.unlink(temp_name)
+        except (OSError, PermissionError):
+            pass  # Ignore cleanup errors on Windows
+
+
+def test_sim2stone_yaml_format_compliance():
+    """Test that sim2stone generated YAML is compatible with pre-commit formatting."""
+    import subprocess
+    import sys
+
+    sim, _ = _build_test_network()
+
+    # Generate YAML with sim2stone
+    yaml_str = sim_to_stone_yaml(sim, default_mechanism="gri30.yaml")
+
+    # Write to a temporary file
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_str)
+        f.flush()
+        temp_name = f.name
+
+    try:
+        # Test that the YAML passes check-yaml hook
+        result = subprocess.run(
+            [sys.executable, "-m", "pre_commit", "run", "check-yaml", "--files", temp_name],
+            capture_output=True,
+            text=True,
+        )
+        # Note: pre-commit may not be available in all test environments
+        # so we'll make this test conditional
+        if result.returncode == 0 or "command not found" in result.stderr.lower():
+            # Either passed or pre-commit not available - both are acceptable
+            pass
+        else:
+            pytest.fail(f"Generated YAML failed check-yaml validation: {result.stderr}")
+
+        # Test that the YAML can be loaded by PyYAML (basic syntax check)
+        import yaml
+        with open(temp_name, "r") as f:
+            parsed = yaml.safe_load(f)
+        assert parsed is not None
+
+    finally:
+        try:
+            os.unlink(temp_name)
+        except (OSError, PermissionError):
+            pass  # Ignore cleanup errors on Windows
+
+
+def test_mix1_example_yaml_validation():
+    """Test that examples/mix1.py -> mix1.yaml conversion passes validation."""
+    import sys
+    from pathlib import Path
+
+    # Get the path to examples/mix1.py
+    examples_dir = Path(__file__).parent.parent / "examples"
+    mix1_path = examples_dir / "mix1.py"
+
+    if not mix1_path.exists():
+        pytest.skip("examples/mix1.py not found")
+
+    # Import and execute mix1.py to get the simulation
+    sys.path.insert(0, str(examples_dir))
+    try:
+        import mix1
+        sim = mix1.sim
+    except ImportError:
+        pytest.skip("Could not import mix1 example")
+    finally:
+        # Clean up sys.path
+        if str(examples_dir) in sys.path:
+            sys.path.remove(str(examples_dir))
+
+    # Generate YAML using sim2stone with smart detection
+    yaml_str = sim_to_stone_yaml(
+        sim,
+        default_mechanism="gri30.yaml",
+        source_file=str(mix1_path),
+        include_comments=True,
+    )
+
+    # Test that the generated YAML can be loaded
+    loaded = load_yaml_string_with_comments(yaml_str)
+    assert loaded is not None
+
+    # Test that it passes normalization
+    normalized = normalize_config(loaded)
+    assert normalized is not None
+
+    # Test that it passes Boulder's validation
+    validate_normalized_config(normalized)  # Should not raise
+
+    # Test that it passes the legacy validate_config as well
+    validated = validate_config(normalized)
+    assert validated is not None
+
+    # Verify expected structure
+    assert "nodes" in validated
+    assert "connections" in validated
+    assert len(validated["nodes"]) >= 3  # Should have multiple reactors/reservoirs
+    assert len(validated["connections"]) >= 2  # Should have multiple connections
+
+    # Verify metadata is included when using smart detection
+    assert "metadata" in validated
+    assert "title" in validated["metadata"]
+    assert "description" in validated["metadata"]
+    assert "source_file" in validated["metadata"]

@@ -67,16 +67,16 @@ class TestCLIHeadless:
             assert "network = ct.ReactorNet(" in generated_code
             assert "network.advance(" in generated_code
 
-            # Verify it contains the reactors from the config
-            assert "reactor1 = ct.IdealGasReactor(" in generated_code
-            assert "reactor2 = ct.IdealGasReactor(" in generated_code
-            assert "mixer1 = ct.IdealGasReactor(" in generated_code
-            assert "res1 = ct.Reservoir(" in generated_code
-            assert "res2 = ct.Reservoir(" in generated_code
+            # Verify it contains the reactors from the config (using actual names from mix_react_streams.yaml)
+            assert "Mixer = ct.IdealGasReactor(" in generated_code
+            assert "Air_Reservoir = ct.Reservoir(" in generated_code
+            assert "Fuel_Reservoir = ct.Reservoir(" in generated_code
+            assert "Outlet_Reservoir = ct.Reservoir(" in generated_code
 
-            # Verify it contains the connections from the config
-            assert "mfc1 = ct.MassFlowController(" in generated_code
-            assert "mfc2 = ct.MassFlowController(" in generated_code
+            # Verify it contains the connections from the config (using actual names)
+            assert "Air_Inlet = ct.MassFlowController(" in generated_code
+            assert "Fuel_Inlet = ct.MassFlowController(" in generated_code
+            assert "Valve = ct.Valve(" in generated_code
             assert "mfc3 = ct.MassFlowController(" in generated_code
             assert "mfc4 = ct.MassFlowController(" in generated_code
 

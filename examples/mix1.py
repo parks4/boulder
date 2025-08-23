@@ -1,5 +1,6 @@
 """
-Mixing two streams
+Mixing two streams.
+
 ==================
 
 *A Cantera example (from https://cantera.org/3.1/examples/python/reactors/mix1.html
