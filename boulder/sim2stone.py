@@ -34,7 +34,7 @@ def _parse_python_comments(source_file: str) -> Dict[str, Any]:
     except Exception:
         return {}
 
-    metadata = {
+    metadata: Dict[str, Any] = {
         "file_description": "",
         "variable_comments": {},
         "source_file": os.path.basename(source_file),
@@ -134,10 +134,10 @@ def _smart_extract_object_comments(
 
     # Parse the source code to find variable assignments and their comments
     lines = source_code.split("\n")
-    object_comments = {}
+    object_comments: Dict[str, str] = {}
 
     # First pass: collect all comment blocks and their positions
-    comment_blocks = []
+    comment_blocks: List[Dict[str, Any]] = []
     i = 0
     while i < len(lines):
         line_stripped = lines[i].strip()
