@@ -84,6 +84,144 @@ def _parse_python_comments(source_file: str) -> Dict[str, Any]:
     return metadata
 
 
+def _smart_extract_object_comments(
+    source_file: str, reactor_net: ct.ReactorNet
+) -> Dict[str, str]:
+    """Smart extraction of comments for reactor network objects.
+
+    Uses the reactor network to identify objects, then parses the Python source
+    to find comments above their definitions.
+
+    Args:
+        source_file: Path to the Python source file
+        reactor_net: The Cantera ReactorNet object
+
+    Returns
+    -------
+        Dictionary mapping object names to their descriptions
+    """
+    if not os.path.isfile(source_file):
+        return {}
+
+    try:
+        with open(source_file, "r", encoding="utf-8") as f:
+            source_code = f.read()
+    except Exception:
+        return {}
+
+    # Collect all objects from the reactor network
+    all_reactors = list(collect_all_reactors_and_reservoirs(reactor_net))
+    flow_devices = _unique_flow_devices(set(all_reactors))
+    walls = _unique_walls(set(all_reactors))
+
+    # Create mapping of object names to look for
+    object_names = set()
+
+    # Add reactor names
+    for reactor in all_reactors:
+        if hasattr(reactor, "name") and reactor.name:
+            object_names.add(reactor.name)
+
+    # Add flow device names
+    for device in flow_devices:
+        if hasattr(device, "name") and device.name:
+            object_names.add(device.name)
+
+    # Add wall names
+    for wall in walls:
+        if hasattr(wall, "name") and wall.name:
+            object_names.add(wall.name)
+
+    # Parse the source code to find variable assignments and their comments
+    lines = source_code.split("\n")
+    object_comments = {}
+
+    # First pass: collect all comment blocks and their positions
+    comment_blocks = []
+    i = 0
+    while i < len(lines):
+        line_stripped = lines[i].strip()
+
+        # Look for comment blocks
+        if line_stripped.startswith("#"):
+            comments = []
+
+            # Collect all consecutive comment lines
+            while i < len(lines) and lines[i].strip().startswith("#"):
+                comment_text = lines[i].strip()[1:].strip()
+                # Skip empty comments and %% section markers, but keep regular comments
+                if comment_text and not (
+                    comment_text.startswith("%%") and len(comment_text.strip()) <= 2
+                ):
+                    # Remove %% prefix if present but keep the content
+                    if comment_text.startswith("%%"):
+                        comment_text = comment_text[2:].strip()
+                    if comment_text:  # Only add non-empty comments
+                        comments.append(comment_text)
+                i += 1
+
+            # Skip empty lines after comments
+            while i < len(lines) and not lines[i].strip():
+                i += 1
+
+            if comments:
+                comment_blocks.append(
+                    {"comments": comments, "end_line": i - 1, "next_code_line": i}
+                )
+        else:
+            i += 1
+
+    # Second pass: find Cantera object assignments and associate with comment blocks
+    for i, line in enumerate(lines):
+        line_stripped = line.strip()
+
+        # Skip empty lines and comments
+        if not line_stripped or line_stripped.startswith("#"):
+            continue
+
+        # Look for assignments that create Cantera objects
+        if (
+            "=" in line
+            and ("ct." in line or "cantera." in line)
+            and any(
+                cantera_type in line
+                for cantera_type in [
+                    "Reservoir",
+                    "IdealGasReactor",
+                    "MassFlowController",
+                    "Valve",
+                    "Wall",
+                    "Solution",
+                ]
+            )
+        ):
+            # Extract variable name
+            var_match = re.match(r"(\w+)\s*=", line_stripped)
+            if var_match:
+                var_name = var_match.group(1)
+
+                # Find the most recent comment block before this line
+                relevant_comment_block = None
+                for block in comment_blocks:
+                    if block["next_code_line"] <= i:
+                        # Check if this line is within reasonable distance of the comment block
+                        if i - block["next_code_line"] <= 5:  # Allow up to 5 lines gap
+                            relevant_comment_block = block
+
+                if relevant_comment_block:
+                    description = "\n".join(relevant_comment_block["comments"])
+                    object_comments[var_name] = description
+
+                    # Also try to match by object name if it has one
+                    # Look for name= parameter in the line
+                    name_match = re.search(r'name\s*=\s*["\']([^"\']+)["\']', line)
+                    if name_match:
+                        object_name = name_match.group(1)
+                        object_comments[object_name] = description
+
+    return object_comments
+
+
 def _mechanism_from_thermo(thermo: ct.ThermoPhase) -> Optional[str]:
     """Try to read the mechanism file name from the ThermoPhase.
 
@@ -181,8 +319,11 @@ def sim_to_internal_config(
 
     # Parse comments and metadata from source file if provided
     metadata = {}
+    object_comments = {}
     if source_file and include_comments:
         metadata = _parse_python_comments(source_file)
+        # Use smart extraction to get comments for reactor network objects
+        object_comments = _smart_extract_object_comments(source_file, sim)
 
     # Collect unique reactors/reservoirs from the entire network
     all_reactors = list(collect_all_reactors_and_reservoirs(sim))
@@ -224,15 +365,20 @@ def sim_to_internal_config(
         # Ensure each node has a non-empty unique identifier
         rid = r.name or f"reactor_{id(r)}"
 
-        # Add description from comments if available
+        # Add description from smart comment extraction
         node_dict = {"id": rid, "type": node_type, "properties": props}
-        if metadata and "variable_comments" in metadata:
-            # Look for comments associated with this reactor's variable name
-            var_comments = metadata["variable_comments"]
-            for var_name, comment in var_comments.items():
-                if var_name in rid or rid in var_name:
-                    node_dict["description"] = comment
-                    break
+
+        # First try to find description by reactor name
+        if rid in object_comments:
+            node_dict["description"] = object_comments[rid]
+        else:
+            # Fallback to old method for backward compatibility
+            if metadata and "variable_comments" in metadata:
+                var_comments = metadata["variable_comments"]
+                for var_name, comment in var_comments.items():
+                    if var_name in rid or rid in var_name:
+                        node_dict["description"] = comment
+                        break
 
         nodes.append(node_dict)
 
@@ -288,15 +434,20 @@ def sim_to_internal_config(
             else f"{conn_type}_{src_id}_to_{tgt_id}"
         )
 
-        connections.append(
-            {
-                "id": cid,
-                "type": conn_type,
-                "properties": conn_props,
-                "source": src_id,
-                "target": tgt_id,
-            }
-        )
+        # Create connection dictionary
+        conn_dict = {
+            "id": cid,
+            "type": conn_type,
+            "properties": conn_props,
+            "source": src_id,
+            "target": tgt_id,
+        }
+
+        # Add description from smart comment extraction if available
+        if cid in object_comments:
+            conn_dict["description"] = object_comments[cid]
+
+        connections.append(conn_dict)
 
     # Walls (energy links)
     walls = _unique_walls(set(all_reactors))
@@ -326,20 +477,25 @@ def sim_to_internal_config(
         else:
             electric_power_kW = q_watts / 1e3
 
-        connections.append(
-            {
-                "id": cid,
-                "type": "Wall",
-                "properties": {
-                    "electric_power_kW": electric_power_kW,
-                    # Efficiency unknown; preserve neutral defaults used by builder
-                    "torch_eff": 1.0,
-                    "gen_eff": 1.0,
-                },
-                "source": l_id,
-                "target": r_id,
-            }
-        )
+        # Create wall connection dictionary
+        wall_dict = {
+            "id": cid,
+            "type": "Wall",
+            "properties": {
+                "electric_power_kW": electric_power_kW,
+                # Efficiency unknown; preserve neutral defaults used by builder
+                "torch_eff": 1.0,
+                "gen_eff": 1.0,
+            },
+            "source": l_id,
+            "target": r_id,
+        }
+
+        # Add description from smart comment extraction if available
+        if cid in object_comments:
+            wall_dict["description"] = object_comments[cid]
+
+        connections.append(wall_dict)
 
     internal: Dict[str, Any] = {
         "nodes": nodes,
@@ -453,6 +609,15 @@ def sim_to_stone_yaml(
         conn_cm[conn["type"]] = conn.get("properties", {})
         conn_cm["source"] = conn["source"]
         conn_cm["target"] = conn["target"]
+        # Add description if available
+        if "description" in conn:
+            desc = conn["description"]
+            if isinstance(desc, str) and "\n" in desc:
+                from ruamel.yaml.scalarstring import LiteralScalarString
+
+                conn_cm["description"] = LiteralScalarString(desc)
+            else:
+                conn_cm["description"] = desc
         conns_seq.append(conn_cm)
     stone_cm["connections"] = conns_seq
     # blank line before connections

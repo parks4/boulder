@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import os
+import tempfile
+import textwrap
+
 import cantera as ct  # type: ignore
 
 from boulder.cantera_converter import DualCanteraConverter
@@ -85,3 +89,151 @@ def test_roundtrip_sim_to_yaml_and_back():
     # ReactorNet parity: one non-reservoir reactor called "Mixer"
     assert len(network.reactors) == 1
     assert network.reactors[0].name == "Mixer"
+
+
+def test_smart_detection_with_comments():
+    """Test sim2stone with smart comment detection enabled."""
+    # Create a temporary Python file with comments
+    python_content = textwrap.dedent('''
+        """
+        Test reactor network
+        ====================
+
+        A simple test network for validating smart detection.
+        """
+        import cantera as ct
+
+        # Set up gas solution
+        gas = ct.Solution('gri30.yaml')
+        gas.TPX = 300.0, ct.one_atm, 'CH4:1, O2:2, N2:7.52'
+
+        # Create main reactor for testing
+        # This reactor handles the main reactions
+        reactor = ct.IdealGasReactor(gas, name="Test Reactor")
+
+        # Create inlet reservoir
+        inlet_gas = ct.Solution('gri30.yaml')
+        inlet_gas.TPX = 300.0, ct.one_atm, 'CH4:1, O2:2, N2:7.52'
+        inlet = ct.Reservoir(inlet_gas, name="Inlet")
+
+        # Mass flow controller for inlet flow
+        mfc = ct.MassFlowController(inlet, reactor, mdot=0.1, name="Inlet MFC")
+
+        sim = ct.ReactorNet([reactor])
+    ''')
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(python_content)
+        f.flush()
+        temp_name = f.name
+
+    try:
+        # Execute the Python file to create the network
+        exec_globals = {}
+        with open(temp_name, "r") as file:
+            exec(file.read(), exec_globals)
+
+        sim = exec_globals["sim"]
+
+        # Convert with smart detection enabled
+        yaml_str = sim_to_stone_yaml(
+            sim,
+            default_mechanism="gri30.yaml",
+            source_file=temp_name,
+            include_comments=True,
+        )
+
+        # Verify metadata is included
+        assert "metadata:" in yaml_str
+        assert "Test reactor network" in yaml_str
+        assert "A simple test network for validating smart detection." in yaml_str
+        assert f"source_file: {os.path.basename(temp_name)}" in yaml_str
+
+        # Verify node descriptions are included
+        assert "description: |-" in yaml_str
+        assert "Create main reactor for testing" in yaml_str
+        assert "This reactor handles the main reactions" in yaml_str
+        assert "Create inlet reservoir" in yaml_str
+
+        # Verify connection descriptions are included
+        assert "Mass flow controller for inlet flow" in yaml_str
+
+        # Verify the YAML can be loaded and validated
+        loaded = load_yaml_string_with_comments(yaml_str)
+        normalized = normalize_config(loaded)
+        validated = validate_config(normalized)
+
+        # Should have metadata section
+        assert "metadata" in validated
+        assert (
+            validated["metadata"]["title"]
+            == f"Converted from {os.path.basename(temp_name)}"
+        )
+
+    finally:
+        try:
+            os.unlink(temp_name)
+        except (OSError, PermissionError):
+            pass  # Ignore cleanup errors on Windows
+
+
+def test_smart_detection_disabled():
+    """Test sim2stone with smart comment detection disabled."""
+    # Create a temporary Python file with comments
+    python_content = textwrap.dedent('''
+        """This docstring should be ignored"""
+        import cantera as ct
+
+        # This comment should be ignored
+        gas = ct.Solution('gri30.yaml')
+        reactor = ct.IdealGasReactor(gas, name="Test")
+        sim = ct.ReactorNet([reactor])
+    ''')
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(python_content)
+        f.flush()
+        temp_name = f.name
+
+    try:
+        # Execute the Python file to create the network
+        exec_globals = {}
+        with open(temp_name, "r") as file:
+            exec(file.read(), exec_globals)
+
+        sim = exec_globals["sim"]
+
+        # Convert with smart detection disabled
+        yaml_str = sim_to_stone_yaml(
+            sim,
+            default_mechanism="gri30.yaml",
+            source_file=temp_name,
+            include_comments=False,
+        )
+
+        # Should not contain comments or descriptions
+        assert "This docstring should be ignored" not in yaml_str
+        assert "This comment should be ignored" not in yaml_str
+        assert "description:" not in yaml_str
+        assert "metadata:" not in yaml_str or "description:" not in yaml_str
+
+    finally:
+        try:
+            os.unlink(temp_name)
+        except (OSError, PermissionError):
+            pass  # Ignore cleanup errors on Windows
+
+
+def test_smart_detection_no_source_file():
+    """Test sim2stone when no source file is provided."""
+    sim, _ = _build_test_network()
+
+    # Convert without source file
+    yaml_str = sim_to_stone_yaml(
+        sim, default_mechanism="gri30.yaml", source_file=None, include_comments=True
+    )
+
+    # Should not contain descriptions from smart detection
+    # (but may contain basic metadata)
+    assert "Create main reactor" not in yaml_str
+    assert "Mass flow controller" not in yaml_str

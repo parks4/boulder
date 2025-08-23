@@ -45,8 +45,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    """Main entry point for stone2sim CLI.
-    
+    """Convert STONE YAML to Python simulation script.
+
     This function replicates the functionality of `boulder --headless --download`
     by using the same DualCanteraConverter to generate Python code from YAML.
     """
@@ -65,19 +65,19 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         # Import Boulder's headless functionality
         from .cli import run_headless_mode
-        
+
         if args.verbose:
             print(f"[stone2sim] Generating Python code: {output_path}")
-        
+
         # Use the existing headless mode functionality
         run_headless_mode(args.input, output_path, args.verbose)
-        
+
         # Always print the created file path so callers can capture/chain it
         print(f"🐍 Python simulation script created: {output_path}")
-        
+
         if args.verbose:
             print(f"[stone2sim] Done: {output_path}")
-        
+
         return 0
 
     except Exception as e:

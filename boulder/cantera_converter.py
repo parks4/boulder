@@ -583,9 +583,6 @@ class DualCanteraConverter:
             # Check for deprecated keys and raise errors only if they contain values
             deprecated_keys = []
 
-            print("\n" * 5)
-            print("DEBUG: config", config)
-
             # Only error if simulation section exists and has content
             simulation_section = config.get("simulation", {})
             if simulation_section:  # Only if not empty

@@ -4,7 +4,7 @@ metadata:
     A Cantera example showcasing mixing of air and methane streams in stoichiometric
     proportions. Since reactors can have multiple inlets and outlets, they can be used to
     implement mixers, splitters, etc. Due to the low temperature, no reactions occur.
-    
+
     Note that the air stream and the methane stream use different reaction mechanisms,
     with different numbers of species and reactions. When gas flows from one reactor
     or reservoir to another one with a different reaction mechanism, species are matched
