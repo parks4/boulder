@@ -26,25 +26,30 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
                         dbc.Col(
                             dcc.Graph(id="temperature-plot"),
                             width=6,
+                            id="temperature-plot-container",
                         ),
                         dbc.Col(
                             dcc.Graph(id="pressure-plot"),
                             width=6,
+                            id="pressure-plot-container",
                         ),
                     ],
                     className="mb-2 mt-3",
+                    id="plots-row-1",
                 ),
                 dbc.Row(
                     [
                         dbc.Col(
                             dcc.Graph(id="species-plot"),
                             width=6,
+                            id="species-plot-container",
                         ),
                         dbc.Col(
                             html.Div(),
                             width=6,
                         ),
-                    ]
+                    ],
+                    id="plots-row-2",
                 ),
             ],
         ),
