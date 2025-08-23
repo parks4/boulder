@@ -20,13 +20,12 @@ from pathlib import Path
 examples_dir = Path(__file__).parent
 sys.path.insert(0, str(examples_dir))
 
-import mix1     # import any file where there is a simulation object `sim`
+import mix1  # import any file where there is a simulation object `sim`
 
 # For regeneration and Boulder functionality
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import load_config_file, normalize_config, validate_config
 from boulder.sim2stone import write_sim_as_yaml
-
 
 # %%
 # Boulder functionality: Serialize to STONE YAML
@@ -41,13 +40,12 @@ print(f"Wrote STONE YAML to {output_yaml}")
 
 
 """
-All of this can be ran from command line with 
+All of this can be ran from command line with
 
 ```bash
 sim2stone mix1.py
 ```
 """
-
 
 
 # %%
@@ -76,7 +74,12 @@ print(
 # %%
 # Verify the regenerated network matches the original
 # ---------------------------------------------------
-expected_nodes = {mix1.res_a.name, mix1.res_b.name, mix1.mixer.name, mix1.downstream.name}
+expected_nodes = {
+    mix1.res_a.name,
+    mix1.res_b.name,
+    mix1.mixer.name,
+    mix1.downstream.name,
+}
 assert set(converter.reactors.keys()) == expected_nodes
 assert len(converter.connections) == 3
 print("✅ Network regeneration successful - all assertions passed!")

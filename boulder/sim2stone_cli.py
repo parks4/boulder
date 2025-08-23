@@ -61,6 +61,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose progress messages"
     )
+    parser.add_argument(
+        "--no-comments",
+        action="store_true",
+        help="Exclude comment parsing from Python source code",
+    )
     return parser.parse_args(argv)
 
 
@@ -136,7 +141,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             f"Writing: {output_path}"
         )
 
-    write_sim_as_yaml(network, output_path, default_mechanism=args.mechanism)
+    write_sim_as_yaml(
+        network,
+        output_path,
+        default_mechanism=args.mechanism,
+        source_file=args.input,
+        include_comments=not args.no_comments,
+    )
 
     # Always print the created file path so callers can capture/chain it
     print(f"🪨 STONE file created in {output_path}")

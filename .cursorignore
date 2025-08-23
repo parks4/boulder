@@ -3,5 +3,6 @@
 !configs/default.yaml       # except from this one
 !configs/mix_react_streams.yaml
 !configs/grouped_nodes.yaml
+!examples/mix1.yaml
 *.csv
 *.json

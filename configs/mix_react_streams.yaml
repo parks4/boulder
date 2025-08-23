@@ -4,42 +4,42 @@ phases:
 settings: {}
 
 nodes:
-  - id: Air Reservoir
-    Reservoir:
-      temperature: 300.0
-      pressure: 101325.00000000003
-      composition: N2:0.78,O2:0.21,AR:0.01
-    mechanism: air.yaml
-  - id: Fuel Reservoir
-    Reservoir:
-      temperature: 300.0
-      pressure: 101325.00000000001
-      composition: CH4:1
-  - id: Mixer
-    IdealGasReactor:
-      temperature: 299.9999999999867
-      pressure: 101326.46614484335
-      composition: N2:0.719557,O2:0.193727,CH4:0.0774908,AR:0.00922509
-      volume: 1.0
-  - id: Outlet Reservoir
-    Reservoir:
-      temperature: 300.0
-      pressure: 101325.00000000003
-      composition: N2:0.78,O2:0.21,AR:0.01
-      mass_flow_rate: 0.6516985521312658
-    mechanism: air.yaml
+- id: Air Reservoir
+  Reservoir:
+    temperature: 300.0
+    pressure: 101325.00000000003
+    composition: N2:0.78,O2:0.21,AR:0.01
+  mechanism: air.yaml
+- id: Fuel Reservoir
+  Reservoir:
+    temperature: 300.0
+    pressure: 101325.00000000001
+    composition: CH4:1
+- id: Mixer
+  IdealGasReactor:
+    temperature: 299.9999999999867
+    pressure: 101326.46614484335
+    composition: N2:0.719557,O2:0.193727,CH4:0.0774908,AR:0.00922509
+    volume: 1.0
+- id: Outlet Reservoir
+  Reservoir:
+    temperature: 300.0
+    pressure: 101325.00000000003
+    composition: N2:0.78,O2:0.21,AR:0.01
+    mass_flow_rate: 0.6516985521312658
+  mechanism: air.yaml
 
 connections:
-  - id: Air Inlet
-    MassFlowController: {}
-    source: Air Reservoir
-    target: Mixer
-  - id: Fuel Inlet
-    MassFlowController: {}
-    source: Fuel Reservoir
-    target: Mixer
-  - id: Valve
-    Valve:
-      valve_coeff: 10.0
-    source: Mixer
-    target: Outlet Reservoir
+- id: Air Inlet
+  MassFlowController: {}
+  source: Air Reservoir
+  target: Mixer
+- id: Fuel Inlet
+  MassFlowController: {}
+  source: Fuel Reservoir
+  target: Mixer
+- id: Valve
+  Valve:
+    valve_coeff: 10.0
+  source: Mixer
+  target: Outlet Reservoir

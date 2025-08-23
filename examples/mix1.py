@@ -3,7 +3,7 @@ Mixing two streams
 ==================
 
 *A Cantera example (from https://cantera.org/3.1/examples/python/reactors/mix1.html
-used in Boulder to showcase the sim2stone functionality: generating a simulation 
+used in Boulder to showcase the sim2stone functionality: generating a simulation
 yaml file from a :py:class:`~cantera.ReactorNet` object*
 
 Since reactors can have multiple inlets and outlets, they can be used to
@@ -32,16 +32,16 @@ import cantera as ct
 # --------------------------
 #
 # Use air for stream a.
-gas_a = ct.Solution('air.yaml')
-gas_a.TPX = 300.0, ct.one_atm, 'O2:0.21, N2:0.78, AR:0.01'
+gas_a = ct.Solution("air.yaml")
+gas_a.TPX = 300.0, ct.one_atm, "O2:0.21, N2:0.78, AR:0.01"
 rho_a = gas_a.density
 
 # %%
 # Use GRI-Mech 3.0 for stream b (methane) and for the mixer. If it is desired
 # to have a pure mixer, with no chemistry, use instead a reaction mechanism
 # for gas_b that has no reactions.
-gas_b = ct.Solution('gri30.yaml')
-gas_b.TPX = 300.0, ct.one_atm, 'CH4:1'
+gas_b = ct.Solution("gri30.yaml")
+gas_b.TPX = 300.0, ct.one_atm, "CH4:1"
 rho_b = gas_b.density
 
 # %%
@@ -51,23 +51,23 @@ rho_b = gas_b.density
 # replaced with a reactor with no outlet, if it is desired to integrate the
 # composition leaving the mixer in time, or by an arbitrary network of
 # downstream reactors.
-res_a = ct.Reservoir(gas_a, name='Air Reservoir')
-res_b = ct.Reservoir(gas_b, name='Fuel Reservoir')
-downstream = ct.Reservoir(gas_a, name='Outlet Reservoir')
+res_a = ct.Reservoir(gas_a, name="Air Reservoir")
+res_b = ct.Reservoir(gas_b, name="Fuel Reservoir")
+downstream = ct.Reservoir(gas_a, name="Outlet Reservoir")
 
 # %%
 # Create a reactor for the mixer. A reactor is required instead of a
 # reservoir, since the state will change with time if the inlet mass flow
 # rates change or if there is chemistry occurring.
-gas_b.TPX = 300.0, ct.one_atm, 'O2:0.21, N2:0.78, AR:0.01'
-mixer = ct.IdealGasReactor(gas_b, name='Mixer')
+gas_b.TPX = 300.0, ct.one_atm, "O2:0.21, N2:0.78, AR:0.01"
+mixer = ct.IdealGasReactor(gas_b, name="Mixer")
 
 # %%
 # Create two mass flow controllers connecting the upstream reservoirs to the
 # mixer, and set their mass flow rates to values corresponding to
 # stoichiometric combustion.
-mfc1 = ct.MassFlowController(res_a, mixer, mdot=rho_a*2.5/0.21, name="Air Inlet")
-mfc2 = ct.MassFlowController(res_b, mixer, mdot=rho_b*1.0, name="Fuel Inlet")
+mfc1 = ct.MassFlowController(res_a, mixer, mdot=rho_a * 2.5 / 0.21, name="Air Inlet")
+mfc2 = ct.MassFlowController(res_b, mixer, mdot=rho_b * 1.0, name="Fuel Inlet")
 
 # %%
 # Connect the mixer to the downstream reservoir with a valve.
