@@ -185,7 +185,9 @@ class DualCanteraConverter:
                 volume_val = float(volume)
                 if volume_val > 0:
                     reactor.volume = volume_val
-                    self.code_lines.append(f"{reactor_id}.volume = {volume_val}")
+                    self.code_lines.append(
+                        f"{reactor_id}.volume = {volume_val}  # Set reactor volume in m³"
+                    )
                     logger.debug(f"Set volume for {reactor_id}: {volume_val} m³")
             except (ValueError, TypeError, AttributeError) as e:
                 logger.warning(f"Failed to set volume for {reactor_id}: {e}")
@@ -195,7 +197,14 @@ class DualCanteraConverter:
         # Store config for later post-processing
         self._last_config = config
         self.code_lines = []
+        self.code_lines.append(
+            "# Import Cantera for chemical kinetics and reactor modeling"
+        )
         self.code_lines.append("import cantera as ct")
+        self.code_lines.append("")
+        self.code_lines.append(
+            "# Load the chemical mechanism (contains species and reactions)"
+        )
         self.code_lines.append(f"gas_default = ct.Solution('{self.mechanism}')")
         try:
             self.gas = ct.Solution(self.mechanism)
@@ -223,7 +232,9 @@ class DualCanteraConverter:
         self.connections = {}
         self.network = None
 
-        # Reactors
+        # Create reactors from configuration
+        self.code_lines.append("")
+        self.code_lines.append("# ===== REACTOR SETUP =====")
         for node in config["nodes"]:
             rid = node["id"]
             typ = node["type"]
@@ -256,6 +267,12 @@ class DualCanteraConverter:
                 # Code gen: note plugin usage
                 self.code_lines.append(f"# Plugin reactor {typ} -> created as '{rid}'")
             elif typ == "IdealGasReactor":
+                self.code_lines.append(
+                    f"# Create IdealGasReactor '{rid}' - variable volume, constant energy"
+                )
+                self.code_lines.append(
+                    f"# Initial conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
+                )
                 self.code_lines.append(f"{rid} = ct.IdealGasReactor(gas_default)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasReactor(gas_for_node)
@@ -272,6 +289,12 @@ class DualCanteraConverter:
                 except Exception:
                     pass
             elif typ == "IdealGasConstPressureReactor":
+                self.code_lines.append(
+                    f"# Create IdealGasConstPressureReactor '{rid}' - constant pressure"
+                )
+                self.code_lines.append(
+                    f"# Initial conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
+                )
                 self.code_lines.append(
                     f"{rid} = ct.IdealGasConstPressureReactor(gas_default)"
                 )
@@ -291,6 +314,12 @@ class DualCanteraConverter:
                     pass
             elif typ == "IdealGasConstPressureMoleReactor":
                 self.code_lines.append(
+                    f"# Create IdealGasConstPressureMoleReactor '{rid}' - mole-based"
+                )
+                self.code_lines.append(
+                    f"# Initial conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
+                )
+                self.code_lines.append(
                     f"{rid} = ct.IdealGasConstPressureMoleReactor(gas_default)"
                 )
                 self.code_lines.append(f"{rid}.name = '{rid}'")
@@ -308,7 +337,12 @@ class DualCanteraConverter:
                 except Exception:
                     pass
             elif typ == "IdealGasMoleReactor":
-                # Available in Cantera 3.x
+                self.code_lines.append(
+                    f"# Create IdealGasMoleReactor '{rid}' - mole-based (Cantera 3.x)"
+                )
+                self.code_lines.append(
+                    f"# Initial conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
+                )
                 self.code_lines.append(f"{rid} = ct.IdealGasMoleReactor(gas_default)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.IdealGasMoleReactor(gas_for_node)  # type: ignore[attr-defined]
@@ -325,6 +359,12 @@ class DualCanteraConverter:
                 except Exception:
                     pass
             elif typ == "Reservoir":
+                self.code_lines.append(
+                    f"# Create Reservoir '{rid}' - infinite capacity, constant state"
+                )
+                self.code_lines.append(
+                    f"# Fixed conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
+                )
                 self.code_lines.append(f"{rid} = ct.Reservoir(gas_default)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
                 self.reactors[rid] = ct.Reservoir(gas_for_node)
@@ -342,7 +382,9 @@ class DualCanteraConverter:
                 self.code_lines.append(f"# Unsupported reactor type: {typ}")
                 raise ValueError(f"Unsupported reactor type: {typ}")
 
-        # Connections
+        # Create connections between reactors
+        self.code_lines.append("")
+        self.code_lines.append("# ===== CONNECTION SETUP =====")
         for conn in config["connections"]:
             cid = conn["id"]
             typ = conn["type"]
@@ -358,6 +400,10 @@ class DualCanteraConverter:
                 )
             elif typ == "MassFlowController":
                 mfr = float(props.get("mass_flow_rate", 0.1))
+                self.code_lines.append(
+                    f"# Create MassFlowController '{cid}': {src} -> {tgt}"
+                )
+                self.code_lines.append(f"# Controls mass flow rate at {mfr} kg/s")
                 self.code_lines.append(f"{cid} = ct.MassFlowController({src}, {tgt})")
                 self.code_lines.append(f"{cid}.mass_flow_rate = {mfr}")
                 self.connections[cid] = ct.MassFlowController(
@@ -366,6 +412,10 @@ class DualCanteraConverter:
                 self.connections[cid].mass_flow_rate = mfr
             elif typ == "Valve":
                 coeff = float(props.get("valve_coeff", 1.0))
+                self.code_lines.append(f"# Create Valve '{cid}': {src} -> {tgt}")
+                self.code_lines.append(
+                    f"# Flow depends on pressure difference, valve coeff = {coeff}"
+                )
                 self.code_lines.append(f"{cid} = ct.Valve({src}, {tgt})")
                 self.code_lines.append(f"{cid}.valve_coeff = {coeff}")
                 self.connections[cid] = ct.Valve(self.reactors[src], self.reactors[tgt])
@@ -378,6 +428,13 @@ class DualCanteraConverter:
                 gen_eff = float(props.get("gen_eff", 1.0))
                 # Convert from kW to W
                 Q_watts = electric_power_kW * 1e3 * torch_eff * gen_eff
+                self.code_lines.append(f"# Create Wall '{cid}': {src} <-> {tgt}")
+                self.code_lines.append(
+                    f"# Heat transfer: {Q_watts} W (from {electric_power_kW} kW input)"
+                )
+                self.code_lines.append(
+                    f"# Efficiencies: torch={torch_eff}, generator={gen_eff}"
+                )
                 self.code_lines.append(
                     f"{cid} = ct.Wall({src}, {tgt}, A=1.0, Q={Q_watts}, name='{cid}')"
                 )
@@ -390,15 +447,25 @@ class DualCanteraConverter:
                 self.code_lines.append(f"# Unsupported connection type: {typ}")
                 raise ValueError(f"Unsupported connection type: {typ}")
 
-        # ReactorNet (include all non-Reservoir reactors)
+        # Create reactor network (exclude reservoirs as they don't evolve in time)
         reactor_ids = [
             rid for rid, r in self.reactors.items() if not isinstance(r, ct.Reservoir)
         ]
+        self.code_lines.append("")
+        self.code_lines.append("# ===== NETWORK SETUP =====")
+        self.code_lines.append(
+            "# Create reactor network with all time-evolving reactors"
+        )
+        self.code_lines.append(f"# Reactors in network: {', '.join(reactor_ids)}")
         self.code_lines.append(f"network = ct.ReactorNet([{', '.join(reactor_ids)}])")
         self.network = ct.ReactorNet([self.reactors[rid] for rid in reactor_ids])
-        self.code_lines.append("network.rtol = 1e-6")
-        self.code_lines.append("network.atol = 1e-8")
-        self.code_lines.append("network.max_steps = 10000")
+        self.code_lines.append("")
+        self.code_lines.append("# Set solver tolerances for numerical integration")
+        self.code_lines.append("network.rtol = 1e-6  # Relative tolerance")
+        self.code_lines.append("network.atol = 1e-8  # Absolute tolerance")
+        self.code_lines.append(
+            "network.max_steps = 10000  # Maximum steps per time step"
+        )
         self.network.rtol = 1e-6
         self.network.atol = 1e-8
         self.network.max_steps = 10000
@@ -472,15 +539,28 @@ class DualCanteraConverter:
             )
 
         # Add simulation loop code generation
-        sim_time = int(simulation_time)
-        step_time = int(time_step)
-        # Generate compact, line-length compliant code lines for the demo script
-        self.code_lines.append("# Run the simulation")
-        self.code_lines.append(f"for t in range(0, {sim_time}, {step_time}):")
-        self.code_lines.append("    network.advance(t)")
+        self.code_lines.append("")
+        self.code_lines.append("# ===== SIMULATION EXECUTION =====")
+        self.code_lines.append("# Import numpy for time array generation")
+        self.code_lines.append("import numpy as np")
+        self.code_lines.append("")
         self.code_lines.append(
-            '    print(f"t={t}, T={[r.thermo.T for r in network.reactors]}")'
+            f"# Create time array: 0 to {simulation_time}s with {time_step}s steps"
         )
+        self.code_lines.append(f"times = np.arange(0, {simulation_time}, {time_step})")
+        self.code_lines.append("")
+        self.code_lines.append("# Run time integration loop")
+        self.code_lines.append("print('Starting simulation...')")
+        self.code_lines.append("print('Time (s)\\tTemperatures (K)')")
+        self.code_lines.append("for t in times:")
+        self.code_lines.append("    # Advance the reactor network to time t")
+        self.code_lines.append("    network.advance(t)")
+        self.code_lines.append("    # Print current time and reactor temperatures")
+        self.code_lines.append(
+            '    print(f"t={t:.4f}, T={[r.thermo.T for r in network.reactors]}")'
+        )
+        self.code_lines.append("")
+        self.code_lines.append("print('Simulation completed!')")
 
         # Initialize data structures
         times: List[float] = []

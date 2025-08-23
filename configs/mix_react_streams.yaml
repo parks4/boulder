@@ -1,68 +1,45 @@
-metadata:
-  name: "Mixed Reactor Streams"
-  description: "Complex multi-reactor network with interconnected streams"
-  version: "3.0"
-  author: "Boulder Configuration System"
-
 phases:
   gas:
     mechanism: gri30.yaml
-settings:
-  time_step: 0.0005    # s
-  max_time: 2.0        # s
-  solver: "CVODE_BDF"
-  relative_tolerance: 1.0e-08
-  absolute_tolerance: 1.0e-12
-  max_steps: 20000
+settings: {}
 
 nodes:
-- id: reactor1
-  IdealGasReactor:
-    temperature: 1100      # K
-    pressure: 101325       # Pa
-    composition: "CH4:0.8,O2:1.6,N2:6.0"
-    volume: 0.005          # m³
-- id: reactor2
-  IdealGasReactor:
-    temperature: 900       # K
-    pressure: 101325       # Pa
-    composition: "H2:2,O2:1,N2:3.76"
-    volume: 0.008          # m³
-
-- id: res1
-  Reservoir:
-    temperature: 300       # K
-    composition: "CH4:1,N2:2"
-- id: res2
-  Reservoir:
-    temperature: 320       # K
-    pressure: 151987       # Pa
-    composition: "O2:1,N2:3.76"
-- id: mixer1
-  IdealGasReactor:
-    temperature: 400       # K
-    pressure: 101325       # Pa
-    composition: "N2:1"
-    volume: 0.002          # m³
+  - id: Air Reservoir
+    Reservoir:
+      temperature: 300.0
+      pressure: 101325.00000000003
+      composition: N2:0.78,O2:0.21,AR:0.01
+    mechanism: air.yaml
+  - id: Fuel Reservoir
+    Reservoir:
+      temperature: 300.0
+      pressure: 101325.00000000001
+      composition: CH4:1
+  - id: Mixer
+    IdealGasReactor:
+      temperature: 299.9999999999867
+      pressure: 101326.46614484335
+      composition: N2:0.719557,O2:0.193727,CH4:0.0774908,AR:0.00922509
+      volume: 1.0
+  - id: Outlet Reservoir
+    Reservoir:
+      temperature: 300.0
+      pressure: 101325.00000000003
+      composition: N2:0.78,O2:0.21,AR:0.01
+      mass_flow_rate: 0.6516985521312658
+    mechanism: air.yaml
 
 connections:
-- id: mfc1
-  MassFlowController:
-    mass_flow_rate: 0.03    # kg/s
-  source: res1
-  target: reactor1
-- id: mfc2
-  MassFlowController:
-    mass_flow_rate: 0.04    # kg/s
-  source: res2
-  target: reactor1
-- id: mfc3
-  MassFlowController:
-    mass_flow_rate: 0.025   # kg/s
-  source: reactor1
-  target: mixer1
-- id: mfc4
-  MassFlowController:
-    mass_flow_rate: 0.035   # kg/s
-  source: mixer1
-  target: reactor2
+  - id: Air Inlet
+    MassFlowController: {}
+    source: Air Reservoir
+    target: Mixer
+  - id: Fuel Inlet
+    MassFlowController: {}
+    source: Fuel Reservoir
+    target: Mixer
+  - id: Valve
+    Valve:
+      valve_coeff: 10.0
+    source: Mixer
+    target: Outlet Reservoir

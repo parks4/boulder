@@ -1,5 +1,7 @@
 #configs/  # Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
-#!configs/default.yaml  # except from this one
 *.yaml
+!configs/default.yaml       # except from this one
+!configs/mix_react_streams.yaml
+!configs/grouped_nodes.yaml
 *.csv
 *.json
