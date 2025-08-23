@@ -137,35 +137,83 @@ def register_callbacks(app) -> None:  # type: ignore
             content_type, content_string = upload_contents.split(",")
             try:
                 decoded_string = base64.b64decode(content_string).decode("utf-8")
-                # Only accept YAML files with 🪨 STONE standard
+                # Accept YAML files with 🪨 STONE standard and Python files
                 if upload_filename and upload_filename.lower().endswith(
-                    (".yaml", ".yml")
+                    (".yaml", ".yml", ".py")
                 ):
+                    # Handle both Python and YAML files with unified logic
+                    import os
+                    import tempfile
+
                     from ..config import (
+                        load_config_file_with_py_support_and_comments,
                         load_yaml_string_with_comments,
                         normalize_config,
                         validate_config,
                     )
 
-                    # Use comment-preserving YAML loader
-                    try:
-                        decoded = load_yaml_string_with_comments(decoded_string)
-                    except Exception:
-                        # Fallback to standard loader for compatibility
-                        decoded = yaml.safe_load(decoded_string)
+                    if upload_filename.lower().endswith(".py"):
+                        # Step 1: Save Python file to temporary location
+                        with tempfile.NamedTemporaryFile(
+                            mode="w", suffix=".py", delete=False, encoding="utf-8"
+                        ) as temp_file:
+                            temp_file.write(decoded_string)
+                            temp_py_path = temp_file.name
 
-                    # Normalize from YAML with 🪨 STONE standard to internal format
-                    normalized = normalize_config(decoded)
-                    # Validate the configuration (this will also convert units)
-                    normalized = validate_config(normalized)
-                    if is_verbose_mode():
-                        logger.info(
-                            f"Successfully loaded configuration file: {upload_filename}"
+                        try:
+                            # Step 2: Convert Python to YAML, then load the YAML
+                            config, original_yaml, actual_yaml_path = (
+                                load_config_file_with_py_support_and_comments(
+                                    temp_py_path, verbose=is_verbose_mode()
+                                )
+                            )
+                            normalized = normalize_config(config)
+                            validated = validate_config(normalized)
+
+                            if is_verbose_mode():
+                                logger.info(
+                                    f"Successfully converted Python to YAML and loaded: {upload_filename}"
+                                )
+
+                            # Use the original filename for display, but note it was converted
+                            display_filename = f"{upload_filename} (converted to YAML)"
+                            return (
+                                validated,
+                                display_filename,
+                                original_yaml,
+                                dash.no_update,
+                            )
+
+                        finally:
+                            # Clean up temporary file
+                            if os.path.exists(temp_py_path):
+                                os.unlink(temp_py_path)
+                    else:
+                        # Step 1 & 2: For YAML files, load directly (no conversion needed)
+                        # Use comment-preserving YAML loader with fallback
+                        try:
+                            decoded = load_yaml_string_with_comments(decoded_string)
+                        except (yaml.YAMLError, AttributeError):
+                            # Fallback to standard loader for compatibility
+                            decoded = yaml.safe_load(decoded_string)
+
+                        # Normalize from YAML with 🪨 STONE standard to internal format
+                        normalized = normalize_config(decoded)
+                        # Validate the configuration (this will also convert units)
+                        normalized = validate_config(normalized)
+                        if is_verbose_mode():
+                            logger.info(
+                                f"Successfully loaded YAML file: {upload_filename}"
+                            )
+                        return (
+                            normalized,
+                            upload_filename,
+                            decoded_string,
+                            dash.no_update,
                         )
-                    return normalized, upload_filename, decoded_string, dash.no_update
                 else:
                     print(
-                        "Only YAML format with 🪨 STONE standard (.yaml/.yml) files are supported. Got:"
+                        "Only YAML format with 🪨 STONE standard (.yaml/.yml) and Python (.py) files are supported. Got:"
                         f" {upload_filename}"
                     )
                     return dash.no_update, "", "", dash.no_update

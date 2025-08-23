@@ -61,8 +61,14 @@ def register_callbacks(app) -> None:  # type: ignore
                         f"File content preview (first 200 chars): {decoded_string[:200]}..."
                     )
 
-                # Validate as YAML (STONE standard) instead of JSON
-                parsed_yaml = yaml.safe_load(decoded_string)
+                # Handle both YAML and Python files
+                if upload_filename and upload_filename.lower().endswith(".py"):
+                    # For Python files, we'll validate that they can be processed
+                    # The actual conversion happens in config_callbacks
+                    parsed_yaml = {"type": "python_file", "filename": upload_filename}
+                else:
+                    # Validate as YAML (STONE standard) instead of JSON
+                    parsed_yaml = yaml.safe_load(decoded_string)
 
                 if is_verbose_mode():
                     keys_info = (

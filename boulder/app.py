@@ -11,7 +11,6 @@ from . import (
     output_pane_plugins,  # noqa: F401
 )
 from .config import (
-    get_config_from_path_with_comments,
     get_initial_config_with_comments,
 )
 from .layout import get_layout
@@ -52,9 +51,23 @@ env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
 
 if env_config_path and env_config_path.strip():
     cleaned = env_config_path.strip()
-    initial_config, original_yaml = get_config_from_path_with_comments(cleaned)
+    # Use Python-aware loading for environment config
+    from .config import (
+        load_config_file_with_py_support_and_comments,
+        normalize_config,
+        validate_config,
+    )
+
+    config, original_yaml, actual_yaml_path = (
+        load_config_file_with_py_support_and_comments(
+            cleaned, verbose=os.environ.get("BOULDER_VERBOSE") == "1"
+        )
+    )
+    normalized = normalize_config(config)
+    initial_config = validate_config(normalized)
+
     # When a specific file is provided, propagate its base name to the UI store
-    provided_filename = os.path.basename(cleaned)
+    provided_filename = os.path.basename(actual_yaml_path)
 else:
     initial_config, original_yaml = get_initial_config_with_comments()
 
