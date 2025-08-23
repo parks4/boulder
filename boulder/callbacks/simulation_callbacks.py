@@ -14,8 +14,6 @@ from ..verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
 
-REPORT_FRACTION_TRESHOLD = 1e-7  # 0.1 ppm cutoff for thermo report
-
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
@@ -120,7 +118,21 @@ def register_callbacks(app) -> None:  # type: ignore
             return (True, {"display": "none"}, "")
 
         # Determine the mechanism to use
-        if mechanism_select == "custom-name":
+        # First, try to extract mechanism from config (STONE standard)
+        # TODO refactor properly see https://github.com/parks4/boulder/issues/27
+        config_mechanism = None
+        if config and isinstance(config, dict):
+            phases = config.get("phases", {})
+            if isinstance(phases, dict):
+                gas = phases.get("gas", {})
+                if isinstance(gas, dict):
+                    config_mechanism = gas.get("mechanism")
+
+        if config_mechanism:
+            # Use mechanism from config (highest priority)
+            mechanism = config_mechanism
+            logger.info(f"Using mechanism from config: {mechanism}")
+        elif mechanism_select == "custom-name":
             mechanism = (
                 custom_mechanism
                 if custom_mechanism and custom_mechanism.strip()
@@ -381,6 +393,7 @@ def register_callbacks(app) -> None:  # type: ignore
         results = {
             "time": progress.times,
             "reactors": progress.reactors_series,
+            "summary": progress.summary,
         }
 
         simulation_data = {
@@ -748,6 +761,37 @@ def register_callbacks(app) -> None:  # type: ignore
         species_fig = apply_theme_to_figure(species_fig, theme)
 
         return temp_fig.to_dict(), press_fig.to_dict(), species_fig.to_dict()
+
+    # Populate Summary text when Summary tab is active
+    @app.callback(
+        Output("summary-text", "children"),
+        [
+            Input("results-tabs", "active_tab"),
+            Input("simulation-data", "data"),
+        ],
+        prevent_initial_call=True,
+    )
+    def update_summary_text(active_tab: str, simulation_data: Dict[str, Any]):
+        import dash
+
+        from ..output_summary import format_summary_text
+
+        if active_tab != "summary-tab":
+            return dash.no_update
+        if not simulation_data or "results" not in simulation_data:
+            return "No simulation data available."
+
+        results = simulation_data["results"]
+        summary = results.get("summary") or []
+
+        if not summary:
+            return (
+                "No output summary configured.\n\n"
+                "Add an 'output:' section to your YAML config:\n\n"
+                "output:\n  reactor_id: temperature\n  reactor_id: pressure, bar"
+            )
+
+        return format_summary_text(summary)
 
     # Update composition plot and thermo report when a reactor node is selected
     @app.callback(
