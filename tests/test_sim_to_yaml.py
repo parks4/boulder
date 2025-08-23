@@ -8,7 +8,6 @@ import cantera as ct  # type: ignore
 
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import (
-    load_config_file,
     load_yaml_string_with_comments,
     normalize_config,
     validate_config,
@@ -361,7 +360,15 @@ def test_sim2stone_yaml_format_compliance():
     try:
         # Test that the YAML passes check-yaml hook
         result = subprocess.run(
-            [sys.executable, "-m", "pre_commit", "run", "check-yaml", "--files", temp_name],
+            [
+                sys.executable,
+                "-m",
+                "pre_commit",
+                "run",
+                "check-yaml",
+                "--files",
+                temp_name,
+            ],
             capture_output=True,
             text=True,
         )
@@ -375,6 +382,7 @@ def test_sim2stone_yaml_format_compliance():
 
         # Test that the YAML can be loaded by PyYAML (basic syntax check)
         import yaml
+
         with open(temp_name, "r") as f:
             parsed = yaml.safe_load(f)
         assert parsed is not None
@@ -402,6 +410,7 @@ def test_mix1_example_yaml_validation():
     sys.path.insert(0, str(examples_dir))
     try:
         import mix1
+
         sim = mix1.sim
     except ImportError:
         pytest.skip("Could not import mix1 example")
