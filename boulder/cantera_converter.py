@@ -95,8 +95,8 @@ def get_plugins() -> BoulderPlugins:
     try:
         from .output_pane_plugins import get_output_pane_registry
 
-        registry = get_output_pane_registry()
-        plugins.output_pane_plugins = registry.plugins.copy()
+        output_registry = get_output_pane_registry()
+        plugins.output_pane_plugins = output_registry.plugins.copy()
     except ImportError as e:
         logger.debug(f"Output pane plugins not available: {e}")
 
@@ -104,8 +104,8 @@ def get_plugins() -> BoulderPlugins:
     try:
         from .summary_builder import get_summary_builder_registry
 
-        registry = get_summary_builder_registry()
-        plugins.summary_builders = registry.builders.copy()
+        summary_registry = get_summary_builder_registry()
+        plugins.summary_builders = summary_registry.builders.copy()
     except ImportError as e:
         logger.debug(f"Summary builder plugins not available: {e}")
 
@@ -492,11 +492,6 @@ class DualCanteraConverter:
         reactors_series: Dict[str, Dict[str, Any]] = {}
         sol_arrays: Dict[str, ct.SolutionArray] = {}
         last_error_message: str = ""
-        # DEBUG: Print mechanism info before creating solution arrays
-        print(f"DEBUG: Creating solution arrays with mechanism: {self.gas.source}")
-        print(f"DEBUG: Number of species: {len(self.gas.species_names)}")
-        print(f"DEBUG: First 5 species: {self.gas.species_names[:5]}")
-
         for reactor in reactor_list:
             reactor_id = getattr(reactor, "name", "") or str(id(reactor))
             sol_arrays[reactor_id] = ct.SolutionArray(self.gas, shape=(0,))
@@ -580,19 +575,6 @@ class DualCanteraConverter:
                         X_vec = [
                             1.0 if s == "N2" else 0.0 for s in self.gas.species_names
                         ]
-
-                # DEBUG: Print species info before appending
-                print(f"DEBUG: About to append to {reactor_id}")
-                print(f"DEBUG: X_vec length: {len(X_vec)}")
-                print(
-                    f"DEBUG: self.gas.species_names length: {len(self.gas.species_names)}"
-                )
-                print(
-                    f"DEBUG: SolutionArray mechanism: {sol_arrays[reactor_id]._phase.source}"
-                )
-                print(
-                    f"DEBUG: SolutionArray species count: {len(sol_arrays[reactor_id]._phase.species_names)}"
-                )
 
                 sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
                 reactors_series[reactor_id]["T"].append(T)

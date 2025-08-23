@@ -36,7 +36,7 @@ class SimulationProgress:
 class SimulationWorker:
     """Background worker for running Cantera simulations with streaming updates."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.progress = SimulationProgress()
         self._lock = threading.Lock()
         self._stop_event = threading.Event()

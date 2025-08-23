@@ -14,8 +14,6 @@ from ..verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
 
-REPORT_FRACTION_TRESHOLD = 1e-7  # 0.1 ppm cutoff for thermo report
-
 
 def register_callbacks(app) -> None:  # type: ignore
     """Register simulation-related callbacks."""
@@ -120,7 +118,21 @@ def register_callbacks(app) -> None:  # type: ignore
             return (True, {"display": "none"}, "")
 
         # Determine the mechanism to use
-        if mechanism_select == "custom-name":
+        # First, try to extract mechanism from config (STONE standard)
+        # TODO refactor properly see https://github.com/parks4/boulder/issues/27
+        config_mechanism = None
+        if config and isinstance(config, dict):
+            phases = config.get("phases", {})
+            if isinstance(phases, dict):
+                gas = phases.get("gas", {})
+                if isinstance(gas, dict):
+                    config_mechanism = gas.get("mechanism")
+
+        if config_mechanism:
+            # Use mechanism from config (highest priority)
+            mechanism = config_mechanism
+            logger.info(f"Using mechanism from config: {mechanism}")
+        elif mechanism_select == "custom-name":
             mechanism = (
                 custom_mechanism
                 if custom_mechanism and custom_mechanism.strip()

@@ -13,7 +13,7 @@ import cantera as ct
 class LiveSimulation:
     """Singleton to store live Cantera simulation objects."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = RLock()
         self._network: Optional[ct.ReactorNet] = None
         self._reactors: Dict[str, ct.Reactor] = {}
