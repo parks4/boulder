@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import dash
 import plotly.graph_objects as go  # type: ignore
-from dash import Input, Output, State, dcc
+from dash import Input, NoUpdate, Output, State, dcc
 
 from ..simulation_worker import get_simulation_worker
 from ..verbose_utils import get_verbose_logger, is_verbose_mode
@@ -201,6 +201,9 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("temperature-plot", "figure"),
             Output("pressure-plot", "figure"),
             Output("species-plot", "figure"),
+            Output("temperature-plot-container", "style"),
+            Output("pressure-plot-container", "style"),
+            Output("species-plot-container", "style"),
             Output("last-sim-python-code", "data"),
             Output("simulation-results-card", "style"),
             Output("simulation-data", "data"),
@@ -230,6 +233,9 @@ def register_callbacks(app) -> None:  # type: ignore
         Any,
         Any,
         Any,
+        Dict[str, str],
+        Dict[str, str],
+        Dict[str, str],
         Any,
         Dict[str, str],
         Dict[str, Any],
@@ -302,6 +308,9 @@ def register_callbacks(app) -> None:  # type: ignore
                 go.Figure(),
                 go.Figure(),
                 go.Figure(),
+                {"display": "none"},  # Hide temperature plot
+                {"display": "none"},  # Hide pressure plot
+                {"display": "none"},  # Hide species plot
                 "",
                 results_card_style,
                 {},
@@ -330,6 +339,9 @@ def register_callbacks(app) -> None:  # type: ignore
                         go.Figure(),
                         go.Figure(),
                         go.Figure(),
+                        {"display": "none"},  # Hide temperature plot
+                        {"display": "none"},  # Hide pressure plot
+                        {"display": "none"},  # Hide species plot
                         dash.no_update,
                         {"display": "none"},
                         {},
@@ -457,10 +469,17 @@ def register_callbacks(app) -> None:  # type: ignore
         interval_disabled = progress.is_complete or not progress.is_running
         simulation_running = progress.is_running
 
+        # Determine plot visibility based on data availability
+        has_data = bool(progress.reactors_series and progress.times)
+        plot_style = {"display": "block"} if has_data else {"display": "none"}
+
         return (
             temp_fig.to_dict(),
             press_fig.to_dict(),
             species_fig.to_dict(),
+            plot_style,  # Temperature plot container style
+            plot_style,  # Pressure plot container style
+            plot_style,  # Species plot container style
             progress.code_str,
             {"display": "block"},
             simulation_data,
@@ -675,6 +694,9 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("temperature-plot", "figure", allow_duplicate=True),
             Output("pressure-plot", "figure", allow_duplicate=True),
             Output("species-plot", "figure", allow_duplicate=True),
+            Output("temperature-plot-container", "style", allow_duplicate=True),
+            Output("pressure-plot-container", "style", allow_duplicate=True),
+            Output("species-plot-container", "style", allow_duplicate=True),
         ],
         [
             Input("last-selected-element", "data"),
@@ -685,7 +707,17 @@ def register_callbacks(app) -> None:  # type: ignore
     )
     def update_plots_for_selected_node(
         last_selected: Dict[str, Any], simulation_data: Dict[str, Any], theme: str
-    ) -> Tuple[Any, Any, Any]:
+    ) -> Union[
+        Tuple[Any, Any, Any, Dict[str, str], Dict[str, str], Dict[str, str]],
+        Tuple[
+            NoUpdate,
+            NoUpdate,
+            NoUpdate,
+            NoUpdate,
+            NoUpdate,
+            NoUpdate,
+        ],
+    ]:
         import plotly.graph_objects as go
 
         from ..utils import apply_theme_to_figure
@@ -693,7 +725,8 @@ def register_callbacks(app) -> None:  # type: ignore
         if not last_selected or last_selected.get("type") != "node":
             # Clear plots when nothing appropriate is selected
             empty = go.Figure().to_dict()
-            return empty, empty, empty
+            hidden_style = {"display": "none"}
+            return empty, empty, empty, hidden_style, hidden_style, hidden_style
 
         node_id = (last_selected.get("data") or {}).get("id")
         node_type = (last_selected.get("data") or {}).get("type") or ""
@@ -705,16 +738,31 @@ def register_callbacks(app) -> None:  # type: ignore
             "wall",
         }:
             empty = go.Figure().to_dict()
-            return empty, empty, empty
+            hidden_style = {"display": "none"}
+            return empty, empty, empty, hidden_style, hidden_style, hidden_style
         if not node_id or not simulation_data or "results" not in simulation_data:
             # Ignore selections that do not correspond to simulated reactors
-            return dash.no_update, dash.no_update, dash.no_update
+            return (
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+            )
 
         results = simulation_data["results"]
         reactors = results.get("reactors") or {}
 
         if node_id not in reactors:
-            return dash.no_update, dash.no_update, dash.no_update
+            return (
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+            )
 
         times = results.get("time", [])
         node_series = reactors[node_id]
@@ -760,7 +808,16 @@ def register_callbacks(app) -> None:  # type: ignore
         )
         species_fig = apply_theme_to_figure(species_fig, theme)
 
-        return temp_fig.to_dict(), press_fig.to_dict(), species_fig.to_dict()
+        # Show plots when we have valid data
+        visible_style = {"display": "block"}
+        return (
+            temp_fig.to_dict(),
+            press_fig.to_dict(),
+            species_fig.to_dict(),
+            visible_style,
+            visible_style,
+            visible_style,
+        )
 
     # Populate Summary text when Summary tab is active
     @app.callback(
