@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from typing import Optional
 
 
 def _run_sim2stone_conversion(py_path: str, verbose: bool = False) -> str:
@@ -188,7 +189,9 @@ def _handle_yaml_conflicts(
     return yaml_path
 
 
-def convert_py_to_yaml(py_input, output_path: str = None, verbose: bool = False) -> str:
+def convert_py_to_yaml(
+    py_input, output_path: Optional[str] = None, verbose: bool = False
+) -> str:
     """Convert Python file or content to YAML using sim2stone.
 
     This function handles the complete conversion process including:

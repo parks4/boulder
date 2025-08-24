@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import dash
 import plotly.graph_objects as go  # type: ignore
-from dash import Input, Output, State, dcc, no_update
+from dash import Input, Output, State, dcc
 
 from ..simulation_worker import get_simulation_worker
 from ..verbose_utils import get_verbose_logger, is_verbose_mode
@@ -725,14 +725,7 @@ def register_callbacks(app) -> None:  # type: ignore
         last_selected: Dict[str, Any], simulation_data: Dict[str, Any], theme: str
     ) -> Union[
         Tuple[Any, Any, Any, Dict[str, str], Dict[str, str], Dict[str, str]],
-        Tuple[
-            no_update,
-            no_update,
-            no_update,
-            no_update,
-            no_update,
-            no_update,
-        ],
+        Tuple[Any, Any, Any, Any, Any, Any],
     ]:
         import plotly.graph_objects as go
 

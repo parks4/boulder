@@ -152,7 +152,9 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
         from .output_pane_plugins import get_output_pane_registry
 
         registry = get_output_pane_registry()
-        print(f"🏗️  [LAYOUT] Found {len(registry.plugins)} plugins in registry")
+        print(
+            f"🏗️  [LAYOUT] Found {len(registry.plugins)} output-pane plugins in registry"
+        )
 
         # Create tabs for ALL plugins, not just available ones
         # Ensure Summary tab (if present) is listed first among plugins
@@ -200,7 +202,7 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
             tabs.append(plugin_tab)
             print(f"✅ [LAYOUT] Added tab for plugin: {plugin.plugin_id}")
 
-        print(f"🏗️  [LAYOUT] Created {len(registry.plugins)} plugin tabs")
+        print(f"🏗️  [LAYOUT] Created {len(registry.plugins)} output-pane plugin tabs")
 
     except ImportError as e:
         print(f"⚠️  [LAYOUT] Output pane plugins not available: {e}")
