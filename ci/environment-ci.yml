@@ -17,13 +17,12 @@ dependencies:
 # DO NOT EDIT ABOVE THIS LINE, ADD DEPENDENCIES BELOW
 
 # E2E Testing dependencies
-- selenium
 - pip:
   - dash[testing]>=2.0.0
   - pytest-html>=3.0.0
   - pytest-xvfb
-  - pytest-mock>=3.0.0
   - types-PyYAML>=6.0.0
   - pint
   - pydantic>=2.0.0
-  - webdriver-manager>=4.0.0
+  - playwright>=1.40.0
+  - pytest-playwright>=0.4.0

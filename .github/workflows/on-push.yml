@@ -147,9 +147,12 @@ jobs:
     - name: Install package
       run: |
         python -m pip install --no-deps -e .
+    - name: Install Playwright browsers
+      run: |
+        python -m playwright install --with-deps
     - name: Run E2E tests
       run: |
-        xvfb-run -a python -m pytest tests/test_e2e.py -v --headless --html=e2e-report.html --self-contained-html
+        xvfb-run -a python -m pytest -m e2e -v --headless --html=e2e-report.html --self-contained-html
     - name: Upload E2E test results
       uses: actions/upload-artifact@v4
       if: always()

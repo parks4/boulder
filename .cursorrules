@@ -14,7 +14,7 @@ TESTING
 - After successful tests, use `make qa` for code quality.
 - Do not implement mock tests, only real tests.
 - Explicit describe in the test docstrings what is asserted in the test.
-
+- For E2E tests also, explicitely state in the docstrings what is assessed.
 
 VERSIONING
 - Never perform git commits
