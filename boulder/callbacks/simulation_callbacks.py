@@ -21,6 +21,8 @@ def register_callbacks(app) -> None:  # type: ignore
 
     # Note: Debug logging moved to start_streaming_simulation callback
 
+    logger.info("🔧 [CALLBACKS] Starting simulation callback registration...")
+
     # Callback to handle file upload for custom mechanism
     @app.callback(
         [
@@ -828,6 +830,8 @@ def register_callbacks(app) -> None:  # type: ignore
             visible_style,
         )
 
+    logger.info("✅ [CALLBACKS] Node selection callback registered successfully")
+
     # Populate Summary text when Summary tab is active
     @app.callback(
         Output("summary-text", "children"),
@@ -910,3 +914,5 @@ def register_callbacks(app) -> None:  # type: ignore
         )
 
         return (combined,)
+
+    logger.info("🎯 [CALLBACKS] All simulation callbacks registered successfully")

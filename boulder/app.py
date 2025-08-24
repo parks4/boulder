@@ -84,6 +84,15 @@ app.layout = get_layout(
 callbacks.register_callbacks(app)
 
 
+def create_app():
+    """Create and return the Dash app instance for testing purposes.
+
+    This function is used by E2E tests to get a fresh app instance.
+    For production use, import the 'app' instance directly.
+    """
+    return app
+
+
 def run_server(
     debug: bool = False, host: str = "0.0.0.0", port: int = 8050, verbose: bool = False
 ) -> None:

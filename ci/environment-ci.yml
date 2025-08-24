@@ -26,3 +26,4 @@ dependencies:
   - types-PyYAML>=6.0.0
   - pint
   - pydantic>=2.0.0
+  - webdriver-manager>=4.0.0
