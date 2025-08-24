@@ -440,6 +440,18 @@ pre {
   letter-spacing: 0.3px;
 }
 
+[data-theme="light"] #simulation-overlay .overlay-timer {
+  position: absolute;
+  top: 60px;
+  right: 20px;
+  padding: 4px 8px;
+  background: rgba(25,135,84,0.15);
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
 /* Simulation overlay visuals - Dark mode */
 [data-theme="dark"] #simulation-overlay {
   backdrop-filter: blur(2px) brightness(0.95);
@@ -466,6 +478,19 @@ pre {
   border-radius: 6px;
   font-weight: 600;
   letter-spacing: 0.3px;
+  box-shadow: 0 2px 6px var(--shadow);
+}
+
+[data-theme="dark"] #simulation-overlay .overlay-timer {
+  position: absolute;
+  top: 60px;
+  right: 20px;
+  padding: 4px 8px;
+  background: rgba(25,135,84,0.20);
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-weight: 500;
   box-shadow: 0 2px 6px var(--shadow);
 }
 

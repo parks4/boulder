@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import dash
 import plotly.graph_objects as go  # type: ignore
-from dash import Input, NoUpdate, Output, State, dcc
+from dash import Input, Output, State, dcc
 
 from ..simulation_worker import get_simulation_worker
 from ..verbose_utils import get_verbose_logger, is_verbose_mode
@@ -213,6 +213,7 @@ def register_callbacks(app) -> None:  # type: ignore
             Output("error-tab-pane", "tab_style"),
             Output("simulation-progress-interval", "disabled"),
             Output("simulation-running", "data"),
+            Output("simulation-timer", "children"),
         ],
         [
             Input("simulation-progress-interval", "n_intervals"),
@@ -245,6 +246,7 @@ def register_callbacks(app) -> None:  # type: ignore
         Dict[str, str],
         bool,
         bool,
+        str,
     ]:
         """Update plots with streaming simulation data."""
         from ..utils import apply_theme_to_figure
@@ -262,6 +264,17 @@ def register_callbacks(app) -> None:  # type: ignore
         logger.info(
             f"  Data: {len(progress.times)} time points, {len(progress.reactors_series)} reactors"
         )
+
+        # Generate timer text
+        timer_text = ""
+        if progress.is_running:
+            elapsed = progress.get_elapsed_time()
+            if elapsed is not None:
+                timer_text = f"Time elapsed: {elapsed:.1f}s"
+        elif progress.is_complete:
+            calc_time = progress.get_calculation_time()
+            if calc_time is not None:
+                timer_text = f"Completed in {calc_time:.1f}s"
 
         # If simulation not running and not complete, show error if present and disable interval
         if not progress.is_running and not progress.is_complete:
@@ -320,6 +333,7 @@ def register_callbacks(app) -> None:  # type: ignore
                 error_tab_style,
                 True,  # Disable interval
                 False,  # Not running
+                timer_text,  # Timer text
             )
 
         # Build plots from current progress
@@ -351,6 +365,7 @@ def register_callbacks(app) -> None:  # type: ignore
                         {"display": "none"},
                         True,
                         False,
+                        timer_text,  # Timer text
                     )
                 selected_node_id = sel_data.get("id")
 
@@ -489,6 +504,7 @@ def register_callbacks(app) -> None:  # type: ignore
             error_tab_style,
             interval_disabled,
             simulation_running,
+            timer_text,  # Timer text
         )
 
     print("✅ [SIMULATION CALLBACKS] Streaming update callback registered successfully")
@@ -709,14 +725,7 @@ def register_callbacks(app) -> None:  # type: ignore
         last_selected: Dict[str, Any], simulation_data: Dict[str, Any], theme: str
     ) -> Union[
         Tuple[Any, Any, Any, Dict[str, str], Dict[str, str], Dict[str, str]],
-        Tuple[
-            NoUpdate,
-            NoUpdate,
-            NoUpdate,
-            NoUpdate,
-            NoUpdate,
-            NoUpdate,
-        ],
+        Tuple[Any, Any, Any, Any, Any, Any],
     ]:
         import plotly.graph_objects as go
 
@@ -832,6 +841,7 @@ def register_callbacks(app) -> None:  # type: ignore
         import dash
 
         from ..output_summary import format_summary_text
+        from ..simulation_worker import get_simulation_worker
 
         if active_tab != "summary-tab":
             return dash.no_update
@@ -848,7 +858,12 @@ def register_callbacks(app) -> None:  # type: ignore
                 "output:\n  reactor_id: temperature\n  reactor_id: pressure, bar"
             )
 
-        return format_summary_text(summary)
+        # Get calculation time from simulation worker
+        worker = get_simulation_worker()
+        progress = worker.get_progress()
+        calculation_time = progress.get_calculation_time()
+
+        return format_summary_text(summary, calculation_time)
 
     # Update composition plot and thermo report when a reactor node is selected
     @app.callback(

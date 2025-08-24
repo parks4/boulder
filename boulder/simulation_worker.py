@@ -1,6 +1,7 @@
 """Background simulation worker for streaming updates."""
 
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,23 @@ class SimulationProgress:
     is_running: bool = False
     is_complete: bool = False
     error_message: Optional[str] = None
+
+    # Timing information
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+
+    def get_elapsed_time(self) -> Optional[float]:
+        """Get elapsed time in seconds. Returns None if not started."""
+        if self.start_time is None:
+            return None
+        end_time = self.end_time if self.end_time is not None else time.time()
+        return end_time - self.start_time
+
+    def get_calculation_time(self) -> Optional[float]:
+        """Get total calculation time in seconds. Returns None if not completed."""
+        if self.start_time is None or self.end_time is None:
+            return None
+        return self.end_time - self.start_time
 
 
 class SimulationWorker:
@@ -103,6 +121,8 @@ class SimulationWorker:
                 is_running=self.progress.is_running,
                 is_complete=self.progress.is_complete,
                 error_message=self.progress.error_message,
+                start_time=self.progress.start_time,
+                end_time=self.progress.end_time,
             )
 
     def _run_simulation(
@@ -167,6 +187,8 @@ class SimulationWorker:
                 self.progress.is_running = True
                 self.progress.is_complete = False
                 self.progress.error_message = None
+                self.progress.start_time = time.time()
+                self.progress.end_time = None
 
             logger.info(
                 f"Starting streaming simulation: {simulation_time}s with {time_step}s steps"
@@ -194,6 +216,7 @@ class SimulationWorker:
                 )
                 self.progress.is_running = False
                 self.progress.is_complete = True
+                self.progress.end_time = time.time()
                 # Carry through final error message if present in results
                 if isinstance(results, dict) and results.get("error_message"):
                     self.progress.error_message = results.get("error_message")
@@ -204,6 +227,7 @@ class SimulationWorker:
                 self.progress.error_message = str(e)
                 self.progress.is_running = False
                 self.progress.is_complete = False
+                self.progress.end_time = time.time()
 
     def _generate_reactor_reports(
         self, converter: Any, results: Dict[str, Any]

@@ -190,12 +190,19 @@ def _evaluate_formula(expression: str, results: Dict[str, Any]) -> float:
     return float(eval(compile(tree, "<formula>", "eval"), namespace))
 
 
-def format_summary_text(evaluated_items: List[Dict[str, Any]]) -> str:
+def format_summary_text(
+    evaluated_items: List[Dict[str, Any]], calculation_time: Optional[float] = None
+) -> str:
     """Format evaluated items as readable text."""
     if not evaluated_items:
         return "No output summary configured."
 
     lines = ["SIMULATION SUMMARY", "=" * 50, ""]
+
+    # Add calculation time if available
+    if calculation_time is not None:
+        lines.append(f"Calculation time: {calculation_time:.2f} seconds")
+        lines.append("")
 
     for item in evaluated_items:
         reactor = item["reactor"]

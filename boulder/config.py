@@ -5,7 +5,7 @@ where component types are keys containing their properties.
 """
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import yaml
 from ruamel.yaml import YAML
@@ -29,7 +29,11 @@ def get_yaml_with_comments():
     yaml_obj = YAML()
     yaml_obj.preserve_quotes = True
     yaml_obj.width = 4096  # Prevent line wrapping
-    yaml_obj.indent(mapping=2, sequence=4, offset=2)
+    # Configure indentation to match pretty-format-yaml expectations
+    # mapping=2: 2 spaces for dictionary keys
+    # sequence=2: 2 spaces for list items after the dash
+    # offset=0: no extra indentation for the dash itself
+    yaml_obj.indent(mapping=2, sequence=2, offset=0)
     return yaml_obj
 
 
@@ -488,3 +492,84 @@ def _update_yaml_item_preserving_comments(original_item, new_item):
                 updated_item[key] = new_value
 
     return updated_item
+
+
+def load_config_file_with_py_support(
+    config_path: str, verbose: bool = False
+) -> Tuple[Dict[str, Any], str]:
+    """Load configuration file with automatic Python to YAML conversion support.
+
+    Logic:
+    1. If .py file: convert to .yaml first, then load the .yaml
+    2. If .yaml/.yml file: load directly
+    3. Always return loaded config from a YAML file
+
+    Args:
+        config_path: Path to configuration file (.yaml, .yml, or .py)
+        verbose: Enable verbose output
+
+    Returns
+    -------
+        Tuple of (config_dict, yaml_file_path)
+
+    Raises
+    ------
+        ValueError: If file type is not supported
+        FileNotFoundError: If file doesn't exist
+        RuntimeError: If conversion fails
+    """
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    _, ext = os.path.splitext(config_path.lower())
+
+    # Step 0: Convert Python to YAML if needed (preliminary conversion step)
+    yaml_path = config_path
+
+    if ext == ".py":
+        from .parser import convert_py_to_yaml
+
+        if verbose:
+            print(f"[Boulder] Detected Python file: {config_path}")
+            print("[Boulder] Converting to YAML using sim2stone...")
+
+        yaml_path = convert_py_to_yaml(config_path, verbose=verbose)
+
+    elif ext not in [".yaml", ".yml"]:
+        raise ValueError(
+            f"Unsupported file format. Supported formats: .py, .yaml, .yml. Got: {ext}"
+        )
+
+    # Step 1 & 2: Common YAML processing pipeline (for both original YAML and converted Python)
+    if verbose:
+        print(f"[Boulder] Loading YAML file: {yaml_path}")
+
+    config = load_config_file(yaml_path)
+    return config, yaml_path
+
+
+def load_config_file_with_py_support_and_comments(
+    config_path: str, verbose: bool = False
+) -> Tuple[Dict[str, Any], str, str]:
+    """Load configuration file with Python support, preserving comments.
+
+    Logic:
+    1. If .py file: convert to .yaml first
+    2. Always load from the resulting .yaml file with comments preserved
+
+    Args:
+        config_path: Path to configuration file (.yaml, .yml, or .py)
+        verbose: Enable verbose output
+
+    Returns
+    -------
+        Tuple of (config_dict, original_yaml_string, yaml_file_path)
+    """
+    # Step 1: Handle conversion if needed, get the YAML path
+    config, yaml_path = load_config_file_with_py_support(config_path, verbose)
+
+    # Step 2: Always read the YAML file with comments preserved
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        original_yaml = f.read()
+
+    return config, original_yaml, yaml_path
