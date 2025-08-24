@@ -167,7 +167,9 @@ def register_callbacks(app) -> None:  # type: ignore
 
                         # Convert Python content to YAML
                         yaml_path = convert_py_to_yaml(
-                            decoded_string, output_path=temp_yaml_path, verbose=is_verbose_mode()
+                            decoded_string,
+                            output_path=temp_yaml_path,
+                            verbose=is_verbose_mode(),
                         )
 
                         # Read the converted YAML content
@@ -183,7 +185,8 @@ def register_callbacks(app) -> None:  # type: ignore
                             )
 
                     try:
-                        # Step 1 & 2: Common YAML processing pipeline (for both original YAML and converted Python)
+                        # Step 1 & 2: Common YAML processing pipeline 
+                        # (for both original YAML and converted Python)
                         # Use comment-preserving YAML loader with fallback
                         try:
                             decoded = load_yaml_string_with_comments(yaml_content)
@@ -215,8 +218,8 @@ def register_callbacks(app) -> None:  # type: ignore
                                 os.unlink(cleanup_file)
                 else:
                     print(
-                        "Only YAML format with 🪨 STONE standard (.yaml/.yml) and Python (.py) files are supported. Got:"
-                        f" {upload_filename}"
+                        "Only YAML format with 🪨 STONE standard (.yaml/.yml) and "
+                        f"Python (.py) files are supported. Got: {upload_filename}"
                     )
                     return dash.no_update, "", "", dash.no_update
             except Exception as e:

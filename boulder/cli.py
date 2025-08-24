@@ -240,7 +240,7 @@ def run_headless_mode(
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
-    # Handle .py files with conversion-only mode (no GUI launch)
+    # Handle .py files: convert first, then continue to launch GUI
     if args.config and args.config.lower().endswith(".py") and not args.headless:
         from .config import (
             load_config_file_with_py_support,
@@ -262,7 +262,11 @@ def main(argv: list[str] | None = None) -> None:
 
         if args.verbose:
             print(f"Validated configuration successfully loaded from: {yaml_path}")
-        return
+
+        # Update args.config to point to the generated YAML file for GUI launch
+        args.config = yaml_path
+        print("🚀 Launching Boulder GUI with converted configuration...")
+        # Continue to GUI launch (don't return here)
 
     # Validate argument combinations for headless mode
     if args.download and not args.headless:
