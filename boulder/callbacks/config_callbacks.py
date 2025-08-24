@@ -141,76 +141,78 @@ def register_callbacks(app) -> None:  # type: ignore
                 if upload_filename and upload_filename.lower().endswith(
                     (".yaml", ".yml", ".py")
                 ):
-                    # Handle both Python and YAML files with unified logic
                     import os
                     import tempfile
 
                     from ..config import (
-                        load_config_file_with_py_support_and_comments,
                         load_yaml_string_with_comments,
                         normalize_config,
                         validate_config,
                     )
 
+                    # Step 0: Convert Python to YAML if needed (preliminary conversion step)
+                    yaml_content = decoded_string
+                    display_filename = upload_filename
+                    cleanup_files = []
+
                     if upload_filename.lower().endswith(".py"):
-                        # Step 1: Save Python file to temporary location
+                        from ..parser import convert_py_to_yaml
+
+                        # Create a temporary output path for the YAML
                         with tempfile.NamedTemporaryFile(
-                            mode="w", suffix=".py", delete=False, encoding="utf-8"
-                        ) as temp_file:
-                            temp_file.write(decoded_string)
-                            temp_py_path = temp_file.name
+                            suffix=".yaml", delete=False
+                        ) as temp_yaml:
+                            temp_yaml_path = temp_yaml.name
+                        cleanup_files.append(temp_yaml_path)
 
-                        try:
-                            # Step 2: Convert Python to YAML, then load the YAML
-                            config, original_yaml, actual_yaml_path = (
-                                load_config_file_with_py_support_and_comments(
-                                    temp_py_path, verbose=is_verbose_mode()
-                                )
-                            )
-                            normalized = normalize_config(config)
-                            validated = validate_config(normalized)
+                        # Convert Python content to YAML
+                        yaml_path = convert_py_to_yaml(
+                            decoded_string, output_path=temp_yaml_path, verbose=is_verbose_mode()
+                        )
 
-                            if is_verbose_mode():
-                                logger.info(
-                                    f"Successfully converted Python to YAML and loaded: {upload_filename}"
-                                )
+                        # Read the converted YAML content
+                        with open(yaml_path, "r", encoding="utf-8") as f:
+                            yaml_content = f.read()
 
-                            # Use the original filename for display, but note it was converted
-                            display_filename = f"{upload_filename} (converted to YAML)"
-                            return (
-                                validated,
-                                display_filename,
-                                original_yaml,
-                                dash.no_update,
+                        # Update display filename to show conversion
+                        display_filename = f"{upload_filename} (converted to YAML)"
+
+                        if is_verbose_mode():
+                            logger.info(
+                                f"Python file converted to YAML: {upload_filename}"
                             )
 
-                        finally:
-                            # Clean up temporary file
-                            if os.path.exists(temp_py_path):
-                                os.unlink(temp_py_path)
-                    else:
-                        # Step 1 & 2: For YAML files, load directly (no conversion needed)
+                    try:
+                        # Step 1 & 2: Common YAML processing pipeline (for both original YAML and converted Python)
                         # Use comment-preserving YAML loader with fallback
                         try:
-                            decoded = load_yaml_string_with_comments(decoded_string)
+                            decoded = load_yaml_string_with_comments(yaml_content)
                         except (yaml.YAMLError, AttributeError):
                             # Fallback to standard loader for compatibility
-                            decoded = yaml.safe_load(decoded_string)
+                            decoded = yaml.safe_load(yaml_content)
 
                         # Normalize from YAML with 🪨 STONE standard to internal format
                         normalized = normalize_config(decoded)
                         # Validate the configuration (this will also convert units)
-                        normalized = validate_config(normalized)
+                        validated = validate_config(normalized)
+
                         if is_verbose_mode():
                             logger.info(
-                                f"Successfully loaded YAML file: {upload_filename}"
+                                f"Successfully loaded configuration: {display_filename}"
                             )
+
                         return (
-                            normalized,
-                            upload_filename,
-                            decoded_string,
+                            validated,
+                            display_filename,
+                            yaml_content,
                             dash.no_update,
                         )
+
+                    finally:
+                        # Clean up any temporary files
+                        for cleanup_file in cleanup_files:
+                            if os.path.exists(cleanup_file):
+                                os.unlink(cleanup_file)
                 else:
                     print(
                         "Only YAML format with 🪨 STONE standard (.yaml/.yml) and Python (.py) files are supported. Got:"

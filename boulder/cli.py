@@ -240,6 +240,30 @@ def run_headless_mode(
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
+    # Handle .py files with conversion-only mode (no GUI launch)
+    if args.config and args.config.lower().endswith(".py") and not args.headless:
+        from .config import (
+            load_config_file_with_py_support,
+            normalize_config,
+            validate_config,
+        )
+
+        # Use the unified pipeline to convert and load
+        config, yaml_path = load_config_file_with_py_support(args.config, args.verbose)
+        normalized = normalize_config(config)
+        validated = validate_config(normalized)
+
+        num_nodes = len(validated.get("nodes", []))
+        num_conns = len(validated.get("connections", []))
+
+        print("✅ Conversion complete!")
+        print(f"📄 YAML file: {yaml_path}")
+        print(f"🔧 Configuration: {num_nodes} nodes, {num_conns} connections")
+
+        if args.verbose:
+            print(f"Validated configuration successfully loaded from: {yaml_path}")
+        return
+
     # Validate argument combinations for headless mode
     if args.download and not args.headless:
         print("Error: --download requires --headless")

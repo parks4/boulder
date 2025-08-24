@@ -494,84 +494,6 @@ def _update_yaml_item_preserving_comments(original_item, new_item):
     return updated_item
 
 
-def _convert_py_to_yaml(py_path: str, verbose: bool = False) -> str:
-    """Convert a Python file to YAML using sim2stone.
-
-    Args:
-        py_path: Path to the Python file
-        verbose: Enable verbose output
-
-    Returns
-    -------
-        Path to the generated YAML file
-
-    Raises
-    ------
-        RuntimeError: If conversion fails
-    """
-    from .sim2stone_cli import main as sim2stone_main
-
-    # Generate output path
-    base, _ = os.path.splitext(os.path.abspath(py_path))
-    yaml_path = base + ".yaml"
-
-    # Prepare arguments for sim2stone
-    args = [py_path, "-o", yaml_path]
-    if verbose:
-        args.append("--verbose")
-
-    # Run sim2stone conversion
-    exit_code = sim2stone_main(args)
-    if exit_code != 0:
-        raise RuntimeError(f"sim2stone conversion failed with exit code {exit_code}")
-
-    if not os.path.exists(yaml_path):
-        raise RuntimeError(f"Expected YAML file was not created: {yaml_path}")
-
-    return yaml_path
-
-
-def _generate_unique_yaml_path(original_yaml_path: str) -> str:
-    """Generate a unique YAML path when a conflict exists.
-
-    Args:
-        original_yaml_path: The original YAML path that would conflict
-
-    Returns
-    -------
-        A unique path with a suffix like _converted, _converted_2, etc.
-    """
-    base, ext = os.path.splitext(original_yaml_path)
-    counter = 1
-
-    # Try _converted first
-    new_path = f"{base}_converted{ext}"
-    while os.path.exists(new_path):
-        counter += 1
-        new_path = f"{base}_converted_{counter}{ext}"
-
-    return new_path
-
-
-def _yaml_files_are_different(yaml_path1: str, yaml_path2: str) -> bool:
-    """Compare two YAML files to see if they have different content.
-
-    Args:
-        yaml_path1: Path to first YAML file
-        yaml_path2: Path to second YAML file
-
-    Returns
-    -------
-        True if files are different, False if they are the same
-    """
-    with open(yaml_path1, "r", encoding="utf-8") as f1:
-        content1 = yaml.safe_load(f1)
-    with open(yaml_path2, "r", encoding="utf-8") as f2:
-        content2 = yaml.safe_load(f2)
-
-    return content1 != content2
-
-
 def load_config_file_with_py_support(
     config_path: str, verbose: bool = False
 ) -> Tuple[Dict[str, Any], str]:
@@ -601,54 +523,27 @@ def load_config_file_with_py_support(
 
     _, ext = os.path.splitext(config_path.lower())
 
+    # Step 0: Convert Python to YAML if needed (preliminary conversion step)
+    yaml_path = config_path
+
     if ext == ".py":
-        # Step 1: Convert Python to YAML
+        from .parser import convert_py_to_yaml
+
         if verbose:
             print(f"[Boulder] Detected Python file: {config_path}")
             print("[Boulder] Converting to YAML using sim2stone...")
 
-        yaml_path = _convert_py_to_yaml(config_path, verbose)
+        yaml_path = convert_py_to_yaml(config_path, verbose=verbose)
 
-        # Handle conflicts with existing YAML files
-        base, _ = os.path.splitext(os.path.abspath(config_path))
-        original_yaml_path = base + ".yaml"
-
-        if os.path.exists(original_yaml_path) and yaml_path == original_yaml_path:
-            # We would overwrite the existing file, check if they're different
-            temp_yaml = yaml_path + ".tmp"
-            os.rename(yaml_path, temp_yaml)
-
-            if _yaml_files_are_different(original_yaml_path, temp_yaml):
-                # Files are different, create unique name
-                unique_yaml_path = _generate_unique_yaml_path(original_yaml_path)
-                os.rename(temp_yaml, unique_yaml_path)
-                yaml_path = unique_yaml_path
-                if verbose:
-                    print("[Boulder] Existing YAML differs from converted version")
-                    print(f"[Boulder] Created new file: {yaml_path}")
-            else:
-                # Files are the same, just use the existing one
-                os.remove(temp_yaml)
-                yaml_path = original_yaml_path
-                if verbose:
-                    print(
-                        f"[Boulder] Converted YAML matches existing file: {yaml_path}"
-                    )
-
-        if verbose:
-            print(f"[Boulder] Conversion complete. Loading YAML: {yaml_path}")
-
-    elif ext in [".yaml", ".yml"]:
-        # Use the YAML file directly
-        yaml_path = config_path
-        if verbose:
-            print(f"[Boulder] Loading YAML file: {yaml_path}")
-    else:
+    elif ext not in [".yaml", ".yml"]:
         raise ValueError(
             f"Unsupported file format. Supported formats: .py, .yaml, .yml. Got: {ext}"
         )
 
-    # Step 2: Always load from YAML file
+    # Step 1 & 2: Common YAML processing pipeline (for both original YAML and converted Python)
+    if verbose:
+        print(f"[Boulder] Loading YAML file: {yaml_path}")
+
     config = load_config_file(yaml_path)
     return config, yaml_path
 
