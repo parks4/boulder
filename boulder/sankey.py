@@ -103,7 +103,7 @@ def generate_sankey_input_from_sim(
     sim,
     node_order=[],
     flow_type="hhv",
-    show_species=["H2"],
+    show_species=[],
     verbose=False,
     mechanism="gri30.yaml",
 ):
@@ -120,8 +120,8 @@ def generate_sankey_input_from_sim(
         Type of flow to be considered in the sankey diagram. Default is "hhv".
         # TODO : implement other types of flow (e.g. "enthalpy", "exergy", etc.)
     show_species : list of str
-        List of species to show in the sankey diagram. Default is ["H2", "C(s)"].
-        Set to [] not to show any species.
+        List of species to show in the sankey diagram.
+        Set to [] not to show any species. Default is [].
     mechanism : str
         Cantera mechanism file to use for heating value calculations. Default is "gri30.yaml".
 

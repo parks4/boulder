@@ -152,7 +152,9 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
         from .output_pane_plugins import get_output_pane_registry
 
         registry = get_output_pane_registry()
-        print(
+        from .verbose_utils import verbose_print
+
+        verbose_print(
             f"🏗️  [LAYOUT] Found {len(registry.plugins)} output-pane plugins in registry"
         )
 
@@ -169,7 +171,7 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
             plugin_list = registry.plugins
 
         for plugin in plugin_list:
-            print(f"🏗️  [LAYOUT] Creating tab for plugin: {plugin.plugin_id}")
+            verbose_print(f"🏗️  [LAYOUT] Creating tab for plugin: {plugin.plugin_id}")
 
             # For dbc.Tab, label must be a string, not a component
             tab_label = plugin.tab_label

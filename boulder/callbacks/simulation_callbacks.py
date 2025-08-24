@@ -410,6 +410,8 @@ def register_callbacks(app) -> None:  # type: ignore
             "time": progress.times,
             "reactors": progress.reactors_series,
             "summary": progress.summary,
+            "sankey_links": progress.sankey_links,
+            "sankey_nodes": progress.sankey_nodes,
         }
 
         simulation_data = {
@@ -621,6 +623,21 @@ def register_callbacks(app) -> None:  # type: ignore
         results = simulation_data["results"]
         links = results.get("sankey_links")
         nodes = results.get("sankey_nodes")
+
+        # Debug logging
+        logger.info(
+            f"[FRONTEND] Sankey data check: links={type(links)}, nodes={type(nodes)}"
+        )
+        if links:
+            logger.info(
+                f"[FRONTEND] Links has {len(links.get('source', []))} connections"
+            )
+        else:
+            logger.info(f"[FRONTEND] Links is None or empty: {links}")
+        if nodes:
+            logger.info(f"[FRONTEND] Nodes has {len(nodes)} entries")
+        else:
+            logger.info(f"[FRONTEND] Nodes is None or empty: {nodes}")
 
         # Check if Sankey data is available
         if not links or not nodes:

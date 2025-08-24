@@ -35,6 +35,7 @@ class BoulderPlugins:
     summary_builders: Dict[str, Any] = field(
         default_factory=dict
     )  # Summary builder plugins
+    sankey_generator: Optional[Callable] = None  # Custom Sankey generation function
 
 
 # Global cache to ensure plugins are discovered only once
@@ -798,16 +799,41 @@ class DualCanteraConverter:
 
         # Generate Sankey data
         try:
-            links, nodes = generate_sankey_input_from_sim(
-                self.last_network,
-                show_species=["H2", "CH4"],
-                verbose=False,
-                mechanism=self.mechanism,
+            plugins = get_plugins()
+            if plugins.sankey_generator:
+                # Use custom Sankey generator from plugin
+                logger.info("Using custom Sankey generator from plugin")
+                links, nodes = plugins.sankey_generator(
+                    self.last_network,
+                    show_species=["H2", "CH4"],
+                    verbose=False,
+                    mechanism=self.mechanism,
+                )
+            else:
+                # Use default Boulder Sankey generator
+                logger.info("Using default Boulder Sankey generator")
+                links, nodes = generate_sankey_input_from_sim(
+                    self.last_network,
+                    show_species=["H2", "CH4"],
+                    verbose=False,
+                    mechanism=self.mechanism,
+                )
+
+            logger.info(
+                f"Sankey generation result: links={type(links)}, nodes={type(nodes)}"
             )
+            if links:
+                logger.info(f"Links has {len(links.get('source', []))} connections")
+            if nodes:
+                logger.info(f"Nodes has {len(nodes)} entries")
+
             results["sankey_links"] = links
             results["sankey_nodes"] = nodes
         except Exception as e:
             logger.error(f"Error generating Sankey diagram: {e}")
+            import traceback
+
+            logger.error(f"Traceback: {traceback.format_exc()}")
             results["sankey_links"] = None
             results["sankey_nodes"] = None
 
