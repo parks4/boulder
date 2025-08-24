@@ -37,9 +37,12 @@ dev = [
 [project.scripts]
 boulder = "boulder.cli:main"
 sim2stone = "boulder.sim2stone_cli:main"
+stone2sim = "boulder.stone2sim_cli:main"
 
 [tool.coverage.run]
 branch = true
+concurrency = ["multiprocessing"]
+parallel = true
 
 [tool.mypy]
 strict = true

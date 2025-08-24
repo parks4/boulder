@@ -9,13 +9,217 @@ equivalent topology (same nodes and connections) when reconstructed by
 
 from __future__ import annotations
 
+import ast
 import os
+import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cantera as ct  # type: ignore
 
 from .config import CANTERA_MECHANISM, yaml_to_string_with_comments
 from .ctutils import collect_all_reactors_and_reservoirs
+
+
+def _parse_python_comments(source_file: str) -> Dict[str, Any]:
+    """Parse Python source file to extract comments and metadata.
+
+    Returns a dictionary with file-level metadata and variable-specific comments.
+    """
+    if not os.path.isfile(source_file):
+        return {}
+
+    try:
+        with open(source_file, "r", encoding="utf-8") as f:
+            source_code = f.read()
+    except Exception:
+        return {}
+
+    metadata: Dict[str, Any] = {
+        "file_description": "",
+        "variable_comments": {},
+        "source_file": os.path.basename(source_file),
+    }
+
+    # Extract docstring as file description
+    try:
+        tree = ast.parse(source_code)
+        if (
+            tree.body
+            and isinstance(tree.body[0], ast.Expr)
+            and isinstance(tree.body[0].value, ast.Constant)
+            and isinstance(tree.body[0].value.value, str)
+        ):
+            metadata["file_description"] = tree.body[0].value.value.strip()
+    except Exception:
+        pass
+
+    # Parse line-by-line for variable comments
+    lines = source_code.split("\n")
+    for i, line in enumerate(lines):
+        # Look for variable assignments with comments
+        if "=" in line and "#" in line:
+            # Extract variable name and comment
+            parts = line.split("#", 1)
+            if len(parts) == 2:
+                var_part = parts[0].strip()
+                comment = parts[1].strip()
+
+                # Extract variable name (simple heuristic)
+                var_match = re.match(r"(\w+)\s*=", var_part)
+                if var_match:
+                    var_name = var_match.group(1)
+                    metadata["variable_comments"][var_name] = comment
+
+        # Look for standalone comments above variable assignments
+        elif line.strip().startswith("#") and i + 1 < len(lines):
+            next_line = lines[i + 1].strip()
+            if "=" in next_line and "#" not in next_line:
+                comment = line.strip()[1:].strip()
+                var_match = re.match(r"(\w+)\s*=", next_line)
+                if var_match:
+                    var_name = var_match.group(1)
+                    if var_name not in metadata["variable_comments"]:
+                        metadata["variable_comments"][var_name] = comment
+
+    return metadata
+
+
+def _smart_extract_object_comments(
+    source_file: str, reactor_net: ct.ReactorNet
+) -> Dict[str, str]:
+    """Smart extraction of comments for reactor network objects.
+
+    Uses the reactor network to identify objects, then parses the Python source
+    to find comments above their definitions.
+
+    Args:
+        source_file: Path to the Python source file
+        reactor_net: The Cantera ReactorNet object
+
+    Returns
+    -------
+        Dictionary mapping object names to their descriptions
+    """
+    if not os.path.isfile(source_file):
+        return {}
+
+    try:
+        with open(source_file, "r", encoding="utf-8") as f:
+            source_code = f.read()
+    except Exception:
+        return {}
+
+    # Collect all objects from the reactor network
+    all_reactors = list(collect_all_reactors_and_reservoirs(reactor_net))
+    flow_devices = _unique_flow_devices(set(all_reactors))
+    walls = _unique_walls(set(all_reactors))
+
+    # Create mapping of object names to look for
+    object_names = set()
+
+    # Add reactor names
+    for reactor in all_reactors:
+        if hasattr(reactor, "name") and reactor.name:
+            object_names.add(reactor.name)
+
+    # Add flow device names
+    for device in flow_devices:
+        if hasattr(device, "name") and device.name:
+            object_names.add(device.name)
+
+    # Add wall names
+    for wall in walls:
+        if hasattr(wall, "name") and wall.name:
+            object_names.add(wall.name)
+
+    # Parse the source code to find variable assignments and their comments
+    lines = source_code.split("\n")
+    object_comments: Dict[str, str] = {}
+
+    # First pass: collect all comment blocks and their positions
+    comment_blocks: List[Dict[str, Any]] = []
+    i = 0
+    while i < len(lines):
+        line_stripped = lines[i].strip()
+
+        # Look for comment blocks
+        if line_stripped.startswith("#"):
+            comments = []
+
+            # Collect all consecutive comment lines
+            while i < len(lines) and lines[i].strip().startswith("#"):
+                comment_text = lines[i].strip()[1:].strip()
+                # Skip empty comments and %% section markers, but keep regular comments
+                if comment_text and not (
+                    comment_text.startswith("%%") and len(comment_text.strip()) <= 2
+                ):
+                    # Remove %% prefix if present but keep the content
+                    if comment_text.startswith("%%"):
+                        comment_text = comment_text[2:].strip()
+                    if comment_text:  # Only add non-empty comments
+                        comments.append(comment_text)
+                i += 1
+
+            # Skip empty lines after comments
+            while i < len(lines) and not lines[i].strip():
+                i += 1
+
+            if comments:
+                comment_blocks.append(
+                    {"comments": comments, "end_line": i - 1, "next_code_line": i}
+                )
+        else:
+            i += 1
+
+    # Second pass: find Cantera object assignments and associate with comment blocks
+    for i, line in enumerate(lines):
+        line_stripped = line.strip()
+
+        # Skip empty lines and comments
+        if not line_stripped or line_stripped.startswith("#"):
+            continue
+
+        # Look for assignments that create Cantera objects
+        if (
+            "=" in line
+            and ("ct." in line or "cantera." in line)
+            and any(
+                cantera_type in line
+                for cantera_type in [
+                    "Reservoir",
+                    "IdealGasReactor",
+                    "MassFlowController",
+                    "Valve",
+                    "Wall",
+                    "Solution",
+                ]
+            )
+        ):
+            # Extract variable name
+            var_match = re.match(r"(\w+)\s*=", line_stripped)
+            if var_match:
+                var_name = var_match.group(1)
+
+                # Find the most recent comment block before this line
+                relevant_comment_block = None
+                for block in comment_blocks:
+                    if block["next_code_line"] <= i:
+                        # Check if this line is within reasonable distance of the comment block
+                        if i - block["next_code_line"] <= 5:  # Allow up to 5 lines gap
+                            relevant_comment_block = block
+
+                if relevant_comment_block:
+                    description = "\n".join(relevant_comment_block["comments"])
+                    object_comments[var_name] = description
+
+                    # Also try to match by object name if it has one
+                    # Look for name= parameter in the line
+                    name_match = re.search(r'name\s*=\s*["\']([^"\']+)["\']', line)
+                    if name_match:
+                        object_name = name_match.group(1)
+                        object_comments[object_name] = description
+
+    return object_comments
 
 
 def _mechanism_from_thermo(thermo: ct.ThermoPhase) -> Optional[str]:
@@ -101,7 +305,10 @@ def _unique_walls(all_reactors: Set[ct.Reactor]) -> Set[ct.Wall]:
 
 
 def sim_to_internal_config(
-    sim: ct.ReactorNet, default_mechanism: Optional[str] = None
+    sim: ct.ReactorNet,
+    default_mechanism: Optional[str] = None,
+    source_file: Optional[str] = None,
+    include_comments: bool = True,
 ) -> Dict[str, Any]:
     """Convert a Cantera ReactorNet to Boulder internal configuration format.
 
@@ -109,6 +316,14 @@ def sim_to_internal_config(
     ``CanteraConverter.build_network``.
     """
     mechanism = default_mechanism or CANTERA_MECHANISM
+
+    # Parse comments and metadata from source file if provided
+    metadata = {}
+    object_comments = {}
+    if source_file and include_comments:
+        metadata = _parse_python_comments(source_file)
+        # Use smart extraction to get comments for reactor network objects
+        object_comments = _smart_extract_object_comments(source_file, sim)
 
     # Collect unique reactors/reservoirs from the entire network
     all_reactors = list(collect_all_reactors_and_reservoirs(sim))
@@ -149,7 +364,23 @@ def sim_to_internal_config(
 
         # Ensure each node has a non-empty unique identifier
         rid = r.name or f"reactor_{id(r)}"
-        nodes.append({"id": rid, "type": node_type, "properties": props})
+
+        # Add description from smart comment extraction
+        node_dict = {"id": rid, "type": node_type, "properties": props}
+
+        # First try to find description by reactor name
+        if rid in object_comments:
+            node_dict["description"] = object_comments[rid]
+        else:
+            # Fallback to old method for backward compatibility
+            if metadata and "variable_comments" in metadata:
+                var_comments = metadata["variable_comments"]
+                for var_name, comment in var_comments.items():
+                    if var_name in rid or rid in var_name:
+                        node_dict["description"] = comment
+                        break
+
+        nodes.append(node_dict)
 
     # Flow devices (MassFlowController, Valve, etc.)
     devices = _unique_flow_devices(set(all_reactors))
@@ -203,15 +434,20 @@ def sim_to_internal_config(
             else f"{conn_type}_{src_id}_to_{tgt_id}"
         )
 
-        connections.append(
-            {
-                "id": cid,
-                "type": conn_type,
-                "properties": conn_props,
-                "source": src_id,
-                "target": tgt_id,
-            }
-        )
+        # Create connection dictionary
+        conn_dict = {
+            "id": cid,
+            "type": conn_type,
+            "properties": conn_props,
+            "source": src_id,
+            "target": tgt_id,
+        }
+
+        # Add description from smart comment extraction if available
+        if cid in object_comments:
+            conn_dict["description"] = object_comments[cid]
+
+        connections.append(conn_dict)
 
     # Walls (energy links)
     walls = _unique_walls(set(all_reactors))
@@ -241,20 +477,25 @@ def sim_to_internal_config(
         else:
             electric_power_kW = q_watts / 1e3
 
-        connections.append(
-            {
-                "id": cid,
-                "type": "Wall",
-                "properties": {
-                    "electric_power_kW": electric_power_kW,
-                    # Efficiency unknown; preserve neutral defaults used by builder
-                    "torch_eff": 1.0,
-                    "gen_eff": 1.0,
-                },
-                "source": l_id,
-                "target": r_id,
-            }
-        )
+        # Create wall connection dictionary
+        wall_dict = {
+            "id": cid,
+            "type": "Wall",
+            "properties": {
+                "electric_power_kW": electric_power_kW,
+                # Efficiency unknown; preserve neutral defaults used by builder
+                "torch_eff": 1.0,
+                "gen_eff": 1.0,
+            },
+            "source": l_id,
+            "target": r_id,
+        }
+
+        # Add description from smart comment extraction if available
+        if cid in object_comments:
+            wall_dict["description"] = object_comments[cid]
+
+        connections.append(wall_dict)
 
     internal: Dict[str, Any] = {
         "nodes": nodes,
@@ -262,19 +503,38 @@ def sim_to_internal_config(
         "phases": {"gas": {"mechanism": mechanism}},
     }
 
+    # Add metadata if available
+    if metadata:
+        file_metadata = {
+            "title": f"Converted from {metadata.get('source_file', 'Python script')}",
+            "description": metadata.get("file_description", ""),
+            "source_file": metadata.get("source_file", ""),
+        }
+        # Only include non-empty metadata
+        file_metadata = {k: v for k, v in file_metadata.items() if v}
+        if file_metadata:
+            internal["metadata"] = file_metadata
+
     return internal
 
 
 def sim_to_stone_yaml(
     sim: ct.ReactorNet,
     default_mechanism: Optional[str] = None,
+    source_file: Optional[str] = None,
+    include_comments: bool = True,
 ) -> str:
     """Convert a Cantera ReactorNet to a STONE YAML string.
 
     Includes top-level `phases` (with `gas/mechanism`) and an explicit `settings` section.
     Adds a blank line before `nodes` and `connections` for readability.
     """
-    internal = sim_to_internal_config(sim, default_mechanism=default_mechanism)
+    internal = sim_to_internal_config(
+        sim,
+        default_mechanism=default_mechanism,
+        source_file=source_file,
+        include_comments=include_comments,
+    )
 
     # Determine mechanism from phases.gas.mechanism (STONE standard)
     phases = internal.get("phases", {})
@@ -285,6 +545,20 @@ def sim_to_stone_yaml(
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
     stone_cm = CommentedMap()
+
+    # metadata (if available)
+    if "metadata" in internal:
+        metadata_cm = CommentedMap()
+        for key, value in internal["metadata"].items():
+            if key == "description" and isinstance(value, str) and "\n" in value:
+                # Use literal block style for multi-line descriptions
+                from ruamel.yaml.scalarstring import LiteralScalarString
+
+                metadata_cm[key] = LiteralScalarString(value)
+            else:
+                metadata_cm[key] = value
+        stone_cm["metadata"] = metadata_cm
+
     # phases
     phases_cm = CommentedMap()
     gas_cm = CommentedMap()
@@ -310,6 +584,15 @@ def sim_to_stone_yaml(
         node_cm[node["type"]] = props
         if node_mech is not None:
             node_cm["mechanism"] = node_mech
+        # Add description if available
+        if "description" in node:
+            desc = node["description"]
+            if isinstance(desc, str) and "\n" in desc:
+                from ruamel.yaml.scalarstring import LiteralScalarString
+
+                node_cm["description"] = LiteralScalarString(desc)
+            else:
+                node_cm["description"] = desc
         nodes_seq.append(node_cm)
     stone_cm["nodes"] = nodes_seq
     # blank line before nodes
@@ -326,6 +609,15 @@ def sim_to_stone_yaml(
         conn_cm[conn["type"]] = conn.get("properties", {})
         conn_cm["source"] = conn["source"]
         conn_cm["target"] = conn["target"]
+        # Add description if available
+        if "description" in conn:
+            desc = conn["description"]
+            if isinstance(desc, str) and "\n" in desc:
+                from ruamel.yaml.scalarstring import LiteralScalarString
+
+                conn_cm["description"] = LiteralScalarString(desc)
+            else:
+                conn_cm["description"] = desc
         conns_seq.append(conn_cm)
     stone_cm["connections"] = conns_seq
     # blank line before connections
@@ -341,8 +633,15 @@ def write_sim_as_yaml(
     sim: ct.ReactorNet,
     file_path: str,
     default_mechanism: Optional[str] = None,
+    source_file: Optional[str] = None,
+    include_comments: bool = True,
 ) -> None:
     """Serialize a Cantera ReactorNet to a STONE YAML file."""
-    yaml_str = sim_to_stone_yaml(sim, default_mechanism=default_mechanism)
+    yaml_str = sim_to_stone_yaml(
+        sim,
+        default_mechanism=default_mechanism,
+        source_file=source_file,
+        include_comments=include_comments,
+    )
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(yaml_str)

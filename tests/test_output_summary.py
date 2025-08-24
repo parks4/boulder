@@ -26,7 +26,14 @@ def _dummy_results():
 
 
 def test_parse_mapping_format():
-    """Test parsing dict format: {reactor_id: spec}."""
+    """Test parsing dict format: {reactor_id: spec}.
+
+    Assertions:
+    1. Block with 2 reactors (PFR, CSTR) produces 3 items total (len(items) == 3)
+    2. First item: reactor="PFR", quantity="temperature"
+    3. Second item: reactor="CSTR", quantity="temperature", unit="K"
+    4. Third item: reactor="CSTR", quantity="pressure", unit="bar"
+    """
     block = {
         "PFR": "temperature",
         "CSTR": ["temperature, K", "pressure, bar"],
@@ -47,7 +54,13 @@ def test_parse_mapping_format():
 
 
 def test_parse_list_format():
-    """Test parsing list format: [{reactor_id: spec}, ...]."""
+    """Test parsing list format: [{reactor_id: spec}, ...].
+
+    Assertions:
+    1. Block with 2 list items produces 2 parsed items (len(items) == 2)
+    2. First item: reactor="PFR", quantity="temperature"
+    3. Second item: reactor="CSTR", quantity="pressure", unit="bar"
+    """
     block = [
         {"PFR": "temperature"},
         {"CSTR": "pressure, bar"},
@@ -63,7 +76,14 @@ def test_parse_list_format():
 
 
 def test_evaluate_temperature_and_pressure():
-    """Test evaluation of temperature and pressure with unit conversion."""
+    """Test evaluation of temperature and pressure with unit conversion.
+
+    Assertions:
+    1. PFR final temperature in K: 310.0 (evaluated[0]["value"] ≈ 310.0)
+    2. PFR final temperature in C: 36.85 (evaluated[1]["value"] ≈ 36.85, 310K - 273.15)
+    3. CSTR final pressure in Pa: 3.0e5 (evaluated[2]["value"] ≈ 3.0e5)
+    4. CSTR final pressure in bar: 3.0 (evaluated[3]["value"] ≈ 3.0, 3.0e5 Pa / 1e5)
+    """
     items = parse_output_block(
         {
             "PFR": ["temperature, K", "temperature, C"],
