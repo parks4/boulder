@@ -185,7 +185,7 @@ def register_callbacks(app) -> None:  # type: ignore
                             )
 
                     try:
-                        # Step 1 & 2: Common YAML processing pipeline 
+                        # Step 1 & 2: Common YAML processing pipeline
                         # (for both original YAML and converted Python)
                         # Use comment-preserving YAML loader with fallback
                         try:

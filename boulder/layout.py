@@ -253,7 +253,12 @@ def get_layout(
                 id="simulation-overlay",
                 children=[
                     html.Div(className="flowing-background"),
-                    html.Div("Simulating...", className="overlay-text"),
+                    html.Div(
+                        children=[
+                            html.Div("Simulating...", className="overlay-text"),
+                            html.Div(id="simulation-timer", className="overlay-timer"),
+                        ]
+                    ),
                 ],
                 style={
                     "display": "none",

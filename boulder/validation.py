@@ -260,7 +260,7 @@ class NormalizedConfigModel(BaseModel):
                                     "pressure units like 'atm', 'bar', 'Pa', 'psi'"
                                 ),
                                 "[mass]": "mass units like 'kg', 'g', 'lb'",
-                                "[length] ** 3": "volume units like 'm3', 'L', 'mL', 'ft3'",
+                                "[length] ** 3": "volume units like 'm**3', 'L', 'mL', 'ft**3'",
                                 "[mass] / [time]": "flow rate units like 'kg/s', 'g/min', 'lb/hr'",
                                 "[time]": "time units like 's', 'ms', 'min', 'hr'",
                                 "[mass] * [length] ** 2 / [time] ** 3": (
