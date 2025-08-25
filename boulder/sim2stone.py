@@ -636,7 +636,13 @@ def write_sim_as_yaml(
     source_file: Optional[str] = None,
     include_comments: bool = True,
 ) -> None:
-    """Serialize a Cantera ReactorNet to a STONE YAML file."""
+    """Serialize a Cantera ReactorNet to a STONE YAML file.
+
+    Examples
+    --------
+    .. minigallery:: boulder.sim2stone.write_sim_as_yaml
+       :add-heading: Examples using write_sim_as_yaml
+    """
     yaml_str = sim_to_stone_yaml(
         sim,
         default_mechanism=default_mechanism,

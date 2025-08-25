@@ -156,7 +156,13 @@ def get_plugins() -> BoulderPlugins:
 #    which generates code in parallel to solving the simulation
 #    """"
 class DualCanteraConverter:
-    """Unified Cantera converter with streaming simulation capabilities."""
+    """Unified Cantera converter with streaming simulation capabilities.
+
+    Examples
+    --------
+    .. minigallery:: boulder.cantera_converter.DualCanteraConverter
+       :add-heading: Examples using DualCanteraConverter
+    """
 
     def __init__(
         self,

@@ -3,6 +3,13 @@ Welcome to Boulder's documentation!
 
 Boulder is a web-based tool for visually constructing and simulating Cantera ReactorNet systems.
 
+.. figure:: mix_streams_example.png
+   :alt: Mixed reactor streams example in Boulder
+   :align: center
+   :width: 80%
+
+   Mixed reactor streams example in Boulder.
+
 Quick start
 -----------
 
@@ -23,6 +30,7 @@ From the CLI::
 
    installation
    usage
+   auto_examples/index
    api
 
 Indices and tables

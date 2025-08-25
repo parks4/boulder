@@ -96,7 +96,13 @@ def create_app():
 def run_server(
     debug: bool = False, host: str = "0.0.0.0", port: int = 8050, verbose: bool = False
 ) -> None:
-    """Run the Dash server."""
+    """Run the Dash server.
+
+    Examples
+    --------
+    .. minigallery:: boulder.app.run_server
+       :add-heading: Examples using run_server
+    """
     if verbose:
         # Configure logging for verbose output
         logging.basicConfig(
