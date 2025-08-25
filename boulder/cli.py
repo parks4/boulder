@@ -158,6 +158,11 @@ def run_headless_mode(
     The script will run the simulation and print time-series data to the console.
     For advanced post-processing, users can modify the generated script to save
     data to files or create custom plots.
+
+    Examples
+    --------
+    .. minigallery:: boulder.cli.run_headless_mode
+       :add-heading: Examples using headless conversion
     """
     try:
         # Load and validate config (supports .py, .yaml, .yml)
