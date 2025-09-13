@@ -1,6 +1,71 @@
 """Sankey diagrams tools for Bloc."""
 
+from typing import List
+
 from .ctutils import collect_all_reactors_and_reservoirs
+from .verbose_utils import get_verbose_logger
+
+logger = get_verbose_logger(__name__)
+
+
+def _get_available_species_for_sankey_from_sim(sim) -> List[str]:
+    """Dynamically determine which species to use for Sankey diagram generation from a simulation.
+
+    Args:
+        sim: Cantera ReactorNet simulation object
+
+    Returns
+    -------
+        List of species names available in the mechanism for Sankey analysis
+    """
+    try:
+        all_reactors = list(collect_all_reactors_and_reservoirs(sim))
+        if not all_reactors:
+            return []
+
+        # Define priority species for energy flow analysis (in order of preference)
+        # Only include species that are implemented in the Sankey generation code
+        priority_species = [
+            # Currently implemented species in Sankey generation
+            "H2",  # Hydrogen - implemented
+            "CH4",  # Methane - implemented
+            # Note: Other species like H2O, CO2, etc. are not yet implemented in Sankey
+            # and will cause "not implemented yet" errors, so we exclude them for now
+        ]
+
+        # Check all reactors in the network to find available species
+        # Different reactors might use different mechanisms
+        all_available_species = set()
+        for reactor in all_reactors:
+            try:
+                reactor_species = set(reactor.thermo.species_names)
+                all_available_species.update(reactor_species)
+            except Exception as e:
+                logger.debug(f"Could not get species from reactor {reactor.name}: {e}")
+                continue
+
+        # Find implemented species that are available in at least one reactor
+        available_species = []
+        for species in priority_species:
+            if species in all_available_species:
+                available_species.append(species)
+
+        # If no implemented species found, disable species-based Sankey generation
+        # This prevents "not implemented yet" errors
+        if not available_species:
+            logger.info(
+                f"No implemented species found for Sankey diagram in network with "
+                f"{len(all_available_species)} total species, disabling species-based analysis"
+            )
+            return []  # Empty list disables species-based Sankey generation
+
+        logger.info(f"Found implemented species for Sankey: {available_species}")
+        return available_species
+
+    except Exception as e:
+        logger.warning(f"Could not determine species for Sankey diagram: {e}")
+        # Return empty list to disable species-based Sankey generation
+        return []
 
 
 def plot_sankey_diagram(sim, mechanism="gri30.yaml"):
@@ -32,8 +97,10 @@ def plot_sankey_diagram(sim, mechanism="gri30.yaml"):
 
     # Generate Sankey data:
     # ---------------------
+    # Dynamically determine available species
+    available_species = _get_available_species_for_sankey_from_sim(sim)
     links, nodes = generate_sankey_input_from_sim(
-        sim, show_species=["H2", "CH4"], mechanism=mechanism
+        sim, show_species=available_species, mechanism=mechanism, if_no_species="ignore"
     )
 
     # Plot Sankey Diagram:
@@ -106,6 +173,7 @@ def generate_sankey_input_from_sim(
     show_species=[],
     verbose=False,
     mechanism="gri30.yaml",
+    if_no_species="ignore",
 ):
     """Generate input data for sankey plot from a Cantera Reactor Net simulation.
 
@@ -124,6 +192,10 @@ def generate_sankey_input_from_sim(
         Set to [] not to show any species. Default is [].
     mechanism : str
         Cantera mechanism file to use for heating value calculations. Default is "gri30.yaml".
+    if_no_species : str
+        How to handle species in show_species that are not present in reactors.
+        Options: "ignore" (skip missing species), "warn" (log warning and skip),
+        "error" (raise exception). Default is "ignore".
 
     Other Parameters
     ----------------
@@ -227,6 +299,24 @@ def generate_sankey_input_from_sim(
                             links["color"] += ["Cs"]
                         else:
                             raise NotImplementedError(f"{s} not implemented yet")
+
+                        # Check if species exists in the upstream reactor
+                        if s not in outlet.upstream.thermo.species_names:
+                            if if_no_species == "ignore":
+                                # Skip this species silently
+                                continue
+                            elif if_no_species == "warn":
+                                logger.warning(
+                                    f"Species '{s}' not found in reactor '{outlet.upstream.name}', skipping"
+                                )
+                                continue
+                            elif if_no_species == "error":
+                                raise ValueError(
+                                    f"Species '{s}' not found in reactor '{outlet.upstream.name}'"
+                                )
+                            else:
+                                # Default to ignore for unknown options
+                                continue
 
                         energy_rate_s = (
                             flow_rate * outlet.upstream.thermo[s].Y * hhv_s
@@ -454,7 +544,8 @@ if __name__ == "__main__":
 
     sim.advance_to_steady_state()
 
-    links, nodes = generate_sankey_input_from_sim(sim, show_species=["H2", "CH4"])
+    available_species = _get_available_species_for_sankey_from_sim(sim)
+    links, nodes = generate_sankey_input_from_sim(sim, show_species=available_species)
 
     print("RESULT: ")
     print("Source:", links["source"])

@@ -158,28 +158,60 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
             f"🏗️  [LAYOUT] Found {len(registry.plugins)} output-pane plugins in registry"
         )
 
-        # Create tabs for ALL plugins, not just available ones
-        # Ensure Summary tab (if present) is listed first among plugins
-        plugin_list = registry.plugins[:]
+        # Handle Network plugin separately - insert it after Sankey tab
+        network_plugin = None
+        other_plugins = []
+
+        for plugin in registry.plugins:
+            if getattr(plugin, "plugin_id", "") == "network-visualization":
+                network_plugin = plugin
+            else:
+                other_plugins.append(plugin)
+
+        # Insert Network plugin right after Sankey tab (index 1)
+        if network_plugin:
+            verbose_print("🏗️  [LAYOUT] Creating Network tab after Sankey")
+            tab_label = network_plugin.tab_label
+            network_tab = dbc.Tab(
+                label=tab_label,
+                tab_id=f"plugin-{network_plugin.plugin_id}-tab",
+                children=[
+                    html.Div(
+                        id=f"plugin-{network_plugin.plugin_id}-content",
+                        className="mt-3",
+                        children=[
+                            html.Div(
+                                [
+                                    html.H5(f"{network_plugin.tab_label}"),
+                                    html.P(
+                                        "Select an element in the network to use this plugin."
+                                    ),
+                                ]
+                            )
+                        ],
+                    )
+                ],
+            )
+            tabs.insert(2, network_tab)  # Insert after Sankey (index 1)
+            print(
+                f"✅ [LAYOUT] Added Network tab after Sankey: {network_plugin.plugin_id}"
+            )
+
+        # Sort remaining plugins - Summary first, others after
         try:
-            plugin_list.sort(
+            other_plugins.sort(
                 key=lambda p: 0
                 if getattr(p, "plugin_id", "") == "summary-output-pane"
                 else 1
             )
         except Exception:
-            plugin_list = registry.plugins
+            pass
 
-        for plugin in plugin_list:
+        for plugin in other_plugins:
             verbose_print(f"🏗️  [LAYOUT] Creating tab for plugin: {plugin.plugin_id}")
 
             # For dbc.Tab, label must be a string, not a component
             tab_label = plugin.tab_label
-            if plugin.tab_icon:
-                # Use a simple string with icon class name for now
-                tab_label = (
-                    f"📊 {plugin.tab_label}"  # Using emoji instead of Bootstrap icon
-                )
 
             plugin_tab = dbc.Tab(
                 label=tab_label,

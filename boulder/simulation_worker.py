@@ -246,9 +246,30 @@ class SimulationWorker:
             # Generate reports for each reactor
             for reactor_id, reactor in converter.reactors.items():
                 if isinstance(reactor, ct.Reservoir):
-                    continue  # Skip reservoirs
+                    # Handle Reservoirs - they maintain fixed thermodynamic conditions
+                    current_T = reactor.thermo.T
+                    current_P = reactor.thermo.P
+                    current_T_c = current_T - 273.15
 
-                # Get final state data
+                    reactor_reports[reactor_id] = {
+                        "T": current_T,
+                        "P": current_P,
+                        "X": {
+                            name: reactor.thermo.X[i]
+                            for i, name in enumerate(reactor.thermo.species_names)
+                        },
+                        "species_names": reactor.thermo.species_names,
+                        "molecular_weights": reactor.thermo.molecular_weights,
+                        "mass_fractions": reactor.thermo.Y.copy(),
+                        # Generate formatted reports for UI display
+                        "reactor_report": f"Temperature: {current_T_c:.2f} °C (Fixed)\nPressure: "
+                        f"{current_P:.2e} Pa (Fixed)\nType: Reservoir (Infinite Capacity)",
+                        # Use the reactor's own thermo to ensure mechanism matches reactor
+                        "thermo_report": reactor.thermo.report(),
+                    }
+                    continue
+
+                # Get final state data for regular reactors
                 if reactor_id in results["reactors"]:
                     reactor_data = results["reactors"][reactor_id]
                     if reactor_data["T"] and reactor_data["P"]:

@@ -12,6 +12,7 @@ dependencies:
 - dash-html-components
 - dash-extensions
 - dash-bootstrap-components
+- graphviz  # for reactor networks
 - numpy
 - pandas
 - plotly
