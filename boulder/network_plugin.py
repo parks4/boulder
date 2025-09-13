@@ -191,12 +191,15 @@ class NetworkPlugin(OutputPanePlugin):
 
 def register_network_plugin() -> None:
     """Register the Network plugin with Boulder's output pane system."""
-    from .output_pane_plugins import get_output_pane_registry, register_output_pane_plugin
+    from .output_pane_plugins import (
+        get_output_pane_registry,
+        register_output_pane_plugin,
+    )
 
     # Check if already registered to handle module reloads
     registry = get_output_pane_registry()
     existing_ids = {p.plugin_id for p in registry.plugins}
-    
+
     if "network-visualization" not in existing_ids:
         plugin = NetworkPlugin()
         register_output_pane_plugin(plugin)

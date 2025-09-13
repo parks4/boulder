@@ -250,11 +250,14 @@ class SimulationWorker:
                     current_T = reactor.thermo.T
                     current_P = reactor.thermo.P
                     current_T_c = current_T - 273.15
-                    
+
                     reactor_reports[reactor_id] = {
                         "T": current_T,
                         "P": current_P,
-                        "X": {name: reactor.thermo.X[i] for i, name in enumerate(reactor.thermo.species_names)},
+                        "X": {
+                            name: reactor.thermo.X[i]
+                            for i, name in enumerate(reactor.thermo.species_names)
+                        },
                         "species_names": reactor.thermo.species_names,
                         "molecular_weights": reactor.thermo.molecular_weights,
                         "mass_fractions": reactor.thermo.Y.copy(),
