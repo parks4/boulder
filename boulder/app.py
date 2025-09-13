@@ -8,6 +8,7 @@ import dash_bootstrap_components as dbc
 from . import (
     callbacks,
     cantera_converter,  # noqa: F401
+    network_plugin,
     output_pane_plugins,  # noqa: F401
 )
 from .config import (
@@ -15,6 +16,9 @@ from .config import (
 )
 from .layout import get_layout
 from .styles import CYTOSCAPE_STYLESHEET
+
+# Register built-in plugins
+network_plugin.register_network_plugin()
 
 # Create a single, shared converter instance for the app
 # This ensures that the same set of discovered plugins is used everywhere.

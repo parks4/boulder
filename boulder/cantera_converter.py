@@ -837,6 +837,15 @@ class DualCanteraConverter:
             results["sankey_links"] = None
             results["sankey_nodes"] = None
 
+            # Propagate Sankey errors to the UI error system
+            sankey_error_msg = f"Sankey diagram generation failed: {str(e)}"
+            if "error_message" in results:
+                results["error_message"] = (
+                    f"{results['error_message']}\n\n{sankey_error_msg}"
+                )
+            else:
+                results["error_message"] = sankey_error_msg
+
         # Evaluate custom output summary if configured
         try:
             cfg = self._last_config or {}
