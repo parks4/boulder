@@ -799,13 +799,17 @@ class DualCanteraConverter:
 
         # Generate Sankey data
         try:
+            # Dynamically determine available species for Sankey diagram
+            available_species = self._get_available_species_for_sankey()
+            logger.info(f"Using species for Sankey diagram: {available_species}")
+
             plugins = get_plugins()
             if plugins.sankey_generator:
                 # Use custom Sankey generator from plugin
                 logger.info("Using custom Sankey generator from plugin")
                 links, nodes = plugins.sankey_generator(
                     self.last_network,
-                    show_species=["H2", "CH4"],
+                    show_species=available_species,  # TODO : let it be set by plugin
                     verbose=False,
                     mechanism=self.mechanism,
                 )
@@ -814,9 +818,10 @@ class DualCanteraConverter:
                 logger.info("Using default Boulder Sankey generator")
                 links, nodes = generate_sankey_input_from_sim(
                     self.last_network,
-                    show_species=["H2", "CH4"],
+                    show_species=available_species,
                     verbose=False,
                     mechanism=self.mechanism,
+                    if_no_species="ignore",
                 )
 
             logger.info(
@@ -894,6 +899,62 @@ class DualCanteraConverter:
             logger.warning(f"Failed to evaluate custom output summary: {e}")
 
         return results
+
+    def _get_available_species_for_sankey(self) -> List[str]:
+        """Dynamically determine which species to use for Sankey diagram generation.
+
+        Returns a list of species that are available in the mechanism and commonly
+        used for energy flow analysis. Handles networks with multiple mechanisms.
+        """
+        if not self.network or not self.network.reactors:
+            return []
+
+        try:
+            # Define priority species for energy flow analysis (in order of preference)
+            # Only include species that are implemented in the Sankey generation code
+            priority_species = [
+                # Currently implemented species in Sankey generation
+                "H2",  # Hydrogen - implemented
+                "CH4",  # Methane - implemented
+                # Note: Other species like H2O, CO2, etc. are not yet implemented in Sankey
+                # and will cause "not implemented yet" errors, so we exclude them for now
+            ]
+
+            # Check all reactors in the network to find available species
+            # Different reactors might use different mechanisms
+            all_available_species = set()
+            for reactor in self.network.reactors:
+                try:
+                    reactor_species = set(reactor.thermo.species_names)
+                    all_available_species.update(reactor_species)
+                except Exception as e:
+                    logger.debug(
+                        f"Could not get species from reactor {reactor.name}: {e}"
+                    )
+                    continue
+
+            # Find implemented species that are available in at least one reactor
+            available_species = []
+            for species in priority_species:
+                if species in all_available_species:
+                    available_species.append(species)
+
+            # If no implemented species found, disable species-based Sankey generation
+            # This prevents "not implemented yet" errors
+            if not available_species:
+                logger.info(
+                    f"No implemented species found for Sankey diagram in network with "
+                    f"{len(all_available_species)} total species, disabling species-based analysis"
+                )
+                return []  # Empty list disables species-based Sankey generation
+
+            logger.info(f"Found implemented species for Sankey: {available_species}")
+            return available_species
+
+        except Exception as e:
+            logger.warning(f"Could not determine species for Sankey diagram: {e}")
+            # Return empty list to disable species-based Sankey generation
+            return []
 
     def build_network_and_code(
         self, config: Dict[str, Any]
