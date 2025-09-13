@@ -161,16 +161,16 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
         # Handle Network plugin separately - insert it after Sankey tab
         network_plugin = None
         other_plugins = []
-        
+
         for plugin in registry.plugins:
             if getattr(plugin, "plugin_id", "") == "network-visualization":
                 network_plugin = plugin
             else:
                 other_plugins.append(plugin)
-        
+
         # Insert Network plugin right after Sankey tab (index 1)
         if network_plugin:
-            verbose_print(f"🏗️  [LAYOUT] Creating Network tab after Sankey")
+            verbose_print("🏗️  [LAYOUT] Creating Network tab after Sankey")
             tab_label = network_plugin.tab_label
             network_tab = dbc.Tab(
                 label=tab_label,
@@ -193,7 +193,9 @@ def get_results_tabs(initial_config: Dict[str, Any]) -> List[dbc.Tab]:
                 ],
             )
             tabs.insert(2, network_tab)  # Insert after Sankey (index 1)
-            print(f"✅ [LAYOUT] Added Network tab after Sankey: {network_plugin.plugin_id}")
+            print(
+                f"✅ [LAYOUT] Added Network tab after Sankey: {network_plugin.plugin_id}"
+            )
 
         # Sort remaining plugins - Summary first, others after
         try:
