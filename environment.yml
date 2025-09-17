@@ -3,7 +3,6 @@ channels:
 - conda-forge
 - defaults
 dependencies:
-- python=3.11
 - pip
 - cantera
 - dash
@@ -12,9 +11,9 @@ dependencies:
 - dash-html-components
 - dash-extensions
 - dash-bootstrap-components
-- graphviz  # for reactor networks
 - numpy
 - pandas
 - plotly
 - pint
 - pydantic
+- python-graphviz   # installs Python package as well as the graphviz & dot commands
