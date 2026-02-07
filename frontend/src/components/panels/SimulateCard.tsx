@@ -95,10 +95,10 @@ export function SimulateCard() {
         onClick={handleRun}
         disabled={isRunning || config.nodes.length === 0}
         className={cn(
-          "w-full px-3 py-2 text-sm rounded-md font-medium transition-opacity",
+          "w-full px-3 py-2 text-sm rounded-md font-medium transition-all",
           isRunning
             ? "bg-muted text-muted-foreground cursor-not-allowed"
-            : "bg-success text-white hover:opacity-90",
+            : "bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700",
         )}
       >
         {isRunning ? "Running..." : "Run Simulation (Ctrl+Enter)"}

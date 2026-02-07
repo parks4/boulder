@@ -5,7 +5,7 @@ import { useSimulationStore } from "@/stores/simulationStore";
 import { useSimulationSSE } from "@/hooks/useSimulationSSE";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { startSimulation } from "@/api/simulations";
-import { fetchDefaultConfig } from "@/api/configs";
+import { fetchDefaultConfig, fetchPreloadedConfig } from "@/api/configs";
 import { EditNetworkCard } from "@/components/panels/EditNetworkCard";
 import { SimulateCard } from "@/components/panels/SimulateCard";
 import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
@@ -24,10 +24,24 @@ export function AppShell() {
   // Connect SSE stream
   useSimulationSSE();
 
-  // Load default config on mount
+  // Load preloaded config if available, otherwise load default config on mount
   useEffect(() => {
-    fetchDefaultConfig()
-      .then((resp) => setConfig(resp.config, "default.yaml", resp.yaml))
+    fetchPreloadedConfig()
+      .then((resp) => {
+        if (resp.preloaded && resp.config) {
+          setConfig(resp.config, resp.filename || "config.yaml", resp.yaml || "");
+          toast.success(`Loaded ${resp.filename || "configuration"}`);
+        } else {
+          // No preloaded config, load default
+          return fetchDefaultConfig();
+        }
+      })
+      .then((resp) => {
+        // Only runs if fetchDefaultConfig was called
+        if (resp) {
+          setConfig(resp.config, "default.yaml", resp.yaml);
+        }
+      })
       .catch(() => {
         /* API not available yet */
       });
