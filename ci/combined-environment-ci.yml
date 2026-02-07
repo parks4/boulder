@@ -4,12 +4,6 @@ channels:
 - nodefaults
 dependencies:
 - cantera
-- dash
-- dash-bootstrap-components
-- dash-core-components
-- dash-extensions
-- dash-html-components
-- dash_cytoscape
 - make
 - mypy
 - myst-parser
@@ -24,12 +18,10 @@ dependencies:
 - pytest
 - pytest-cov
 - python=3.11
-- selenium
 - sphinx
 - sphinx-autoapi
 - sphinx-gallery
 - pip:
-  - dash[testing]>=2.0.0
   - pytest-html>=3.0.0
   - pytest-mock>=3.0.0
   - pytest-xvfb

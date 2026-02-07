@@ -83,8 +83,7 @@ uvicorn.run("boulder.api.main:app", host="127.0.0.1", port=8000)
 Notes:
 
 - Default address is `http://127.0.0.1:8050`.
-- The API documentation is available at `http://localhost:8000/docs` (Swagger UI).
-- Set `BOULDER_USE_DASH=true` to use the legacy Dash frontend.
+- The API documentation is available at `http://127.0.0.1:8050/docs` (Swagger UI).
 
 Once running, use the interface to:
 

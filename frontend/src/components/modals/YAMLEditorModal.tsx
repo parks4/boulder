@@ -1,4 +1,4 @@
-import { useState, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { useConfigStore } from "@/stores/configStore";
 import { parseYaml, exportConfig } from "@/api/configs";
 import { toast } from "sonner";
@@ -12,23 +12,23 @@ interface Props {
 
 export function YAMLEditorModal({ open, onClose }: Props) {
   const { config, originalYaml, setConfig } = useConfigStore();
-  const [value, setValue] = useState(originalYaml);
+  const [value, setValue] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Refresh displayed value when modal opens
-  const handleOpen = useCallback(async () => {
-    try {
-      const resp = await exportConfig(config);
-      setValue(resp.yaml);
-    } catch {
-      setValue(originalYaml);
+  // Sync editor content when modal opens or config changes
+  useEffect(() => {
+    if (!open) return;
+    // Show stored YAML immediately so the editor is never empty
+    setValue(originalYaml);
+    // Then fetch the freshest YAML export from the backend
+    if (config.nodes.length > 0) {
+      exportConfig(config)
+        .then((resp) => setValue(resp.yaml))
+        .catch(() => {
+          /* keep originalYaml on failure */
+        });
     }
-  }, [config, originalYaml]);
-
-  // Export current config when opening
-  if (open && value === originalYaml && config.nodes.length > 0) {
-    handleOpen();
-  }
+  }, [open, config, originalYaml]);
 
   if (!open) return null;
 

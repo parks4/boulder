@@ -326,9 +326,6 @@ def main(argv: list[str] | None = None) -> None:
     elif args.verbose:
         print(f"Port {args.port} is available.")
 
-    # Determine which server to start
-    use_dash = os.environ.get("BOULDER_USE_DASH", "false").lower() == "true"
-
     url = f"http://{args.host}:{args.port}"
     if not args.no_open:
         # Open browser slightly before server starts; browser will retry the connection
@@ -342,23 +339,16 @@ def main(argv: list[str] | None = None) -> None:
     elif args.verbose:
         print(f"Boulder server will start on {url}")
 
-    if use_dash:
-        # Legacy Dash mode (set BOULDER_USE_DASH=true to use)
-        from . import cantera_converter  # noqa: F401
-        from .app import run_server
-        run_server(debug=args.debug, host=args.host, port=args.port, verbose=args.verbose)
-    else:
-        # New FastAPI + React mode (default)
-        import uvicorn
+    import uvicorn
 
-        log_level = "info" if args.verbose else "warning"
-        uvicorn.run(
-            "boulder.api.main:app",
-            host=args.host,
-            port=args.port,
-            reload=args.debug,
-            log_level=log_level,
-        )
+    log_level = "info" if args.verbose else "warning"
+    uvicorn.run(
+        "boulder.api.main:app",
+        host=args.host,
+        port=args.port,
+        reload=args.debug,
+        log_level=log_level,
+    )
 
 
 if __name__ == "__main__":

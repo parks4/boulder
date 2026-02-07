@@ -136,7 +136,7 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="li
     sankey_theme = get_sankey_theme_config(theme)
     link_color_map = sankey_theme["link_colors"]
 
-    # Create a copy to avoid modifying the original dict from dcc.Store
+    # Create a copy to avoid modifying the original dict
     links_with_colors = links.copy()
     links_with_colors["color"] = [link_color_map.get(c, "grey") for c in links["color"]]
 

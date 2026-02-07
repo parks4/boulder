@@ -76,48 +76,10 @@ async def render_plugin(
         if not plugin.is_available(context):
             return {"available": False, "message": "Plugin not available for current context"}
 
-        # Try the new JSON-based API first, fall back to legacy
-        if hasattr(plugin, "create_content_data"):
-            data = plugin.create_content_data(context)
-            return {"available": True, "data": data}
-
-        # Fallback: render legacy Dash content and extract text/images
-        try:
-            content = plugin.create_content(context)
-            # Best-effort extraction of useful data from Dash components
-            return {
-                "available": True,
-                "data": _extract_data_from_dash_component(content),
-            }
-        except Exception:
-            return {
-                "available": True,
-                "data": {"type": "text", "content": "Plugin rendered (legacy Dash content)"},
-            }
+        data = plugin.create_content_data(context)
+        return {"available": True, "data": data}
 
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-
-
-def _extract_data_from_dash_component(component: Any) -> Dict[str, Any]:
-    """Best-effort extraction of data from a Dash component tree."""
-    # Check for image components (e.g., NetworkPlugin returns an <img> with base64 src)
-    if hasattr(component, "children"):
-        children = component.children
-        if isinstance(children, list):
-            for child in children:
-                result = _extract_data_from_dash_component(child)
-                if result.get("type") != "text":
-                    return result
-        elif hasattr(children, "src"):
-            return {"type": "image", "src": children.src, "alt": "Plugin output"}
-
-    if hasattr(component, "src"):
-        return {"type": "image", "src": component.src, "alt": "Plugin output"}
-
-    if hasattr(component, "children") and isinstance(component.children, str):
-        return {"type": "text", "content": component.children}
-
-    return {"type": "text", "content": str(component)}

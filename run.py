@@ -1,12 +1,6 @@
 """Entry point for running the Boulder application."""
 
-from boulder.app import run_server
+import uvicorn
 
 if __name__ == "__main__":
-    run_server(debug=True)  # Enable debug mode to see errors in the browser
-
-
-# TODO
-# - min/max values for temperature, pressure.
-# - check inputs format
-# - add graphical option to delete a node (we can already do it through the JSON)
+    uvicorn.run("boulder.api.main:app", host="0.0.0.0", port=8050, reload=True)

@@ -13,9 +13,6 @@ classifiers = [
   "Topic :: Scientific/Engineering"
 ]
 dependencies = [
-  "dash>=2.0.0",
-  "dash-bootstrap-components>=1.0.0",
-  "dash-cytoscape>=0.3.0",
   "cantera>=3.0.0",
   "python-dotenv>=1.0.0",
   "PyYAML>=6.0",
