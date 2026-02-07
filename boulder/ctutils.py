@@ -144,7 +144,13 @@ def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg"):
             # ignore and return nan
             return np.nan, np.nan
     h1 = gas.enthalpy_mass
-    Y_fuel = sum([gas[f].Y[0] for f in list(fuel.mole_fraction_dict().keys())])
+    fuel_species = list(fuel.mole_fraction_dict().keys())
+    if not fuel_species:
+        return np.nan, np.nan
+    fuel_indices = [gas.species_index(name) for name in fuel_species]
+    Y_fuel = float(np.sum(gas.Y[fuel_indices]))
+    if Y_fuel <= 0:
+        return np.nan, np.nan
 
     # complete combustion products
     X_products = {
@@ -163,7 +169,8 @@ def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg"):
     h_gas = water.h
 
     gas.TPX = None, None, X_products
-    Y_H2O = gas["H2O"].Y[0]
+    h2o_index = gas.species_index("H2O")
+    Y_H2O = float(gas.Y[h2o_index])
     h2 = gas.enthalpy_mass
     LHV = -(h2 - h1) / Y_fuel
     HHV = -(h2 - h1 + (h_liquid - h_gas) * Y_H2O) / Y_fuel

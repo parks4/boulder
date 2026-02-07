@@ -2,6 +2,8 @@
 
 from typing import List
 
+import numpy as np
+
 from .ctutils import collect_all_reactors_and_reservoirs
 from .verbose_utils import get_verbose_logger
 
@@ -136,9 +138,19 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="li
     sankey_theme = get_sankey_theme_config(theme)
     link_color_map = sankey_theme["link_colors"]
 
-    # Create a copy to avoid modifying the original dict
-    links_with_colors = links.copy()
-    links_with_colors["color"] = [link_color_map.get(c, "grey") for c in links["color"]]
+    # Create a deep copy to avoid modifying the original dict from dcc.Store
+    # Also ensure all arrays are proper Python lists (not NumPy arrays with references)
+    # to avoid NumPy 2.x resize issues
+    links_with_colors = {
+        "source": list(links["source"]),
+        "target": list(links["target"]),
+        "value": list(links["value"]),
+        "label": list(links["label"]),
+        "color": [link_color_map.get(c, "grey") for c in links["color"]],
+    }
+
+    # Ensure nodes is a proper Python list
+    nodes_list = list(nodes)
 
     # Get theme-specific colors for nodes
     if theme == "dark":
@@ -152,7 +164,7 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="li
         data=go.Sankey(
             arrangement="snap",
             node={
-                "label": nodes,
+                "label": nodes_list,
                 "pad": 11,
                 "line": dict(color=node_line_color, width=0.5),
                 "thickness": 20,
@@ -259,9 +271,9 @@ def generate_sankey_input_from_sim(
             target_reactor = outlet.downstream
             j = node_order.index(target_reactor.name)
             if target_reactor:
-                flow_rate = outlet.mass_flow_rate  # kg/s0
+                flow_rate = float(outlet.mass_flow_rate)  # kg/s0 - convert to Python float
                 if flow_type == "enthalpy":
-                    upstream_enthalpy = outlet.upstream.thermo.enthalpy_mass  # J/kg
+                    upstream_enthalpy = float(outlet.upstream.thermo.enthalpy_mass)  # J/kg
                     energy_rate = flow_rate * upstream_enthalpy  # J/s = W
                     assert energy_rate > 0
                     links["source"] += [i]
@@ -279,10 +291,13 @@ def generate_sankey_input_from_sim(
                     )  # J/kg
                     # TODO define temperature reference when computing HHV
                     # (and make it consistent with the one used in sensible enthalpy)
-                    energy_rate = flow_rate * hhv  # J/s = W
+                    use_hhv = np.isfinite(hhv) and hhv > 0
+                    if use_hhv:
+                        energy_rate = flow_rate * hhv  # J/s = W
 
-                    for s in show_species:
-                        import cantera as ct
+                    if use_hhv:
+                        for s in show_species:
+                            import cantera as ct
 
                         if s == "H2":
                             lhv_s, hhv_s = heating_values(
@@ -318,9 +333,10 @@ def generate_sankey_input_from_sim(
                                 # Default to ignore for unknown options
                                 continue
 
-                        energy_rate_s = (
-                            flow_rate * outlet.upstream.thermo[s].Y * hhv_s
-                        )  # J/s = W
+                        species_index = outlet.upstream.thermo.species_index(s)
+                        energy_rate_s = float(
+                            flow_rate * outlet.upstream.thermo.Y[species_index] * hhv_s
+                        )  # J/s = W - convert to Python float
                         # remove energy rate of this species from the remaining energy rate:
                         energy_rate -= energy_rate_s
                         links["value"] += [energy_rate_s]
@@ -328,18 +344,18 @@ def generate_sankey_input_from_sim(
                         links["target"] += [j]
                         links["label"] += [f"HHV {s} (W)"]
 
-                    links["source"] += [i]
-                    links["target"] += [j]
-                    links["value"] += [energy_rate]
-                    links["color"] += ["enthalpy"]
-                    links["label"] += ["HHV (W)"]
+                        links["source"] += [i]
+                        links["target"] += [j]
+                        links["value"] += [energy_rate]
+                        links["color"] += ["enthalpy"]
+                        links["label"] += ["HHV (W)"]
 
                     # Add a second link with sensible enthalpy
                     # ----------------------------------------
                     from .ctutils import get_STP_properties_IUPAC
 
                     _, enthalpy_STP = get_STP_properties_IUPAC(outlet.upstream.thermo)
-                    sensible_enthalpy = (
+                    sensible_enthalpy = float(
                         outlet.upstream.thermo.enthalpy_mass - enthalpy_STP
                     )  # J/kg
 
@@ -362,18 +378,18 @@ def generate_sankey_input_from_sim(
             if reactor == wall.left_reactor:
                 target_reactor = wall.right_reactor
                 j = node_order.index(target_reactor.name)
-                heat_rate = wall.heat_rate  # W
+                heat_rate = float(wall.heat_rate)  # W - convert to Python float
                 if flow_type not in ["hhv", "enthalpy"]:
                     raise NotImplementedError(
                         f"Unsupported heat rate when flow_rate is {flow_type}"
                     )
-                if wall.heat_rate > 0:
+                if heat_rate > 0:
                     links["source"] += [i]
                     links["target"] += [j]
                     links["value"] += [heat_rate]
                     links["color"] += ["heat"]
                     links["label"] += ["Power (W)"]
-                elif wall.heat_rate < 0:
+                elif heat_rate < 0:
                     links["source"] += [j]
                     links["target"] += [i]
                     links["value"] += [-heat_rate]
