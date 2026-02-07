@@ -39,6 +39,42 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Create a basic converter without problematic plugins
         app.state.converter = DualCanteraConverter()
     
+    # Load initial configuration from environment variable if provided
+    env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
+        "BOULDER_CONFIG"
+    )
+    app.state.preloaded_config = None
+    app.state.preloaded_yaml = None
+    app.state.preloaded_filename = None
+    
+    if env_config_path and env_config_path.strip():
+        try:
+            from ..config import (
+                load_config_file_with_py_support_and_comments,
+                normalize_config,
+                validate_config,
+            )
+            
+            cleaned = env_config_path.strip()
+            verbose = os.environ.get("BOULDER_VERBOSE") == "1"
+            
+            if verbose:
+                logger.info(f"Loading preloaded configuration from: {cleaned}")
+            
+            config, original_yaml, actual_yaml_path = (
+                load_config_file_with_py_support_and_comments(cleaned, verbose)
+            )
+            normalized = normalize_config(config)
+            validated = validate_config(normalized)
+            
+            app.state.preloaded_config = validated
+            app.state.preloaded_yaml = original_yaml
+            app.state.preloaded_filename = os.path.basename(actual_yaml_path)
+            
+            logger.info(f"Preloaded configuration: {app.state.preloaded_filename}")
+        except Exception as e:
+            logger.error(f"Failed to load preloaded configuration: {e}")
+    
     logger.info("Boulder API started – plugins loaded, converter ready")
     yield
     # Shutdown: nothing to clean up

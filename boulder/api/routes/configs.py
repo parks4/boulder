@@ -58,6 +58,26 @@ async def get_default_config() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/preloaded")
+async def get_preloaded_config() -> Dict[str, Any]:
+    """Return the preloaded configuration if one was specified via CLI.
+    
+    If no configuration was preloaded (no BOULDER_CONFIG_PATH env var),
+    returns an empty response with preloaded: false.
+    """
+    from fastapi import Request
+    from ...api.main import app
+    
+    if app.state.preloaded_config is not None:
+        return {
+            "preloaded": True,
+            "config": app.state.preloaded_config,
+            "yaml": app.state.preloaded_yaml or "",
+            "filename": app.state.preloaded_filename or "config.yaml",
+        }
+    return {"preloaded": False}
+
+
 @router.post("/parse")
 async def parse_yaml(body: YAMLParseRequest) -> Dict[str, Any]:
     """Parse a YAML string, normalise and validate it.

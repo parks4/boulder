@@ -6,6 +6,13 @@ interface DefaultConfigResponse {
   yaml: string;
 }
 
+interface PreloadedConfigResponse {
+  preloaded: boolean;
+  config?: NormalizedConfig;
+  yaml?: string;
+  filename?: string;
+}
+
 interface ParseResponse {
   config: NormalizedConfig;
   yaml: string;
@@ -27,6 +34,10 @@ interface UploadResponse {
 
 export function fetchDefaultConfig() {
   return apiFetch<DefaultConfigResponse>("/configs/default");
+}
+
+export function fetchPreloadedConfig() {
+  return apiFetch<PreloadedConfigResponse>("/configs/preloaded");
 }
 
 export function parseYaml(yaml: string) {

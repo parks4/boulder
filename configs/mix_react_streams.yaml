@@ -72,14 +72,16 @@ nodes:
 
 connections:
 - id: Air Inlet
-  MassFlowController: {}
+  MassFlowController:
+    mass_flow_rate: 14.01  # kg/s - stoichiometric air flow (rho_air * 2.5 / 0.21)
   source: Air Reservoir
   target: Mixer
   description: |-
     Mass flow controller connecting the air reservoir to the mixer.
     Mass flow rate set to values corresponding to stoichiometric combustion.
 - id: Fuel Inlet
-  MassFlowController: {}
+  MassFlowController:
+    mass_flow_rate: 0.657  # kg/s - methane flow (rho_methane * 1.0)
   source: Fuel Reservoir
   target: Mixer
   description: |-
