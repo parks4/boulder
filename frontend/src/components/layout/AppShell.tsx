@@ -29,7 +29,7 @@ export function AppShell() {
     fetchPreloadedConfig()
       .then((resp) => {
         if (resp.preloaded && resp.config) {
-          setConfig(resp.config, resp.filename || "config.yaml", resp.yaml || "");
+          setConfig(resp.config, resp.filename || "config.yaml", resp.yaml);
           toast.success(`Loaded ${resp.filename || "configuration"}`);
         } else {
           // No preloaded config, load default
