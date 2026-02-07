@@ -1,44 +1,31 @@
 import type { SimulationResults } from "@/types/simulation";
-import { useSimulationStore } from "@/stores/simulationStore";
-import { exportConfig } from "@/api/configs";
-import { useConfigStore } from "@/stores/configStore";
-import { Button } from "@/components/ui/Button";
-import { toast } from "sonner";
 
 interface Props {
   results: SimulationResults;
 }
 
 export function SummaryTab({ results }: Props) {
-  const pythonCode = useSimulationStore((s) => s.pythonCode);
-  const config = useConfigStore((s) => s.config);
-
-  const handleDownloadPy = () => {
-    if (!pythonCode) return;
-    const blob = new Blob([pythonCode], { type: "text/x-python" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "simulation.py";
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Python code downloaded");
+  const formatNumber = (n: number) => {
+    if (!Number.isFinite(n)) return String(n);
+    const fixed = n.toFixed(3);
+    return fixed.replace(/\.?0+$/, "");
   };
 
-  const handleDownloadYaml = async () => {
-    try {
-      const resp = await exportConfig(config);
-      const blob = new Blob([resp.yaml], { type: "text/yaml" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "config.yaml";
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success("YAML config downloaded");
-    } catch (err) {
-      toast.error(`Download failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+  const formatSummaryLine = (row: Record<string, unknown>) => {
+    const label = typeof row.label === "string" ? row.label : undefined;
+    const reactor = typeof row.reactor === "string" ? row.reactor : undefined;
+    const quantity = typeof row.quantity === "string" ? row.quantity : undefined;
+    const unit = typeof row.unit === "string" ? row.unit : "";
+    const error = typeof row.error === "string" ? row.error : undefined;
+    const value = row.value;
+
+    const displayLabel = label ?? [reactor, quantity].filter(Boolean).join(" ") ?? "Output";
+
+    if (error) return `${displayLabel}: ERROR - ${error}`;
+    if (typeof value === "number") return `${displayLabel}: ${formatNumber(value)}${unit ? ` ${unit}` : ""}`;
+    if (value == null) return `${displayLabel}: (no value)`;
+
+    return `${displayLabel}: ${String(value)}${unit ? ` ${unit}` : ""}`;
   };
 
   return (
@@ -50,32 +37,14 @@ export function SummaryTab({ results }: Props) {
       )}
 
       {Array.isArray(results.summary) && results.summary.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <tbody>
-              {results.summary.map((row, i) => (
-                <tr key={i} className="border-b border-border">
-                  {Object.entries(row as Record<string, unknown>).map(([k, v]) => (
-                    <td key={k} className="px-2 py-1 text-xs text-foreground">
-                      <span className="text-muted-foreground">{k}: </span>
-                      {String(v)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-1">
+          {results.summary.map((row, i) => (
+            <div key={i} className="text-sm text-foreground">
+              {formatSummaryLine(row as Record<string, unknown>)}
+            </div>
+          ))}
         </div>
       )}
-
-      <div className="flex gap-2">
-        <Button onClick={handleDownloadPy} disabled={!pythonCode} variant="secondary" size="sm">
-          Download Python
-        </Button>
-        <Button onClick={handleDownloadYaml} variant="secondary" size="sm">
-          Download YAML
-        </Button>
-      </div>
     </div>
   );
 }

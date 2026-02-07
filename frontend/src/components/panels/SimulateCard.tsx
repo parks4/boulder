@@ -7,7 +7,7 @@ import { toast } from "sonner";
 
 export function SimulateCard() {
   const config = useConfigStore((s) => s.config);
-  const { isRunning, startSimulation: setStarted } = useSimulationStore();
+  const { isRunning, simulationId, pythonCode, startSimulation: setStarted } = useSimulationStore();
   const [simTime, setSimTime] = useState("10");
   const [timeStep, setTimeStep] = useState("1");
 
@@ -28,6 +28,18 @@ export function SimulateCard() {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [config, simTime, timeStep, setStarted]);
+
+  const handleDownloadPy = useCallback(() => {
+    if (!pythonCode) return;
+    const blob = new Blob([pythonCode], { type: "text/x-python" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "simulation.py";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Python code downloaded");
+  }, [pythonCode]);
 
   const runDisabled = isRunning || config.nodes.length === 0;
   const runVariant = runDisabled ? "muted" : "success";
@@ -72,6 +84,18 @@ export function SimulateCard() {
       >
         {isRunning ? "Running..." : "Run Simulation (Ctrl+Enter)"}
       </Button>
+
+      {simulationId && (
+        <Button
+          id="download-python"
+          onClick={handleDownloadPy}
+          disabled={!pythonCode}
+          variant="secondary"
+          className="w-full"
+        >
+          Download Python
+        </Button>
+      )}
     </div>
   );
 }
