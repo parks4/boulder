@@ -13,6 +13,7 @@ import { ReactorGraph } from "@/components/graph/ReactorGraph";
 import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
 import { YAMLEditorModal } from "@/components/modals/YAMLEditorModal";
+import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 export function AppShell() {
@@ -69,18 +70,21 @@ export function AppShell() {
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold">Boulder</h1>
           {fileName && (
-            <button
+            <Button
               id="config-file-name-span"
               onClick={() => setShowYamlEditor(true)}
-              className="text-sm text-muted-foreground hover:text-foreground underline"
+              variant="link"
+              size="sm"
+              className="px-0 h-auto"
             >
               {fileName}
-            </button>
+            </Button>
           )}
         </div>
-        <button
+        <Button
           onClick={toggleTheme}
-          className="px-3 py-1.5 text-sm rounded-md bg-secondary text-secondary-foreground hover:opacity-80 transition-all"
+          variant="secondary"
+          size="sm"
           title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
         >
           {theme === "light" ? (
@@ -126,7 +130,7 @@ export function AppShell() {
               Light
             </span>
           )}
-        </button>
+        </Button>
       </header>
 
       {/* Main layout: 3-col left + 9-col right (12-col grid) */}

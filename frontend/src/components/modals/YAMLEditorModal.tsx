@@ -1,6 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useConfigStore } from "@/stores/configStore";
 import { parseYaml, exportConfig } from "@/api/configs";
+import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 const MonacoEditor = lazy(() => import("@monaco-editor/react"));
@@ -77,12 +78,15 @@ export function YAMLEditorModal({ open, onClose }: Props) {
           <h2 className="text-lg font-semibold text-foreground">
             YAML Configuration Editor
           </h2>
-          <button
+          <Button
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground text-lg"
+            variant="ghost"
+            size="icon"
+            className="text-lg"
+            aria-label="Close"
           >
             ×
-          </button>
+          </Button>
         </div>
 
         <div className="flex-1 overflow-hidden">
@@ -122,20 +126,18 @@ export function YAMLEditorModal({ open, onClose }: Props) {
         </div>
 
         <div className="flex justify-end gap-2 p-4 border-t border-border">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded-md bg-secondary text-secondary-foreground hover:opacity-80"
-          >
+          <Button onClick={onClose} variant="secondary" size="sm">
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             id="save-config-yaml-edit-btn"
             onClick={handleSave}
             disabled={saving || fetching}
-            className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            variant="primary"
+            size="sm"
           >
             {saving ? "Saving..." : "Save"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

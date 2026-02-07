@@ -1,8 +1,8 @@
 import { useState, useCallback } from "react";
-import { cn } from "@/lib/cn";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
+import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 export function PropertiesPanel() {
@@ -85,26 +85,17 @@ export function PropertiesPanel() {
         </div>
         <div className="flex gap-1">
           {!isEditing ? (
-            <button
-              onClick={handleEdit}
-              className="text-xs px-2 py-1 rounded bg-secondary text-secondary-foreground hover:opacity-80"
-            >
+            <Button onClick={handleEdit} variant="secondary" size="sm" className="text-xs">
               Edit
-            </button>
+            </Button>
           ) : (
-            <button
-              onClick={handleSave}
-              className="text-xs px-2 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
-            >
+            <Button onClick={handleSave} variant="primary" size="sm" className="text-xs">
               Save
-            </button>
+            </Button>
           )}
-          <button
-            onClick={handleDelete}
-            className="text-xs px-2 py-1 rounded bg-destructive text-destructive-foreground hover:opacity-90"
-          >
+          <Button onClick={handleDelete} variant="destructive" size="sm" className="text-xs">
             Delete
-          </button>
+          </Button>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useConfigStore } from "@/stores/configStore";
+import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 interface Props {
@@ -134,19 +135,12 @@ export function AddMFCModal({ open, onClose }: Props) {
         </label>
 
         <div className="flex justify-end gap-2 pt-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded-md bg-secondary text-secondary-foreground hover:opacity-80"
-          >
+          <Button onClick={onClose} variant="secondary" size="sm">
             Cancel
-          </button>
-          <button
-            id="add-mfc"
-            onClick={handleSubmit}
-            className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:opacity-90"
-          >
+          </Button>
+          <Button id="add-mfc" onClick={handleSubmit} variant="primary" size="sm">
             Add
-          </button>
+          </Button>
         </div>
       </div>
     </div>

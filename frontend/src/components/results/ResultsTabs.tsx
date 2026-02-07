@@ -1,7 +1,6 @@
 import { useState, lazy, Suspense } from "react";
-import { cn } from "@/lib/cn";
 import { useSimulationStore } from "@/stores/simulationStore";
-import { useSelectionStore } from "@/stores/selectionStore";
+import { Button } from "@/components/ui/Button";
 import { PlotsTab } from "./PlotsTab";
 import { SummaryTab } from "./SummaryTab";
 import { ErrorTab } from "./ErrorTab";
@@ -27,18 +26,15 @@ export function ResultsTabs() {
     <div id="simulation-results-card" className="rounded-lg border border-border bg-card">
       <div className="flex border-b border-border">
         {TABS.map((tab) => (
-          <button
+          <Button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={cn(
-              "px-4 py-2 text-sm font-medium transition-colors",
-              activeTab === tab
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+            variant="tab"
+            size="tab"
+            data-active={activeTab === tab}
           >
             {tab}
-          </button>
+          </Button>
         ))}
       </div>
 

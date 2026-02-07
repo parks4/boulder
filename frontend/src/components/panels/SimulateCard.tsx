@@ -1,9 +1,9 @@
 import { useCallback, useState, useEffect } from "react";
-import { cn } from "@/lib/cn";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { startSimulation } from "@/api/simulations";
 import { fetchMechanisms } from "@/api/mechanisms";
+import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 export function SimulateCard() {
@@ -40,6 +40,9 @@ export function SimulateCard() {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [config, selectedMechanism, simTime, timeStep, setStarted]);
+
+  const runDisabled = isRunning || config.nodes.length === 0;
+  const runVariant = runDisabled ? "muted" : "success";
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -90,19 +93,15 @@ export function SimulateCard() {
         </div>
       </div>
 
-      <button
+      <Button
         id="run-simulation"
         onClick={handleRun}
-        disabled={isRunning || config.nodes.length === 0}
-        className={cn(
-          "w-full px-3 py-2 text-sm rounded-md font-medium transition-all",
-          isRunning
-            ? "bg-muted text-muted-foreground cursor-not-allowed"
-            : "bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700",
-        )}
+        disabled={runDisabled}
+        variant={runVariant}
+        className="w-full"
       >
         {isRunning ? "Running..." : "Run Simulation (Ctrl+Enter)"}
-      </button>
+      </Button>
     </div>
   );
 }

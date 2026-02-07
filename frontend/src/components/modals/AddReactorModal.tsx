@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { cn } from "@/lib/cn";
 import { useConfigStore } from "@/stores/configStore";
 import { celsiusToKelvin } from "@/lib/units";
+import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 interface Props {
@@ -122,19 +122,12 @@ export function AddReactorModal({ open, onClose }: Props) {
         </label>
 
         <div className="flex justify-end gap-2 pt-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded-md bg-secondary text-secondary-foreground hover:opacity-80"
-          >
+          <Button onClick={onClose} variant="secondary" size="sm">
             Cancel
-          </button>
-          <button
-            id="add-reactor"
-            onClick={handleSubmit}
-            className="px-3 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:opacity-90"
-          >
+          </Button>
+          <Button id="add-reactor" onClick={handleSubmit} variant="primary" size="sm">
             Add
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import type { SimulationResults } from "@/types/simulation";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { exportConfig } from "@/api/configs";
 import { useConfigStore } from "@/stores/configStore";
+import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 interface Props {
@@ -68,19 +69,12 @@ export function SummaryTab({ results }: Props) {
       )}
 
       <div className="flex gap-2">
-        <button
-          onClick={handleDownloadPy}
-          disabled={!pythonCode}
-          className="px-3 py-1.5 text-sm rounded-md bg-secondary text-secondary-foreground hover:opacity-80 disabled:opacity-50"
-        >
+        <Button onClick={handleDownloadPy} disabled={!pythonCode} variant="secondary" size="sm">
           Download Python
-        </button>
-        <button
-          onClick={handleDownloadYaml}
-          className="px-3 py-1.5 text-sm rounded-md bg-secondary text-secondary-foreground hover:opacity-80"
-        >
+        </Button>
+        <Button onClick={handleDownloadYaml} variant="secondary" size="sm">
           Download YAML
-        </button>
+        </Button>
       </div>
     </div>
   );
