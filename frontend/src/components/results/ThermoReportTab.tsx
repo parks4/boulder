@@ -19,21 +19,21 @@ export function ThermoReportTab({ results }: Props) {
       {Object.entries(reports).map(([rid, report]) => (
         <div key={rid} className="rounded border border-border p-3">
           <h4 className="text-sm font-medium text-foreground mb-2">{rid}</h4>
-          {report.reactor_report && (
+          {report.reactor_report && typeof report.reactor_report === "string" ? (
             <pre className="text-xs text-muted-foreground whitespace-pre-wrap mb-2">
-              {String(report.reactor_report)}
+              {report.reactor_report}
             </pre>
-          )}
-          {report.thermo_report && (
+          ) : null}
+          {report.thermo_report && typeof report.thermo_report === "string" ? (
             <details className="text-xs">
               <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
                 Full thermo report
               </summary>
               <pre className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap">
-                {String(report.thermo_report)}
+                {report.thermo_report}
               </pre>
             </details>
-          )}
+          ) : null}
         </div>
       ))}
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import cytoscape, { type Core, type EventObject } from "cytoscape";
+// @ts-ignore - no types available
 import dagre from "cytoscape-dagre";
 import { useConfigStore } from "@/stores/configStore";
 import { useSelectionStore } from "@/stores/selectionStore";
@@ -66,7 +67,7 @@ export function ReactorGraph() {
   }, [config]);
 
   // Build stylesheet
-  const buildStylesheet = useCallback((): cytoscape.Stylesheet[] => {
+  const buildStylesheet = useCallback((): any => {
     const isDark = theme === "dark";
     return [
       {
@@ -124,7 +125,7 @@ export function ReactorGraph() {
           "border-color": "#0d6efd",
         },
       },
-    ] as cytoscape.Stylesheet[];
+    ];
   }, [theme]);
 
   // Initialize cytoscape
@@ -134,13 +135,13 @@ export function ReactorGraph() {
     const cy = cytoscape({
       container: containerRef.current,
       elements: buildElements(),
-      style: buildStylesheet(),
+      style: buildStylesheet() as any,
       layout: {
         name: "dagre",
         rankDir: "LR",
         nodeSep: 60,
         rankSep: 100,
-      } as unknown as cytoscape.LayoutOptions,
+      } as any,
       minZoom: 0.3,
       maxZoom: 3,
       userPanningEnabled: true,
@@ -183,14 +184,14 @@ export function ReactorGraph() {
       rankSep: 100,
       animate: true,
       animationDuration: 300,
-    } as unknown as cytoscape.LayoutOptions).run();
+    } as any).run();
   }, [buildElements]);
 
   // Update stylesheet when theme changes
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
-    cy.style(buildStylesheet());
+    cy.style(buildStylesheet() as any);
   }, [buildStylesheet]);
 
   return (

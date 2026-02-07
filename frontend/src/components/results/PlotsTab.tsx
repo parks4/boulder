@@ -27,10 +27,11 @@ export function PlotsTab({ data }: Props) {
     () => ({
       paper_bgcolor: "transparent",
       plot_bgcolor: "transparent",
-      font: { color: theme === "dark" ? "#ccc" : "#333" },
-      margin: { t: 30, b: 40, l: 50, r: 10 },
-      height: 250,
-      xaxis: { title: "Time (s)" },
+      font: { color: theme === "dark" ? "#ccc" : "#333", size: 12 },
+      margin: { t: 40, b: 60, l: 70, r: 30 },
+      height: 300,
+      showlegend: true,
+      legend: { x: 1, xanchor: "right" as const, y: 1 },
     }),
     [theme],
   );
@@ -49,9 +50,21 @@ export function PlotsTab({ data }: Props) {
             y: data.reactors_series[rid]?.T?.map((t: number) => t - 273.15) ?? [],
             type: "scatter" as const,
             mode: "lines" as const,
-            name: `${rid} T`,
+            name: rid,
+            line: { width: 2 },
           }))}
-          layout={{ ...layoutDefaults, yaxis: { title: "Temperature (°C)" } }}
+          layout={{
+            ...layoutDefaults,
+            title: { text: "Temperature vs Time", font: { size: 14 } },
+            xaxis: { 
+              title: { text: "Time (s)", font: { size: 12 } },
+              gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
+            },
+            yaxis: { 
+              title: { text: "Temperature (°C)", font: { size: 12 } },
+              gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
+            },
+          }}
           config={{ responsive: true, displayModeBar: false }}
           useResizeHandler
           className="w-full"
@@ -66,9 +79,21 @@ export function PlotsTab({ data }: Props) {
             y: data.reactors_series[rid]?.P ?? [],
             type: "scatter" as const,
             mode: "lines" as const,
-            name: `${rid} P`,
+            name: rid,
+            line: { width: 2 },
           }))}
-          layout={{ ...layoutDefaults, yaxis: { title: "Pressure (Pa)" } }}
+          layout={{
+            ...layoutDefaults,
+            title: { text: "Pressure vs Time", font: { size: 14 } },
+            xaxis: { 
+              title: { text: "Time (s)", font: { size: 12 } },
+              gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
+            },
+            yaxis: { 
+              title: { text: "Pressure (Pa)", font: { size: 12 } },
+              gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
+            },
+          }}
           config={{ responsive: true, displayModeBar: false }}
           useResizeHandler
           className="w-full"

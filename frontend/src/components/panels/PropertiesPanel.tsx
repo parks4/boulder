@@ -140,9 +140,9 @@ export function PropertiesPanel() {
 
       {!isNode && entity && (
         <div className="text-xs text-muted-foreground">
-          <span>Source: {(entity as { source: string }).source}</span>
+          <span>Source: {String("source" in entity ? entity.source : "N/A")}</span>
           {" → "}
-          <span>Target: {(entity as { target: string }).target}</span>
+          <span>Target: {String("target" in entity ? entity.target : "N/A")}</span>
         </div>
       )}
     </div>
