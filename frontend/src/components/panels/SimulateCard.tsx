@@ -1,26 +1,15 @@
-import { useCallback, useState, useEffect } from "react";
+import { useCallback, useState } from "react";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { startSimulation } from "@/api/simulations";
-import { fetchMechanisms } from "@/api/mechanisms";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 export function SimulateCard() {
   const config = useConfigStore((s) => s.config);
   const { isRunning, startSimulation: setStarted } = useSimulationStore();
-  const [mechanisms, setMechanisms] = useState<{ label: string; value: string }[]>([]);
-  const [selectedMechanism, setSelectedMechanism] = useState("gri30.yaml");
   const [simTime, setSimTime] = useState("10");
   const [timeStep, setTimeStep] = useState("1");
-
-  useEffect(() => {
-    fetchMechanisms()
-      .then(setMechanisms)
-      .catch(() => {
-        /* use default */
-      });
-  }, []);
 
   const handleRun = useCallback(async () => {
     if (config.nodes.length === 0) {
@@ -30,7 +19,6 @@ export function SimulateCard() {
     try {
       const resp = await startSimulation(
         config,
-        selectedMechanism,
         parseFloat(simTime),
         parseFloat(timeStep),
       );
@@ -39,7 +27,7 @@ export function SimulateCard() {
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [config, selectedMechanism, simTime, timeStep, setStarted]);
+  }, [config, simTime, timeStep, setStarted]);
 
   const runDisabled = isRunning || config.nodes.length === 0;
   const runVariant = runDisabled ? "muted" : "success";
@@ -49,24 +37,6 @@ export function SimulateCard() {
       <h3 className="font-semibold text-sm text-foreground">Simulate</h3>
 
       <div className="space-y-2">
-        <label className="block text-xs text-muted-foreground">
-          Mechanism
-          <select
-            value={selectedMechanism}
-            onChange={(e) => setSelectedMechanism(e.target.value)}
-            className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
-          >
-            {mechanisms.length === 0 && (
-              <option value="gri30.yaml">gri30.yaml</option>
-            )}
-            {mechanisms.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
         <div className="grid grid-cols-2 gap-2">
           <label className="block text-xs text-muted-foreground">
             Time (s)

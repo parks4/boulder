@@ -8,7 +8,6 @@ interface StartResponse {
 
 export function startSimulation(
   config: NormalizedConfig,
-  mechanism?: string,
   simulationTime?: number,
   timeStep?: number,
 ) {
@@ -16,7 +15,6 @@ export function startSimulation(
     method: "POST",
     body: JSON.stringify({
       config,
-      mechanism,
       simulation_time: simulationTime ?? 10.0,
       time_step: timeStep ?? 1.0,
     }),
