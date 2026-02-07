@@ -68,7 +68,7 @@ export function YAMLEditorModal({ open, onClose }: Props) {
   return (
     <div
       id="config-yaml-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

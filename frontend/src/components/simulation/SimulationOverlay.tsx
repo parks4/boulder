@@ -14,7 +14,7 @@ export function SimulationOverlay() {
   return (
     <div
       id="simulation-overlay"
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-sm"
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/50"
     >
       <div className="bg-card border border-border rounded-lg shadow-lg p-8 text-center space-y-3 max-w-sm">
         <div className="animate-spin rounded-full h-10 w-10 border-4 border-primary border-t-transparent mx-auto" />
