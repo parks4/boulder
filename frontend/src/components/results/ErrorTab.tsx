@@ -3,9 +3,7 @@ interface Props {
 }
 
 export function ErrorTab({ error }: Props) {
-  if (!error) {
-    return <p className="text-sm text-muted-foreground">No errors.</p>;
-  }
+  if (!error) return null;
 
   return (
     <div
