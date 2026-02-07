@@ -12,15 +12,11 @@ export function PlotsTab({ data }: Props) {
   const selectedElement = useSelectionStore((s) => s.selectedElement);
   const theme = useThemeStore((s) => s.theme);
 
-  // Determine which reactors to plot (selected or all)
-  const reactorIds = useMemo(() => {
-    if (
-      selectedElement?.type === "node" &&
-      data.reactors_series[String(selectedElement.data.id)]
-    ) {
-      return [String(selectedElement.data.id)];
-    }
-    return Object.keys(data.reactors_series);
+  // Determine which reactor to plot (selected only)
+  const selectedReactorId = useMemo(() => {
+    if (selectedElement?.type !== "node") return null;
+    const selectedId = String(selectedElement.data.id);
+    return data.reactors_series[selectedId] ? selectedId : null;
   }, [selectedElement, data.reactors_series]);
 
   const layoutDefaults = useMemo(
@@ -40,19 +36,32 @@ export function PlotsTab({ data }: Props) {
     return <p className="text-sm text-muted-foreground">No data yet.</p>;
   }
 
+  if (!selectedReactorId) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Select a reactor node to view plots.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* Temperature plot */}
       <div id="temperature-plot-container">
         <Plot
-          data={reactorIds.map((rid) => ({
-            x: data.times,
-            y: data.reactors_series[rid]?.T?.map((t: number) => t - 273.15) ?? [],
-            type: "scatter" as const,
-            mode: "lines" as const,
-            name: rid,
-            line: { width: 2 },
-          }))}
+          data={[
+            {
+              x: data.times,
+              y:
+                data.reactors_series[selectedReactorId]?.T?.map(
+                  (t: number) => t - 273.15,
+                ) ?? [],
+              type: "scatter" as const,
+              mode: "lines" as const,
+              name: selectedReactorId,
+              line: { width: 2 },
+            },
+          ]}
           layout={{
             ...layoutDefaults,
             title: { text: "Temperature vs Time", font: { size: 14 } },
@@ -74,14 +83,16 @@ export function PlotsTab({ data }: Props) {
       {/* Pressure plot */}
       <div>
         <Plot
-          data={reactorIds.map((rid) => ({
-            x: data.times,
-            y: data.reactors_series[rid]?.P ?? [],
-            type: "scatter" as const,
-            mode: "lines" as const,
-            name: rid,
-            line: { width: 2 },
-          }))}
+          data={[
+            {
+              x: data.times,
+              y: data.reactors_series[selectedReactorId]?.P ?? [],
+              type: "scatter" as const,
+              mode: "lines" as const,
+              name: selectedReactorId,
+              line: { width: 2 },
+            },
+          ]}
           layout={{
             ...layoutDefaults,
             title: { text: "Pressure vs Time", font: { size: 14 } },

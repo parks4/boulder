@@ -11,7 +11,7 @@ TESTING
 - Use test-driven development
 - Fix library code, not tests
 - Run tests in 'boulder' conda env
-- Frontend build runs from `frontend` with `npm run build` (ensure Node.js/npm is available).
+- Frontend build runs from `frontend` with `npm run build`. Always rebuild the frontend after changes.
 - After successful tests, use `make qa` for code quality.
 - Do not implement mock tests, only real tests.
 - Explicit describe in the test docstrings what is asserted in the test.
