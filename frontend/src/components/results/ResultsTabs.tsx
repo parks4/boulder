@@ -33,8 +33,9 @@ export function ResultsTabs() {
   const [pluginData, setPluginData] = useState<Record<string, PluginRenderData>>({});
   const [pluginLoading, setPluginLoading] = useState<Record<string, boolean>>({});
 
-  // Use a ref to track in-flight requests without causing re-renders
+  // Track in-flight requests and what was already fetched (cache key per plugin)
   const loadingRef = useRef<Record<string, boolean>>({});
+  const fetchedKeyRef = useRef<Record<string, string>>({});
 
   // Fetch available plugins when simulation results arrive
   useEffect(() => {
@@ -49,17 +50,32 @@ export function ResultsTabs() {
     if (!error && activeTab === ERROR_TAB_LABEL) setActiveTab("Plots");
   }, [error, activeTab]);
 
-  // Auto-load plugin data when the active tab changes to a plugin tab,
-  // or when the selection / context changes while on a plugin tab.
+  // Load plugin content when a plugin tab is active.
+  // Uses a cache key per plugin so we only re-fetch when something the
+  // plugin actually cares about has changed.
+  const activePlugin = plugins.find((p) => p.label === activeTab);
   useEffect(() => {
-    const plugin = plugins.find((p) => p.label === activeTab);
-    if (!plugin) return;
+    if (!activePlugin) return;
 
-    const pluginId = plugin.id;
+    const pluginId = activePlugin.id;
 
-    // Skip if already loading this plugin
+    // Build a cache key from the inputs this plugin depends on.
+    // Selection-independent plugins ignore selectedElement entirely.
+    const cacheKey = JSON.stringify({
+      results: !!results,  // only care about presence, not reference
+      theme,
+      ...(activePlugin.requires_selection
+        ? { sel: selectedElement }
+        : {}),
+    });
+
+    // Already fetched with the same context — nothing to do.
+    if (fetchedKeyRef.current[pluginId] === cacheKey) return;
+    // Already in-flight — skip duplicate request.
     if (loadingRef.current[pluginId]) return;
+
     loadingRef.current[pluginId] = true;
+    fetchedKeyRef.current[pluginId] = cacheKey;
     setPluginLoading((prev) => ({ ...prev, [pluginId]: true }));
 
     renderPlugin(pluginId, {
@@ -72,6 +88,8 @@ export function ResultsTabs() {
         setPluginData((prev) => ({ ...prev, [pluginId]: data }));
       })
       .catch((err) => {
+        // Clear cache key so a retry is possible
+        fetchedKeyRef.current[pluginId] = "";
         setPluginData((prev) => ({
           ...prev,
           [pluginId]: {
@@ -84,7 +102,8 @@ export function ResultsTabs() {
         loadingRef.current[pluginId] = false;
         setPluginLoading((prev) => ({ ...prev, [pluginId]: false }));
       });
-  }, [activeTab, plugins, selectedElement, results, config, theme]);
+  }); // no dependency array — runs every render, but the cache-key
+      // guard above ensures we only actually fetch when needed.
 
   const data = results ?? progress;
   if (!data && !error) return null;
