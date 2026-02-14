@@ -29,8 +29,8 @@ export function formatNumber(value: number, decimals: number = 2): string {
 /**
  * Format a label with its unit, e.g. "Temperature (K)" or "Pressure (Pa)".
  */
-export function labelWithUnit(label: string, unit: string): string {
-  return `${label} (${unit})`;
+export function labelWithUnit(label: string, unit?: string): string {
+  return unit ? `${label} (${unit})` : label;
 }
 
 /**

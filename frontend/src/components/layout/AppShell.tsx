@@ -69,17 +69,15 @@ export function AppShell() {
       <header className="border-b border-border px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold">Boulder</h1>
-          {fileName && (
-            <Button
-              id="config-file-name-span"
-              onClick={() => setShowYamlEditor(true)}
-              variant="link"
-              size="sm"
-              className="px-0 h-auto"
-            >
-              {fileName}
-            </Button>
-          )}
+          <Button
+            id="config-file-name-span"
+            onClick={() => setShowYamlEditor(true)}
+            variant="link"
+            size="sm"
+            className="px-0 h-auto"
+          >
+            {fileName ?? "untitled.yaml"}
+          </Button>
         </div>
         <Button
           onClick={toggleTheme}

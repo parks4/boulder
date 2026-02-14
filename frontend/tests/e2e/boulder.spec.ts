@@ -31,8 +31,8 @@ async function addReactor(
 test.describe("Boulder E2E Tests", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    // Wait for the app to load (default config)
-    await expect(page.locator("text=Boulder")).toBeVisible();
+    // Wait for the app shell to load.
+    await expect(page.getByRole("heading", { name: "Boulder" })).toBeVisible();
   });
 
   test("1. add reactor flow", async ({ page }) => {
@@ -69,8 +69,8 @@ test.describe("Boulder E2E Tests", () => {
     await expect(page.locator("#add-mfc-modal")).not.toBeVisible();
   });
 
-  test("4. config upload area visible", async ({ page }) => {
-    await expect(page.locator("#config-upload-area")).toBeVisible();
+  test("4. config upload button visible", async ({ page }) => {
+    await expect(page.locator("#config-upload-btn")).toBeVisible();
   });
 
   test("5. YAML editor flow", async ({ page }) => {
@@ -106,7 +106,7 @@ test.describe("Boulder E2E Tests", () => {
     // Without nodes, it should be a no-op (no crash)
     await page.keyboard.press("Control+Enter");
     // App should not crash – verify page is still responsive
-    await expect(page.locator("text=Boulder")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Boulder" })).toBeVisible();
   });
 
   test("9. duplicate reactor ID rejected", async ({ page }) => {

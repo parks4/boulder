@@ -535,7 +535,11 @@ class DualCanteraConverter:
                     f"{cid} = ct.Wall({src}, {tgt}, A=1.0, Q={Q_watts}, name='{cid}')"
                 )
                 wall = ct.Wall(
-                    self.reactors[src], self.reactors[tgt], A=1.0, Q=lambda t: Q_watts, name=cid  # type: ignore[arg-type]
+                    self.reactors[src],
+                    self.reactors[tgt],
+                    A=1.0,
+                    Q=lambda t: Q_watts,
+                    name=cid,  # type: ignore[arg-type]
                 )
                 self.walls[cid] = wall
                 # Note: Walls are not flow devices, so we track them separately
@@ -754,14 +758,16 @@ class DualCanteraConverter:
                             for s in reactor_species_names
                         ]
                         import numpy as np
+
                         X_vec = np.array(X_vec_list)
                     else:
                         # Use default values
                         import numpy as np
+
                         T, P = 300.0, 101325.0
-                        X_vec = np.array([
-                            1.0 if s == "N2" else 0.0 for s in reactor_species_names
-                        ])
+                        X_vec = np.array(
+                            [1.0 if s == "N2" else 0.0 for s in reactor_species_names]
+                        )
 
                 sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
                 reactors_series[reactor_id]["T"].append(T)
@@ -833,7 +839,7 @@ class DualCanteraConverter:
                     verbose=False,
                     mechanism=self.mechanism,
                     if_no_species="ignore",
-            )
+                )
 
             logger.info(
                 f"Sankey generation result: links={type(links)}, nodes={type(nodes)}"
