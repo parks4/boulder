@@ -1,7 +1,7 @@
 """Global singleton for storing live Cantera simulation objects.
 
 This module provides a simple way to store and access live Cantera objects
-without serialization issues in Dash callbacks.
+for plugins and other components that need access to the current simulation state.
 """
 
 from threading import RLock

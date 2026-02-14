@@ -5,15 +5,17 @@ channels:
 dependencies:
 - pip
 - cantera
-- dash
-- dash_cytoscape
-- dash-core-components
-- dash-html-components
-- dash-extensions
-- dash-bootstrap-components
 - numpy
 - pandas
 - plotly
 - pint
 - pydantic
 - python-graphviz   # installs Python package as well as the graphviz & dot commands
+- nodejs            # for the React frontend build
+- pip:
+  - fastapi>=0.110.0
+  - "uvicorn[standard]>=0.27.0"
+  - python-multipart>=0.0.6
+  - PyYAML>=6.0
+  - "ruamel.yaml>=0.18.0"
+  - python-dotenv>=1.0.0

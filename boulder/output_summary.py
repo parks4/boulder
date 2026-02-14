@@ -133,7 +133,7 @@ def _convert_pressure(pascal: float, unit: Optional[str]) -> float:
     if not unit or unit.lower() == "pa":
         return pascal
 
-    ureg = UnitRegistry()
+    ureg: UnitRegistry = UnitRegistry()
     try:
         return ureg.Quantity(pascal, "Pa").to(unit).magnitude
     except Exception:

@@ -6,10 +6,7 @@ custom output panes that can be dynamically added to Boulder's simulation result
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
-
-import dash_bootstrap_components as dbc
-from dash import html
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -63,20 +60,22 @@ class OutputPanePlugin(ABC):
 
     @property
     def supported_element_types(self) -> List[str]:
-        """List of element types this plugin supports (e.g., ['reactor', 'connection'])."""
+        """List of element types this plugin supports."""
         return ["reactor"]
 
     def is_available(self, context: OutputPaneContext) -> bool:
         """Check if this plugin should be available given the current context.
 
-        Args:
-            context: Current context information
+        Parameters
+        ----------
+        context
+            Current context information.
 
         Returns
         -------
-            True if the plugin should be shown, False otherwise
+        bool
+            True if the plugin should be shown, False otherwise.
         """
-        # Default implementation checks if selection is required
         if self.requires_selection:
             if not context.selected_element:
                 return False
@@ -88,17 +87,25 @@ class OutputPanePlugin(ABC):
         return True
 
     @abstractmethod
-    def create_content(
-        self, context: OutputPaneContext
-    ) -> Union[html.Div, dbc.Card, List[Any]]:
-        """Create the content for this output pane.
+    def create_content_data(self, context: OutputPaneContext) -> Dict[str, Any]:
+        """Create JSON-serialisable content data for this output pane.
 
-        Args:
-            context: Current context information
+        The returned dictionary should describe the content to render.
+        Common shapes:
+
+        - ``{"type": "image", "src": "data:image/png;base64,...", "alt": "..."}``
+        - ``{"type": "text", "content": "..."}``
+        - ``{"type": "error", "title": "...", "message": "..."}``
+
+        Parameters
+        ----------
+        context
+            Current context information.
 
         Returns
         -------
-            Dash component(s) to display in the tab
+        dict
+            JSON-serialisable content descriptor.
         """
         pass
 
@@ -107,7 +114,8 @@ class OutputPanePlugin(ABC):
 
         Returns
         -------
-            List of tuples: (outputs, inputs, callback_function)
+        list
+            List of tuples: (outputs, inputs, callback_function).
         """
         return []
 
@@ -116,12 +124,15 @@ class OutputPanePlugin(ABC):
     ) -> Optional[Dict[str, Any]]:
         """Handle simulation data update.
 
-        Args:
-            context: Updated context information
+        Parameters
+        ----------
+        context
+            Updated context information.
 
         Returns
         -------
-            Optional dictionary of updates to apply to components
+        dict or None
+            Optional dictionary of updates to apply to components.
         """
         return None
 
@@ -134,7 +145,6 @@ class OutputPaneRegistry:
 
     def register(self, plugin: OutputPanePlugin) -> None:
         """Register a new output pane plugin."""
-        # Check for duplicate IDs
         existing_ids = {p.plugin_id for p in self.plugins}
         if plugin.plugin_id in existing_ids:
             raise ValueError(f"Plugin with ID '{plugin.plugin_id}' already registered")

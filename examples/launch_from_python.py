@@ -1,6 +1,6 @@
-"""Launch Boulder from Python (as in run.py)."""
+"""Launch Boulder from Python."""
 
-from boulder.app import run_server
+import uvicorn
 
 if __name__ == "__main__":
-    run_server(debug=True)
+    uvicorn.run("boulder.api.main:app", host="0.0.0.0", port=8050, reload=True)

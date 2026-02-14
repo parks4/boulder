@@ -254,6 +254,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# But allow frontend source lib
+!frontend/src/lib/
 parts/
 sdist/
 var/
@@ -473,3 +475,5 @@ $RECYCLE.BIN/
 # End of https://www.toptal.com/developers/gitignore/api/python,jupyternotebooks,vim,visualstudiocode,pycharm,emacs,linux,macos,windows
 boulder/version.py
 mixed_reactor_stream.yaml
+frontend/test-results/*
+frontend/playwright-report/*

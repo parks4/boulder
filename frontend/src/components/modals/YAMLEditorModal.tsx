@@ -1,0 +1,145 @@
+import { useState, useEffect, lazy, Suspense } from "react";
+import { useConfigStore } from "@/stores/configStore";
+import { parseYaml, exportConfig } from "@/api/configs";
+import { Button } from "@/components/ui/Button";
+import { toast } from "sonner";
+
+const MonacoEditor = lazy(() => import("@monaco-editor/react"));
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+export function YAMLEditorModal({ open, onClose }: Props) {
+  const { config, originalYaml, setConfig } = useConfigStore();
+  const [value, setValue] = useState("");
+  const [fetching, setFetching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch YAML when modal opens – depends only on `open` so edits
+  // inside the editor are never overwritten by a re-render.
+  useEffect(() => {
+    if (!open) return;
+    setError(null);
+
+    if (config.nodes.length > 0) {
+      setFetching(true);
+      exportConfig(config)
+        .then((resp) => setValue(resp.yaml))
+        .catch((err) => {
+          // Fallback to the raw YAML stored at load time
+          if (originalYaml) {
+            setValue(originalYaml);
+          } else {
+            setError(
+              `Failed to load YAML: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        })
+        .finally(() => setFetching(false));
+    } else if (originalYaml) {
+      setValue(originalYaml);
+    } else {
+      setError("No configuration available to edit");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  if (!open) return null;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const resp = await parseYaml(value);
+      setConfig(resp.config, undefined, value);
+      toast.success("YAML config updated");
+      onClose();
+    } catch (err) {
+      toast.error(
+        `Invalid YAML: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      id="config-yaml-modal"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-3xl h-[80vh] bg-card border border-border rounded-lg shadow-lg flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h2 className="text-lg font-semibold text-foreground">
+            YAML Configuration Editor
+          </h2>
+          <Button
+            onClick={onClose}
+            variant="ghost"
+            size="icon"
+            className="text-lg"
+            aria-label="Close"
+          >
+            ×
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-hidden">
+          {fetching ? (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              Loading YAML...
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center h-full text-destructive p-4 text-center">
+              {error}
+            </div>
+          ) : (
+            <Suspense
+              fallback={
+                <textarea
+                  id="config-yaml-editor"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  className="w-full h-full p-4 font-mono text-sm bg-background text-foreground resize-none"
+                />
+              }
+            >
+              <MonacoEditor
+                height="100%"
+                language="yaml"
+                value={value}
+                onChange={(v) => setValue(v ?? "")}
+                theme="vs-dark"
+                options={{
+                  minimap: { enabled: false },
+                  wordWrap: "on",
+                  fontSize: 13,
+                }}
+              />
+            </Suspense>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 p-4 border-t border-border">
+          <Button onClick={onClose} variant="secondary" size="sm">
+            Cancel
+          </Button>
+          <Button
+            id="save-config-yaml-edit-btn"
+            onClick={handleSave}
+            disabled={saving || fetching}
+            variant="primary"
+            size="sm"
+          >
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

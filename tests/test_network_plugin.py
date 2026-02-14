@@ -62,75 +62,61 @@ class TestNetworkPlugin:
         )
         assert self.plugin.is_available(context)
 
-    def test_create_content_no_live_simulation(self):
-        """Test content creation when no live simulation is available."""
+    def test_create_content_data_no_live_simulation(self):
+        """Test content creation returns error dict when no live simulation is available."""
         context = OutputPaneContext(
             simulation_data={"results": {"time": [0, 1]}}, config={}, theme="light"
         )
 
-        content = self.plugin.create_content(context)
+        data = self.plugin.create_content_data(context)
 
-        # Should return a div with error message
-        assert hasattr(content, "children")
-        # Check that it contains the expected error message
-        content_str = str(content)
-        assert "Network Not Available" in content_str
+        assert data["type"] == "error"
+        assert "Network Not Available" in data["title"]
 
     @patch("boulder.network_plugin.get_live_simulation")
-    def test_create_content_network_drawing_success(self, mock_get_live_sim):
-        """Test successful network diagram generation."""
-        # Mock live simulation
+    def test_create_content_data_network_drawing_success(self, mock_get_live_sim):
+        """Test successful network diagram generation returns image data."""
         mock_live_sim = MagicMock()
         mock_live_sim.is_available.return_value = True
 
-        # Mock network
         mock_network = MagicMock()
         mock_live_sim.get_network.return_value = mock_network
 
-        # Mock the _generate_network_diagram method to return success
         with patch.object(self.plugin, "_generate_network_diagram") as mock_generate:
             mock_generate.return_value = ("base64encodedimage", None)
-
             mock_get_live_sim.return_value = mock_live_sim
 
             context = OutputPaneContext(
                 simulation_data={"results": {"time": [0, 1]}}, config={}, theme="light"
             )
 
-            content = self.plugin.create_content(context)
+            data = self.plugin.create_content_data(context)
 
-            # Should return a Card with the network diagram
-            assert hasattr(content, "children")
-            content_str = str(content)
-            assert "Reactor Network Structure" in content_str
+            assert data["type"] == "image"
+            assert "base64encodedimage" in data["src"]
 
     @patch("boulder.network_plugin.get_live_simulation")
-    def test_create_content_network_drawing_failure(self, mock_get_live_sim):
-        """Test network diagram generation failure."""
-        # Mock live simulation
+    def test_create_content_data_network_drawing_failure(self, mock_get_live_sim):
+        """Test network diagram generation failure returns error data."""
         mock_live_sim = MagicMock()
         mock_live_sim.is_available.return_value = True
 
-        # Mock network
         mock_network = MagicMock()
         mock_live_sim.get_network.return_value = mock_network
 
-        # Mock the _generate_network_diagram method to return failure
         with patch.object(self.plugin, "_generate_network_diagram") as mock_generate:
             mock_generate.return_value = (None, "Graphviz not available")
-
             mock_get_live_sim.return_value = mock_live_sim
 
             context = OutputPaneContext(
                 simulation_data={"results": {"time": [0, 1]}}, config={}, theme="light"
             )
 
-            content = self.plugin.create_content(context)
+            data = self.plugin.create_content_data(context)
 
-            # Should return a div with error message
-            content_str = str(content)
-            assert "Network Diagram Generation Failed" in content_str
-            assert "Graphviz not available" in content_str
+            assert data["type"] == "error"
+            assert "Network Diagram Generation Failed" in data["title"]
+            assert "Graphviz not available" in data["message"]
 
     def test_generate_network_diagram_no_graphviz(self):
         """Test network diagram generation when graphviz is not available."""

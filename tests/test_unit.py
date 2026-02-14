@@ -5,7 +5,6 @@ import json
 import pytest
 
 from boulder.config import get_initial_config
-from boulder.layout import get_layout
 from boulder.styles import CYTOSCAPE_STYLESHEET
 from boulder.utils import config_to_cyto_elements
 from boulder.validation import validate_normalized_config
@@ -239,64 +238,8 @@ class TestBoulderCallbacks:
 
 
 @pytest.mark.unit
-class TestBoulderLayout:
-    """Unit tests for layout components."""
-
-    def test_layout_generation(self):
-        """Test that layout can be generated with initial config."""
-        layout = get_layout(get_initial_config(), CYTOSCAPE_STYLESHEET)
-
-        assert layout is not None
-        # Layout should be a Dash component
-        assert hasattr(layout, "children")
-
-    def test_layout_contains_required_components(self):
-        """Test that layout contains required UI components."""
-        layout = get_layout(get_initial_config(), CYTOSCAPE_STYLESHEET)
-
-        # Convert layout to string to check for component IDs
-        layout_str = str(layout)
-
-        # Check for key component IDs
-        required_ids = [
-            "reactor-graph",
-            "add-reactor-modal",
-            "open-reactor-modal",
-            "notification-toast",
-            "current-config",
-        ]
-
-        for component_id in required_ids:
-            assert component_id in layout_str, (
-                f"Component {component_id} not found in layout"
-            )
-
-
-@pytest.mark.integration
-class TestBoulderIntegration:
-    """Integration tests for Boulder application."""
-
-    def test_app_creation(self):
-        """Test that the app can be created without errors."""
-        from boulder.app import app
-
-        assert app is not None
-        assert hasattr(app, "layout")
-        assert hasattr(app, "callback_map")
-
-    def test_callbacks_registration(self):
-        """Test that all callbacks can be registered."""
-        from boulder.app import app
-
-        # App should have callbacks registered during import
-        assert len(app.callback_map) > 0
-
-        # Check for specific callback patterns
-        callback_ids = [str(cb) for cb in app.callback_map.keys()]
-
-        # Should have callbacks for reactor management
-        has_reactor_callback = any("add-reactor" in cb_id for cb_id in callback_ids)
-        assert has_reactor_callback, "No add-reactor callback found"
+class TestBoulderStylesheet:
+    """Unit tests for Cytoscape stylesheet configuration."""
 
     def test_stylesheet_loading(self):
         """Test that cytoscape stylesheet loads correctly."""

@@ -91,7 +91,9 @@ def get_plugins() -> BoulderPlugins:
         selected = (
             eps_group(group="boulder.plugins")
             if eps_group
-            else eps.get("boulder.plugins", [])
+            else getattr(eps, "get", lambda x: [])(  # type: ignore[attr-defined]
+                "boulder.plugins"
+            )
         )
         for ep in selected:
             try:
@@ -194,9 +196,9 @@ class DualCanteraConverter:
         self.reactor_meta: Dict[str, Dict[str, Any]] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.walls: Dict[str, Any] = {}
-        self.network: ct.ReactorNet = None
+        self.network: Optional[ct.ReactorNet] = None
         self.code_lines: List[str] = []
-        self.last_network: ct.ReactorNet = (
+        self.last_network: Optional[ct.ReactorNet] = (
             None  # Store the last successfully built network
         )
         # Preserve last config for post-processing (e.g., output summary)
@@ -288,7 +290,6 @@ class DualCanteraConverter:
 
         self.reactors = {}
         self.connections = {}
-        self.network = None
 
         # Create reactors from configuration
         self.code_lines.append("")
@@ -453,7 +454,8 @@ class DualCanteraConverter:
                 python_var = _make_valid_python_identifier(rid)
                 self.code_lines.append(f"{python_var} = ct.Reservoir(gas_default)")
                 self.code_lines.append(f"{python_var}.name = '{rid}'")
-                self.reactors[rid] = ct.Reservoir(gas_for_node)
+                reservoir = ct.Reservoir(gas_for_node)
+                self.reactors[rid] = reservoir  # type: ignore[assignment]
                 self.reactors[rid].name = rid
                 try:
                     self.reactors[rid].group_name = str(
@@ -497,10 +499,9 @@ class DualCanteraConverter:
                     f"{cid_var} = ct.MassFlowController({src_var}, {tgt_var})"
                 )
                 self.code_lines.append(f"{cid_var}.mass_flow_rate = {mfr}")
-                self.connections[cid] = ct.MassFlowController(
-                    self.reactors[src], self.reactors[tgt]
-                )
-                self.connections[cid].mass_flow_rate = mfr
+                mfc = ct.MassFlowController(self.reactors[src], self.reactors[tgt])
+                mfc.mass_flow_rate = mfr  # type: ignore[misc]
+                self.connections[cid] = mfc
             elif typ == "Valve":
                 coeff = float(props.get("valve_coeff", 1.0))
                 self.code_lines.append(f"# Create Valve '{cid}': {src} -> {tgt}")
@@ -512,8 +513,9 @@ class DualCanteraConverter:
                 tgt_var = _make_valid_python_identifier(tgt)
                 self.code_lines.append(f"{cid_var} = ct.Valve({src_var}, {tgt_var})")
                 self.code_lines.append(f"{cid_var}.valve_coeff = {coeff}")
-                self.connections[cid] = ct.Valve(self.reactors[src], self.reactors[tgt])
-                self.connections[cid].valve_coeff = coeff
+                valve = ct.Valve(self.reactors[src], self.reactors[tgt])
+                valve.valve_coeff = coeff  # type: ignore[attr-defined]
+                self.connections[cid] = valve
             elif typ == "Wall":
                 # Handle walls as energy connections (e.g., torch power or losses)
                 # After validation, electric_power_kW is converted to kilowatts if it had units
@@ -533,7 +535,11 @@ class DualCanteraConverter:
                     f"{cid} = ct.Wall({src}, {tgt}, A=1.0, Q={Q_watts}, name='{cid}')"
                 )
                 wall = ct.Wall(
-                    self.reactors[src], self.reactors[tgt], A=1.0, Q=Q_watts, name=cid
+                    self.reactors[src],
+                    self.reactors[tgt],
+                    A=1.0,
+                    Q=lambda t: Q_watts,
+                    name=cid,  # type: ignore[arg-type]
                 )
                 self.walls[cid] = wall
                 # Note: Walls are not flow devices, so we track them separately
@@ -747,16 +753,21 @@ class DualCanteraConverter:
                     if len(reactors_series[reactor_id]["T"]) > 0:
                         T = reactors_series[reactor_id]["T"][-1]
                         P = reactors_series[reactor_id]["P"][-1]
-                        X_vec = [
+                        X_vec_list = [
                             reactors_series[reactor_id]["X"][s][-1]
                             for s in reactor_species_names
                         ]
+                        import numpy as np
+
+                        X_vec = np.array(X_vec_list)
                     else:
                         # Use default values
+                        import numpy as np
+
                         T, P = 300.0, 101325.0
-                        X_vec = [
-                            1.0 if s == "N2" else 0.0 for s in reactor_species_names
-                        ]
+                        X_vec = np.array(
+                            [1.0 if s == "N2" else 0.0 for s in reactor_species_names]
+                        )
 
                 sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
                 reactors_series[reactor_id]["T"].append(T)
@@ -867,7 +878,7 @@ class DualCanteraConverter:
             if isinstance(output_block, dict):
                 summary_builder_id = output_block.get("summary_builder")
 
-            if summary_builder_id:
+            if summary_builder_id and self.last_network:
                 # Use custom summary builder
                 from .summary_builder import build_summary_from_simulation
 
@@ -883,7 +894,7 @@ class DualCanteraConverter:
                 items = parse_output_block(output_block)
                 summary = evaluate_output_items(items, results)
                 results["summary"] = summary
-            else:
+            elif self.last_network:
                 # Use default summary builder if no output configuration
                 from .summary_builder import build_summary_from_simulation
 

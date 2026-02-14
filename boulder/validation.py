@@ -129,7 +129,7 @@ class NormalizedConfigModel(BaseModel):
 
         This uses dynamic unit detection based on property names and pint's capabilities.
         """
-        unit_registry = UnitRegistry()
+        unit_registry: UnitRegistry = UnitRegistry()
 
         # Define preferred target units for common physical quantities
         # This maps dimensionalities to preferred units, not property names to units
@@ -182,7 +182,7 @@ class NormalizedConfigModel(BaseModel):
 
             try:
                 # Parse the value to determine its dimensionality
-                qty = unit_registry.Quantity(val)
+                qty: Any = unit_registry.Quantity(val)
                 dimensionality_str = str(qty.dimensionality)
 
                 # Look up preferred unit for this dimensionality
@@ -238,7 +238,7 @@ class NormalizedConfigModel(BaseModel):
                                     return value - 273.15
 
                     # Use pint for all other conversions
-                    qty = unit_registry.Quantity(val)
+                    qty: Any = unit_registry.Quantity(val)
                     return qty.to(target_unit).magnitude
 
                 except Exception as e:

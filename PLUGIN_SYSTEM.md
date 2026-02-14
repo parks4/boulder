@@ -50,9 +50,9 @@ class MyPlugin(OutputPanePlugin):
         # Check if plugin should be shown for current context
         return context.selected_element is not None
 
-    def create_content(self, context: OutputPaneContext):
-        # Return Dash components for the tab content
-        return html.Div("My custom analysis content")
+    def create_content_data(self, context: OutputPaneContext):
+        # Return JSON-serialisable data for the tab content
+        return {"type": "text", "content": "My custom analysis content"}
 ```
 
 ### 2. Register the Plugin
