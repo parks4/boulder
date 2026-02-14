@@ -254,6 +254,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# But allow frontend source lib
+!frontend/src/lib/
 parts/
 sdist/
 var/
