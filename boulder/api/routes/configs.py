@@ -136,6 +136,8 @@ async def upload_config(file: UploadFile = File(...)) -> Dict[str, Any]:
             detail=f"Unsupported file type: {ext}. Use .yaml, .yml, or .py",
         )
 
+    tmp_py = None
+    yaml_path = None
     try:
         contents = await file.read()
         decoded = contents.decode("utf-8")
@@ -144,12 +146,26 @@ async def upload_config(file: UploadFile = File(...)) -> Dict[str, Any]:
             # Save to temp file, convert via sim2stone, then load YAML
             from ...parser import convert_py_to_yaml
 
-            tmp_py = os.path.join(tempfile.gettempdir(), file.filename)
-            with open(tmp_py, "w", encoding="utf-8") as f:
+            # Securely create temp file with suffix to prevent path traversal
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".py",
+                encoding="utf-8",
+                delete=False
+            ) as f:
+                tmp_py = f.name
                 f.write(decoded)
-            yaml_path = convert_py_to_yaml(tmp_py)
-            with open(yaml_path, "r", encoding="utf-8") as f:
-                yaml_str = f.read()
+            
+            try:
+                yaml_path = convert_py_to_yaml(tmp_py)
+                with open(yaml_path, "r", encoding="utf-8") as f:
+                    yaml_str = f.read()
+            finally:
+                # Clean up temporary files
+                if tmp_py and os.path.exists(tmp_py):
+                    os.unlink(tmp_py)
+                if yaml_path and os.path.exists(yaml_path):
+                    os.unlink(yaml_path)
         else:
             yaml_str = decoded
 
