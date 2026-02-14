@@ -33,8 +33,14 @@ _simulations: Dict[str, tuple[SimulationWorker, float]] = {}
 class StartSimulationRequest(BaseModel):
     config: Dict[str, Any]
     mechanism: Optional[str] = None
-    simulation_time: float = 10.0
-    time_step: float = 1.0
+    simulation_time: Optional[float] = None
+    time_step: Optional[float] = None
+
+
+def _require_positive(value: float, name: str) -> None:
+    """Validate that a numeric simulation parameter is strictly positive."""
+    if value <= 0:
+        raise HTTPException(status_code=422, detail=f"{name} must be > 0")
 
 
 # ---------------------------------------------------------------------------
@@ -72,12 +78,17 @@ async def start_simulation(
 
         # Extract simulation parameters
         settings = config.get("settings", {}) or {}
-        simulation_time = body.simulation_time or float(
+        settings_simulation_time = float(
             settings.get("end_time", settings.get("max_time", 10.0))
         )
-        time_step = body.time_step or float(
-            settings.get("dt", settings.get("time_step", 1.0))
+        settings_time_step = float(settings.get("dt", settings.get("time_step", 1.0)))
+        simulation_time = (
+            body.simulation_time
+            if body.simulation_time is not None
+            else settings_simulation_time
         )
+        time_step = body.time_step if body.time_step is not None else settings_time_step
+        _require_positive(time_step, "time_step")
 
         # Create a fresh worker for this simulation
         worker = SimulationWorker()
@@ -86,6 +97,8 @@ async def start_simulation(
 
         return {"simulation_id": sim_id}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

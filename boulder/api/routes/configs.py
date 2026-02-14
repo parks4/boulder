@@ -10,7 +10,7 @@ import os
 import tempfile
 from typing import Any, Dict
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from ...config import (
@@ -60,20 +60,20 @@ async def get_default_config() -> Dict[str, Any]:
 
 
 @router.get("/preloaded")
-async def get_preloaded_config() -> Dict[str, Any]:
+async def get_preloaded_config(request: Request) -> Dict[str, Any]:
     """Return the preloaded configuration if one was specified via CLI.
 
     If no configuration was preloaded (no BOULDER_CONFIG_PATH env var),
     returns an empty response with preloaded: false.
     """
-    from ...api.main import app
-
-    if app.state.preloaded_config is not None:
+    preloaded_config = getattr(request.app.state, "preloaded_config", None)
+    if preloaded_config is not None:
         return {
             "preloaded": True,
-            "config": app.state.preloaded_config,
-            "yaml": app.state.preloaded_yaml or "",
-            "filename": app.state.preloaded_filename or "config.yaml",
+            "config": preloaded_config,
+            "yaml": getattr(request.app.state, "preloaded_yaml", None) or "",
+            "filename": getattr(request.app.state, "preloaded_filename", None)
+            or "config.yaml",
         }
     return {"preloaded": False}
 

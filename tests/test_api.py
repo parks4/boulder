@@ -13,7 +13,9 @@ pytest.importorskip("fastapi")
 
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 
+from boulder.api.main import app as module_app  # noqa: E402
 from boulder.api.main import create_app  # noqa: E402
+from boulder.api.routes import simulations as simulation_routes  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -57,6 +59,35 @@ class TestConfigRoutes:
             assert "yaml" in data
             assert "nodes" in data["config"]
             assert isinstance(data["config"]["nodes"], list)
+
+    @pytest.mark.asyncio
+    async def test_get_preloaded_uses_request_app_state(self):
+        """The /preloaded route must return values from the active request app state."""
+        app = create_app()
+        app.state.preloaded_config = {
+            "nodes": [{"id": "from-request-app"}],
+            "connections": [],
+        }
+        app.state.preloaded_yaml = "nodes: []"
+        app.state.preloaded_filename = "request-app.yaml"
+
+        module_app.state.preloaded_config = {
+            "nodes": [{"id": "from-module-app"}],
+            "connections": [],
+        }
+        module_app.state.preloaded_yaml = "nodes: [{id: wrong}]"
+        module_app.state.preloaded_filename = "module-app.yaml"
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get("/api/configs/preloaded")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["preloaded"] is True
+        assert data["config"]["nodes"][0]["id"] == "from-request-app"
+        assert data["yaml"] == "nodes: []"
+        assert data["filename"] == "request-app.yaml"
 
     @pytest.mark.asyncio
     async def test_validate_config_valid(self):
@@ -247,3 +278,117 @@ class TestPluginRoutes:
                 json={"theme": "light"},
             )
             assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Simulation routes
+# ---------------------------------------------------------------------------
+
+
+class TestSimulationRoutes:
+    @pytest.mark.asyncio
+    async def test_start_simulation_uses_settings_when_fields_omitted(
+        self, monkeypatch
+    ):
+        """Start route must use config settings when time fields are omitted."""
+        simulation_routes._simulations.clear()
+        captured: dict[str, float] = {}
+
+        class DummyConverter:
+            def __init__(self, mechanism: str):
+                self.mechanism = mechanism
+
+        class DummyWorker:
+            def start_simulation(self, converter, config, simulation_time, time_step):
+                captured["simulation_time"] = simulation_time
+                captured["time_step"] = time_step
+
+        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
+        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
+
+        config = {
+            "nodes": [],
+            "connections": [],
+            "settings": {"end_time": 12.5, "dt": 0.25},
+        }
+        async with _make_client() as client:
+            resp = await client.post("/api/simulations", json={"config": config})
+
+        assert resp.status_code == 200
+        assert captured["simulation_time"] == 12.5
+        assert captured["time_step"] == 0.25
+
+        simulation_routes._simulations.clear()
+
+    @pytest.mark.asyncio
+    async def test_start_simulation_prefers_explicit_request_values(self, monkeypatch):
+        """Start route must prefer explicit request values over config settings."""
+        simulation_routes._simulations.clear()
+        captured: dict[str, float] = {}
+
+        class DummyConverter:
+            def __init__(self, mechanism: str):
+                self.mechanism = mechanism
+
+        class DummyWorker:
+            def start_simulation(self, converter, config, simulation_time, time_step):
+                captured["simulation_time"] = simulation_time
+                captured["time_step"] = time_step
+
+        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
+        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
+
+        config = {
+            "nodes": [],
+            "connections": [],
+            "settings": {"end_time": 99.0, "dt": 9.0},
+        }
+        payload = {
+            "config": config,
+            "simulation_time": 3.0,
+            "time_step": 0.05,
+        }
+        async with _make_client() as client:
+            resp = await client.post("/api/simulations", json=payload)
+
+        assert resp.status_code == 200
+        assert captured["simulation_time"] == 3.0
+        assert captured["time_step"] == 0.05
+
+        simulation_routes._simulations.clear()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("invalid_time_step", [0.0, -1.0])
+    async def test_start_simulation_rejects_non_positive_time_step(
+        self, monkeypatch, invalid_time_step: float
+    ):
+        """Start route must reject zero/negative time_step to avoid non-progress loops."""
+        simulation_routes._simulations.clear()
+        worker_called = False
+
+        class DummyConverter:
+            def __init__(self, mechanism: str):
+                self.mechanism = mechanism
+
+        class DummyWorker:
+            def start_simulation(self, converter, config, simulation_time, time_step):
+                nonlocal worker_called
+                worker_called = True
+
+        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
+        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
+
+        config = {
+            "nodes": [],
+            "connections": [],
+            "settings": {"end_time": 10.0, "dt": 1.0},
+        }
+        payload = {"config": config, "time_step": invalid_time_step}
+
+        async with _make_client() as client:
+            resp = await client.post("/api/simulations", json=payload)
+
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "time_step must be > 0"
+        assert worker_called is False
+        simulation_routes._simulations.clear()
