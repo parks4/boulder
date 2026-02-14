@@ -271,9 +271,13 @@ def generate_sankey_input_from_sim(
             target_reactor = outlet.downstream
             j = node_order.index(target_reactor.name)
             if target_reactor:
-                flow_rate = float(outlet.mass_flow_rate)  # kg/s0 - convert to Python float
+                flow_rate = float(
+                    outlet.mass_flow_rate
+                )  # kg/s0 - convert to Python float
                 if flow_type == "enthalpy":
-                    upstream_enthalpy = float(outlet.upstream.thermo.enthalpy_mass)  # J/kg
+                    upstream_enthalpy = float(
+                        outlet.upstream.thermo.enthalpy_mass
+                    )  # J/kg
                     energy_rate = flow_rate * upstream_enthalpy  # J/s = W
                     assert energy_rate > 0
                     links["source"] += [i]

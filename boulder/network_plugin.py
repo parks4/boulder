@@ -48,9 +48,7 @@ class NetworkPlugin(OutputPanePlugin):
             and live_sim.get_network() is not None
         )
 
-    def create_content_data(
-        self, context: OutputPaneContext
-    ) -> Dict[str, Any]:
+    def create_content_data(self, context: OutputPaneContext) -> Dict[str, Any]:
         """Create JSON-serialisable content for the Network output pane."""
         live_sim = get_live_simulation()
 

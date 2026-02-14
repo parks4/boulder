@@ -87,9 +87,7 @@ class OutputPanePlugin(ABC):
         return True
 
     @abstractmethod
-    def create_content_data(
-        self, context: OutputPaneContext
-    ) -> Dict[str, Any]:
+    def create_content_data(self, context: OutputPaneContext) -> Dict[str, Any]:
         """Create JSON-serialisable content data for this output pane.
 
         The returned dictionary should describe the content to render.

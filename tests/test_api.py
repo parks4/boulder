@@ -15,10 +15,10 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 from boulder.api.main import create_app  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
 
 def _make_client():
     """Return an AsyncClient bound to a fresh FastAPI app."""
@@ -203,9 +203,7 @@ class TestGraphRoutes:
             ],
         }
         async with _make_client() as client:
-            resp = await client.post(
-                "/api/graph/elements", json={"config": config}
-            )
+            resp = await client.post("/api/graph/elements", json={"config": config})
             assert resp.status_code == 200
             elements = resp.json()
             # 2 nodes + 1 edge = 3 elements

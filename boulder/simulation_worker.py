@@ -197,6 +197,7 @@ class SimulationWorker:
             # Update the live simulation singleton so plugins
             # (e.g. NetworkPlugin) can access the network
             from .live_simulation import update_live_simulation
+
             update_live_simulation(network, converter.reactors, converter.mechanism)
 
             logger.info(

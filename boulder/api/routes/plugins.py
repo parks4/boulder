@@ -12,6 +12,7 @@ router = APIRouter()
 
 class PluginRenderRequest(BaseModel):
     """Context sent to a plugin for rendering."""
+
     simulation_data: Optional[Dict[str, Any]] = None
     selected_element: Optional[Dict[str, Any]] = None
     config: Optional[Dict[str, Any]] = None
@@ -27,15 +28,17 @@ async def list_plugins() -> List[Dict[str, Any]]:
         registry = get_output_pane_registry()
         result = []
         for plugin in registry.plugins:
-            result.append({
-                "id": plugin.plugin_id,
-                "label": plugin.tab_label,
-                "icon": getattr(plugin, "tab_icon", None),
-                "requires_selection": getattr(plugin, "requires_selection", False),
-                "supported_element_types": getattr(
-                    plugin, "supported_element_types", ["reactor"]
-                ),
-            })
+            result.append(
+                {
+                    "id": plugin.plugin_id,
+                    "label": plugin.tab_label,
+                    "icon": getattr(plugin, "tab_icon", None),
+                    "requires_selection": getattr(plugin, "requires_selection", False),
+                    "supported_element_types": getattr(
+                        plugin, "supported_element_types", ["reactor"]
+                    ),
+                }
+            )
         return result
     except ImportError:
         return []
@@ -74,7 +77,10 @@ async def render_plugin(
         )
 
         if not plugin.is_available(context):
-            return {"available": False, "message": "Plugin not available for current context"}
+            return {
+                "available": False,
+                "message": "Plugin not available for current context",
+            }
 
         data = plugin.create_content_data(context)
         return {"available": True, "data": data}

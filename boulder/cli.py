@@ -273,8 +273,9 @@ def main(argv: list[str] | None = None) -> None:
             try:
                 # Determine npm command based on platform
                 import platform
+
                 npm_cmd = "npm.cmd" if platform.system() == "Windows" else "npm"
-                
+
                 # Check if node_modules exists
                 if not (frontend_dir / "node_modules").exists():
                     print("📦 Installing frontend dependencies (npm install)...")
@@ -302,10 +303,11 @@ def main(argv: list[str] | None = None) -> None:
         frontend_thread.start()
 
         print("⚙️  Starting backend server...")
-        
+
         # Open browser to Vite dev server after waiting for it to be ready
         if not args.no_open:
             import time
+
             def open_browser_delayed():
                 # Wait longer for Vite to fully start
                 print("⏳ Waiting for Vite dev server to be ready...")
@@ -316,10 +318,10 @@ def main(argv: list[str] | None = None) -> None:
                     webbrowser.open(vite_url)
                 except Exception:
                     pass
-            
+
             browser_thread = threading.Thread(target=open_browser_delayed, daemon=True)
             browser_thread.start()
-        
+
         # Continue to start backend below (disable opening backend URL)
         args.no_open = True
 

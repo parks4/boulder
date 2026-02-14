@@ -29,6 +29,7 @@ _simulations: Dict[str, tuple[SimulationWorker, float]] = {}
 # Request / response schemas
 # ---------------------------------------------------------------------------
 
+
 class StartSimulationRequest(BaseModel):
     config: Dict[str, Any]
     mechanism: Optional[str] = None
@@ -39,6 +40,7 @@ class StartSimulationRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.post("")
 async def start_simulation(
@@ -177,7 +179,9 @@ async def stop_simulation(sim_id: str) -> Dict[str, Any]:
 
 
 @router.post("/cleanup")
-async def cleanup_completed_simulations(max_age_seconds: Optional[int] = None) -> Dict[str, Any]:
+async def cleanup_completed_simulations(
+    max_age_seconds: Optional[int] = None,
+) -> Dict[str, Any]:
     """Clean up completed or errored simulations from memory.
 
     Parameters

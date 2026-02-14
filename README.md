@@ -68,6 +68,7 @@ boulder --dev
 ```
 
 This will:
+
 - Start the FastAPI backend on port 8050
 - Automatically start the Vite dev server (frontend) with hot-reload
 - Install frontend dependencies if needed (npm install)

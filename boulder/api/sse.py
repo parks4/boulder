@@ -13,7 +13,7 @@ async def simulation_event_stream(
     worker: SimulationWorker,
     poll_interval: float = 0.5,
 ) -> AsyncGenerator[str, None]:
-    """Async generator that yields SSE-formatted simulation progress events.
+    r"""Async generator that yields SSE-formatted simulation progress events.
 
     Polls the worker every ``poll_interval`` seconds and yields progress
     snapshots until the simulation completes or errors out.

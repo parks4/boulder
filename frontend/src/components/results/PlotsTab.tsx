@@ -65,11 +65,11 @@ export function PlotsTab({ data }: Props) {
           layout={{
             ...layoutDefaults,
             title: { text: "Temperature vs Time", font: { size: 14 } },
-            xaxis: { 
+            xaxis: {
               title: { text: "Time (s)", font: { size: 12 } },
               gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
             },
-            yaxis: { 
+            yaxis: {
               title: { text: "Temperature (°C)", font: { size: 12 } },
               gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
             },
@@ -96,11 +96,11 @@ export function PlotsTab({ data }: Props) {
           layout={{
             ...layoutDefaults,
             title: { text: "Pressure vs Time", font: { size: 14 } },
-            xaxis: { 
+            xaxis: {
               title: { text: "Time (s)", font: { size: 12 } },
               gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
             },
-            yaxis: { 
+            yaxis: {
               title: { text: "Pressure (Pa)", font: { size: 12 } },
               gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
             },

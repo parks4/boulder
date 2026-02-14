@@ -6,12 +6,11 @@ reactor network configurations in the STONE YAML format.
 
 from __future__ import annotations
 
-import base64
 import os
 import tempfile
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from ...config import (
@@ -30,6 +29,7 @@ router = APIRouter()
 # Request / response schemas
 # ---------------------------------------------------------------------------
 
+
 class YAMLParseRequest(BaseModel):
     yaml: str
 
@@ -46,6 +46,7 @@ class ConfigValidateRequest(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/default")
 async def get_default_config() -> Dict[str, Any]:
     """Return the default reactor network configuration with original YAML."""
@@ -61,13 +62,12 @@ async def get_default_config() -> Dict[str, Any]:
 @router.get("/preloaded")
 async def get_preloaded_config() -> Dict[str, Any]:
     """Return the preloaded configuration if one was specified via CLI.
-    
+
     If no configuration was preloaded (no BOULDER_CONFIG_PATH env var),
     returns an empty response with preloaded: false.
     """
-    from fastapi import Request
     from ...api.main import app
-    
+
     if app.state.preloaded_config is not None:
         return {
             "preloaded": True,
@@ -148,14 +148,11 @@ async def upload_config(file: UploadFile = File(...)) -> Dict[str, Any]:
 
             # Securely create temp file with suffix to prevent path traversal
             with tempfile.NamedTemporaryFile(
-                mode="w",
-                suffix=".py",
-                encoding="utf-8",
-                delete=False
+                mode="w", suffix=".py", encoding="utf-8", delete=False
             ) as f:
                 tmp_py = f.name
                 f.write(decoded)
-            
+
             try:
                 yaml_path = convert_py_to_yaml(tmp_py)
                 with open(yaml_path, "r", encoding="utf-8") as f:
@@ -187,6 +184,7 @@ async def upload_config(file: UploadFile = File(...)) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_plain_dict(data: Any) -> Any:
     """Recursively convert ruamel CommentedMap/Seq to plain Python dicts/lists."""
