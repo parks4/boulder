@@ -45,8 +45,8 @@ def test_cli_main_import_dependencies():
     """
     # Test that we can import the CLI module and its dependencies
     try:
-        # Test that we can import the app module that was failing
-        from boulder import app
+        # Test that we can import the FastAPI app module
+        from boulder.api.main import app
         from boulder.cli import main
 
         # If we get here, the imports worked

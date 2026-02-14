@@ -64,7 +64,6 @@ filterwarnings = [
 ]
 # Test markers
 markers = [
-  "e2e: marks tests as end-to-end tests requiring Playwright (deselect with '-m \"not e2e\"')",
   "slow: marks tests as slow (deselect with '-m \"not slow\"')",
   "integration: marks tests as integration tests",
   "unit: marks tests as unit tests"
