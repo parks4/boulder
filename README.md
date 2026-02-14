@@ -56,11 +56,23 @@ Optional flags:
 boulder --host 0.0.0.0 --port 8050 --debug  # customize host/port, enable auto-reload
 boulder some_file.yaml --no-open             # do not auto-open the browser
 boulder config.yaml --headless --download output.py  # headless code generation
+boulder --dev                                # run in development mode with Vite dev server
 ```
 
 ### Development Mode
 
-Run the FastAPI backend and Vite dev server simultaneously:
+You can start both the backend and frontend development server with a single command:
+
+```bash
+boulder --dev
+```
+
+This will:
+- Start the FastAPI backend on port 8050
+- Automatically start the Vite dev server (frontend) with hot-reload
+- Install frontend dependencies if needed (npm install)
+
+Alternatively, run them separately in two terminals:
 
 ```bash
 # Terminal 1: Backend API

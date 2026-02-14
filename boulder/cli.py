@@ -3,6 +3,7 @@
 Usage:
     boulder                  # Launches the server and opens the interface
     boulder path/to/file.yaml  # Launches with the YAML preloaded
+    boulder --dev            # Launches in development mode with Vite dev server
 """
 
 from __future__ import annotations
@@ -87,6 +88,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--download",
         metavar="OUTPUT_FILE",
         help="Generate Python code from YAML and save to file (requires --headless)",
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Run the development frontend (starts both backend and Vite dev server)",
     )
     return parser.parse_args(argv)
 
@@ -244,6 +250,78 @@ def run_headless_mode(
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+
+    # Handle --dev mode: start both backend and frontend dev server
+    if args.dev:
+        import subprocess
+        import threading
+        from pathlib import Path
+
+        # Find the frontend directory (relative to boulder package)
+        boulder_root = Path(__file__).parent.parent
+        frontend_dir = boulder_root / "frontend"
+
+        if not frontend_dir.exists():
+            print(f"Error: Frontend directory not found at {frontend_dir}")
+            sys.exit(1)
+
+        print("🚀 Starting Boulder in development mode...")
+        print(f"📁 Frontend directory: {frontend_dir}")
+
+        # Start frontend dev server in a separate thread
+        def run_frontend():
+            try:
+                # Determine npm command based on platform
+                import platform
+                npm_cmd = "npm.cmd" if platform.system() == "Windows" else "npm"
+                
+                # Check if node_modules exists
+                if not (frontend_dir / "node_modules").exists():
+                    print("📦 Installing frontend dependencies (npm install)...")
+                    subprocess.run(
+                        [npm_cmd, "install"],
+                        cwd=frontend_dir,
+                        check=True,
+                        shell=True,
+                    )
+
+                print("🎨 Starting Vite dev server...")
+                subprocess.run(
+                    [npm_cmd, "run", "dev"],
+                    cwd=frontend_dir,
+                    check=True,
+                    shell=True,
+                )
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Error starting frontend dev server: {e}")
+            except FileNotFoundError:
+                print("❌ Error: npm not found. Please install Node.js and npm.")
+                print("   Download from: https://nodejs.org/")
+
+        frontend_thread = threading.Thread(target=run_frontend, daemon=True)
+        frontend_thread.start()
+
+        print("⚙️  Starting backend server...")
+        
+        # Open browser to Vite dev server after waiting for it to be ready
+        if not args.no_open:
+            import time
+            def open_browser_delayed():
+                # Wait longer for Vite to fully start
+                print("⏳ Waiting for Vite dev server to be ready...")
+                time.sleep(5)  # Increased delay for Vite to fully start
+                vite_url = "http://localhost:5173"
+                print(f"🌐 Opening browser at {vite_url}")
+                try:
+                    webbrowser.open(vite_url)
+                except Exception:
+                    pass
+            
+            browser_thread = threading.Thread(target=open_browser_delayed, daemon=True)
+            browser_thread.start()
+        
+        # Continue to start backend below (disable opening backend URL)
+        args.no_open = True
 
     # Handle .py files: convert first, then continue to launch GUI
     if args.config and args.config.lower().endswith(".py") and not args.headless:
