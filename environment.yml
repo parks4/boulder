@@ -12,6 +12,7 @@ dependencies:
 - pydantic
 - python-graphviz   # installs Python package as well as the graphviz & dot commands
 - nodejs            # for the React frontend build
+- npm               # ensure npm available (e.g. for frontend build)
 - pip:
   - fastapi>=0.110.0
   - "uvicorn[standard]>=0.27.0"

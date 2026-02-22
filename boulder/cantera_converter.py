@@ -208,6 +208,8 @@ class DualCanteraConverter:
         )
         # Preserve last config for post-processing (e.g., output summary)
         self._last_config: Optional[Dict[str, Any]] = None
+        # Path to config file for --download script (set by CLI in headless mode)
+        self._download_config_path: Optional[str] = None
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -609,6 +611,27 @@ class DualCanteraConverter:
             plan = build_stage_graph(config)
             trajectory = solve_staged(self, plan, config)
             self._staged_trajectory = trajectory
+            # Generate downloadable script: load from YAML and build network
+            download_path = getattr(
+                self, "_download_config_path", None
+            ) or "config.yaml"
+            self.code_lines = [
+                "# Load configuration from YAML and build Cantera network",
+                "import cantera as ct",
+                "from boulder.config import (",
+                "    load_config_file_with_py_support,",
+                "    normalize_config,",
+                "    validate_config,",
+                ")",
+                "from boulder.cantera_converter import DualCanteraConverter",
+                "",
+                f"config_path = {repr(download_path)}",
+                "config, _ = load_config_file_with_py_support(config_path, False)",
+                "config = validate_config(normalize_config(config))",
+                "",
+                "converter = DualCanteraConverter()",
+                "network = converter.build_network(config)",
+            ]
             # viz_network is already set on self.network by build_viz_network
             return self.network  # type: ignore[return-value]
 
