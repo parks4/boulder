@@ -1054,6 +1054,7 @@ class DualCanteraConverter:
                 "T": [],
                 "P": [],
                 "X": {s: [] for s in reactor_gas.species_names},
+                "Y": {s: [] for s in reactor_gas.species_names},
             }
 
         # Simulation loop with streaming updates
@@ -1083,13 +1084,21 @@ class DualCanteraConverter:
                             T = float(reactor.phase.T)
                             P = float(reactor.phase.P)
                             X_vec = reactor.phase.X
+                            Y_vec = reactor.phase.Y
                             if not (
                                 math.isfinite(T)
                                 and math.isfinite(P)
                                 and all(math.isfinite(float(x)) for x in X_vec)
+                                and all(math.isfinite(float(y)) for y in Y_vec)
                             ):
                                 T, P = 300.0, 101325.0
                                 X_vec = np.array(
+                                    [
+                                        1.0 if s == "N2" else 0.0
+                                        for s in reactor_species_names
+                                    ]
+                                )
+                                Y_vec = np.array(
                                     [
                                         1.0 if s == "N2" else 0.0
                                         for s in reactor_species_names
@@ -1103,12 +1112,22 @@ class DualCanteraConverter:
                                     for s in reactor_species_names
                                 ]
                             )
+                            Y_vec = np.array(
+                                [
+                                    1.0 if s == "N2" else 0.0
+                                    for s in reactor_species_names
+                                ]
+                            )
                         sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
                         reactors_series[reactor_id]["T"].append(T)
                         reactors_series[reactor_id]["P"].append(P)
                         for species_name, x_value in zip(reactor_species_names, X_vec):
                             reactors_series[reactor_id]["X"][species_name].append(
                                 float(x_value)
+                            )
+                        for species_name, y_value in zip(reactor_species_names, Y_vec):
+                            reactors_series[reactor_id]["Y"][species_name].append(
+                                float(y_value)
                             )
                     if progress_callback:
                         progress_callback(
@@ -1119,6 +1138,7 @@ class DualCanteraConverter:
                                         "T": v["T"].copy(),
                                         "P": v["P"].copy(),
                                         "X": {s: v["X"][s].copy() for s in v["X"]},
+                                        "Y": {s: v["Y"][s].copy() for s in v["Y"]},
                                     }
                                     for k, v in reactors_series.items()
                                 },
@@ -1140,6 +1160,7 @@ class DualCanteraConverter:
                                     "T": v["T"].copy(),
                                     "P": v["P"].copy(),
                                     "X": {s: v["X"][s].copy() for s in v["X"]},
+                                    "Y": {s: v["Y"][s].copy() for s in v["Y"]},
                                 }
                                 for k, v in reactors_series.items()
                             },
@@ -1158,6 +1179,7 @@ class DualCanteraConverter:
                 T = reactor.phase.T
                 P = reactor.phase.P
                 X_vec = reactor.phase.X
+                Y_vec = reactor.phase.Y
 
                 # Get the correct gas solution for this reactor's mechanism
                 reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
@@ -1170,6 +1192,7 @@ class DualCanteraConverter:
                     math.isfinite(T)
                     and math.isfinite(P)
                     and all(math.isfinite(float(x)) for x in X_vec)
+                    and all(math.isfinite(float(y)) for y in Y_vec)
                 ):
                     last_error_message = (
                         "Non-finite state detected (T/P/X) — using previous values"
@@ -1189,12 +1212,20 @@ class DualCanteraConverter:
                         import numpy as np
 
                         X_vec = np.array(X_vec_list)
+                        Y_vec_list = [
+                            reactors_series[reactor_id]["Y"][s][-1]
+                            for s in reactor_species_names
+                        ]
+                        Y_vec = np.array(Y_vec_list)
                     else:
                         # Use default values
                         import numpy as np
 
                         T, P = 300.0, 101325.0
                         X_vec = np.array(
+                            [1.0 if s == "N2" else 0.0 for s in reactor_species_names]
+                        )
+                        Y_vec = np.array(
                             [1.0 if s == "N2" else 0.0 for s in reactor_species_names]
                         )
 
@@ -1204,6 +1235,10 @@ class DualCanteraConverter:
                 for species_name, x_value in zip(reactor_species_names, X_vec):
                     reactors_series[reactor_id]["X"][species_name].append(
                         float(x_value)
+                    )
+                for species_name, y_value in zip(reactor_species_names, Y_vec):
+                    reactors_series[reactor_id]["Y"][species_name].append(
+                        float(y_value)
                     )
 
             # Call progress callback if provided (for streaming updates)
@@ -1215,6 +1250,7 @@ class DualCanteraConverter:
                             "T": v["T"].copy(),
                             "P": v["P"].copy(),
                             "X": {s: v["X"][s].copy() for s in v["X"]},
+                            "Y": {s: v["Y"][s].copy() for s in v["Y"]},
                         }
                         for k, v in reactors_series.items()
                     },

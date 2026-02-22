@@ -6,9 +6,13 @@ export function SimulationOverlay() {
 
   if (!isRunning) return null;
 
+  const totalTime = progress?.total_time ?? 10;
+  const currentTime = progress?.times?.length
+    ? progress.times[progress.times.length - 1]
+    : 0;
   const pct =
-    progress && progress.times.length > 0
-      ? Math.min(100, Math.round((progress.times[progress.times.length - 1] / 10) * 100))
+    totalTime > 0
+      ? Math.min(100, Math.round((currentTime / totalTime) * 100))
       : 0;
 
   return (
@@ -26,7 +30,9 @@ export function SimulationOverlay() {
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          {progress ? `${progress.times.length} time steps` : "Initializing..."}
+          {progress
+            ? `${pct}% — ${progress.times.length} time steps`
+            : "Initializing..."}
         </p>
       </div>
     </div>

@@ -44,6 +44,57 @@ export function PlotsTab({ data }: Props) {
     );
   }
 
+  const reactorSeries = data.reactors_series[selectedReactorId];
+  const times = data.times;
+
+  // Main species for composition: max fraction > threshold, keep up to 12 species
+  const MAIN_SPECIES_MIN_FRACTION = 1e-4;
+  const MAIN_SPECIES_MAX_COUNT = 12;
+
+  const mainSpeciesMole = useMemo(() => {
+    const X = reactorSeries?.X ?? {};
+    return Object.entries(X)
+      .map(([name, arr]) => ({
+        name,
+        max: Math.max(...(arr ?? []), 0),
+      }))
+      .filter((s) => s.max >= MAIN_SPECIES_MIN_FRACTION)
+      .sort((a, b) => b.max - a.max)
+      .slice(0, MAIN_SPECIES_MAX_COUNT)
+      .map((s) => s.name);
+  }, [reactorSeries?.X]);
+
+  const mainSpeciesMass = useMemo(() => {
+    const Y = reactorSeries?.Y ?? {};
+    return Object.entries(Y)
+      .map(([name, arr]) => ({
+        name,
+        max: Math.max(...(arr ?? []), 0),
+      }))
+      .filter((s) => s.max >= MAIN_SPECIES_MIN_FRACTION)
+      .sort((a, b) => b.max - a.max)
+      .slice(0, MAIN_SPECIES_MAX_COUNT)
+      .map((s) => s.name);
+  }, [reactorSeries?.Y]);
+
+  const moleFractionTraces = mainSpeciesMole.map((species) => ({
+    x: times,
+    y: reactorSeries?.X?.[species] ?? [],
+    type: "scatter" as const,
+    mode: "lines" as const,
+    name: species,
+    line: { width: 2 },
+  }));
+
+  const massFractionTraces = mainSpeciesMass.map((species) => ({
+    x: times,
+    y: reactorSeries?.Y?.[species] ?? [],
+    type: "scatter" as const,
+    mode: "lines" as const,
+    name: species,
+    line: { width: 2 },
+  }));
+
   return (
     <div className="space-y-4">
       {/* Temperature plot */}
@@ -110,6 +161,62 @@ export function PlotsTab({ data }: Props) {
           className="w-full"
         />
       </div>
+
+      {/* Mole fraction (composition) vs Time */}
+      {moleFractionTraces.length > 0 && (
+        <div>
+          <Plot
+            data={moleFractionTraces}
+            layout={{
+              ...layoutDefaults,
+              title: {
+                text: "Mole fraction vs Time (main species)",
+                font: { size: 14 },
+              },
+              xaxis: {
+                title: { text: "Time (s)", font: { size: 12 } },
+                gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
+              },
+              yaxis: {
+                title: { text: "Mole fraction", font: { size: 12 } },
+                gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
+                tickformat: ".2e",
+              },
+            }}
+            config={{ responsive: true, displayModeBar: false }}
+            useResizeHandler
+            className="w-full"
+          />
+        </div>
+      )}
+
+      {/* Mass fraction (composition) vs Time */}
+      {massFractionTraces.length > 0 && reactorSeries?.Y && (
+        <div>
+          <Plot
+            data={massFractionTraces}
+            layout={{
+              ...layoutDefaults,
+              title: {
+                text: "Mass fraction vs Time (main species)",
+                font: { size: 14 },
+              },
+              xaxis: {
+                title: { text: "Time (s)", font: { size: 12 } },
+                gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
+              },
+              yaxis: {
+                title: { text: "Mass fraction", font: { size: 12 } },
+                gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
+                tickformat: ".2e",
+              },
+            }}
+            config={{ responsive: true, displayModeBar: false }}
+            useResizeHandler
+            className="w-full"
+          />
+        </div>
+      )}
     </div>
   );
 }

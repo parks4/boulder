@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import cantera as ct  # type: ignore
 
-from .verbose_utils import get_verbose_logger, is_verbose_mode
+from .verbose_utils import get_verbose_logger
 
 logger = get_verbose_logger(__name__)
 
@@ -39,6 +39,7 @@ class SimulationProgress:
     # Timing information
     start_time: Optional[float] = None
     end_time: Optional[float] = None
+    total_time: Optional[float] = None  # simulation end time (s), for progress %
 
     def get_elapsed_time(self) -> Optional[float]:
         """Get elapsed time in seconds. Returns None if not started."""
@@ -115,6 +116,11 @@ class SimulationWorker:
                         "T": v["T"].copy(),
                         "P": v["P"].copy(),
                         "X": {s: v["X"][s].copy() for s in v["X"]},
+                        **(
+                            {"Y": {s: v["Y"][s].copy() for s in v["Y"]}}
+                            if "Y" in v
+                            else {}
+                        ),
                     }
                     for k, v in self.progress.reactors_series.items()
                 },
@@ -129,6 +135,7 @@ class SimulationWorker:
                 error_message=self.progress.error_message,
                 start_time=self.progress.start_time,
                 end_time=self.progress.end_time,
+                total_time=self.progress.total_time,
             )
 
     def _run_simulation(
@@ -167,23 +174,15 @@ class SimulationWorker:
                     progress_pct = (
                         (current_time / total_time) * 100 if total_time > 0 else 0
                     )
-                    if is_verbose_mode():
-                        # Log at 0%, 25%, 50%, 75%, 100% to avoid flooding console
-                        pct_floor = int(progress_pct // 25) * 25
-                        if pct_floor > last_logged_pct[0] or (
-                            progress_pct >= 99.9 and last_logged_pct[0] < 100
-                        ):
-                            last_logged_pct[0] = (
-                                100 if progress_pct >= 99.9 else pct_floor
-                            )
-                            logger.info(
-                                f"Simulation progress: {progress_pct:.1f}% "
-                                f"(t={current_time:.1f}s / {total_time:.1f}s)"
-                            )
-                    else:
-                        logger.debug(
+                    # Log every 10% to avoid flooding console (always shown)
+                    pct_floor = int(progress_pct // 10) * 10
+                    if pct_floor > last_logged_pct[0] or (
+                        progress_pct >= 99.9 and last_logged_pct[0] < 100
+                    ):
+                        last_logged_pct[0] = 100 if progress_pct >= 99.9 else pct_floor
+                        logger.info(
                             f"Simulation progress: {progress_pct:.1f}% "
-                            f"(t={current_time:.1f}s)"
+                            f"(t={current_time:.1f}s / {total_time:.1f}s)"
                         )
                     # Stream updated thermo reports so Thermo tab reflects latest state
                     try:
@@ -214,6 +213,7 @@ class SimulationWorker:
                 self.progress.error_message = None
                 self.progress.start_time = time.time()
                 self.progress.end_time = None
+                self.progress.total_time = simulation_time
 
             # Update the live simulation singleton so plugins
             # (e.g. NetworkPlugin) can access the network

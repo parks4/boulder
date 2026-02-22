@@ -42,6 +42,7 @@ async def simulation_event_stream(
             "reactors_series": progress.reactors_series,
             "reactor_reports": _serialise_reports(progress.reactor_reports),
             "connection_reports": progress.connection_reports.copy(),
+            "total_time": progress.total_time,
         }
 
         if progress.error_message and not progress.is_running:

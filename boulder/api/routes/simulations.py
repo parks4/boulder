@@ -152,6 +152,7 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
             "is_complete": False,
             "times": progress.times,
             "reactors_series": progress.reactors_series,
+            "total_time": progress.total_time,
         }
 
     from ..sse import _serialise_reports
