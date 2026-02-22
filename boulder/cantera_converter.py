@@ -3,7 +3,7 @@ import math
 import os
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import cantera as ct  # type: ignore
 import numpy as np
@@ -72,6 +72,114 @@ def _make_valid_python_identifier(name: str) -> str:
         identifier += "_"
 
     return identifier
+
+
+def resolve_unset_flow_rates(
+    mfc_topology: Dict[str, Tuple[str, str]],
+    flow_rates: Dict[str, float],
+    mfc_objects: Dict[str, "ct.MassFlowController"],
+    reactors: Dict[str, "ct.ReactorBase"],
+    unresolved_ids: Set[str],
+) -> None:
+    """Resolve mass flow rates for MFCs not specified in the config.
+
+    Applies steady-state mass conservation at each non-Reservoir reactor node::
+
+        sum(incoming mass flows) == sum(outgoing mass flows)
+
+    Iterates until all unresolved MFCs are determined. Raises ``ValueError``
+    if the system is underdetermined (more than one unknown per node at any step).
+
+    Parameters
+    ----------
+    mfc_topology :
+        Mapping from connection ID to ``(source_node_id, target_node_id)``
+        for every MFC in the network (resolved and unresolved).
+    flow_rates :
+        Mapping from connection ID to the known mass flow rate (kg/s).
+        Unresolved IDs are absent; resolved ones are added here in-place.
+        Callers must not read ``ct.MassFlowController.mass_flow_rate`` directly
+        because that property requires an initialized ``ReactorNet``.
+    mfc_objects :
+        Mapping from connection ID to the Cantera ``MassFlowController`` object.
+        Resolved flow rates are written to the MFC objects via the setter, which
+        works before the network is initialized.
+    reactors :
+        All reactor/reservoir objects keyed by node ID.
+        ``ct.Reservoir`` nodes are excluded from conservation.
+    unresolved_ids :
+        Set of connection IDs whose ``mass_flow_rate`` was not specified in the
+        config. Modified in-place: IDs are removed as they are resolved.
+
+    Raises
+    ------
+    ValueError
+        If a resolved flow rate is negative (inconsistent inlet conditions),
+        or if any MFC remains unresolved after no further progress can be made.
+    """
+    remaining = set(unresolved_ids)
+
+    while remaining:
+        progress = False
+        for reactor_id, reactor in list(reactors.items()):
+            if isinstance(reactor, ct.Reservoir):
+                continue
+
+            in_mfcs = [
+                cid
+                for cid, (src, tgt) in mfc_topology.items()
+                if tgt == reactor_id and cid in mfc_objects
+            ]
+            out_mfcs = [
+                cid
+                for cid, (src, tgt) in mfc_topology.items()
+                if src == reactor_id and cid in mfc_objects
+            ]
+
+            unset_in = [cid for cid in in_mfcs if cid in remaining]
+            unset_out = [cid for cid in out_mfcs if cid in remaining]
+            n_unset = len(unset_in) + len(unset_out)
+
+            if n_unset != 1:
+                continue  # Cannot uniquely resolve at this node yet
+
+            known_in = sum(
+                flow_rates.get(cid, 0.0) for cid in in_mfcs if cid not in remaining
+            )
+            known_out = sum(
+                flow_rates.get(cid, 0.0) for cid in out_mfcs if cid not in remaining
+            )
+
+            if unset_in:
+                resolved_flow = known_out - known_in
+                cid = unset_in[0]
+            else:
+                resolved_flow = known_in - known_out
+                cid = unset_out[0]
+
+            if resolved_flow < 0.0:
+                raise ValueError(
+                    f"Mass conservation yields a negative flow rate "
+                    f"({resolved_flow:.4g} kg/s) for connection '{cid}'. "
+                    "Check the inlet mass flow rates."
+                )
+
+            flow_rates[cid] = resolved_flow
+            mfc_objects[cid].mass_flow_rate = resolved_flow  # type: ignore[misc]
+            remaining.discard(cid)
+            unresolved_ids.discard(cid)
+            progress = True
+            break  # restart loop to propagate newly resolved value
+
+        if not progress:
+            break
+
+    if remaining:
+        raise ValueError(
+            f"Cannot determine mass flow rate for connection(s): {sorted(remaining)}. "
+            "Specify mass_flow_rate explicitly, or ensure exactly one unknown "
+            "per reactor node so that mass conservation uniquely determines it."
+        )
 
 
 def get_plugins() -> BoulderPlugins:
@@ -210,6 +318,10 @@ class DualCanteraConverter:
         self._last_config: Optional[Dict[str, Any]] = None
         # Path to config file for --download script (set by CLI in headless mode)
         self._download_config_path: Optional[str] = None
+        # Flow-conservation tracking: populated during connection building
+        self._unresolved_mfc_ids: Set[str] = set()
+        self._mfc_topology: Dict[str, Tuple[str, str]] = {}  # conn_id -> (src, tgt)
+        self._mfc_flow_rates: Dict[str, float] = {}  # known flow rates (kg/s)
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -334,9 +446,15 @@ class DualCanteraConverter:
             device = self.plugins.connection_builders[typ](self, conn)
             self.connections[cid] = device
         elif typ == "MassFlowController":
-            mfr = float(props.get("mass_flow_rate", 0.1))
+            self._mfc_topology[cid] = (src, tgt)
             mfc = ct.MassFlowController(self.reactors[src], self.reactors[tgt])
-            mfc.mass_flow_rate = mfr  # type: ignore[misc]
+            if "mass_flow_rate" in props:
+                mfr = float(props["mass_flow_rate"])
+                mfc.mass_flow_rate = mfr  # type: ignore[misc]
+                self._mfc_flow_rates[cid] = mfr
+            else:
+                mfc.mass_flow_rate = 0.0  # type: ignore[misc]  # resolved by conservation
+                self._unresolved_mfc_ids.add(cid)
             self.connections[cid] = mfc
         elif typ == "Valve":
             coeff = float(props.get("valve_coeff", 1.0))
@@ -358,6 +476,46 @@ class DualCanteraConverter:
             self.walls[cid] = wall
         else:
             raise ValueError(f"Unsupported connection type: '{typ}'")
+
+    def _apply_flow_conservation(self) -> None:
+        """Resolve unset MFC flow rates via mass conservation, then reset tracking state.
+
+        Called after all connections for a network (or sub-network stage) have been
+        built. MFCs without an explicit ``mass_flow_rate`` in the YAML config are
+        resolved by enforcing steady-state mass conservation at each non-Reservoir
+        reactor node. Resolved values are also appended to ``code_lines`` so the
+        ``--download`` script reflects the actual flow rates.
+
+        Raises
+        ------
+        ValueError
+            Propagated from :func:`resolve_unset_flow_rates` if any flow rate
+            cannot be uniquely determined.
+        """
+        originally_unresolved = set(self._unresolved_mfc_ids)
+        if originally_unresolved:
+            all_mfcs: Dict[str, ct.MassFlowController] = {
+                cid: dev  # type: ignore[assignment]
+                for cid, dev in self.connections.items()
+                if isinstance(dev, ct.MassFlowController)
+            }
+            resolve_unset_flow_rates(
+                self._mfc_topology,
+                self._mfc_flow_rates,
+                all_mfcs,
+                self.reactors,
+                self._unresolved_mfc_ids,
+            )
+            for cid in originally_unresolved:
+                resolved_rate = self._mfc_flow_rates[cid]
+                cid_var = _make_valid_python_identifier(cid)
+                self.code_lines.append(
+                    f"{cid_var}.mass_flow_rate = {resolved_rate}"
+                    "  # resolved by mass conservation"
+                )
+        self._unresolved_mfc_ids = set()
+        self._mfc_topology = {}
+        self._mfc_flow_rates = {}
 
     # ------------------------------------------------------------------
     # Staged solving
@@ -455,6 +613,9 @@ class DualCanteraConverter:
             stage_reactor_ids.append(rid)
 
         # Build intra-stage connections
+        self._unresolved_mfc_ids = set()
+        self._mfc_topology = {}
+        self._mfc_flow_rates = {}
         for conn in stage_connections:
             cid = conn["id"]
             src = conn["source"]
@@ -475,6 +636,8 @@ class DualCanteraConverter:
                     cid,
                     exc,
                 )
+
+        self._apply_flow_conservation()
 
         # Apply post-build hooks for this stage's subset
         stage_config_subset: Dict[str, Any] = {
@@ -612,9 +775,9 @@ class DualCanteraConverter:
             trajectory = solve_staged(self, plan, config)
             self._staged_trajectory = trajectory
             # Generate downloadable script: load from YAML and build network
-            download_path = getattr(
-                self, "_download_config_path", None
-            ) or "config.yaml"
+            download_path = (
+                getattr(self, "_download_config_path", None) or "config.yaml"
+            )
             self.code_lines = [
                 "# Load configuration from YAML and build Cantera network",
                 "import cantera as ct",
@@ -869,6 +1032,9 @@ class DualCanteraConverter:
         # Create connections between reactors
         self.code_lines.append("")
         self.code_lines.append("# ===== CONNECTION SETUP =====")
+        self._unresolved_mfc_ids = set()
+        self._mfc_topology = {}
+        self._mfc_flow_rates = {}
         for conn in config["connections"]:
             cid = conn["id"]
             typ = conn["type"]
@@ -883,20 +1049,29 @@ class DualCanteraConverter:
                     f"# Plugin connection {typ} -> created as '{cid}'"
                 )
             elif typ == "MassFlowController":
-                mfr = float(props.get("mass_flow_rate", 0.1))
-                self.code_lines.append(
-                    f"# Create MassFlowController '{cid}': {src} -> {tgt}"
-                )
-                self.code_lines.append(f"# Controls mass flow rate at {mfr} kg/s")
+                self._mfc_topology[cid] = (src, tgt)
                 cid_var = _make_valid_python_identifier(cid)
                 src_var = _make_valid_python_identifier(src)
                 tgt_var = _make_valid_python_identifier(tgt)
                 self.code_lines.append(
+                    f"# Create MassFlowController '{cid}': {src} -> {tgt}"
+                )
+                self.code_lines.append(
                     f"{cid_var} = ct.MassFlowController({src_var}, {tgt_var})"
                 )
-                self.code_lines.append(f"{cid_var}.mass_flow_rate = {mfr}")
                 mfc = ct.MassFlowController(self.reactors[src], self.reactors[tgt])
-                mfc.mass_flow_rate = mfr  # type: ignore[misc]
+                if "mass_flow_rate" in props:
+                    mfr = float(props["mass_flow_rate"])
+                    self.code_lines.append(f"# Controls mass flow rate at {mfr} kg/s")
+                    self.code_lines.append(f"{cid_var}.mass_flow_rate = {mfr}")
+                    mfc.mass_flow_rate = mfr  # type: ignore[misc]
+                    self._mfc_flow_rates[cid] = mfr
+                else:
+                    self.code_lines.append(
+                        f"# mass_flow_rate for '{cid}' resolved by mass conservation"
+                    )
+                    mfc.mass_flow_rate = 0.0  # type: ignore[misc]  # resolved later
+                    self._unresolved_mfc_ids.add(cid)
                 self.connections[cid] = mfc
             elif typ == "Valve":
                 coeff = float(props.get("valve_coeff", 1.0))
@@ -942,6 +1117,8 @@ class DualCanteraConverter:
             else:
                 self.code_lines.append(f"# Unsupported connection type: {typ}")
                 raise ValueError(f"Unsupported connection type: {typ}")
+
+        self._apply_flow_conservation()
 
         # Create reactor network (exclude reservoirs as they don't evolve in time)
         reactor_ids = [

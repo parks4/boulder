@@ -325,6 +325,14 @@ def sim_to_internal_config(
         # Use smart extraction to get comments for reactor network objects
         object_comments = _smart_extract_object_comments(source_file, sim)
 
+    # Cantera flow devices expose mass_flow_rate only after the ReactorNet has been
+    # initialized (i.e. after the first advance/step call).  Calling advance(0.0) on
+    # a fresh network triggers the lazy C++ initialization without changing any state.
+    try:
+        sim.advance(sim.time)
+    except Exception:
+        pass
+
     # Collect unique reactors/reservoirs from the entire network
     all_reactors = list(collect_all_reactors_and_reservoirs(sim))
     # Deterministic order
@@ -403,7 +411,7 @@ def sim_to_internal_config(
         if isinstance(dev, ct.MassFlowController):
             # Prefer attribute if available; Cantera exposes mass_flow_rate as a property
             try:
-                props["mass_flow_rate"] = float(dev.mass_flow_rate)
+                conn_props["mass_flow_rate"] = float(dev.mass_flow_rate)
             except Exception:
                 # Fallbacks: some backends require initialized networks; try alternate attributes
                 mdot_attr = getattr(dev, "mdot", None)
@@ -412,8 +420,8 @@ def sim_to_internal_config(
                 except Exception:
                     mdot_value = None
                 if isinstance(mdot_value, (int, float)):
-                    props["mass_flow_rate"] = float(mdot_value)
-                # Else: omit property; builder will use its default
+                    conn_props["mass_flow_rate"] = float(mdot_value)
+                # Else: omit property; conservation will infer it if possible
             # If mass flow is negative, re-orient the connection and take absolute value
             mfr = conn_props.get("mass_flow_rate")
             if isinstance(mfr, (int, float)) and mfr < 0:
