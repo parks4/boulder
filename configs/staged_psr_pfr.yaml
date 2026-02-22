@@ -1,0 +1,193 @@
+metadata:
+  title: Staged PSR → PFR (staged solver demo)
+  description: |-
+    Demonstrates Boulder's staged solving architecture.
+
+    The network is split into two sequential stages:
+      - Stage 1 (psr_stage): a single well-stirred reactor (PSR) representing
+        an ignition / premixing zone. It is solved to steady state first.
+      - Stage 2 (pfr_stage): a four-cell CSTR chain approximating a plug-flow
+        reactor (PFR). It is initialised directly from the PSR outlet state and
+        solved to steady state second.
+
+    Because the two stages use the same mechanism (gri30.yaml) in this example,
+    no mechanism_switch is needed. To use a different kinetic model in the PFR
+    stage, change pfr_stage.mechanism and uncomment the mechanism_switch block
+    on the psr_to_pfr connection.
+
+    How the staged solver works
+    ---------------------------
+    When a `groups` section is present, Boulder's DualCanteraConverter detects
+    it in build_network() and delegates to staged_solver.solve_staged():
+      1. build_stage_graph() partitions nodes/connections by group, performs a
+         topological sort of the stage DAG, and validates acyclicity.
+      2. For each stage in order:
+         a. Reactors that receive inter-stage flow are initialised directly from
+            the upstream outlet state (T, P, Y) — no Reservoir injection needed.
+         b. A sub-ReactorNet is built from the intra-stage connections only.
+         c. The sub-network is advanced to steady state.
+         d. Outlet states are extracted; mechanism_switch is applied if declared.
+      3. After all stages, a final ReactorNet is assembled from all converged
+         reactor objects with inter-stage connections restored as MFCs, for use
+         with ReactorNet.draw() and Sankey diagrams.
+    A LagrangianTrajectory is attached to the converter as
+    converter._staged_trajectory for post-processing.
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+# ---------------------------------------------------------------------------
+# groups — define the staged execution plan
+# ---------------------------------------------------------------------------
+# Each key is a group id that nodes reference via `group:` in their properties.
+# Fields:
+#   stage_order  : int    informational hint (actual order is topological)
+#   mechanism    : str    kinetic mechanism for every reactor in this stage
+#   solve        : str    "advance_to_steady_state" | "advance"
+#   advance_time : float  [s] only relevant when solve == "advance"
+groups:
+  psr_stage:
+    stage_order: 1
+    mechanism: gri30.yaml
+    # advance integrates for advance_time [s] before moving to the next stage.
+    # For a PSR with no outlet (feed reservoir has no group → feed_to_psr is
+    # outside any stage sub-network), advance is more robust than
+    # advance_to_steady_state on a closed reactor with stiff combustion chemistry.
+    solve: advance
+    advance_time: 1.0e-3  # s — long enough for CH4/air ignition at 1800 K
+
+  pfr_stage:
+    stage_order: 2
+    # To use a different mechanism for the PFR, replace with e.g. "h2o2.yaml"
+    # and uncomment mechanism_switch on the psr_to_pfr connection below.
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1.0e-3  # s
+
+# ---------------------------------------------------------------------------
+# nodes
+# ---------------------------------------------------------------------------
+nodes:
+  # ── Inlet reservoir (no group — feeds the PSR via a standard MFC) ─────────
+- id: feed
+  Reservoir:
+    temperature: 300          # K — room temperature
+    pressure: 101325           # Pa
+    composition: "CH4:1,O2:2,N2:7.52"    # stoichiometric CH4/air
+  description: |-
+    Premixed CH4/air feed at room temperature and atmospheric pressure.
+    No group assigned: this reservoir is outside the staged-solve graph and
+    simply drives the mass flow into the first stage.
+
+  # ── Stage 1 : PSR ─────────────────────────────────────────────────────────
+- id: psr
+  IdealGasConstPressureMoleReactor:
+    group: psr_stage
+    temperature: 2200      # K  — near adiabatic flame temperature for CH4/air
+    pressure: 101325       # Pa
+    composition: "CO2:1,H2O:2,N2:7.52"    # post-combustion products (stable)
+    volume: 1.0e-5         # m³
+  description: |-
+    Perfectly-stirred reactor representing the high-temperature reaction zone.
+    Advanced for advance_time seconds. Its outlet state (T, P, Y) is passed
+    directly to pfr_cell_1 as the initial condition for Stage 2.
+
+  # ── Stage 2 : PFR (4-cell CSTR chain) ─────────────────────────────────────
+- id: pfr_cell_1
+  IdealGasConstPressureMoleReactor:
+    group: pfr_stage
+    temperature: 2200      # K  — overwritten by PSR outlet at solve time
+    pressure: 101325       # Pa
+    composition: "CO2:1,H2O:2,N2:7.52"    # overwritten by PSR outlet at solve time
+    volume: 2.5e-6         # m³  (V_pfr_total / 4)
+  description: |-
+    First cell of the PFR chain. At solve time it is initialised from the PSR
+    outlet (T, P, Y), so the temperature/composition listed here are only a
+    fallback when running this config without the staged solver.
+
+- id: pfr_cell_2
+  IdealGasConstPressureMoleReactor:
+    group: pfr_stage
+    temperature: 2100
+    pressure: 101325
+    composition: "CO2:1,H2O:2,N2:7.52"
+    volume: 2.5e-6
+  description: Second cell of the PFR chain.
+
+- id: pfr_cell_3
+  IdealGasConstPressureMoleReactor:
+    group: pfr_stage
+    temperature: 2000
+    pressure: 101325
+    composition: "CO2:1,H2O:2,N2:7.52"
+    volume: 2.5e-6
+  description: Third cell of the PFR chain.
+
+- id: pfr_cell_4
+  IdealGasConstPressureMoleReactor:
+    group: pfr_stage
+    temperature: 1900
+    pressure: 101325
+    composition: "CO2:1,H2O:2,N2:7.52"
+    volume: 2.5e-6
+  description: |-
+    Fourth (last) cell of the PFR chain.
+    Its steady-state composition is the network outlet.
+
+# ---------------------------------------------------------------------------
+# connections
+# ---------------------------------------------------------------------------
+connections:
+  # ── Feed → PSR (ungrouped reservoir → Stage 1) ────────────────────────────
+- id: feed_to_psr
+  MassFlowController:
+    mass_flow_rate: 1.0e-4      # kg/s
+  source: feed
+  target: psr
+  description: |-
+    Drives the premixed feed into the PSR. Because `feed` has no group, this
+    connection is treated as an ordinary intra-stage inlet during the PSR solve.
+
+  # ── PSR → PFR cell 1  (inter-stage connection) ────────────────────────────
+  # At solve time this connection is VIRTUAL: pfr_cell_1 is initialised from
+  # the PSR outlet state instead of building a Cantera MassFlowController.
+  # In the final visualization ReactorNet it is restored as a real MFC so the
+  # full topology appears in ReactorNet.draw() and the Sankey diagram.
+- id: psr_to_pfr
+  MassFlowController:
+    mass_flow_rate: 1.0e-4      # kg/s
+  source: psr
+  target: pfr_cell_1
+    # Uncomment when pfr_stage.mechanism differs from psr_stage.mechanism:
+    # mechanism_switch:
+    #   htol: 1.0e-4    # relative enthalpy tolerance for the mapping check
+    #   Xtol: 1.0e-4    # total mole-fraction loss tolerance (error if exceeded)
+  description: |-
+    Inter-stage connection: transfers the PSR steady-state outlet (T, P, Y)
+    to pfr_cell_1. A mechanism_switch block can be added here if the two
+    stages use different kinetic mechanisms.
+
+  # ── PFR chain  (intra-stage connections, all within pfr_stage) ────────────
+- id: pfr_1_to_2
+  MassFlowController:
+    mass_flow_rate: 1.0e-4
+  source: pfr_cell_1
+  target: pfr_cell_2
+  description: PFR cell 1 → cell 2 (intra-stage, built as a real MFC).
+
+- id: pfr_2_to_3
+  MassFlowController:
+    mass_flow_rate: 1.0e-4
+  source: pfr_cell_2
+  target: pfr_cell_3
+  description: PFR cell 2 → cell 3 (intra-stage, built as a real MFC).
+
+- id: pfr_3_to_4
+  MassFlowController:
+    mass_flow_rate: 1.0e-4
+  source: pfr_cell_3
+  target: pfr_cell_4
+  description: PFR cell 3 → cell 4 (intra-stage, built as a real MFC).
+
+settings: {}

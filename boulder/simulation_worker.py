@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import cantera as ct  # type: ignore
 
-from .verbose_utils import get_verbose_logger
+from .verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
 
@@ -26,6 +26,7 @@ class SimulationProgress:
     reactors_series: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     code_str: str = ""
     reactor_reports: Dict[str, Any] = field(default_factory=dict)
+    connection_reports: Dict[str, Any] = field(default_factory=dict)
     summary: List[Dict[str, Any]] = field(default_factory=list)
     sankey_links: Optional[Dict[str, Any]] = None
     sankey_nodes: Optional[List[str]] = None
@@ -119,6 +120,7 @@ class SimulationWorker:
                 },
                 code_str=self.progress.code_str,
                 reactor_reports=self.progress.reactor_reports.copy(),
+                connection_reports=self.progress.connection_reports.copy(),
                 summary=self.progress.summary.copy(),
                 sankey_links=self.progress.sankey_links,
                 sankey_nodes=self.progress.sankey_nodes,
@@ -145,6 +147,9 @@ class SimulationWorker:
             network = converter.build_network(config)
             logger.info("Network built successfully, starting streaming simulation...")
 
+            # Track last logged % for verbose throttle (log at 0, 25, 50, 75, 100)
+            last_logged_pct: List[float] = [-1]
+
             # Define progress callback for streaming updates
             def progress_callback(
                 progress_data: Dict[str, Any], current_time: float, total_time: float
@@ -162,9 +167,24 @@ class SimulationWorker:
                     progress_pct = (
                         (current_time / total_time) * 100 if total_time > 0 else 0
                     )
-                    logger.debug(
-                        f"Simulation progress: {progress_pct:.1f}% (t={current_time:.1f}s)"
-                    )
+                    if is_verbose_mode():
+                        # Log at 0%, 25%, 50%, 75%, 100% to avoid flooding console
+                        pct_floor = int(progress_pct // 25) * 25
+                        if pct_floor > last_logged_pct[0] or (
+                            progress_pct >= 99.9 and last_logged_pct[0] < 100
+                        ):
+                            last_logged_pct[0] = (
+                                100 if progress_pct >= 99.9 else pct_floor
+                            )
+                            logger.info(
+                                f"Simulation progress: {progress_pct:.1f}% "
+                                f"(t={current_time:.1f}s / {total_time:.1f}s)"
+                            )
+                    else:
+                        logger.debug(
+                            f"Simulation progress: {progress_pct:.1f}% "
+                            f"(t={current_time:.1f}s)"
+                        )
                     # Stream updated thermo reports so Thermo tab reflects latest state
                     try:
                         interim_results = {
@@ -188,6 +208,7 @@ class SimulationWorker:
                 self.progress.reactors_series = {}
                 self.progress.code_str = ""
                 self.progress.reactor_reports = {}
+                self.progress.connection_reports = {}
                 self.progress.is_running = True
                 self.progress.is_complete = False
                 self.progress.error_message = None
@@ -226,6 +247,9 @@ class SimulationWorker:
                 # Generate reactor reports for thermo analysis
                 self.progress.reactor_reports = self._generate_reactor_reports(
                     converter, results
+                )
+                self.progress.connection_reports = self._generate_connection_reports(
+                    converter
                 )
                 self.progress.is_running = False
                 self.progress.is_complete = True
@@ -306,6 +330,54 @@ class SimulationWorker:
             logger.warning(f"Failed to generate reactor reports: {e}")
 
         return reactor_reports
+
+    def _generate_connection_reports(self, converter: Any) -> Dict[str, Any]:
+        """Generate connection (MFC) reports with mass and volumetric flow rates.
+
+        Volumetric flow real: at source T, P. Normal: DIN 1343 (0 °C, 101325 Pa).
+        """
+        R_GAS = 8.314462618  # J/(mol·K)
+        T_NORMAL_K = 273.15
+        P_NORMAL_PA = 101325.0
+
+        connection_reports: Dict[str, Any] = {}
+        try:
+            reactor_id_by_obj = {r: rid for rid, r in converter.reactors.items()}
+            for conn_id, device in converter.connections.items():
+                if not isinstance(device, ct.MassFlowController):
+                    continue
+                upstream = device.upstream
+                thermo = upstream.thermo
+                T = float(thermo.T)
+                P = float(thermo.P)
+                # Cantera molecular_weights in kg/kmol; X is mole fractions
+                M_kg_kmol = sum(
+                    float(thermo.X[i]) * float(thermo.molecular_weights[i])
+                    for i in range(thermo.n_species)
+                )
+                M_kg_mol = M_kg_kmol / 1000.0
+                rho = (P * M_kg_mol) / (R_GAS * T)
+                rho_normal = (P_NORMAL_PA * M_kg_mol) / (R_GAS * T_NORMAL_K)
+                mfr = float(device.mass_flow_rate)
+                if rho > 0:
+                    Q_real = mfr / rho
+                else:
+                    Q_real = 0.0
+                if rho_normal > 0:
+                    Q_normal = mfr / rho_normal
+                else:
+                    Q_normal = 0.0
+                connection_reports[conn_id] = {
+                    "mass_flow_rate": mfr,
+                    "volumetric_flow_real_m3_s": Q_real,
+                    "volumetric_flow_normal_m3_s": Q_normal,
+                    "source_id": reactor_id_by_obj.get(upstream),
+                    "target_id": reactor_id_by_obj.get(device.downstream),
+                }
+        except Exception as e:
+            logger.warning(f"Failed to generate connection reports: {e}")
+
+        return connection_reports
 
 
 # Global worker instance

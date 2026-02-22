@@ -111,9 +111,7 @@ export function ReactorGraph() {
           "line-color": isDark ? "#888" : "#999",
           "target-arrow-color": isDark ? "#888" : "#999",
           "target-arrow-shape": "triangle",
-          "curve-style": "taxi",
-          "taxi-direction": "rightward",
-          "taxi-turn": 50,
+          "curve-style": "bezier",
           label: "data(label)",
           "font-size": "11px",
           "text-rotation": "none",
@@ -142,8 +140,8 @@ export function ReactorGraph() {
       layout: {
         name: "dagre",
         rankDir: "LR",
-        nodeSep: 60,
-        rankSep: 100,
+        nodeSep: 120,
+        rankSep: 200,
       } as any,
       minZoom: 0.3,
       maxZoom: 3,
@@ -175,20 +173,45 @@ export function ReactorGraph() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Nudge nodes that share the same position to avoid "invalid endpoints" edge warnings
+  const nudgeOverlappingNodes = useCallback((cy: Core): void => {
+    const NUDGE = 25;
+    const positions = new Map<string, string[]>();
+    cy.nodes().forEach((node) => {
+      if (node.data("isGroup")) return;
+      const pos = node.position();
+      const key = `${pos.x.toFixed(2)},${pos.y.toFixed(2)}`;
+      if (!positions.has(key)) positions.set(key, []);
+      positions.get(key)!.push(node.id());
+    });
+    positions.forEach((nodeIds, _key) => {
+      if (nodeIds.length <= 1) return;
+      nodeIds.slice(1).forEach((id, i) => {
+        const node = cy.getElementById(id);
+        const pos = node.position();
+        node.position({ x: pos.x + (i + 1) * NUDGE, y: pos.y + (i + 1) * NUDGE });
+      });
+    });
+  }, []);
+
   // Update elements when config changes
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
     cy.json({ elements: buildElements() });
-    cy.layout({
+    const layout = cy.layout({
       name: "dagre",
       rankDir: "LR",
-      nodeSep: 60,
-      rankSep: 100,
+      nodeSep: 120,
+      rankSep: 200,
       animate: true,
       animationDuration: 300,
-    } as any).run();
-  }, [buildElements]);
+    } as any);
+    layout.run();
+    layout.promiseOn("layoutstop").then(() => {
+      nudgeOverlappingNodes(cy);
+    });
+  }, [buildElements, nudgeOverlappingNodes]);
 
   // Update stylesheet when theme changes
   useEffect(() => {

@@ -6,6 +6,7 @@ from importlib.metadata import entry_points
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cantera as ct  # type: ignore
+import numpy as np
 
 from .config import CANTERA_MECHANISM
 from .output_summary import evaluate_output_items, parse_output_block
@@ -36,6 +37,10 @@ class BoulderPlugins:
         default_factory=dict
     )  # Summary builder plugins
     sankey_generator: Optional[Callable] = None  # Custom Sankey generation function
+    #: ``(gas, new_mechanism, htol, Xtol) -> ct.Solution``
+    #: Called when an inter-stage connection carries a ``mechanism_switch`` block.
+    #: Registered by the *bloc* package via its plugin entry point.
+    mechanism_switch_fn: Optional[Callable] = None
 
 
 # Global cache to ensure plugins are discovered only once
@@ -208,7 +213,7 @@ class DualCanteraConverter:
         comp_dict = {}
         for pair in comp_str.split(","):
             species, value = pair.split(":")
-            comp_dict[species] = float(value)
+            comp_dict[species.strip()] = float(value)
         return comp_dict
 
     def _set_reactor_volume(
@@ -229,10 +234,387 @@ class DualCanteraConverter:
             except (ValueError, TypeError, AttributeError) as e:
                 logger.warning(f"Failed to set volume for {reactor_id}: {e}")
 
+    # ------------------------------------------------------------------
+    # Low-level helpers shared by build_network / build_sub_network
+    # ------------------------------------------------------------------
+
+    def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
+        """Return (creating and caching if needed) a :class:`~cantera.Solution`.
+
+        Uses the registered mechanism path resolver so that both short names
+        (``"gri30.yaml"``) and absolute paths work uniformly.
+        """
+        resolved = (
+            self.plugins.mechanism_path_resolver(mech_name)
+            if self.plugins.mechanism_path_resolver
+            else mech_name
+        )
+        if resolved in self._gases_by_mech:
+            return self._gases_by_mech[resolved]
+        gas_obj = ct.Solution(resolved)
+        self._gases_by_mech[resolved] = gas_obj
+        return gas_obj
+
+    def _create_reactor_from_node(
+        self, node: Dict[str, Any], gas_for_node: ct.Solution
+    ) -> ct.Reactor:
+        """Instantiate a Cantera reactor from a normalized node dict.
+
+        Uses the plugin reactor builder registry when the type matches a
+        registered custom builder; otherwise falls back to the standard
+        Cantera reactor types.
+
+        Parameters
+        ----------
+        node :
+            Normalized node dict with ``id``, ``type``, and ``properties``.
+        gas_for_node :
+            The :class:`~cantera.Solution` carrying the initial state.
+
+        Returns
+        -------
+        ct.Reactor
+            The newly created reactor (not yet added to any network).
+        """
+        rid = node["id"]
+        typ = node["type"]
+        props = node.get("properties") or {}
+
+        if typ in self.plugins.reactor_builders:
+            reactor = self.plugins.reactor_builders[typ](self, node)
+            reactor.name = rid
+        elif typ == "IdealGasReactor":
+            reactor = ct.IdealGasReactor(gas_for_node, clone=True)
+            reactor.name = rid
+        elif typ == "IdealGasConstPressureReactor":
+            reactor = ct.IdealGasConstPressureReactor(gas_for_node, clone=True)
+            reactor.name = rid
+        elif typ == "IdealGasConstPressureMoleReactor":
+            reactor = ct.IdealGasConstPressureMoleReactor(gas_for_node, clone=True)
+            reactor.name = rid
+        elif typ == "IdealGasMoleReactor":
+            reactor = ct.IdealGasMoleReactor(gas_for_node, clone=True)  # type: ignore[attr-defined]
+            reactor.name = rid
+        elif typ == "Reservoir":
+            reactor = ct.Reservoir(gas_for_node, clone=True)
+            reactor.name = rid
+        else:
+            raise ValueError(f"Unsupported reactor type: '{typ}'")
+
+        self._set_reactor_volume(reactor, props, rid)
+        try:
+            reactor.group_name = str(props.get("group", props.get("group_name", "")))
+        except Exception:
+            pass
+
+        return reactor
+
+    def _build_single_connection(self, conn: Dict[str, Any]) -> None:
+        """Create and register one Cantera flow device or wall from a connection dict.
+
+        The connection is added to ``self.connections`` (for
+        :class:`~cantera.FlowDevice` subtypes) or ``self.walls`` (for
+        :class:`~cantera.Wall`).
+
+        Parameters
+        ----------
+        conn :
+            Normalized connection dict with ``id``, ``type``, ``source``,
+            ``target``, and ``properties``.
+        """
+        cid = conn["id"]
+        typ = conn.get("type", "MassFlowController")
+        src = conn["source"]
+        tgt = conn["target"]
+        props = conn.get("properties") or {}
+
+        if typ in self.plugins.connection_builders:
+            device = self.plugins.connection_builders[typ](self, conn)
+            self.connections[cid] = device
+        elif typ == "MassFlowController":
+            mfr = float(props.get("mass_flow_rate", 0.1))
+            mfc = ct.MassFlowController(self.reactors[src], self.reactors[tgt])
+            mfc.mass_flow_rate = mfr  # type: ignore[misc]
+            self.connections[cid] = mfc
+        elif typ == "Valve":
+            coeff = float(props.get("valve_coeff", 1.0))
+            valve = ct.Valve(self.reactors[src], self.reactors[tgt])
+            valve.valve_coeff = coeff  # type: ignore[attr-defined]
+            self.connections[cid] = valve
+        elif typ == "Wall":
+            electric_power_kW = float(props.get("electric_power_kW", 0.0))
+            torch_eff = float(props.get("torch_eff", 1.0))
+            gen_eff = float(props.get("gen_eff", 1.0))
+            Q_watts = electric_power_kW * 1e3 * torch_eff * gen_eff
+            wall = ct.Wall(
+                self.reactors[src],
+                self.reactors[tgt],
+                A=1.0,
+                Q=lambda t: Q_watts,
+                name=cid,  # type: ignore[arg-type]
+            )
+            self.walls[cid] = wall
+        else:
+            raise ValueError(f"Unsupported connection type: '{typ}'")
+
+    # ------------------------------------------------------------------
+    # Staged solving
+    # ------------------------------------------------------------------
+
+    def build_sub_network(
+        self,
+        stage_nodes: List[Dict[str, Any]],
+        stage_connections: List[Dict[str, Any]],
+        stage_mechanism: str,
+        inlet_states: Dict[str, "ct.Solution"],
+        stage_id: str = "",
+        stage: Optional[Any] = None,
+    ) -> Tuple["ct.ReactorNet", Dict[str, "ct.Reactor"]]:
+        """Build (and solve) a :class:`~cantera.ReactorNet` for one stage.
+
+        Reactors whose IDs appear in *inlet_states* are initialised from the
+        provided :class:`~cantera.Solution` (upstream outlet, already
+        mechanism-switched) instead of from the YAML properties.
+
+        Parameters
+        ----------
+        stage_nodes :
+            Normalized node dicts for this stage only.
+        stage_connections :
+            Intra-stage normalized connection dicts.
+        stage_mechanism :
+            Default kinetic mechanism for the stage.
+        inlet_states :
+            ``{node_id: ct.Solution}`` mapping inlet conditions for reactors
+            that receive inter-stage flow.
+        stage_id :
+            For logging/error messages.
+        stage :
+            :class:`~boulder.staged_solver.Stage` dataclass; used to set the
+            solve directive (``advance_to_steady_state`` vs ``advance``).
+
+        Returns
+        -------
+        (network, stage_reactors)
+            ``network`` is the solved :class:`~cantera.ReactorNet`.
+            ``stage_reactors`` is a ``{node_id: ct.Reactor}`` dict for this
+            stage (a subset of ``self.reactors``).
+        """
+        stage_reactor_ids: List[str] = []
+
+        for node in stage_nodes:
+            rid = node["id"]
+            props = node.get("properties") or {}
+
+            # Use inlet state if provided (inter-stage flow), else use YAML props
+            if rid in inlet_states:
+                inlet = inlet_states[rid]
+                node_mech = stage_mechanism
+                gas_for_node = self._get_gas_for_mech(node_mech)
+                gas_for_node.TPY = inlet.T, inlet.P, inlet.Y
+            else:
+                node_mech = str(
+                    props.get("mechanism") or node.get("mechanism") or stage_mechanism
+                )
+                gas_for_node = self._get_gas_for_mech(node_mech)
+                temp = props.get("temperature", 300)
+                pres = props.get("pressure", 101325)
+                compo = props.get("composition", "N2:1")
+                gas_for_node.TPX = (temp, pres, self.parse_composition(compo))
+
+            self.gas = gas_for_node
+            self.reactor_meta[rid] = {
+                "mechanism": node_mech,
+                "gas_solution": gas_for_node,
+            }
+
+            reactor = self._create_reactor_from_node(node, gas_for_node)
+
+            # Guarantee gas_solution and mechanism are always present in meta.
+            # Plugin builders overwrite reactor_meta[rid] entirely, losing these keys.
+            meta = self.reactor_meta.setdefault(rid, {})
+            meta["gas_solution"] = gas_for_node
+            meta.setdefault("mechanism", node_mech)
+
+            # For plugin-created reactors, also apply inlet state override
+            if rid in inlet_states and not isinstance(reactor, ct.Reservoir):
+                inlet = inlet_states[rid]
+                try:
+                    reactor.phase.TPY = inlet.T, inlet.P, inlet.Y
+                except Exception as exc:
+                    logger.warning(
+                        "Could not override inlet state for '%s' in stage '%s': %s",
+                        rid,
+                        stage_id,
+                        exc,
+                    )
+
+            self.reactors[rid] = reactor
+            stage_reactor_ids.append(rid)
+
+        # Build intra-stage connections
+        for conn in stage_connections:
+            cid = conn["id"]
+            src = conn["source"]
+            tgt = conn["target"]
+            if src not in self.reactors or tgt not in self.reactors:
+                logger.warning(
+                    "Stage '%s': skipping connection '%s' — reactor not found.",
+                    stage_id,
+                    cid,
+                )
+                continue
+            try:
+                self._build_single_connection(conn)
+            except Exception as exc:
+                logger.warning(
+                    "Stage '%s': failed to build connection '%s': %s",
+                    stage_id,
+                    cid,
+                    exc,
+                )
+
+        # Apply post-build hooks for this stage's subset
+        stage_config_subset: Dict[str, Any] = {
+            "nodes": stage_nodes,
+            "connections": stage_connections,
+        }
+        for hook in self.plugins.post_build_hooks:
+            try:
+                hook(self, stage_config_subset)
+            except Exception as exc:
+                logger.warning(
+                    "Post-build hook failed for stage '%s': %s", stage_id, exc
+                )
+
+        # Build ReactorNet (non-Reservoir reactors only)
+        non_res_ids = [
+            rid
+            for rid in stage_reactor_ids
+            if not isinstance(self.reactors[rid], ct.Reservoir)
+        ]
+
+        # Select ReactorNet class — use a custom subclass if any reactor
+        # declares NETWORK_CLASS (e.g. DesignPFR → DesignPFRNet).
+        ReactorNetClass = ct.ReactorNet
+        net_kw: dict = {}
+        for rid in non_res_ids:
+            r = self.reactors[rid]
+            if hasattr(r, "NETWORK_CLASS"):
+                ReactorNetClass = r.NETWORK_CLASS
+                net_kw["meta"] = self.reactor_meta.get(rid, {})
+                break
+
+        network = ReactorNetClass([self.reactors[rid] for rid in non_res_ids], **net_kw)
+        if ReactorNetClass is ct.ReactorNet:
+            network.rtol = 1e-6
+            network.atol = 1e-8
+
+        # Solve
+        solve_directive = (
+            getattr(stage, "solve_directive", "advance_to_steady_state")
+            if stage is not None
+            else "advance_to_steady_state"
+        )
+        if solve_directive == "advance_to_steady_state":
+            network.advance_to_steady_state()
+        elif solve_directive == "advance":
+            advance_time = getattr(stage, "advance_time", 1.0)
+            network.advance(float(advance_time))
+        else:
+            logger.warning(
+                "Unknown solve_directive '%s' for stage '%s'; using advance_to_steady_state.",
+                solve_directive,
+                stage_id,
+            )
+            network.advance_to_steady_state()
+
+        stage_reactors = {rid: self.reactors[rid] for rid in stage_reactor_ids}
+        return network, stage_reactors
+
+    def build_viz_network(
+        self,
+        all_connections: List[Dict[str, Any]],
+        built_conn_ids: Optional[set] = None,
+    ) -> "ct.ReactorNet":
+        """Build a visualization-only :class:`~cantera.ReactorNet`.
+
+        Uses all reactor objects already in ``self.reactors`` (which carry
+        converged states after a staged solve) and adds any inter-stage
+        connections that were not built during the per-stage solve.
+
+        The returned network is **not advanced** – it exists solely for
+        ``ReactorNet.draw()`` and Sankey diagram generation.
+
+        Parameters
+        ----------
+        all_connections :
+            The full list of normalized connection dicts (including
+            inter-stage ones).
+        built_conn_ids :
+            Set of connection IDs already built (intra-stage).  Inter-stage
+            connections not in this set will be created now.
+
+        Returns
+        -------
+        ct.ReactorNet
+        """
+        already_built = built_conn_ids or set()
+
+        for conn in all_connections:
+            cid = conn["id"]
+            if cid in already_built:
+                continue
+            src = conn["source"]
+            tgt = conn["target"]
+            if src not in self.reactors or tgt not in self.reactors:
+                logger.debug(
+                    "Viz network: skipping connection '%s' — reactor not found.", cid
+                )
+                continue
+            try:
+                self._build_single_connection(conn)
+            except Exception as exc:
+                logger.warning(
+                    "Viz network: could not build connection '%s': %s", cid, exc
+                )
+
+        non_res = [r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)]
+        viz_net = ct.ReactorNet(non_res)
+        self.network = viz_net
+        self.last_network = viz_net
+        return viz_net
+
     def build_network(self, config: Dict[str, Any]) -> ct.ReactorNet:
-        """Build the Cantera network without running simulation."""
+        """Build the Cantera network without running simulation.
+
+        If the config contains a top-level ``groups`` section, delegates to
+        :func:`~boulder.staged_solver.solve_staged` which builds one sub-
+        :class:`~cantera.ReactorNet` per stage and returns a visualization
+        ReactorNet.  The :class:`~boulder.lagrangian.LagrangianTrajectory`
+        is stored on ``self._staged_trajectory``.
+
+        Without a ``groups`` section the original single-network behavior is
+        preserved (backward compatible).
+        """
         # Store config for later post-processing
         self._last_config = config
+
+        # ----------------------------------------------------------------
+        # Staged solving path
+        # ----------------------------------------------------------------
+        if config.get("groups"):
+            from .staged_solver import build_stage_graph, solve_staged
+
+            plan = build_stage_graph(config)
+            trajectory = solve_staged(self, plan, config)
+            self._staged_trajectory = trajectory
+            # viz_network is already set on self.network by build_viz_network
+            return self.network  # type: ignore[return-value]
+
+        # ----------------------------------------------------------------
+        # Original single-network path (unchanged)
+        # ----------------------------------------------------------------
         self.code_lines = []
         self.code_lines.append(
             "# Import Cantera for chemical kinetics and reactor modeling"
@@ -275,19 +657,6 @@ class DualCanteraConverter:
                 # Insert at the beginning
                 self.code_lines = docstring_lines + self.code_lines
 
-        # Helper to resolve and cache gas per mechanism
-        def _get_gas_for_mech(mech_name: str) -> ct.Solution:
-            resolved = (
-                self.plugins.mechanism_path_resolver(mech_name)
-                if self.plugins.mechanism_path_resolver
-                else mech_name
-            )
-            if resolved in self._gases_by_mech:
-                return self._gases_by_mech[resolved]
-            gas_obj = ct.Solution(resolved)
-            self._gases_by_mech[resolved] = gas_obj
-            return gas_obj
-
         self.reactors = {}
         self.connections = {}
 
@@ -308,7 +677,7 @@ class DualCanteraConverter:
             node_mech = (
                 node.get("mechanism") or props.get("mechanism") or self.mechanism
             )
-            gas_for_node = _get_gas_for_mech(str(node_mech))
+            gas_for_node = self._get_gas_for_mech(str(node_mech))
             gas_for_node.TPX = (temp, pres, self.parse_composition(compo))
             # Keep converter.gas referencing the last used gas (for back-compat),
             # but store per-reactor association in reactor_meta
@@ -350,7 +719,7 @@ class DualCanteraConverter:
                     f"{python_var} = ct.IdealGasReactor(gas_default)"
                 )
                 self.code_lines.append(f"{python_var}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasReactor(gas_for_node)
+                self.reactors[rid] = ct.IdealGasReactor(gas_for_node, clone=True)
                 self.reactors[rid].name = rid
                 # Set volume if specified
                 self._set_reactor_volume(self.reactors[rid], props, rid)
@@ -380,7 +749,9 @@ class DualCanteraConverter:
                     f"{python_var} = ct.IdealGasConstPressureReactor(gas_default)"
                 )
                 self.code_lines.append(f"{python_var}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasConstPressureReactor(gas_for_node)
+                self.reactors[rid] = ct.IdealGasConstPressureReactor(
+                    gas_for_node, clone=True
+                )
                 self.reactors[rid].name = rid
                 # Set volume if specified
                 self._set_reactor_volume(self.reactors[rid], props, rid)
@@ -404,7 +775,9 @@ class DualCanteraConverter:
                     f"{rid} = ct.IdealGasConstPressureMoleReactor(gas_default)"
                 )
                 self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasConstPressureMoleReactor(gas_for_node)
+                self.reactors[rid] = ct.IdealGasConstPressureMoleReactor(
+                    gas_for_node, clone=True
+                )
                 self.reactors[rid].name = rid
                 # Set volume if specified
                 self._set_reactor_volume(self.reactors[rid], props, rid)
@@ -426,7 +799,7 @@ class DualCanteraConverter:
                 )
                 self.code_lines.append(f"{rid} = ct.IdealGasMoleReactor(gas_default)")
                 self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasMoleReactor(gas_for_node)  # type: ignore[attr-defined]
+                self.reactors[rid] = ct.IdealGasMoleReactor(gas_for_node, clone=True)  # type: ignore[attr-defined]
                 self.reactors[rid].name = rid
                 # Set volume if specified
                 self._set_reactor_volume(self.reactors[rid], props, rid)
@@ -454,7 +827,7 @@ class DualCanteraConverter:
                 python_var = _make_valid_python_identifier(rid)
                 self.code_lines.append(f"{python_var} = ct.Reservoir(gas_default)")
                 self.code_lines.append(f"{python_var}.name = '{rid}'")
-                reservoir = ct.Reservoir(gas_for_node)
+                reservoir = ct.Reservoir(gas_for_node, clone=True)
                 self.reactors[rid] = reservoir  # type: ignore[assignment]
                 self.reactors[rid].name = rid
                 try:
@@ -633,7 +1006,7 @@ class DualCanteraConverter:
                 time_step = simulation_time / 10.0  # Use 10 steps minimum
 
             logger.info(
-                f"🕐 Using config parameters: time={simulation_time}s, step={time_step}s"
+                f"Using config parameters: time={simulation_time}s, step={time_step}s"
             )
 
         # Add simulation loop code generation
@@ -655,7 +1028,7 @@ class DualCanteraConverter:
         self.code_lines.append("    network.advance(t)")
         self.code_lines.append("    # Print current time and reactor temperatures")
         self.code_lines.append(
-            '    print(f"t={t:.4f}, T={[r.thermo.T for r in network.reactors]}")'
+            '    print(f"t={t:.4f}, T={[r.phase.T for r in network.reactors]}")'
         )
         self.code_lines.append("")
         self.code_lines.append("print('Simulation completed!')")
@@ -695,10 +1068,66 @@ class DualCanteraConverter:
                     f"Cantera advance failed at t={current_time}s: {last_error_message}"
                 )
                 if len(times) == 0:
-                    # If we haven't captured any data yet, this is a real failure
-                    raise RuntimeError(
-                        f"Cantera advance failed at t={current_time}s: {last_error_message}"
-                    ) from e
+                    # Record initial state so we have at least one time point (for Sankey, etc.)
+                    logger.warning(
+                        "Recording initial reactor state and returning (integration failed)"
+                    )
+                    times.append(0.0)
+                    for reactor in reactor_list:
+                        reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+                        reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
+                            "gas_solution", self.gas
+                        )
+                        reactor_species_names = reactor_gas.species_names
+                        try:
+                            T = float(reactor.phase.T)
+                            P = float(reactor.phase.P)
+                            X_vec = reactor.phase.X
+                            if not (
+                                math.isfinite(T)
+                                and math.isfinite(P)
+                                and all(math.isfinite(float(x)) for x in X_vec)
+                            ):
+                                T, P = 300.0, 101325.0
+                                X_vec = np.array(
+                                    [
+                                        1.0 if s == "N2" else 0.0
+                                        for s in reactor_species_names
+                                    ]
+                                )
+                        except Exception:
+                            T, P = 300.0, 101325.0
+                            X_vec = np.array(
+                                [
+                                    1.0 if s == "N2" else 0.0
+                                    for s in reactor_species_names
+                                ]
+                            )
+                        sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
+                        reactors_series[reactor_id]["T"].append(T)
+                        reactors_series[reactor_id]["P"].append(P)
+                        for species_name, x_value in zip(reactor_species_names, X_vec):
+                            reactors_series[reactor_id]["X"][species_name].append(
+                                float(x_value)
+                            )
+                    if progress_callback:
+                        progress_callback(
+                            {
+                                "time": times.copy(),
+                                "reactors": {
+                                    k: {
+                                        "T": v["T"].copy(),
+                                        "P": v["P"].copy(),
+                                        "X": {s: v["X"][s].copy() for s in v["X"]},
+                                    }
+                                    for k, v in reactors_series.items()
+                                },
+                                "error_message": last_error_message,
+                            },
+                            0.0,
+                            simulation_time,
+                        )
+                    break
                 # Otherwise, break and return partial results
                 logger.warning(f"Returning partial results up to t={times[-1]}s")
                 # Provide a partial-progress callback update containing the error
@@ -726,9 +1155,9 @@ class DualCanteraConverter:
             # Capture reactor states
             for reactor in reactor_list:
                 reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                T = reactor.thermo.T
-                P = reactor.thermo.P
-                X_vec = reactor.thermo.X
+                T = reactor.phase.T
+                P = reactor.phase.P
+                X_vec = reactor.phase.X
 
                 # Get the correct gas solution for this reactor's mechanism
                 reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
@@ -828,7 +1257,6 @@ class DualCanteraConverter:
                     self.last_network,
                     show_species=available_species,  # TODO : let it be set by plugin
                     verbose=False,
-                    mechanism=self.mechanism,
                 )
             else:
                 # Use default Boulder Sankey generator
@@ -837,7 +1265,6 @@ class DualCanteraConverter:
                     self.last_network,
                     show_species=available_species,
                     verbose=False,
-                    mechanism=self.mechanism,
                     if_no_species="ignore",
                 )
 
@@ -942,7 +1369,7 @@ class DualCanteraConverter:
             all_available_species = set()
             for reactor in self.network.reactors:
                 try:
-                    reactor_species = set(reactor.thermo.species_names)
+                    reactor_species = set(reactor.phase.species_names)
                     all_available_species.update(reactor_species)
                 except Exception as e:
                     logger.debug(

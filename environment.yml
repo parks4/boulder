@@ -5,7 +5,7 @@ channels:
 dependencies:
 - pip
 - cantera
-- numpy
+- numpy>=2.4.0     # np.trapz replaced with np.trapezoid
 - pandas
 - plotly
 - pint
