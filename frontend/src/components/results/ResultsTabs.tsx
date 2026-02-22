@@ -3,6 +3,7 @@ import { useSimulationStore } from "@/stores/simulationStore";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { useResultsTabStore } from "@/stores/resultsTabStore";
 import { fetchPlugins, renderPlugin } from "@/api/plugins";
 import { Button } from "@/components/ui/Button";
 import { PlotsTab } from "./PlotsTab";
@@ -27,8 +28,8 @@ export function ResultsTabs() {
   const selectedElement = useSelectionStore((s) => s.selectedElement);
   const config = useConfigStore((s) => s.config);
   const theme = useThemeStore((s) => s.theme);
-
-  const [activeTab, setActiveTab] = useState<Tab>("Plots");
+  const activeTab = useResultsTabStore((s) => s.activeTab);
+  const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
   const [plugins, setPlugins] = useState<PluginMeta[]>([]);
   const [pluginData, setPluginData] = useState<Record<string, PluginRenderData>>({});
   const [pluginLoading, setPluginLoading] = useState<Record<string, boolean>>({});

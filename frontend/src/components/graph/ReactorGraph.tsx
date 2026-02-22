@@ -4,6 +4,7 @@ import cytoscape, { type Core, type EventObject } from "cytoscape";
 import dagre from "cytoscape-dagre";
 import { useConfigStore } from "@/stores/configStore";
 import { useSelectionStore } from "@/stores/selectionStore";
+import { useResultsTabStore } from "@/stores/resultsTabStore";
 import { useThemeStore } from "@/stores/themeStore";
 
 // Register dagre layout
@@ -13,12 +14,17 @@ cytoscape.use(dagre);
  * Native Cytoscape.js graph component for the reactor network.
  * Uses dagre left-to-right layout.
  */
+const DBLTAP_MS = 300;
+
 export function ReactorGraph() {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  const lastTappedRef = useRef<{ nodeId: string; time: number } | null>(null);
+  const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const config = useConfigStore((s) => s.config);
   const setSelectedElement = useSelectionStore((s) => s.setSelectedElement);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
+  const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
   const theme = useThemeStore((s) => s.theme);
 
   // Build cytoscape elements from config
@@ -151,13 +157,34 @@ export function ReactorGraph() {
 
     cy.on("tap", "node", (e: EventObject) => {
       const data = e.target.data();
-      if (!data.isGroup) {
-        setSelectedElement({ type: "node", data });
+      if (data.isGroup) return;
+      const nodeId = String(data.id);
+      const now = Date.now();
+      const last = lastTappedRef.current;
+      if (last?.nodeId === nodeId && now - last.time < DBLTAP_MS) {
+        if (tapTimeoutRef.current) {
+          clearTimeout(tapTimeoutRef.current);
+          tapTimeoutRef.current = null;
+        }
+        lastTappedRef.current = null;
+        setActiveTab("Thermo");
+      } else {
+        lastTappedRef.current = { nodeId, time: now };
+        if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
+        tapTimeoutRef.current = setTimeout(() => {
+          lastTappedRef.current = null;
+          tapTimeoutRef.current = null;
+        }, DBLTAP_MS);
       }
+      setSelectedElement({ type: "node", data });
     });
 
     cy.on("tap", "edge", (e: EventObject) => {
-      setSelectedElement({ type: "edge", data: e.target.data() });
+      const data = e.target.data();
+      setSelectedElement({ type: "edge", data });
+      if (String(data.type) === "MassFlowController") {
+        setActiveTab("Thermo");
+      }
     });
 
     cy.on("tap", (e: EventObject) => {
@@ -167,6 +194,11 @@ export function ReactorGraph() {
     cyRef.current = cy;
 
     return () => {
+      if (tapTimeoutRef.current) {
+        clearTimeout(tapTimeoutRef.current);
+        tapTimeoutRef.current = null;
+      }
+      lastTappedRef.current = null;
       cy.destroy();
       cyRef.current = null;
     };

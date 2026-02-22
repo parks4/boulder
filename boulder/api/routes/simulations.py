@@ -163,6 +163,7 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
         "times": progress.times,
         "reactors_series": progress.reactors_series,
         "reactor_reports": _serialise_reports(progress.reactor_reports),
+        "connection_reports": progress.connection_reports.copy(),
         "code_str": progress.code_str,
         "summary": progress.summary,
         "sankey_links": progress.sankey_links,
