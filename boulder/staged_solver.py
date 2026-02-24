@@ -505,7 +505,7 @@ def _collect_stage_states(
                     # Fallback: use T, P, and whatever species match
                     gas_template.TP = reactor_thermo.T, reactor_thermo.P
 
-            states.append(gas_template.state, t=t_cumulative)
+            states.append(gas_template.state, t=t_cumulative)  # type: ignore[call-arg]
         except Exception as exc:
             logger.warning(
                 "Could not collect state for reactor '%s' in stage '%s': %s",

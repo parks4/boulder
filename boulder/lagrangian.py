@@ -322,6 +322,6 @@ class LagrangianTrajectory:
 def _get_t_axis(states: ct.SolutionArray) -> Optional[np.ndarray]:
     """Return the ``t`` extra field from a SolutionArray, or ``None``."""
     try:
-        return np.asarray(states.t, dtype=float)
+        return np.asarray(states.t, dtype=float)  # type: ignore[attr-defined]
     except AttributeError:
         return None

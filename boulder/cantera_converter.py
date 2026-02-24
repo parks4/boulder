@@ -3,7 +3,7 @@ import math
 import os
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 import cantera as ct  # type: ignore
 import numpy as np
@@ -78,7 +78,7 @@ def resolve_unset_flow_rates(
     mfc_topology: Dict[str, Tuple[str, str]],
     flow_rates: Dict[str, float],
     mfc_objects: Dict[str, "ct.MassFlowController"],
-    reactors: Dict[str, "ct.ReactorBase"],
+    reactors: Mapping[str, "ct.ReactorBase"],
     unresolved_ids: Set[str],
 ) -> None:
     """Resolve mass flow rates for MFCs not specified in the config.
@@ -410,7 +410,7 @@ class DualCanteraConverter:
             reactor = ct.IdealGasMoleReactor(gas_for_node, clone=True)  # type: ignore[attr-defined]
             reactor.name = rid
         elif typ == "Reservoir":
-            reactor = ct.Reservoir(gas_for_node, clone=True)
+            reactor = ct.Reservoir(gas_for_node, clone=True)  # type: ignore[assignment]
             reactor.name = rid
         else:
             raise ValueError(f"Unsupported reactor type: '{typ}'")

@@ -398,7 +398,7 @@ class TestLagrangianTrajectory:
         states = ct.SolutionArray(gas, extra=["t"])
         for i in range(n):
             gas.TPX = T + i * 10, 101325, "N2:1"
-            states.append(gas.state, t=float(i) * 1e-3)
+            states.append(gas.state, t=float(i) * 1e-3)  # type: ignore[call-arg]
         return states
 
     def test_empty_trajectory(self):
