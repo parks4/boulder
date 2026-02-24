@@ -70,15 +70,19 @@ class TestCLIHeadless:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=60,  # 60 second timeout
             )
 
             # Check that the command succeeded
-            assert result.returncode == 0, f"CLI command failed: {result.stderr}"
+            stderr = result.stderr or ""
+            assert result.returncode == 0, f"CLI command failed: {stderr}"
 
-            # Check that success message is in output
-            assert "Python code generated:" in result.stdout
-            assert output_path in result.stdout
+            # Check that success message is in output (stdout can be None if decode failed)
+            stdout = result.stdout or ""
+            assert "Python code generated:" in stdout
+            assert output_path in stdout
 
             # Check that the output file was created
             assert os.path.exists(output_path), "Generated Python file does not exist"
@@ -109,13 +113,16 @@ class TestCLIHeadless:
                 [sys.executable, output_path],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=30,  # 30 second timeout for execution
             )
 
             # The generated code should start running and produce some output
             # Even if the simulation fails due to numerical issues, we should see initial output
-            assert "t=" in exec_result.stdout, "No simulation output found"
-            assert "T=" in exec_result.stdout, "No temperature output found"
+            exec_stdout = exec_result.stdout or ""
+            assert "t=" in exec_stdout, "No simulation output found"
+            assert "T=" in exec_stdout, "No temperature output found"
 
             # Verify that the code contains proper numpy usage for time steps
             assert "import numpy as np" in generated_code
@@ -152,9 +159,11 @@ class TestCLIHeadless:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert result.returncode == 1
-        assert "Error: --headless requires a config file" in result.stdout
+        assert "Error: --headless requires a config file" in (result.stdout or "")
 
         # Test missing download argument
         config_path = (
@@ -164,9 +173,11 @@ class TestCLIHeadless:
             [sys.executable, "-m", "boulder.cli", str(config_path), "--headless"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert result.returncode == 1
-        assert "Error: --headless requires --download" in result.stdout
+        assert "Error: --headless requires --download" in (result.stdout or "")
 
         # Test download without headless
         result = subprocess.run(
@@ -180,9 +191,11 @@ class TestCLIHeadless:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         assert result.returncode == 1
-        assert "Error: --download requires --headless" in result.stdout
+        assert "Error: --download requires --headless" in (result.stdout or "")
 
     def test_headless_mode_nonexistent_config(self):
         """Test that headless mode handles nonexistent config files gracefully.
@@ -211,11 +224,14 @@ class TestCLIHeadless:
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
 
+            out = result.stdout or ""
             assert result.returncode == 1
-            assert "Error:" in result.stdout
-            assert "not found" in result.stdout.lower()
+            assert "Error:" in out
+            assert "not found" in out.lower()
 
         finally:
             if os.path.exists(output_path):
@@ -235,10 +251,13 @@ class TestCLIHeadless:
             [sys.executable, "-m", "boulder.cli", "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
+        out = result.stdout or ""
         assert result.returncode == 0
-        assert "--headless" in result.stdout
-        assert "--download" in result.stdout
-        assert "Run without starting the web UI" in result.stdout
-        assert "Generate Python code from YAML" in result.stdout
+        assert "--headless" in out
+        assert "--download" in out
+        assert "Run without starting the web UI" in out
+        assert "Generate Python code from YAML" in out

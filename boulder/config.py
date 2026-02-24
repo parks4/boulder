@@ -140,8 +140,16 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     if "connections" in normalized:
         for connection in normalized["connections"]:
             if "type" not in connection:
-                # Find the type key (anything that's not id, source, target, metadata)
-                standard_fields = {"id", "source", "target", "metadata"}
+                # Find the type key (anything that's not id, source, target, metadata,
+                # or the mechanism_switch block – which is a connection-level annotation,
+                # not a Cantera object type).
+                standard_fields = {
+                    "id",
+                    "source",
+                    "target",
+                    "metadata",
+                    "mechanism_switch",
+                }
                 type_keys = [k for k in connection.keys() if k not in standard_fields]
 
                 if type_keys:
@@ -154,6 +162,10 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
                     connection["properties"] = (
                         properties if isinstance(properties, dict) else {}
                     )
+                    # mechanism_switch is preserved at the connection top-level
+
+    # Pass through the groups section unchanged (used by staged solver)
+    # No normalization needed: groups is a plain dict {group_id: {stage_order, mechanism, solve}}
 
     return normalized
 

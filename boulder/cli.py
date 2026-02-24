@@ -200,6 +200,7 @@ def run_headless_mode(
 
         # Create converter instance
         converter = DualCanteraConverter()
+        converter._download_config_path = config_path
 
         if verbose:
             print("Building Cantera network...")

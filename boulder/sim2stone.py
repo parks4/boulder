@@ -325,6 +325,14 @@ def sim_to_internal_config(
         # Use smart extraction to get comments for reactor network objects
         object_comments = _smart_extract_object_comments(source_file, sim)
 
+    # Cantera flow devices expose mass_flow_rate only after the ReactorNet has been
+    # initialized (i.e. after the first advance/step call).  Calling advance(0.0) on
+    # a fresh network triggers the lazy C++ initialization without changing any state.
+    try:
+        sim.advance(sim.time)
+    except Exception:
+        pass
+
     # Collect unique reactors/reservoirs from the entire network
     all_reactors = list(collect_all_reactors_and_reservoirs(sim))
     # Deterministic order
@@ -336,28 +344,35 @@ def sim_to_internal_config(
         # Capture mechanism override if present on reactor object (set by builder)
         mech_override = getattr(r, "_boulder_mechanism", None)
 
-        props: Dict[str, Any] = {
-            "temperature": float(r.thermo.T),
-            "pressure": float(r.thermo.P),
-            "composition": _composition_to_string(r.thermo),
-        }
+        if isinstance(r, ct.Reservoir):
+            # Reservoirs are infinite boundary conditions – T, P, X, and mechanism
+            # are not meaningful in the YAML.  Emit an empty properties block so
+            # the node round-trips cleanly (builder applies sensible defaults).
+            props: Dict[str, Any] = {}
+        else:
+            props = {
+                "temperature": float(r.thermo.T),
+                "pressure": float(r.thermo.P),
+                "composition": _composition_to_string(r.thermo),
+            }
 
-        # Add volume for non-Reservoir reactors (Reservoirs have infinite volume)
-        if not isinstance(r, ct.Reservoir):
+            # Volume (Reservoirs have infinite / undefined volume)
             try:
                 volume = float(r.volume)
                 if volume > 0:  # Only include positive volumes
                     props["volume"] = volume
             except (AttributeError, ValueError, TypeError):
-                # Volume attribute may not be available or accessible
                 pass
-        if isinstance(mech_override, str) and mech_override:
-            props["mechanism"] = mech_override
-        else:
-            guessed = _mechanism_from_thermo(r.thermo)
-            if guessed:
-                props["mechanism"] = guessed
-        # Optional group propagation if present
+
+            # Mechanism: node-level override first, then infer from thermo
+            if isinstance(mech_override, str) and mech_override:
+                props["mechanism"] = mech_override
+            else:
+                guessed = _mechanism_from_thermo(r.thermo)
+                if guessed:
+                    props["mechanism"] = guessed
+
+        # Optional group propagation (applies to all node types)
         group_name = getattr(r, "group_name", "")
         if isinstance(group_name, str) and group_name:
             props["group"] = group_name
@@ -396,7 +411,7 @@ def sim_to_internal_config(
         if isinstance(dev, ct.MassFlowController):
             # Prefer attribute if available; Cantera exposes mass_flow_rate as a property
             try:
-                props["mass_flow_rate"] = float(dev.mass_flow_rate)
+                conn_props["mass_flow_rate"] = float(dev.mass_flow_rate)
             except Exception:
                 # Fallbacks: some backends require initialized networks; try alternate attributes
                 mdot_attr = getattr(dev, "mdot", None)
@@ -405,8 +420,8 @@ def sim_to_internal_config(
                 except Exception:
                     mdot_value = None
                 if isinstance(mdot_value, (int, float)):
-                    props["mass_flow_rate"] = float(mdot_value)
-                # Else: omit property; builder will use its default
+                    conn_props["mass_flow_rate"] = float(mdot_value)
+                # Else: omit property; conservation will infer it if possible
             # If mass flow is negative, re-orient the connection and take absolute value
             mfr = conn_props.get("mass_flow_rate")
             if isinstance(mfr, (int, float)) and mfr < 0:
@@ -581,7 +596,9 @@ def sim_to_stone_yaml(
         # Drop per-node mechanism if it matches the global phases gas mechanism
         if node_mech == mechanism:
             node_mech = None
-        node_cm[node["type"]] = props
+        # Emit null (renders as bare key) when there are no properties,
+        # so Reservoir nodes appear as `Reservoir:` rather than `Reservoir: {}`.
+        node_cm[node["type"]] = props if props else None
         if node_mech is not None:
             node_cm["mechanism"] = node_mech
         # Add description if available

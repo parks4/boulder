@@ -55,7 +55,6 @@ export function AppShell() {
     try {
       const resp = await startSimulation(config);
       setStarted(resp.simulation_id);
-      toast.success("Simulation started");
     } catch (err) {
       toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
     }

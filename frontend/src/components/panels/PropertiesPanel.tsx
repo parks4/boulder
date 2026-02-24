@@ -99,8 +99,10 @@ export function PropertiesPanel() {
         </div>
       </div>
 
-      <div className="divide-y divide-border">
-        {Object.entries(properties).map(([key, value]) => (
+      <div className="border-t border-border pt-2 mt-1">
+        <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
+        <div className="divide-y divide-border">
+          {Object.entries(properties).map(([key, value]) => (
           <div key={key} className="py-1.5 flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground truncate">
               {labelWithUnit(key)}
@@ -127,6 +129,7 @@ export function PropertiesPanel() {
         {Object.keys(properties).length === 0 && (
           <p className="text-xs text-muted-foreground py-1 italic">No properties</p>
         )}
+        </div>
       </div>
 
       {!isNode && entity && (

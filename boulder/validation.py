@@ -67,6 +67,9 @@ class ConnectionModel(BaseModel):
     target: str = Field(min_length=1)
     properties: Dict[str, Any] = Field(default_factory=dict)
     metadata: Optional[Dict[str, Any]] = None
+    #: Optional mechanism-switch annotation for inter-stage connections.
+    #: ``{"htol": float, "Xtol": float}``
+    mechanism_switch: Optional[Dict[str, Any]] = None
 
     @validator("properties")
     def ensure_properties_is_object(cls, value: Dict[str, Any]) -> Dict[str, Any]:
@@ -86,6 +89,9 @@ class NormalizedConfigModel(BaseModel):
     # Preserve top-level `output` block (flexible shape). Validation of its content
     # is handled by feature-specific parsers; we just carry it through here.
     output: Optional[Any] = None
+    #: Staged-solving group definitions.
+    #: ``{group_id: {stage_order, mechanism, solve, advance_time}}``
+    groups: Optional[Dict[str, Any]] = None
 
     def __init__(self, **data):
         super().__init__(**data)
@@ -109,14 +115,22 @@ class NormalizedConfigModel(BaseModel):
                 raise ValueError(f"Duplicate connection id detected: '{conn.id}'")
             seen_conns.add(conn.id)
 
-        # Source/target references must exist
+        # Source/target references must exist (node id or node_id_outlet alias)
         valid_nodes: Set[str] = set(node_ids)
+
+        def _valid_ref(ref: str) -> bool:
+            if ref in valid_nodes:
+                return True
+            if ref.endswith("_outlet") and ref[:-7] in valid_nodes:
+                return True
+            return False
+
         for conn in self.connections:
-            if conn.source not in valid_nodes:
+            if not _valid_ref(conn.source):
                 raise ValueError(
                     f"Connection '{conn.id}' source '{conn.source}' does not reference an existing node"
                 )
-            if conn.target not in valid_nodes:
+            if not _valid_ref(conn.target):
                 raise ValueError(
                     f"Connection '{conn.id}' target '{conn.target}' does not reference an existing node"
                 )

@@ -5,13 +5,13 @@ channels:
 dependencies:
 - pip
 - cantera
-- numpy
+- numpy>=2.4.0     # np.trapz replaced with np.trapezoid
 - pandas
 - plotly
 - pint
 - pydantic
 - python-graphviz   # installs Python package as well as the graphviz & dot commands
-- nodejs            # for the React frontend build
+- nodejs            # for the React frontend build (includes npm)
 - pip:
   - fastapi>=0.110.0
   - "uvicorn[standard]>=0.27.0"
