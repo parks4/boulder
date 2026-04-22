@@ -46,6 +46,11 @@ export function ResultsTabs() {
       .catch(() => setPlugins([]));
   }, [results, progress]);
 
+  // Switch to Sankey automatically when simulation results arrive.
+  useEffect(() => {
+    if (results) setActiveTab("Sankey");
+  }, [results]);
+
   // If the error clears while viewing the Error tab, move back to a safe tab.
   useEffect(() => {
     if (!error && activeTab === ERROR_TAB_LABEL) setActiveTab("Plots");

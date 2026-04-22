@@ -32,22 +32,12 @@ export function PlotsTab({ data }: Props) {
     [theme],
   );
 
-  if (!data.times.length) {
-    return <p className="text-sm text-muted-foreground">No data yet.</p>;
-  }
+  // reactorSeries must be resolved before any early return so that the
+  // useMemo calls below are always executed (React forbids conditional hooks).
+  const reactorSeries = selectedReactorId
+    ? data.reactors_series[selectedReactorId]
+    : undefined;
 
-  if (!selectedReactorId) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        Select a reactor node to view plots.
-      </p>
-    );
-  }
-
-  const reactorSeries = data.reactors_series[selectedReactorId];
-  const times = data.times;
-
-  // Main species for composition: max fraction > threshold, keep up to 12 species
   const MAIN_SPECIES_MIN_FRACTION = 1e-4;
   const MAIN_SPECIES_MAX_COUNT = 12;
 
@@ -76,6 +66,20 @@ export function PlotsTab({ data }: Props) {
       .slice(0, MAIN_SPECIES_MAX_COUNT)
       .map((s) => s.name);
   }, [reactorSeries?.Y]);
+
+  if (!data.times.length) {
+    return <p className="text-sm text-muted-foreground">No data yet.</p>;
+  }
+
+  if (!selectedReactorId) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Select a reactor node to view plots.
+      </p>
+    );
+  }
+
+  const times = data.times;
 
   const moleFractionTraces = mainSpeciesMole.map((species) => ({
     x: times,

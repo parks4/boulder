@@ -118,7 +118,7 @@ class DefaultSummaryBuilder(SummaryBuilder):
                     "reactor": reactor_name,
                     "quantity": "pressure",
                     "label": f"{reactor_name} Pressure",
-                    "value": reactor.thermo.P,
+                    "value": reactor.phase.P,
                     "unit": "Pa",
                 }
             )
