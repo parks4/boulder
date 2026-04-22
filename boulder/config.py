@@ -24,6 +24,26 @@ CANTERA_MECHANISM = "gri30.yaml"
 THEME = "system"
 
 
+# Locked STONE top-level vocabulary.  Any other top-level key is rejected
+# by :func:`normalize_config` — this is the single source of truth for
+# allowed sections, consumed by the CLI's ``boulder validate`` command and
+# by the UI's config linter.
+STONE_TOP_LEVEL_KEYS: frozenset = frozenset(
+    {
+        "metadata",
+        "phases",
+        "settings",
+        "nodes",
+        "connections",
+        "groups",
+        "output",
+        "export",
+        "sweeps",
+        "scenarios",
+    }
+)
+
+
 def get_yaml_with_comments():
     """Get a ruamel.yaml YAML object configured to preserve comments."""
     yaml_obj = YAML()
@@ -102,7 +122,11 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     normalized = config.copy()
 
-    # Require new STONE schema keys
+    # Require new STONE schema keys and reject mixed dialects: the YAML must
+    # contain only top-level keys from the locked STONE vocabulary.  Unknown
+    # keys almost always indicate a partially-ported legacy config (e.g. a
+    # ctwrap ``defaults`` block left over from the SPRING dialect).  Failing
+    # fast here gives a clearer error than downstream Pydantic validation.
     if isinstance(normalized, dict):
         if "nodes" not in normalized:
             raise ValueError(
@@ -110,7 +134,14 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
                 "Please update your YAML configuration to use the new STONE schema with 'nodes', "
                 "'phases', and 'settings'."
             )
-        # Keep phases and settings as separate top-level sections (STONE standard)
+        unknown = sorted(set(normalized.keys()) - STONE_TOP_LEVEL_KEYS)
+        if unknown:
+            raise ValueError(
+                "STONE format violation: unknown top-level keys "
+                f"{unknown}. Allowed keys: {sorted(STONE_TOP_LEVEL_KEYS)}. "
+                "Remove legacy dialect keys (e.g. 'defaults', 'parameters', "
+                "'model_type') or move them under 'settings'/'export'."
+            )
 
     # Normalize nodes
     if "nodes" in normalized:
@@ -167,7 +198,58 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # Pass through the groups section unchanged (used by staged solver)
     # No normalization needed: groups is a plain dict {group_id: {stage_order, mechanism, solve}}
 
+    # Synthesize a single "default" stage when the YAML does not declare any
+    # groups.  Every simulation runs through the staged solver
+    # ({build_stage_graph, solve_staged}) with one ordered stage.  Previously,
+    # ungrouped nodes were silently dropped by build_stage_graph; tagging them
+    # with group="default" here keeps them in the network.
+    synthesize_default_group(normalized)
+
     return normalized
+
+
+def synthesize_default_group(config: Dict[str, Any]) -> None:
+    """Inject a single-stage ``groups`` section when the YAML has none.
+
+    Idempotent.  If ``config["groups"]`` is already a non-empty mapping, this
+    function does nothing.  Otherwise it creates a ``default`` group with the
+    global gas mechanism and ``solve: advance_to_steady_state``, and tags
+    every node and connection with ``group: "default"`` so the staged solver
+    picks them up.  Nodes or connections that already carry a group tag are
+    left untouched (supports partial staging).
+    """
+    groups_cfg = config.get("groups")
+    if groups_cfg:
+        return
+
+    default_mech = "gri30.yaml"
+    phases = config.get("phases") or {}
+    if isinstance(phases, dict):
+        gas_phase = phases.get("gas") or {}
+        if isinstance(gas_phase, dict):
+            default_mech = gas_phase.get("mechanism") or default_mech
+
+    config["groups"] = {
+        "default": {
+            "stage_order": 1,
+            "mechanism": default_mech,
+            "solve": "advance_to_steady_state",
+        }
+    }
+
+    for node in config.get("nodes") or []:
+        raw_props = node.get("properties")
+        props = raw_props if isinstance(raw_props, dict) else {}
+        has_group = bool(node.get("group") or props.get("group"))
+        if not has_group:
+            node["group"] = "default"
+
+    for conn in config.get("connections") or []:
+        raw_props = conn.get("properties")
+        props = raw_props if isinstance(raw_props, dict) else {}
+        has_group = bool(conn.get("group") or props.get("group"))
+        if not has_group:
+            conn["group"] = "default"
 
 
 def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -180,7 +262,17 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
     from .validation import validate_normalized_config
 
     model = validate_normalized_config(config)
-    return model.dict()
+    as_dict = model.dict()
+    # Drop None-valued optional metadata fields so downstream consumers that
+    # use ``metadata.get(key, default)`` still see their fallback instead of
+    # the explicit ``None`` produced by Pydantic's default serialization.
+    meta = as_dict.get("metadata")
+    if isinstance(meta, dict):
+        cleaned = {k: v for k, v in meta.items() if v is not None}
+        if not cleaned.get("extra"):
+            cleaned.pop("extra", None)
+        as_dict["metadata"] = cleaned
+    return as_dict
 
 
 def get_initial_config() -> Dict[str, Any]:

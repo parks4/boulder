@@ -320,10 +320,13 @@ def solve_staged(
             stage_id=stage.id,
             stage=stage,
         )
+        trajectory.stage_nets[stage.id] = network
 
         # Collect SolutionArray in flow order through the stage
         flow_order = _flow_order_within_stage(stage)
-        states = _collect_stage_states(stage, stage_reactors, flow_order, converter)
+        states = _collect_stage_states(
+            stage, stage_reactors, flow_order, converter, network=network
+        )
         mapping_losses: Optional[Dict[str, float]] = None
 
         # Extract outlet states for each outgoing inter-stage connection
@@ -428,11 +431,12 @@ def _collect_stage_states(
     stage_reactors: Dict[str, ct.Reactor],
     flow_order: List[str],
     converter: "DualCanteraConverter",
+    network: Optional[ct.ReactorNet] = None,
 ) -> ct.SolutionArray:
     """Collect per-reactor final states into a SolutionArray in flow order.
 
     Residence time is taken from ``converter.reactor_meta[rid]["t_res_s"]``
-    when available (set by Bloc's post-build hook for DesignTorch / DesignPSR).
+    when available (populated by a post-build hook in an external plugin).
     For CSTR chains the cells have volumes; residence time is approximated as
     ``volume * density / mass_flow_rate`` using the first available outgoing
     mass flow rate; if unknown, the field is ``NaN``.
@@ -453,12 +457,13 @@ def _collect_stage_states(
 
     states = ct.SolutionArray(gas_template, extra=["t"])
 
-    # If a reactor carries a full spatial profile from a custom solver
-    # (e.g. DesignPFRNet.advance()), return it directly without re-sampling.
-    for nid in flow_order:
-        r = stage_reactors.get(nid)
-        if r is not None and hasattr(r, "_boulder_states"):
-            return r._boulder_states  # full FBS SolutionArray — use directly
+    # Fast-path: a plugin-provided CustomStageNetwork (see
+    # :mod:`boulder.stage_network`) may already hold the converged profile.
+    # Use it verbatim, bypassing the generic CSTR-chain sampler below.
+    if network is not None:
+        custom_states = getattr(network, "boulder_states", None)
+        if custom_states is not None and len(custom_states) > 0:
+            return custom_states
 
     t_cumulative = 0.0
     for nid in flow_order:
@@ -595,9 +600,11 @@ def _apply_mechanism_switch(
     switch_fn = getattr(converter.plugins, "mechanism_switch_fn", None)
     if switch_fn is None:
         raise ValueError(
-            f"A mechanism_switch is required ('{gas.source}' → '{new_mechanism}') "
+            f"A mechanism_switch is required ('{gas.source}' -> '{new_mechanism}') "
             "but no 'mechanism_switch_fn' plugin is registered. "
-            "Install the 'bloc' package and ensure its plugins are loaded."
+            "Register a plugin that provides 'mechanism_switch_fn' via the "
+            "Boulder plugin system (entry point 'boulder.plugins' or "
+            "BOULDER_PLUGINS env var)."
         )
 
     htol = float(switch_cfg.get("htol", 1e-4))

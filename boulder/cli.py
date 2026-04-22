@@ -276,7 +276,135 @@ def run_headless_mode(
         sys.exit(1)
 
 
+def _run_plugins_subcommand(argv: list[str]) -> int:
+    """Handle ``boulder plugins list`` — print discovered plugin sources."""
+    sub = argv[0] if argv else "list"
+    if sub != "list":
+        print(f"Unknown 'plugins' subcommand: {sub!r}. Use 'boulder plugins list'.")
+        return 1
+
+    from .cantera_converter import get_plugins
+
+    plugins = get_plugins()
+    ep_sources = plugins.sources.get("entry_point", [])
+    env_sources = plugins.sources.get("env_var", [])
+
+    print("Boulder plugin discovery:")
+    print(f"  entry points (group 'boulder.plugins'): {len(ep_sources)} registered")
+    for ep_name, ep_module in ep_sources:
+        print(f"    - {ep_name}: {ep_module}")
+    print(f"  BOULDER_PLUGINS env var: {len(env_sources)} registered")
+    for mod_name in env_sources:
+        print(f"    - {mod_name}")
+
+    print()
+    print(f"  reactor_builders       : {sorted(plugins.reactor_builders)}")
+    print(f"  connection_builders    : {sorted(plugins.connection_builders)}")
+    print(f"  post_build_hooks       : {len(plugins.post_build_hooks)}")
+    print(f"  mechanism_path_resolver: {plugins.mechanism_path_resolver is not None}")
+    print(f"  mechanism_switch_fn    : {plugins.mechanism_switch_fn is not None}")
+    print(f"  sankey_generator       : {plugins.sankey_generator is not None}")
+    print(f"  output_pane_plugins    : {len(plugins.output_pane_plugins)}")
+    print(f"  summary_builders       : {sorted(plugins.summary_builders)}")
+    return 0
+
+
+def _run_validate_subcommand(argv: list[str]) -> int:
+    """Handle ``boulder validate <yaml>`` — schema-check a STONE YAML."""
+    if not argv:
+        print("Error: 'boulder validate' requires a YAML path.")
+        return 2
+    config_path = argv[0]
+
+    from .config import load_config_file, normalize_config, validate_config
+    from .schema_registry import validate_against_plugin_schemas
+
+    if not os.path.isfile(config_path):
+        print(f"Error: configuration file not found: {config_path}")
+        return 2
+
+    raw = load_config_file(config_path)
+    normalized = normalize_config(raw)
+    validate_config(normalized)
+    errors = validate_against_plugin_schemas(normalized)
+    if errors:
+        print(f"VALIDATION FAILED: {len(errors)} problem(s) in {config_path}")
+        for err in errors:
+            print(f"  - {err}")
+        return 1
+    print(f"OK: {config_path} is a valid STONE configuration.")
+    return 0
+
+
+def _run_describe_subcommand(argv: list[str]) -> int:
+    """Handle ``boulder describe <kind>|--list`` — dump a plugin's schema."""
+    from .schema_registry import describe_kind, registered_kinds
+
+    if not argv or argv[0] in {"-l", "--list"}:
+        kinds = sorted(registered_kinds())
+        if not kinds:
+            print("No reactor kinds registered.")
+            return 0
+        print("Registered reactor kinds:")
+        for k in kinds:
+            print(f"  - {k}")
+        return 0
+    kind = argv[0]
+
+    try:
+        info = describe_kind(kind)
+    except KeyError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    print(f"Reactor kind: {kind}")
+    print(f"  network_class       : {info['network_class']}")
+    print(f"  schema              : {info['schema']}")
+    if info["schema_json"]:
+        import json
+
+        print("  schema (JSON):")
+        print(json.dumps(info["schema_json"], indent=2))
+    if info["categories"]:
+        print("  categories:")
+        for side in ("inputs", "outputs"):
+            print(f"    {side}:")
+            for cat, keys in info["categories"].get(side, {}).items():
+                print(f"      {cat}: {keys}")
+    if info["default_constraints"]:
+        print("  default_constraints:")
+        for c in info["default_constraints"]:
+            print(f"    - {c}")
+    variable_maps = info.get("variable_maps") or {}
+    if variable_maps:
+        print("  variable_maps:")
+        for side in ("inputs", "outputs"):
+            side_map = variable_maps.get(side) or {}
+            if not side_map:
+                continue
+            print(f"    {side}:")
+            for key, meta in side_map.items():
+                print(f"      {key}: {meta}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Subcommand dispatch (kept outside argparse to preserve backward-compat
+    # with the flag-based invocation ``boulder path/to.yaml``).
+    if argv and argv[0] in {"plugins", "validate", "describe"}:
+        sub = argv[0]
+        rc = 0
+        if sub == "plugins":
+            rc = _run_plugins_subcommand(argv[1:])
+        elif sub == "validate":
+            rc = _run_validate_subcommand(argv[1:])
+        elif sub == "describe":
+            rc = _run_describe_subcommand(argv[1:])
+        sys.exit(rc)
+
     args = parse_args(argv)
 
     # Handle --dev mode: start both backend and frontend dev server

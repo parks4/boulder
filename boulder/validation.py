@@ -13,6 +13,46 @@ from typing import Any, Dict, List, Optional, Set
 from pint import UnitRegistry
 from pydantic import BaseModel, Field, validator
 
+#: Locked STONE ``metadata:`` vocabulary.  Mandatory keys identify the
+#: scenario and are consumed by reporting code (calc_note, report, ...).
+#: Optional keys cover documentation/provenance fields we standardise so
+#: report generators can rely on them.  Anything outside this vocabulary
+#: must live under ``metadata.extra:`` — this keeps the '# [unit] desc |
+#: remark' YAML comment convention intact at the value level.
+METADATA_MANDATORY_KEYS: frozenset = frozenset({"description"})
+
+METADATA_OPTIONAL_KEYS: frozenset = frozenset(
+    {
+        "scenario_id",
+        "title",
+        "name",
+        "scenario_name",
+        "architecture",
+        "author",
+        "date",
+        "project",
+        "version",
+        "assumptions",
+        "remarks",
+        # Documentation / control metadata commonly used in engineering notes
+        "pid_no",
+        "tag_name",
+        "doc_no",
+        "rev",
+        "checked_by",
+        "approved_by",
+        "client",
+        # Provenance
+        "original_yaml",
+        "part1_stone_yaml",
+        "source_file",
+        # Escape hatch for truly freeform user metadata
+        "extra",
+    }
+)
+
+METADATA_ALLOWED_KEYS: frozenset = METADATA_MANDATORY_KEYS | METADATA_OPTIONAL_KEYS
+
 # Unit suggestions for error messages
 UNIT_SUGGESTIONS = {
     "celsius": "temperature units like 'degC', 'degF', 'K'",
@@ -27,6 +67,53 @@ UNIT_SUGGESTIONS = {
     "joule": "energy units like 'J', 'kJ', 'cal', 'BTU'",
     "meter": "length units like 'm', 'cm', 'ft', 'in'",
 }
+
+
+class MetadataModel(BaseModel):
+    """STONE ``metadata:`` block with a locked vocabulary.
+
+    Mandatory keys (:data:`METADATA_MANDATORY_KEYS`) identify the scenario
+    and feed the report headers.  A set of well-known optional keys covers
+    authoring, provenance, and document-control fields.  Anything
+    user-specific must live under ``metadata.extra:`` so report generators
+    do not need to branch on ad-hoc top-level fields.
+
+    The ``# [unit] desc | remark`` YAML comment convention applies to
+    individual values and is preserved by ``ruamel.yaml``; this schema
+    only governs *which* keys are accepted.
+    """
+
+    description: str = Field(min_length=1)
+
+    scenario_id: Optional[str] = None
+    title: Optional[str] = None
+    name: Optional[str] = None
+    scenario_name: Optional[str] = None
+    architecture: Optional[str] = None
+    author: Optional[str] = None
+    # Date is kept untyped so YAML can emit either strings or date objects
+    date: Optional[Any] = None
+    project: Optional[str] = None
+    version: Optional[str] = None
+    assumptions: Optional[List[Any]] = None
+    remarks: Optional[Dict[str, Any]] = None
+
+    pid_no: Optional[str] = None
+    tag_name: Optional[str] = None
+    doc_no: Optional[str] = None
+    rev: Optional[str] = None
+    checked_by: Optional[str] = None
+    approved_by: Optional[str] = None
+    client: Optional[str] = None
+
+    original_yaml: Optional[str] = None
+    part1_stone_yaml: Optional[str] = None
+    source_file: Optional[str] = None
+
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        extra = "forbid"
 
 
 class PhasesModel(BaseModel):
@@ -50,6 +137,13 @@ class NodeModel(BaseModel):
     type: str = Field(min_length=1)
     properties: Dict[str, Any] = Field(default_factory=dict)
     metadata: Optional[Dict[str, Any]] = None
+    #: Staged-solving group tag (set automatically by normalize_config's
+    #: default-group synthesis when the YAML has no ``groups:`` section).
+    group: Optional[str] = None
+    #: Optional dotted path or import ref pointing to a custom
+    #: ``ct.ReactorNet`` subclass; takes precedence over ``NETWORK_CLASS``
+    #: class attributes during staged solving.
+    network_class: Optional[str] = None
 
     @validator("properties")
     def ensure_properties_is_object(cls, value: Dict[str, Any]) -> Dict[str, Any]:
@@ -70,6 +164,8 @@ class ConnectionModel(BaseModel):
     #: Optional mechanism-switch annotation for inter-stage connections.
     #: ``{"htol": float, "Xtol": float}``
     mechanism_switch: Optional[Dict[str, Any]] = None
+    #: Staged-solving group tag (same semantics as NodeModel.group).
+    group: Optional[str] = None
 
     @validator("properties")
     def ensure_properties_is_object(cls, value: Dict[str, Any]) -> Dict[str, Any]:
@@ -81,7 +177,7 @@ class ConnectionModel(BaseModel):
 class NormalizedConfigModel(BaseModel):
     """Top-level normalized configuration model."""
 
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[MetadataModel] = None
     phases: Optional[PhasesModel] = None
     settings: Optional[SettingsModel] = None
     nodes: List[NodeModel]

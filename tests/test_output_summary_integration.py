@@ -1,4 +1,5 @@
 from boulder.cantera_converter import DualCanteraConverter
+from boulder.config import normalize_config
 
 
 def test_output_summary_in_results():
@@ -20,6 +21,7 @@ def test_output_summary_in_results():
         "output": [{"PFR": "temperature"}],  # Test the list format user mentioned
     }
 
+    config = normalize_config(config)
     conv = DualCanteraConverter()
     conv.build_network(config)
     results, _ = conv.run_streaming_simulation(

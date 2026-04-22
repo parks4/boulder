@@ -71,7 +71,9 @@ class NetworkPlugin(OutputPanePlugin):
             }
 
         try:
-            network_image, error_message = self._generate_network_diagram(network)
+            network_image, error_message = self._generate_network_diagram(
+                network, theme=context.theme
+            )
 
             if network_image is None:
                 return {
@@ -94,7 +96,7 @@ class NetworkPlugin(OutputPanePlugin):
             }
 
     def _generate_network_diagram(
-        self, network: Any
+        self, network: Any, theme: str = "light"
     ) -> tuple[Optional[str], Optional[str]]:
         """Generate network diagram and return as base64 encoded PNG.
 
@@ -108,12 +110,21 @@ class NetworkPlugin(OutputPanePlugin):
         try:
             import graphviz  # noqa: F401
 
+            if theme == "dark":
+                graph_attr = {"rankdir": "LR", "bgcolor": "#020817"}
+                node_attr = {"shape": "box", "style": "filled", "fillcolor": "#1e3a5f", "fontcolor": "#e2e8f0"}
+                edge_attr = {"color": "#94a3b8", "fontcolor": "#cbd5e1"}
+            else:
+                graph_attr = {"rankdir": "LR", "bgcolor": "white"}
+                node_attr = {"shape": "box", "style": "filled", "fillcolor": "lightblue"}
+                edge_attr = {"color": "black"}
+
             diagram = network.draw(
                 print_state=True,
                 species="X",
-                graph_attr={"rankdir": "LR", "bgcolor": "white"},
-                node_attr={"shape": "box", "style": "filled", "fillcolor": "lightblue"},
-                edge_attr={"color": "black"},
+                graph_attr=graph_attr,
+                node_attr=node_attr,
+                edge_attr=edge_attr,
             )
 
             png_data = diagram.pipe(format="png")

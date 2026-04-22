@@ -39,8 +39,15 @@ class BoulderPlugins:
     sankey_generator: Optional[Callable] = None  # Custom Sankey generation function
     #: ``(gas, new_mechanism, htol, Xtol) -> ct.Solution``
     #: Called when an inter-stage connection carries a ``mechanism_switch`` block.
-    #: Registered by the *bloc* package via its plugin entry point.
+    #: Registered by an external plugin package via its plugin entry point.
     mechanism_switch_fn: Optional[Callable] = None
+
+    #: Per-source provenance for introspection (``boulder plugins list``).
+    #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.
+    sources: Dict[str, List[Any]] = field(default_factory=lambda: {
+        "entry_point": [],
+        "env_var": [],
+    })
 
 
 # Global cache to ensure plugins are discovered only once
@@ -72,6 +79,98 @@ def _make_valid_python_identifier(name: str) -> str:
         identifier += "_"
 
     return identifier
+
+
+def resolve_dotted_path(dotted: str) -> Any:
+    """Resolve a dotted path of the form ``pkg.mod:Symbol`` or ``pkg.mod.Symbol``.
+
+    Used to load YAML-declared ``network_class`` overrides and other
+    plugin-provided callables referenced as strings in the configuration.
+    """
+    if not isinstance(dotted, str) or not dotted:
+        raise ValueError(f"Expected non-empty string for dotted path, got {dotted!r}")
+    if ":" in dotted:
+        module_name, _, attr = dotted.partition(":")
+    else:
+        module_name, _, attr = dotted.rpartition(".")
+        if not module_name:
+            raise ValueError(
+                f"Dotted path {dotted!r} must be of the form 'pkg.mod:Symbol' "
+                "or 'pkg.mod.Symbol'."
+            )
+    module = importlib.import_module(module_name)
+    try:
+        return getattr(module, attr)
+    except AttributeError as exc:
+        raise ImportError(
+            f"Module {module_name!r} has no attribute {attr!r} "
+            f"(while resolving dotted path {dotted!r})."
+        ) from exc
+
+
+def _select_network_class_for_stage(
+    converter: "DualCanteraConverter",
+    stage_id: Optional[str],
+    stage_nodes: List[Dict[str, Any]],
+    non_res_ids: List[str],
+) -> Tuple[Any, Dict[str, Any]]:
+    """Pick the ReactorNet class for a single stage.
+
+    Precedence (high -> low):
+
+    1. Per-node YAML ``network_class`` dotted-path override.
+    2. ``reactor.NETWORK_CLASS`` class attribute.
+    3. :class:`cantera.ReactorNet`.
+
+    Raises
+    ------
+    ValueError
+        If two reactors in the same stage resolve to different non-default
+        classes.  Previously the first-wins silent fallback hid misconfiguration.
+    """
+    node_by_id: Dict[str, Dict[str, Any]] = {n["id"]: n for n in stage_nodes}
+
+    resolved: Optional[Any] = None
+    resolved_from: Optional[str] = None
+    owner_rid: Optional[str] = None
+    net_kw: Dict[str, Any] = {}
+
+    for rid in non_res_ids:
+        reactor = converter.reactors[rid]
+        node_dict = node_by_id.get(rid, {})
+        props = node_dict.get("properties") or {}
+
+        candidate: Optional[Any] = None
+        source: Optional[str] = None
+
+        dotted = node_dict.get("network_class") or props.get("network_class")
+        if dotted:
+            candidate = resolve_dotted_path(str(dotted))
+            source = f"YAML node {rid!r}.network_class"
+        elif hasattr(reactor, "NETWORK_CLASS"):
+            candidate = reactor.NETWORK_CLASS
+            source = f"{type(reactor).__name__}.NETWORK_CLASS"
+
+        if candidate is None:
+            continue
+        if resolved is None:
+            resolved = candidate
+            resolved_from = source
+            owner_rid = rid
+        elif candidate is not resolved:
+            raise ValueError(
+                f"Stage {stage_id!r} has conflicting ReactorNet overrides: "
+                f"{resolved!r} (from {resolved_from} on reactor {owner_rid!r}) "
+                f"vs {candidate!r} (from {source}). Split these reactors "
+                "into separate groups or remove the conflicting override."
+            )
+
+    if resolved is None:
+        return ct.ReactorNet, {}
+
+    if owner_rid is not None:
+        net_kw["meta"] = converter.reactor_meta.get(owner_rid, {})
+    return resolved, net_kw
 
 
 def resolve_unset_flow_rates(
@@ -213,6 +312,8 @@ def get_plugins() -> BoulderPlugins:
                 plugin_func = ep.load()
                 if callable(plugin_func):
                     plugin_func(plugins)
+                    ep_module = getattr(ep, "value", None) or getattr(ep, "module", "")
+                    plugins.sources["entry_point"].append((ep.name, ep_module))
             except Exception as e:
                 logger.warning(f"Failed to load plugin entry point {ep}: {e}")
     except Exception as e:
@@ -229,6 +330,7 @@ def get_plugins() -> BoulderPlugins:
                 registrar = getattr(mod, "register_plugins", None)
                 if callable(registrar):
                     registrar(plugins)
+                    plugins.sources["env_var"].append(mod_name)
             except Exception as e:
                 logger.warning(
                     f"Failed to import BOULDER_PLUGINS module '{mod_name}': {e}"
@@ -659,16 +761,17 @@ class DualCanteraConverter:
             if not isinstance(self.reactors[rid], ct.Reservoir)
         ]
 
-        # Select ReactorNet class — use a custom subclass if any reactor
-        # declares NETWORK_CLASS (e.g. DesignPFR → DesignPFRNet).
-        ReactorNetClass = ct.ReactorNet
-        net_kw: dict = {}
-        for rid in non_res_ids:
-            r = self.reactors[rid]
-            if hasattr(r, "NETWORK_CLASS"):
-                ReactorNetClass = r.NETWORK_CLASS
-                net_kw["meta"] = self.reactor_meta.get(rid, {})
-                break
+        # Select ReactorNet class with precedence:
+        #   1. Per-node YAML ``network_class`` dotted-path override.
+        #   2. ``reactor.NETWORK_CLASS`` class attribute (e.g. DesignPFRNet).
+        #   3. ``ct.ReactorNet`` default.
+        #
+        # If two reactors in the same stage resolve to different non-default
+        # network classes, raise an error (previously the first-wins silent
+        # fallback hid a latent misconfiguration).
+        ReactorNetClass, net_kw = _select_network_class_for_stage(
+            self, stage_id, stage_nodes, non_res_ids
+        )
 
         network = ReactorNetClass([self.reactors[rid] for rid in non_res_ids], **net_kw)
         if ReactorNetClass is ct.ReactorNet:
@@ -751,425 +854,53 @@ class DualCanteraConverter:
         return viz_net
 
     def build_network(self, config: Dict[str, Any]) -> ct.ReactorNet:
-        """Build the Cantera network without running simulation.
+        """Build and solve the Cantera network through the staged solver.
 
-        If the config contains a top-level ``groups`` section, delegates to
-        :func:`~boulder.staged_solver.solve_staged` which builds one sub-
-        :class:`~cantera.ReactorNet` per stage and returns a visualization
-        ReactorNet.  The :class:`~boulder.lagrangian.LagrangianTrajectory`
-        is stored on ``self._staged_trajectory``.
-
-        Without a ``groups`` section the original single-network behavior is
-        preserved (backward compatible).
+        ``normalize_config`` guarantees that the config has a top-level
+        ``groups`` section (synthesising a single ``default`` group when the
+        YAML does not declare one), so this method always delegates to
+        :func:`~boulder.staged_solver.solve_staged`.  It builds one sub-
+        :class:`~cantera.ReactorNet` per stage, solves each according to its
+        ``solve_directive`` and returns a visualization ReactorNet with all
+        reactors in their converged state.  The Lagrangian trajectory is
+        stored on ``self._staged_trajectory``.
         """
-        # Store config for later post-processing
         self._last_config = config
 
-        # ----------------------------------------------------------------
-        # Staged solving path
-        # ----------------------------------------------------------------
-        if config.get("groups"):
-            from .staged_solver import build_stage_graph, solve_staged
-
-            plan = build_stage_graph(config)
-            trajectory = solve_staged(self, plan, config)
-            self._staged_trajectory = trajectory
-            # Generate downloadable script: load from YAML and build network
-            download_path = (
-                getattr(self, "_download_config_path", None) or "config.yaml"
+        if not config.get("groups"):
+            raise ValueError(
+                "build_network requires a config with a 'groups' section. "
+                "Call normalize_config() first — it synthesises a single "
+                "'default' group when the YAML has none."
             )
-            self.code_lines = [
-                "# Load configuration from YAML and build Cantera network",
-                "import cantera as ct",
-                "from boulder.config import (",
-                "    load_config_file_with_py_support,",
-                "    normalize_config,",
-                "    validate_config,",
-                ")",
-                "from boulder.cantera_converter import DualCanteraConverter",
-                "",
-                f"config_path = {repr(download_path)}",
-                "config, _ = load_config_file_with_py_support(config_path, False)",
-                "config = validate_config(normalize_config(config))",
-                "",
-                "converter = DualCanteraConverter()",
-                "network = converter.build_network(config)",
-            ]
-            # viz_network is already set on self.network by build_viz_network
-            return self.network  # type: ignore[return-value]
 
-        # ----------------------------------------------------------------
-        # Original single-network path (unchanged)
-        # ----------------------------------------------------------------
-        self.code_lines = []
-        self.code_lines.append(
-            "# Import Cantera for chemical kinetics and reactor modeling"
-        )
-        self.code_lines.append("import cantera as ct")
-        self.code_lines.append("")
-        self.code_lines.append(
-            "# Load the chemical mechanism (contains species and reactions)"
-        )
-        self.code_lines.append(f"gas_default = ct.Solution('{self.mechanism}')")
-        try:
-            self.gas = ct.Solution(self.mechanism)
-        except Exception as e:
-            logger.error(
-                f"[ERROR] Failed to reload mechanism '{self.mechanism}' in build_network: {e}"
-            )
-        # Reset cache for this build
-        self._gases_by_mech = {}
+        from .staged_solver import build_stage_graph, solve_staged
 
-        # Add metadata from config as docstring at the very top
-        metadata = config.get("metadata", {})
-        if metadata:
-            title = metadata.get("title", "")
-            description = metadata.get("description", "")
+        plan = build_stage_graph(config)
+        trajectory = solve_staged(self, plan, config)
+        self._staged_trajectory = trajectory
 
-            if title or description:
-                # Insert at the beginning of code_lines
-                docstring_lines = ['"""']
-                if title:
-                    docstring_lines.append(title)
-                if description:
-                    if title:
-                        docstring_lines.append("")
-                    # Split description into lines and add each line
-                    for line in description.split("\n"):
-                        docstring_lines.append(line)
-                docstring_lines.append('"""')
-                docstring_lines.append("")
-
-                # Insert at the beginning
-                self.code_lines = docstring_lines + self.code_lines
-
-        self.reactors = {}
-        self.connections = {}
-
-        # Create reactors from configuration
-        self.code_lines.append("")
-        self.code_lines.append("# ===== REACTOR SETUP =====")
-        for node in config["nodes"]:
-            rid = node["id"]
-            typ = node["type"]
-            props = node["properties"]
-            temp = props.get("temperature", 300)
-            pres = props.get("pressure", 101325)
-            compo = props.get("composition", "N2:1")
-
-            # Check if node has a description from YAML
-            node_description = node.get("description", "")
-            # Determine mechanism: node-level override, else global
-            node_mech = (
-                node.get("mechanism") or props.get("mechanism") or self.mechanism
-            )
-            gas_for_node = self._get_gas_for_mech(str(node_mech))
-            gas_for_node.TPX = (temp, pres, self.parse_composition(compo))
-            # Keep converter.gas referencing the last used gas (for back-compat),
-            # but store per-reactor association in reactor_meta
-            self.gas = gas_for_node
-            # Store mechanism info for each reactor to handle multi-mechanism networks
-            self.reactor_meta[rid] = {
-                "mechanism": str(node_mech),
-                "gas_solution": gas_for_node,
-            }
-            # Plugin-backed custom reactor types
-            if typ in self.plugins.reactor_builders:
-                reactor = self.plugins.reactor_builders[typ](self, node)
-                reactor.name = rid
-                self.reactors[rid] = reactor
-                # Set volume if specified (plugins may support volume)
-                self._set_reactor_volume(self.reactors[rid], props, rid)
-                try:
-                    self.reactors[rid].group_name = str(
-                        props.get("group", props.get("group_name", ""))
-                    )
-                except Exception:
-                    pass
-                # Code gen: note plugin usage
-                self.code_lines.append(f"# Plugin reactor {typ} -> created as '{rid}'")
-            elif typ == "IdealGasReactor":
-                self.code_lines.append(
-                    f"# Create IdealGasReactor '{rid}' - variable volume, constant energy"
-                )
-                if node_description:
-                    # Add description as comment if it exists in YAML
-                    for desc_line in node_description.split("\n"):
-                        if desc_line.strip():
-                            self.code_lines.append(f"# {desc_line.strip()}")
-                self.code_lines.append(
-                    f"# Initial conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
-                )
-                python_var = _make_valid_python_identifier(rid)
-                self.code_lines.append(
-                    f"{python_var} = ct.IdealGasReactor(gas_default)"
-                )
-                self.code_lines.append(f"{python_var}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasReactor(gas_for_node, clone=True)
-                self.reactors[rid].name = rid
-                # Set volume if specified
-                self._set_reactor_volume(self.reactors[rid], props, rid)
-                try:
-                    self.reactors[rid].group_name = str(
-                        props.get("group", props.get("group_name", ""))
-                    )
-                    self.code_lines.append(
-                        f"{python_var}.group_name = '{props.get('group', props.get('group_name', ''))}'"
-                    )
-                except Exception:
-                    pass
-            elif typ == "IdealGasConstPressureReactor":
-                self.code_lines.append(
-                    f"# Create IdealGasConstPressureReactor '{rid}' - constant pressure"
-                )
-                if node_description:
-                    # Add description as comment if it exists in YAML
-                    for desc_line in node_description.split("\n"):
-                        if desc_line.strip():
-                            self.code_lines.append(f"# {desc_line.strip()}")
-                self.code_lines.append(
-                    f"# Initial conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
-                )
-                python_var = _make_valid_python_identifier(rid)
-                self.code_lines.append(
-                    f"{python_var} = ct.IdealGasConstPressureReactor(gas_default)"
-                )
-                self.code_lines.append(f"{python_var}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasConstPressureReactor(
-                    gas_for_node, clone=True
-                )
-                self.reactors[rid].name = rid
-                # Set volume if specified
-                self._set_reactor_volume(self.reactors[rid], props, rid)
-                try:
-                    self.reactors[rid].group_name = str(
-                        props.get("group", props.get("group_name", ""))
-                    )
-                    self.code_lines.append(
-                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
-                    )
-                except Exception:
-                    pass
-            elif typ == "IdealGasConstPressureMoleReactor":
-                self.code_lines.append(
-                    f"# Create IdealGasConstPressureMoleReactor '{rid}' - mole-based"
-                )
-                self.code_lines.append(
-                    f"# Initial conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
-                )
-                self.code_lines.append(
-                    f"{rid} = ct.IdealGasConstPressureMoleReactor(gas_default)"
-                )
-                self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasConstPressureMoleReactor(
-                    gas_for_node, clone=True
-                )
-                self.reactors[rid].name = rid
-                # Set volume if specified
-                self._set_reactor_volume(self.reactors[rid], props, rid)
-                try:
-                    self.reactors[rid].group_name = str(
-                        props.get("group", props.get("group_name", ""))
-                    )
-                    self.code_lines.append(
-                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
-                    )
-                except Exception:
-                    pass
-            elif typ == "IdealGasMoleReactor":
-                self.code_lines.append(
-                    f"# Create IdealGasMoleReactor '{rid}' - mole-based (Cantera 3.x)"
-                )
-                self.code_lines.append(
-                    f"# Initial conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
-                )
-                self.code_lines.append(f"{rid} = ct.IdealGasMoleReactor(gas_default)")
-                self.code_lines.append(f"{rid}.name = '{rid}'")
-                self.reactors[rid] = ct.IdealGasMoleReactor(gas_for_node, clone=True)  # type: ignore[attr-defined]
-                self.reactors[rid].name = rid
-                # Set volume if specified
-                self._set_reactor_volume(self.reactors[rid], props, rid)
-                try:
-                    self.reactors[rid].group_name = str(
-                        props.get("group", props.get("group_name", ""))
-                    )
-                    self.code_lines.append(
-                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
-                    )
-                except Exception:
-                    pass
-            elif typ == "Reservoir":
-                self.code_lines.append(
-                    f"# Create Reservoir '{rid}' - infinite capacity, constant state"
-                )
-                if node_description:
-                    # Add description as comment if it exists in YAML
-                    for desc_line in node_description.split("\n"):
-                        if desc_line.strip():
-                            self.code_lines.append(f"# {desc_line.strip()}")
-                self.code_lines.append(
-                    f"# Fixed conditions: T={temp}K, P={pres}Pa, composition='{compo}'"
-                )
-                python_var = _make_valid_python_identifier(rid)
-                self.code_lines.append(f"{python_var} = ct.Reservoir(gas_default)")
-                self.code_lines.append(f"{python_var}.name = '{rid}'")
-                reservoir = ct.Reservoir(gas_for_node, clone=True)
-                self.reactors[rid] = reservoir  # type: ignore[assignment]
-                self.reactors[rid].name = rid
-                try:
-                    self.reactors[rid].group_name = str(
-                        props.get("group", props.get("group_name", ""))
-                    )
-                    self.code_lines.append(
-                        f"{rid}.group_name = '{props.get('group', props.get('group_name', ''))}'"
-                    )
-                except Exception:
-                    pass
-            else:
-                self.code_lines.append(f"# Unsupported reactor type: {typ}")
-                raise ValueError(f"Unsupported reactor type: {typ}")
-
-        # Create connections between reactors
-        self.code_lines.append("")
-        self.code_lines.append("# ===== CONNECTION SETUP =====")
-        self._unresolved_mfc_ids = set()
-        self._mfc_topology = {}
-        self._mfc_flow_rates = {}
-        for conn in config["connections"]:
-            cid = conn["id"]
-            typ = conn["type"]
-            src = conn["source"]
-            tgt = conn["target"]
-            props = conn["properties"]
-            # Plugin-backed custom connections
-            if typ in self.plugins.connection_builders:
-                device = self.plugins.connection_builders[typ](self, conn)
-                self.connections[cid] = device
-                self.code_lines.append(
-                    f"# Plugin connection {typ} -> created as '{cid}'"
-                )
-            elif typ == "MassFlowController":
-                self._mfc_topology[cid] = (src, tgt)
-                cid_var = _make_valid_python_identifier(cid)
-                src_var = _make_valid_python_identifier(src)
-                tgt_var = _make_valid_python_identifier(tgt)
-                self.code_lines.append(
-                    f"# Create MassFlowController '{cid}': {src} -> {tgt}"
-                )
-                self.code_lines.append(
-                    f"{cid_var} = ct.MassFlowController({src_var}, {tgt_var})"
-                )
-                mfc = ct.MassFlowController(self.reactors[src], self.reactors[tgt])
-                if "mass_flow_rate" in props:
-                    mfr = float(props["mass_flow_rate"])
-                    self.code_lines.append(f"# Controls mass flow rate at {mfr} kg/s")
-                    self.code_lines.append(f"{cid_var}.mass_flow_rate = {mfr}")
-                    mfc.mass_flow_rate = mfr  # type: ignore[misc]
-                    self._mfc_flow_rates[cid] = mfr
-                else:
-                    self.code_lines.append(
-                        f"# mass_flow_rate for '{cid}' resolved by mass conservation"
-                    )
-                    mfc.mass_flow_rate = 0.0  # type: ignore[misc]  # resolved later
-                    self._unresolved_mfc_ids.add(cid)
-                self.connections[cid] = mfc
-            elif typ == "Valve":
-                coeff = float(props.get("valve_coeff", 1.0))
-                self.code_lines.append(f"# Create Valve '{cid}': {src} -> {tgt}")
-                self.code_lines.append(
-                    f"# Flow depends on pressure difference, valve coeff = {coeff}"
-                )
-                cid_var = _make_valid_python_identifier(cid)
-                src_var = _make_valid_python_identifier(src)
-                tgt_var = _make_valid_python_identifier(tgt)
-                self.code_lines.append(f"{cid_var} = ct.Valve({src_var}, {tgt_var})")
-                self.code_lines.append(f"{cid_var}.valve_coeff = {coeff}")
-                valve = ct.Valve(self.reactors[src], self.reactors[tgt])
-                valve.valve_coeff = coeff  # type: ignore[attr-defined]
-                self.connections[cid] = valve
-            elif typ == "Wall":
-                # Handle walls as energy connections (e.g., torch power or losses)
-                # After validation, electric_power_kW is converted to kilowatts if it had units
-                electric_power_kW = float(props.get("electric_power_kW", 0.0))
-                torch_eff = float(props.get("torch_eff", 1.0))
-                gen_eff = float(props.get("gen_eff", 1.0))
-                # Convert from kW to W
-                Q_watts = electric_power_kW * 1e3 * torch_eff * gen_eff
-                self.code_lines.append(f"# Create Wall '{cid}': {src} <-> {tgt}")
-                self.code_lines.append(
-                    f"# Heat transfer: {Q_watts} W (from {electric_power_kW} kW input)"
-                )
-                self.code_lines.append(
-                    f"# Efficiencies: torch={torch_eff}, generator={gen_eff}"
-                )
-                self.code_lines.append(
-                    f"{cid} = ct.Wall({src}, {tgt}, A=1.0, Q={Q_watts}, name='{cid}')"
-                )
-                wall = ct.Wall(
-                    self.reactors[src],
-                    self.reactors[tgt],
-                    A=1.0,
-                    Q=lambda t: Q_watts,
-                    name=cid,  # type: ignore[arg-type]
-                )
-                self.walls[cid] = wall
-                # Note: Walls are not flow devices, so we track them separately
-            else:
-                self.code_lines.append(f"# Unsupported connection type: {typ}")
-                raise ValueError(f"Unsupported connection type: {typ}")
-
-        self._apply_flow_conservation()
-
-        # Create reactor network (exclude reservoirs as they don't evolve in time)
-        reactor_ids = [
-            rid for rid, r in self.reactors.items() if not isinstance(r, ct.Reservoir)
+        # Generate a downloadable script mirroring the staged load+build flow.
+        download_path = getattr(self, "_download_config_path", None) or "config.yaml"
+        self.code_lines = [
+            "# Load configuration from YAML and build Cantera network",
+            "import cantera as ct",
+            "from boulder.config import (",
+            "    load_config_file_with_py_support,",
+            "    normalize_config,",
+            "    validate_config,",
+            ")",
+            "from boulder.cantera_converter import DualCanteraConverter",
+            "",
+            f"config_path = {repr(download_path)}",
+            "config, _ = load_config_file_with_py_support(config_path, False)",
+            "config = validate_config(normalize_config(config))",
+            "",
+            "converter = DualCanteraConverter()",
+            "network = converter.build_network(config)",
         ]
-        self.code_lines.append("")
-        self.code_lines.append("# ===== NETWORK SETUP =====")
-        self.code_lines.append(
-            "# Create reactor network with all time-evolving reactors"
-        )
-        reactor_vars = [_make_valid_python_identifier(rid) for rid in reactor_ids]
-        self.code_lines.append(f"# Reactors in network: {', '.join(reactor_ids)}")
-
-        # Apply post-build hooks before instantiating the ReactorNet. Hooks
-        # commonly resolve derived properties (e.g. mass_flow_rate from
-        # connected MFCs) that a custom NETWORK_CLASS may read at __init__.
-        # Matches the order already used in build_sub_network.
-        for hook in self.plugins.post_build_hooks:
-            hook(self, config)
-
-        # Select ReactorNet class — honor a custom subclass declared via
-        # NETWORK_CLASS on any reactor in the network (same contract as
-        # build_sub_network). This lets reactor plugins drive their own
-        # integration scheme (e.g. Lagrangian, spatial) without Boulder
-        # knowing about them. The custom class must accept
-        # (reactors: list, meta: dict) at construction.
-        ReactorNetClass = ct.ReactorNet
-        net_kw: dict = {}
-        for rid in reactor_ids:
-            r = self.reactors[rid]
-            if hasattr(r, "NETWORK_CLASS"):
-                ReactorNetClass = r.NETWORK_CLASS
-                net_kw["meta"] = self.reactor_meta.get(rid, {})
-                break
-        self.code_lines.append(f"network = ct.ReactorNet([{', '.join(reactor_vars)}])")
-        self.network = ReactorNetClass(
-            [self.reactors[rid] for rid in reactor_ids], **net_kw
-        )
-        self.code_lines.append("")
-        self.code_lines.append("# Set solver tolerances for numerical integration")
-        self.code_lines.append("network.rtol = 1e-6  # Relative tolerance")
-        self.code_lines.append("network.atol = 1e-8  # Absolute tolerance")
-        self.code_lines.append(
-            "network.max_steps = 10000  # Maximum steps per time step"
-        )
-        if ReactorNetClass is ct.ReactorNet:
-            self.network.rtol = 1e-6
-            self.network.atol = 1e-8
-            self.network.max_steps = 10000
-
-        return self.network
+        # viz_network is already set on self.network by build_viz_network
+        return self.network  # type: ignore[return-value]
 
     def run_streaming_simulation(
         self,
@@ -1660,7 +1391,27 @@ class DualCanteraConverter:
     def build_network_and_code(
         self, config: Dict[str, Any]
     ) -> Tuple[Any, Dict[str, Any], str]:
-        """Legacy method for backward compatibility - runs full simulation at once."""
+        """Build+solve the network and return ``(network, results, code_str)``.
+
+        ``build_network`` now solves the whole network through the staged
+        solver, so ``results`` only reports what the staged path already
+        produced: the converged per-reactor states (as a single-time-point
+        SolutionArray) and any scalars stored by post-build hooks.
+        """
         network = self.build_network(config)
-        results, code_str = self.run_streaming_simulation()
+        results: Dict[str, Any] = {
+            "time": [0.0],
+            "reactors": {
+                rid: {
+                    "T": [float(r.phase.T)],
+                    "P": [float(r.phase.P)],
+                    "X": {s: [float(r.phase[s].X[0])] for s in r.phase.species_names},
+                    "Y": {s: [float(r.phase[s].Y[0])] for s in r.phase.species_names},
+                }
+                for rid, r in self.reactors.items()
+                if not isinstance(r, ct.Reservoir)
+            },
+            "trajectory": getattr(self, "_staged_trajectory", None),
+        }
+        code_str = "\n".join(self.code_lines)
         return network, results, code_str
