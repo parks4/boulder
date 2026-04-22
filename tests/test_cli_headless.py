@@ -261,3 +261,5 @@ class TestCLIHeadless:
         assert "--download" in out
         assert "Run without starting the web UI" in out
         assert "Generate Python code from YAML" in out
+        assert "Developers:" in out
+        assert "npm run build" in out

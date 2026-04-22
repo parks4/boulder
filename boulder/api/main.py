@@ -12,6 +12,20 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
+# Load .env from the repository root (one level above the package directory)
+# so that BOULDER_PLUGINS and other settings can be configured per-project
+# without modifying this file.  python-dotenv is an optional dependency;
+# a missing file or missing package is silently ignored.
+try:
+    from dotenv import load_dotenv  # type: ignore
+
+    _env_file = Path(__file__).resolve().parent.parent.parent / ".env"
+    if _env_file.is_file():
+        load_dotenv(dotenv_path=_env_file, override=False)
+        logging.getLogger(__name__).debug(f"Loaded .env from {_env_file}")
+except ImportError:
+    pass  # python-dotenv not installed; rely on system environment
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

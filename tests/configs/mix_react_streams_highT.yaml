@@ -1,0 +1,15 @@
+# This file demonstrates YAML inheritance by extending mix_react_streams.yaml
+# It inherits all nodes and connections from the base file but overrides
+# the temperature to a higher value
+
+from: mix_react_streams.yaml
+
+# Override temperatures to high values
+nodes:
+- id: Air Reservoir
+  Reservoir:
+    temperature: 1500    # High temperature (K)
+
+- id: Fuel Reservoir
+  Reservoir:
+    temperature: 1500    # High temperature (K)

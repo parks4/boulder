@@ -1131,8 +1131,32 @@ class DualCanteraConverter:
         )
         reactor_vars = [_make_valid_python_identifier(rid) for rid in reactor_ids]
         self.code_lines.append(f"# Reactors in network: {', '.join(reactor_ids)}")
+
+        # Apply post-build hooks before instantiating the ReactorNet. Hooks
+        # commonly resolve derived properties (e.g. mass_flow_rate from
+        # connected MFCs) that a custom NETWORK_CLASS may read at __init__.
+        # Matches the order already used in build_sub_network.
+        for hook in self.plugins.post_build_hooks:
+            hook(self, config)
+
+        # Select ReactorNet class — honor a custom subclass declared via
+        # NETWORK_CLASS on any reactor in the network (same contract as
+        # build_sub_network). This lets reactor plugins drive their own
+        # integration scheme (e.g. Lagrangian, spatial) without Boulder
+        # knowing about them. The custom class must accept
+        # (reactors: list, meta: dict) at construction.
+        ReactorNetClass = ct.ReactorNet
+        net_kw: dict = {}
+        for rid in reactor_ids:
+            r = self.reactors[rid]
+            if hasattr(r, "NETWORK_CLASS"):
+                ReactorNetClass = r.NETWORK_CLASS
+                net_kw["meta"] = self.reactor_meta.get(rid, {})
+                break
         self.code_lines.append(f"network = ct.ReactorNet([{', '.join(reactor_vars)}])")
-        self.network = ct.ReactorNet([self.reactors[rid] for rid in reactor_ids])
+        self.network = ReactorNetClass(
+            [self.reactors[rid] for rid in reactor_ids], **net_kw
+        )
         self.code_lines.append("")
         self.code_lines.append("# Set solver tolerances for numerical integration")
         self.code_lines.append("network.rtol = 1e-6  # Relative tolerance")
@@ -1140,13 +1164,10 @@ class DualCanteraConverter:
         self.code_lines.append(
             "network.max_steps = 10000  # Maximum steps per time step"
         )
-        self.network.rtol = 1e-6
-        self.network.atol = 1e-8
-        self.network.max_steps = 10000
-
-        # Apply post-build hooks from plugins
-        for hook in self.plugins.post_build_hooks:
-            hook(self, config)
+        if ReactorNetClass is ct.ReactorNet:
+            self.network.rtol = 1e-6
+            self.network.atol = 1e-8
+            self.network.max_steps = 10000
 
         return self.network
 
@@ -1164,7 +1185,7 @@ class DualCanteraConverter:
         # Override parameters from config if provided
         if config:
             # Only use 'settings' section with 'end_time' and 'dt'
-            settings_config = config.get("settings", {})
+            settings_config = config.get("settings") or {}
 
             # Check for deprecated keys and raise errors only if they contain values
             deprecated_keys = []

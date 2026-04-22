@@ -31,6 +31,11 @@ class SimulationProgress:
     sankey_links: Optional[Dict[str, Any]] = None
     sankey_nodes: Optional[List[str]] = None
 
+    # Connections that were added programmatically during network build
+    # (e.g. by post-build hooks).  Sent to the client on completion so the
+    # visual graph can be updated to reflect the actual network topology.
+    updated_connections: Optional[List[Dict[str, Any]]] = None
+
     # Status flags
     is_running: bool = False
     is_complete: bool = False
@@ -130,6 +135,11 @@ class SimulationWorker:
                 summary=self.progress.summary.copy(),
                 sankey_links=self.progress.sankey_links,
                 sankey_nodes=self.progress.sankey_nodes,
+                updated_connections=(
+                    list(self.progress.updated_connections)
+                    if self.progress.updated_connections is not None
+                    else None
+                ),
                 is_running=self.progress.is_running,
                 is_complete=self.progress.is_complete,
                 error_message=self.progress.error_message,
@@ -153,6 +163,14 @@ class SimulationWorker:
             # Build the network first
             network = converter.build_network(config)
             logger.info("Network built successfully, starting streaming simulation...")
+
+            # Capture the connections list after post-build hooks have run.
+            # Post-build hooks may inject synthetic connections into config so
+            # that the visual graph reflects the actual network topology.
+            with self._lock:
+                self.progress.updated_connections = list(
+                    config.get("connections") or []
+                )
 
             # Track last logged % for verbose throttle (log at 0, 25, 50, 75, 100)
             last_logged_pct: List[float] = [-1]

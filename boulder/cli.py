@@ -13,6 +13,18 @@ import os
 import socket
 import sys
 import webbrowser
+from pathlib import Path
+
+# Load .env from the repository root so that BOULDER_PLUGINS and other
+# settings are available for both headless and GUI modes.
+try:
+    from dotenv import load_dotenv  # type: ignore
+
+    _env_file = Path(__file__).resolve().parent.parent / ".env"
+    if _env_file.is_file():
+        load_dotenv(dotenv_path=_env_file, override=False)
+except ImportError:
+    pass
 
 
 def is_port_in_use(host: str, port: int) -> bool:
@@ -36,11 +48,18 @@ def find_available_port(host: str, start_port: int, max_attempts: int = 10) -> i
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    dev_epilog = (
+        "Developers:\n"
+        "  If you changed the frontend and need a production rebuild, run:\n"
+        "  cd frontend && npm install && npm run build"
+    )
     parser = argparse.ArgumentParser(
         prog="boulder",
         description=(
             "Launch the Boulder server and optionally preload a YAML configuration."
         ),
+        epilog=dev_epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "config",
@@ -88,6 +107,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--download",
         metavar="OUTPUT_FILE",
         help="Generate Python code from YAML and save to file (requires --headless)",
+    )
+    parser.add_argument(
+        "--output-yaml",
+        metavar="YAML_FILE",
+        help=(
+            "Output path for generated STONE YAML when converting a .py file "
+            "with --headless (default: replaces .py with _stone.yaml next to input)"
+        ),
     )
     parser.add_argument(
         "--dev",
@@ -359,15 +386,38 @@ def main(argv: list[str] | None = None) -> None:
         print("Error: --download requires --headless")
         sys.exit(1)
 
+    if args.output_yaml and not args.headless:
+        print("Error: --output-yaml requires --headless")
+        sys.exit(1)
+
     if args.headless:
         if not args.config:
             print("Error: --headless requires a config file")
             sys.exit(1)
+
+        # .py input without --download: convert to STONE YAML and exit
+        if args.config.lower().endswith(".py") and not args.download:
+            from pathlib import Path
+
+            from .parser import convert_py_to_yaml
+
+            default_yaml = str(
+                Path(args.config).with_name(Path(args.config).stem + "_stone.yaml")
+            )
+            output_yaml = args.output_yaml or default_yaml
+            yaml_path = convert_py_to_yaml(
+                args.config, output_path=output_yaml, verbose=args.verbose
+            )
+            print(f"STONE YAML written: {yaml_path}")
+            return
+
         if not args.download:
-            print("Error: --headless requires --download")
+            print(
+                "Error: --headless requires --download (or a .py input for YAML conversion)"
+            )
             sys.exit(1)
 
-        # Run headless mode
+        # Run headless mode: load YAML/py, run simulation, write Python script
         run_headless_mode(args.config, args.download, args.verbose)
         return
 
