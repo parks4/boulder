@@ -20,26 +20,17 @@ class TestCLIHeadless:
         1. CLI command execution succeeds (returncode == 0)
         2. Success messages appear in stdout ("Python code generated:", output path)
         3. Output Python file is created and exists on disk
-        4. Generated code contains required Cantera imports and setup:
+        4. Generated code contains required Boulder imports and setup:
            - "import cantera as ct"
-           - "gas_default = ct.Solution("
-           - "network = ct.ReactorNet("
+           - "from boulder.cantera_converter import DualCanteraConverter"
+           - "network = converter.build_network(config)"
            - "network.advance("
-        5. Generated code contains all reactors from mix_react_streams.yaml:
-           - "Mixer = ct.IdealGasReactor(" (main mixing reactor)
-           - "Air_Reservoir = ct.Reservoir(" (air inlet reservoir)
-           - "Fuel_Reservoir = ct.Reservoir(" (fuel inlet reservoir)
-           - "Outlet_Reservoir = ct.Reservoir(" (outlet reservoir)
-        6. Generated code contains all connections from config:
-           - "Air_Inlet = ct.MassFlowController(" (air inlet connection)
-           - "Fuel_Inlet = ct.MassFlowController(" (fuel inlet connection)
-           - "Valve = ct.Valve(" (outlet valve connection)
-        7. Generated Python code executes successfully:
-           - Simulation output contains "t=" (time values)
-           - Simulation output contains "T=" (temperature values)
-        8. Generated code uses proper numpy time stepping:
+        5. Generated code uses proper numpy time stepping:
            - "import numpy as np"
            - "times = np.arange("
+        6. Generated Python code executes successfully:
+           - Simulation output contains "t=" (time values)
+           - Simulation output contains "T=" (temperature values)
         """
         # Get the path to the test config file
         config_path = (
@@ -91,22 +82,16 @@ class TestCLIHeadless:
             with open(output_path, "r", encoding="utf-8") as f:
                 generated_code = f.read()
 
-            # Verify the generated code has expected content
+            # Verify the generated code has expected content.
+            # The headless generator emits a Boulder-based script (DualCanteraConverter)
+            # rather than raw Cantera calls, so we check for the high-level API.
             assert "import cantera as ct" in generated_code
-            assert "gas_default = ct.Solution(" in generated_code
-            assert "network = ct.ReactorNet(" in generated_code
+            assert (
+                "from boulder.cantera_converter import DualCanteraConverter"
+                in generated_code
+            )
+            assert "network = converter.build_network(config)" in generated_code
             assert "network.advance(" in generated_code
-
-            # Verify it contains the reactors from the config (using actual names from mix_react_streams.yaml)
-            assert "Mixer = ct.IdealGasReactor(" in generated_code
-            assert "Air_Reservoir = ct.Reservoir(" in generated_code
-            assert "Fuel_Reservoir = ct.Reservoir(" in generated_code
-            assert "Outlet_Reservoir = ct.Reservoir(" in generated_code
-
-            # Verify it contains the connections from the config (using actual names)
-            assert "Air_Inlet = ct.MassFlowController(" in generated_code
-            assert "Fuel_Inlet = ct.MassFlowController(" in generated_code
-            assert "Valve = ct.Valve(" in generated_code
 
             # Test that the generated Python code can be executed
             exec_result = subprocess.run(

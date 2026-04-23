@@ -112,11 +112,20 @@ class NetworkPlugin(OutputPanePlugin):
 
             if theme == "dark":
                 graph_attr = {"rankdir": "LR", "bgcolor": "#020817"}
-                node_attr = {"shape": "box", "style": "filled", "fillcolor": "#1e3a5f", "fontcolor": "#e2e8f0"}
+                node_attr = {
+                    "shape": "box",
+                    "style": "filled",
+                    "fillcolor": "#1e3a5f",
+                    "fontcolor": "#e2e8f0",
+                }
                 edge_attr = {"color": "#94a3b8", "fontcolor": "#cbd5e1"}
             else:
                 graph_attr = {"rankdir": "LR", "bgcolor": "white"}
-                node_attr = {"shape": "box", "style": "filled", "fillcolor": "lightblue"}
+                node_attr = {
+                    "shape": "box",
+                    "style": "filled",
+                    "fillcolor": "lightblue",
+                }
                 edge_attr = {"color": "black"}
 
             diagram = network.draw(

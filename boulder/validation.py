@@ -13,6 +13,85 @@ from typing import Any, Dict, List, Optional, Set
 from pint import UnitRegistry
 from pydantic import BaseModel, Field, validator
 
+try:
+    from typing import Literal  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - py<3.8
+    from typing_extensions import Literal  # type: ignore[assignment]
+
+
+class InletPort(BaseModel):
+    """Reactor-node inlet port shortcut.
+
+    Synthesised by :func:`boulder.config.expand_port_shortcuts` into a regular
+    ``MassFlowController`` entry in ``connections:``.  Omitting
+    ``mass_flow_rate`` asks the conservation resolver
+    (:func:`boulder.cantera_converter.resolve_unset_flow_rates`) to fill it.
+    """
+
+    source: str = Field(
+        ...,
+        alias="from",
+        description="Id of the upstream node feeding this reactor.",
+    )
+    mass_flow_rate: Optional[float] = Field(
+        default=None,
+        description=(
+            "[kg/s] Optional explicit flow rate; omit to let global mass "
+            "conservation determine it from the rest of the topology."
+        ),
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class OutletPort(BaseModel):
+    """Reactor-node outlet port shortcut.
+
+    By default expands to a ``PressureController`` with ``pressure_coeff=0``
+    so ``m_out = m_in`` at every timestep without a placeholder mass flow
+    rate.  Set ``device='MassFlowController'`` to get an MFC instead (useful
+    when the reactor has several inlets and the PressureController master is
+    ambiguous).
+    """
+
+    to: str = Field(
+        ...,
+        description="Id of the downstream node receiving this reactor's flow.",
+    )
+    device: Literal["PressureController", "MassFlowController"] = Field(
+        default="PressureController",
+        description="Cantera flow device kind to synthesise.",
+    )
+    pressure_coeff: float = Field(
+        default=0.0,
+        description=(
+            "[kg/s/Pa] PressureController pressure coefficient; 0 locks "
+            "m_out = m_primary at every step."
+        ),
+    )
+    master: Optional[str] = Field(
+        default=None,
+        description=(
+            "Id of the inlet MassFlowController that drives this "
+            "PressureController.  When omitted, the expander auto-picks "
+            "the unique inlet MFC; a multi-inlet reactor must set this "
+            "explicitly or switch to device='MassFlowController'."
+        ),
+    )
+    mass_flow_rate: Optional[float] = Field(
+        default=None,
+        description=(
+            "[kg/s] Only used when device='MassFlowController'; omit to let "
+            "global mass conservation resolve it."
+        ),
+    )
+
+    class Config:
+        extra = "forbid"
+
+
 #: Locked STONE ``metadata:`` vocabulary.  Mandatory keys identify the
 #: scenario and are consumed by reporting code (calc_note, report, ...).
 #: Optional keys cover documentation/provenance fields we standardise so
@@ -231,6 +310,33 @@ class NormalizedConfigModel(BaseModel):
                     f"Connection '{conn.id}' target '{conn.target}' does not reference an existing node"
                 )
 
+        by_conn_id = {c.id: c for c in self.connections}
+        for conn in self.connections:
+            if conn.type == "PressureController":
+                master = (conn.properties or {}).get("master")
+                if not master or not str(master).strip():
+                    raise ValueError(
+                        f"Connection '{conn.id}' (PressureController) must set "
+                        f"properties.master to the id of a MassFlowController connection."
+                    )
+                if master not in seen_conns:
+                    raise ValueError(
+                        f"Connection '{conn.id}': PressureController master "
+                        f"'{master}' is not a connection id. Declare the master "
+                        f"MassFlowController first (or use an `inlet:` port)."
+                    )
+                if master == conn.id:
+                    raise ValueError(
+                        f"Connection '{conn.id}': PressureController cannot be its own master."
+                    )
+                mconn = by_conn_id.get(master)
+                if mconn is not None and mconn.type != "MassFlowController":
+                    raise ValueError(
+                        f"Connection '{conn.id}': PressureController master "
+                        f"'{master}' must reference a MassFlowController, not "
+                        f"'{mconn.type}'."
+                    )
+
     def _coerce_units(self) -> None:
         """Coerce unit-bearing strings to canonical units using pint.
 
@@ -446,6 +552,40 @@ class NormalizedConfigModel(BaseModel):
                     # Best-effort: if __dict__ is not writable, ignore silently
                     # (attributes have already been set above).
                     pass
+
+
+def warn_flow_device_conventions(config: Dict[str, Any]) -> List[str]:
+    """Return non-fatal notes about ``MassFlowController`` values that are often legacies.
+
+    A declared ``mass_flow_rate: 0.0`` is valid for a intentionally closed
+    side feed (e.g. ``feed_secondary`` in SPRING) but is also the obsolete
+    placeholder for a tube-furnace outlet; :func:`warn_flow_device_conventions`
+    nudges authors toward :func:`boulder.config.expand_port_shortcuts` or
+    omitting the rate.  Call from ``boulder validate`` only — not from every
+    :func:`boulder.config.validate_config` invocation, to keep library calls quiet.
+    """
+    messages: List[str] = []
+    for raw in config.get("connections") or []:
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("type") != "MassFlowController":
+            continue
+        props = raw.get("properties") or {}
+        mfr = props.get("mass_flow_rate")
+        if mfr is None:
+            continue
+        try:
+            if float(mfr) != 0.0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        cid = raw.get("id", "?")
+        messages.append(
+            f"Connection '{cid}' has mass_flow_rate: 0.0. If this is a main "
+            f"outlet, use a reactor `outlet:` port (PressureController) or omit "
+            f"mass_flow_rate; 0.0 is OK for a deliberately closed side feed."
+        )
+    return messages
 
 
 def validate_normalized_config(config: Dict[str, Any]) -> NormalizedConfigModel:

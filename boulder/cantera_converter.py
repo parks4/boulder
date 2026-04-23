@@ -44,10 +44,12 @@ class BoulderPlugins:
 
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.
-    sources: Dict[str, List[Any]] = field(default_factory=lambda: {
-        "entry_point": [],
-        "env_var": [],
-    })
+    sources: Dict[str, List[Any]] = field(
+        default_factory=lambda: {
+            "entry_point": [],
+            "env_var": [],
+        }
+    )
 
 
 # Global cache to ensure plugins are discovered only once
@@ -563,6 +565,30 @@ class DualCanteraConverter:
             valve = ct.Valve(self.reactors[src], self.reactors[tgt])
             valve.valve_coeff = coeff  # type: ignore[attr-defined]
             self.connections[cid] = valve
+        elif typ == "PressureController":
+            master_id = props.get("master")
+            if not master_id:
+                raise ValueError(
+                    f"PressureController '{cid}' requires a 'master' property "
+                    "pointing at an already-declared MassFlowController."
+                )
+            master = self.connections.get(master_id)
+            if master is None:
+                raise ValueError(
+                    f"PressureController '{cid}' master '{master_id}' not found; "
+                    "ensure the master MassFlowController is declared earlier "
+                    "in connections: (or via an inlet port on an upstream node)."
+                )
+            if not isinstance(master, ct.MassFlowController):
+                raise ValueError(
+                    f"PressureController '{cid}' master '{master_id}' must be a "
+                    f"MassFlowController, got {type(master).__name__}."
+                )
+            coeff = float(props.get("pressure_coeff", 0.0))
+            pc = ct.PressureController(self.reactors[src], self.reactors[tgt])
+            pc.primary = master  # type: ignore[attr-defined]
+            pc.pressure_coeff = coeff  # type: ignore[attr-defined]
+            self.connections[cid] = pc
         elif typ == "Wall":
             electric_power_kW = float(props.get("electric_power_kW", 0.0))
             torch_eff = float(props.get("torch_eff", 1.0))
@@ -615,9 +641,10 @@ class DualCanteraConverter:
                     f"{cid_var}.mass_flow_rate = {resolved_rate}"
                     "  # resolved by mass conservation"
                 )
+        # Only clear the pending set. Keep _mfc_topology and _mfc_flow_rates so
+        # later stages (and the post-solve viz network pass) can resolve MFCs
+        # against the FULL cross-stage topology.
         self._unresolved_mfc_ids = set()
-        self._mfc_topology = {}
-        self._mfc_flow_rates = {}
 
     # ------------------------------------------------------------------
     # Staged solving
@@ -714,10 +741,10 @@ class DualCanteraConverter:
             self.reactors[rid] = reactor
             stage_reactor_ids.append(rid)
 
-        # Build intra-stage connections
+        # Build intra-stage connections.  Do NOT reset _mfc_topology or
+        # _mfc_flow_rates — they accumulate across stages so the final
+        # viz-network conservation pass sees the full cross-stage topology.
         self._unresolved_mfc_ids = set()
-        self._mfc_topology = {}
-        self._mfc_flow_rates = {}
         for conn in stage_connections:
             cid = conn["id"]
             src = conn["source"]
@@ -846,6 +873,13 @@ class DualCanteraConverter:
                 logger.warning(
                     "Viz network: could not build connection '%s': %s", cid, exc
                 )
+
+        # Resolve any MFC mass flow rates that were still pending once all
+        # inter-stage devices are in place.  Until now intra-stage passes only
+        # saw a sub-topology; mixers on stage boundaries (SPRING_A3 shape) or
+        # inter-stage MFCs without explicit mass_flow_rate would otherwise
+        # stay at 0 kg/s and make Sankey bands collapse.
+        self._apply_flow_conservation()
 
         non_res = [r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)]
         viz_net = ct.ReactorNet(non_res)

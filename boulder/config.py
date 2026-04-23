@@ -195,6 +195,17 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
                     )
                     # mechanism_switch is preserved at the connection top-level
 
+    # Expand node-level `inlet:` / `outlet:` ports into regular `connections:`
+    # entries so downstream code (converter, staged solver, visualisation) sees
+    # the canonical shape.  Must run AFTER the node/connection normalisation
+    # loops above because it reads node.properties and writes to connections.
+    expand_port_shortcuts(normalized)
+
+    # Topologically order connections so every PressureController is built
+    # after the MassFlowController it points at via `master:`.  This is a
+    # Cantera requirement (the primary device must exist first).
+    _sort_connections_by_master(normalized)
+
     # Pass through the groups section unchanged (used by staged solver)
     # No normalization needed: groups is a plain dict {group_id: {stage_order, mechanism, solve}}
 
@@ -206,6 +217,242 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     synthesize_default_group(normalized)
 
     return normalized
+
+
+def expand_port_shortcuts(config: Dict[str, Any]) -> None:
+    """Expand node-level ``inlet:`` / ``outlet:`` ports into ``connections:``.
+
+    STONE YAMLs may declare flow ports inline on a reactor node to cut the
+    boilerplate of single-inlet, single-outlet pipelines::
+
+        nodes:
+          - id: tube_furnace
+            DesignTubeFurnace:
+              inlet:  {from: feed, mass_flow_rate: 3.33e-4}
+              outlet: {to: outlet}     # default device: PressureController(K=0)
+
+    This helper rewrites those ports into explicit, normalised connection
+    entries (equivalent to what a user would have written by hand).  Default
+    conventions:
+
+    * ``inlet`` → ``MassFlowController`` with id ``f"{from}_to_{nid}"``.  An
+      omitted ``mass_flow_rate`` means "let global conservation resolve it".
+    * ``outlet`` → ``PressureController`` with ``pressure_coeff=0.0`` and
+      ``master`` auto-picked as the unique inlet MFC of the node.  Multi-inlet
+      reactors must either set ``master:`` explicitly or switch to
+      ``device: MassFlowController``.
+
+    Conflicts (duplicate id, same ``(source, target)`` pair as an explicit
+    connection) raise ``ValueError`` so silent overrides are impossible.
+    """
+    nodes = config.get("nodes") or []
+    connections = config.setdefault("connections", [])
+    if not isinstance(connections, list):
+        return
+
+    explicit_conn_ids = {c.get("id") for c in connections if c.get("id")}
+    explicit_edges = {(c.get("source"), c.get("target")) for c in connections}
+    mfc_inlets_by_target: Dict[str, list] = {}
+    for conn in connections:
+        if conn.get("type") == "MassFlowController":
+            tgt = conn.get("target")
+            if tgt:
+                mfc_inlets_by_target.setdefault(tgt, []).append(conn.get("id"))
+
+    synthesized: list = []
+
+    def _node_group(node: Dict[str, Any]) -> Optional[str]:
+        props = node.get("properties") or {}
+        return node.get("group") or props.get("group")
+
+    # Pass 1: inlet ports first so outlet master-picking sees them.
+    for node in nodes:
+        props = node.get("properties")
+        if not isinstance(props, dict):
+            continue
+        inlet = props.pop("inlet", None)
+        if inlet is None:
+            continue
+        if not isinstance(inlet, dict):
+            raise ValueError(
+                f"Node '{node.get('id')}' 'inlet' port must be a mapping, "
+                f"got {type(inlet).__name__}."
+            )
+        nid = node["id"]
+        from_id = inlet.get("from")
+        if not from_id:
+            raise ValueError(
+                f"Node '{nid}' inlet port is missing required 'from:' field."
+            )
+        cid = f"{from_id}_to_{nid}"
+        if cid in explicit_conn_ids:
+            raise ValueError(
+                f"Inlet port on node '{nid}' generates connection id '{cid}' "
+                f"which already exists in connections:. Remove one of the two."
+            )
+        if (from_id, nid) in explicit_edges:
+            raise ValueError(
+                f"Inlet port on node '{nid}' duplicates an explicit "
+                f"connection from '{from_id}' to '{nid}'. Remove one of them."
+            )
+        conn_props: Dict[str, Any] = {}
+        if "mass_flow_rate" in inlet and inlet["mass_flow_rate"] is not None:
+            conn_props["mass_flow_rate"] = inlet["mass_flow_rate"]
+        entry: Dict[str, Any] = {
+            "id": cid,
+            "type": "MassFlowController",
+            "source": from_id,
+            "target": nid,
+            "properties": conn_props,
+        }
+        group = _node_group(node)
+        if group:
+            entry["group"] = group
+        synthesized.append(entry)
+        explicit_conn_ids.add(cid)
+        explicit_edges.add((from_id, nid))
+        mfc_inlets_by_target.setdefault(nid, []).append(cid)
+
+    # Pass 2: outlet ports.
+    for node in nodes:
+        props = node.get("properties")
+        if not isinstance(props, dict):
+            continue
+        outlet = props.pop("outlet", None)
+        if outlet is None:
+            continue
+        if not isinstance(outlet, dict):
+            raise ValueError(
+                f"Node '{node.get('id')}' 'outlet' port must be a mapping, "
+                f"got {type(outlet).__name__}."
+            )
+        nid = node["id"]
+        to_id = outlet.get("to")
+        if not to_id:
+            raise ValueError(
+                f"Node '{nid}' outlet port is missing required 'to:' field."
+            )
+        device = outlet.get("device", "PressureController")
+        if device not in {"PressureController", "MassFlowController"}:
+            raise ValueError(
+                f"Node '{nid}' outlet port: unsupported device '{device}' "
+                "(allowed: 'PressureController', 'MassFlowController')."
+            )
+        cid = f"{nid}_to_{to_id}"
+        if cid in explicit_conn_ids:
+            raise ValueError(
+                f"Outlet port on node '{nid}' generates connection id '{cid}' "
+                f"which already exists in connections:. Remove one of the two."
+            )
+        if (nid, to_id) in explicit_edges:
+            raise ValueError(
+                f"Outlet port on node '{nid}' duplicates an explicit "
+                f"connection from '{nid}' to '{to_id}'. Remove one of them."
+            )
+        conn_props: Dict[str, Any] = {}
+        if device == "PressureController":
+            master = outlet.get("master")
+            if master is None:
+                candidates = [mid for mid in mfc_inlets_by_target.get(nid, []) if mid]
+                if len(candidates) == 1:
+                    master = candidates[0]
+                elif not candidates:
+                    raise ValueError(
+                        f"Outlet PressureController on node '{nid}' has no "
+                        "MassFlowController inlet to use as master. Declare "
+                        "an inlet port (or an explicit inlet MFC) or switch "
+                        "to 'device: MassFlowController'."
+                    )
+                else:
+                    raise ValueError(
+                        f"Outlet PressureController on node '{nid}' is "
+                        f"ambiguous: {len(candidates)} candidate master MFCs "
+                        f"({candidates}). Set 'master:' explicitly in the "
+                        "outlet port, or switch to 'device: "
+                        "MassFlowController' and omit 'mass_flow_rate' so "
+                        "global conservation resolves it."
+                    )
+            conn_props["master"] = master
+            conn_props["pressure_coeff"] = float(outlet.get("pressure_coeff", 0.0))
+        else:
+            if "mass_flow_rate" in outlet and outlet["mass_flow_rate"] is not None:
+                conn_props["mass_flow_rate"] = outlet["mass_flow_rate"]
+        entry = {
+            "id": cid,
+            "type": device,
+            "source": nid,
+            "target": to_id,
+            "properties": conn_props,
+        }
+        group = _node_group(node)
+        if group:
+            entry["group"] = group
+        synthesized.append(entry)
+        explicit_conn_ids.add(cid)
+        explicit_edges.add((nid, to_id))
+
+    connections.extend(synthesized)
+
+
+def _sort_connections_by_master(config: Dict[str, Any]) -> None:
+    """Reorder ``connections:`` so PressureControllers follow their masters.
+
+    Cantera requires the primary :class:`~cantera.MassFlowController` to exist
+    before a :class:`~cantera.PressureController` that references it.  The
+    staged solver preserves list order within each stage so the ordering
+    established here is the ordering used at build time.
+
+    Raises
+    ------
+    ValueError
+        When a PressureController references a master that does not exist or
+        when the master graph has a cycle.
+    """
+    connections = config.get("connections")
+    if not isinstance(connections, list) or len(connections) < 2:
+        return
+
+    by_id = {c.get("id"): c for c in connections if c.get("id")}
+
+    # Dependency: every PC depends on its master.
+    deps: Dict[str, set] = {cid: set() for cid in by_id}
+    for cid, conn in by_id.items():
+        if conn.get("type") == "PressureController":
+            master = (conn.get("properties") or {}).get("master")
+            if not master:
+                continue
+            if master not in by_id:
+                raise ValueError(
+                    f"PressureController '{cid}' references master "
+                    f"'{master}' which is not a declared connection."
+                )
+            deps[cid].add(master)
+
+    ordered: list = []
+    ordered_ids: set = set()
+    # Preserve original ordering of connections with no dependencies.
+    remaining = [c.get("id") for c in connections if c.get("id")]
+    progress = True
+    while remaining and progress:
+        progress = False
+        still: list = []
+        for cid in remaining:
+            if deps[cid].issubset(ordered_ids):
+                ordered.append(by_id[cid])
+                ordered_ids.add(cid)
+                progress = True
+            else:
+                still.append(cid)
+        remaining = still
+    if remaining:
+        raise ValueError(
+            "PressureController master graph has a cycle or unresolved "
+            f"references: {remaining}"
+        )
+    # Keep connections that had no id at the end (rare; should not happen
+    # after normalization).
+    ordered.extend(c for c in connections if not c.get("id"))
+    config["connections"] = ordered
 
 
 def synthesize_default_group(config: Dict[str, Any]) -> None:

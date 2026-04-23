@@ -36,7 +36,7 @@ alternatives but different audiences:
 
    This is how the bundled spatial output pane plugin is picked up.
 
-2. **`BOULDER_PLUGINS` environment variable** — a comma- or semicolon-separated
+1. **`BOULDER_PLUGINS` environment variable** — a comma- or semicolon-separated
    list of module names for **local / unpackaged / per-project** plugin
    development. Boulder imports each module and calls its `register_plugins`.
    `boulder/cli.py` and `boulder/api/main.py` automatically load a `.env` file
