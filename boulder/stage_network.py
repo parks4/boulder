@@ -2,8 +2,7 @@
 
 Boulder's default stage solver treats each stage as a :class:`cantera.ReactorNet`
 and calls ``advance_to_steady_state`` or ``advance``.  Plugins that need a
-non-trivial stage solver (e.g. a Forward-Backward Sweep for a PFR, an adiabatic
-torch integrator, or a coupled radiative-conductive tube furnace) can provide a
+custom stage solver can provide a
 subclass of :class:`cantera.ReactorNet` that implements the
 :class:`CustomStageNetwork` protocol declared here.
 
@@ -15,8 +14,8 @@ below.  Boulder then:
 1. Stores the concrete network on the :class:`LagrangianTrajectory`
    (``trajectory.stage_nets[stage_id]``) so downstream callers (Calculation
    Note, figures, KPIs) can inspect any plugin-specific scalars via
-   :attr:`CustomStageNetwork.stage_metadata`.
-2. Uses :attr:`CustomStageNetwork.boulder_states` verbatim when collecting the
+   :attr:`CustomStageNetwork.scalars`.
+2. Uses :attr:`CustomStageNetwork.states` verbatim when collecting the
    per-stage Lagrangian segment — no CSTR chain re-sampling.
 
 The protocol is intentionally minimal: it adds no requirements beyond what
@@ -46,19 +45,19 @@ class CustomStageNetwork(Protocol):
 
     Notes
     -----
-    * ``boulder_states`` may return ``None`` before :meth:`advance` has been
+    * ``states`` may return ``None`` before :meth:`advance` has been
       called.  Callers MUST handle ``None`` by falling back to generic
       per-reactor state sampling.
-    * ``stage_metadata`` SHOULD contain JSON-serialisable scalars only so it
+    * ``scalars`` SHOULD contain JSON-serialisable scalars only so it
       can be written into Excel Calculation Notes without further coercion.
     """
 
     @property
-    def boulder_states(self) -> Optional[ct.SolutionArray]:
+    def states(self) -> Optional[ct.SolutionArray]:
         """Full SolutionArray describing the converged stage profile, or ``None``."""
         ...
 
     @property
-    def stage_metadata(self) -> Dict[str, Any]:
+    def scalars(self) -> Dict[str, Any]:
         """Plugin-specific scalars produced by the solver (heat loss, t_res, ...)."""
         ...

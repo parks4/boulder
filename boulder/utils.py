@@ -1,7 +1,130 @@
 """Utility functions for the Boulder application."""
 
+import re
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+# ---------------------------------------------------------------------------
+# Unit coercion helpers
+# ---------------------------------------------------------------------------
+
+#: Matches strings of the form "number unit", e.g. "25 degC", "470 kg/d".
+#: Group 1: the numeric part (including optional sign and exponent).
+#: Group 2: the unit part (everything after the whitespace separator).
+#: Plain numbers without a trailing unit do NOT match (backward-compatible).
+_UNIT_STRING_RE = re.compile(
+    r"^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s+(\S.*?)\s*$",
+    re.ASCII,
+)
+
+#: Property-name → preferred target Pint unit.
+#: Temperature maps to "kelvin" because Cantera's TPX setter expects K.
+#: electric_power_kW uses "kilowatt" for backward-compatible kW storage.
+_PROPERTY_UNIT_HINTS: Dict[str, str] = {
+    "temperature": "kelvin",
+    "pressure": "pascal",
+    "dt": "second",
+    "end_time": "second",
+    "max_time": "second",
+    "electric_power_kW": "kilowatt",
+}
+
+_pint_ureg: Optional[Any] = None  # lazy singleton
+
+
+def _get_pint_ureg() -> Any:
+    """Return (and lazily create) the shared Pint UnitRegistry."""
+    global _pint_ureg
+    if _pint_ureg is None:
+        import pint  # noqa: PLC0415
+
+        _pint_ureg = pint.UnitRegistry()
+    return _pint_ureg
+
+
+def coerce_unit_string(val: Any, property_name: str = "") -> Any:
+    """Convert a string with embedded units to its canonical SI float.
+
+    Only acts on strings of the form ``"number unit"``
+    (e.g. ``"25 degC"``, ``"1.3 bar"``, ``"470 kg/d"``). Plain numeric
+    values (``float`` / ``int``) and non-unit strings are returned unchanged,
+    preserving backward compatibility with existing YAML configs that already
+    store SI values as bare numbers.
+
+    The conversion target is SI unless overridden by
+    :data:`_PROPERTY_UNIT_HINTS`. Temperature always becomes **Kelvin** so
+    that values feed directly into Cantera's ``TPX`` setter.
+
+    Pint's ``OffsetUnitCalculusError`` (raised for degC / degF when the
+    value is constructed from a plain string) is avoided by separating the
+    numeric and unit parts with a regex and constructing
+    ``pint.Quantity(number, unit)`` explicitly.
+
+    Parameters
+    ----------
+    val:
+        Raw value read from a YAML config node.
+    property_name:
+        YAML key associated with *val*, used to look up the preferred
+        target unit (e.g. ``"temperature"`` → ``"kelvin"``).
+
+    Returns
+    -------
+    float | Any
+        SI magnitude when a unit string was detected and parsed; the
+        original *val* otherwise (including on Pint parse errors).
+    """
+    if not isinstance(val, str):
+        return val
+    m = _UNIT_STRING_RE.match(val)
+    if not m:
+        return val
+
+    num_str, unit_str = m.group(1), m.group(2)
+    target_unit_name: Optional[str] = _PROPERTY_UNIT_HINTS.get(property_name)
+    try:
+        ureg = _get_pint_ureg()
+        # Construct Quantity(number, unit) explicitly to avoid Pint's
+        # OffsetUnitCalculusError for offset units like degC / degF.
+        qty = ureg.Quantity(float(num_str), unit_str)
+        if target_unit_name is not None:
+            return float(qty.to(target_unit_name).magnitude)
+        return float(qty.to_base_units().magnitude)
+    except Exception:
+        return val
+
+
+def coerce_config_units(obj: Any, _key: str = "") -> Any:
+    """Recursively coerce unit-bearing string values in a config to SI floats.
+
+    Walks dicts and lists **in-place**, applying :func:`coerce_unit_string`
+    to every leaf value.  Compatible with both plain ``dict`` / ``list``
+    objects and ``ruamel.yaml`` ``CommentedMap`` / ``CommentedSeq``
+    (comments are preserved because mutation is in-place).
+
+    Parameters
+    ----------
+    obj:
+        Configuration object (dict, list, or scalar).  Modified in-place
+        when *obj* is a dict or list.
+    _key:
+        YAML key associated with *obj*; threaded through to
+        :func:`coerce_unit_string` for property-name hints.
+
+    Returns
+    -------
+    Any
+        The same *obj* reference with unit strings replaced by SI floats.
+    """
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            obj[k] = coerce_config_units(v, _key=k)
+        return obj
+    if isinstance(obj, list):
+        for i, item in enumerate(obj):
+            obj[i] = coerce_config_units(item, _key=_key)
+        return obj
+    return coerce_unit_string(obj, property_name=_key)
 
 
 def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:

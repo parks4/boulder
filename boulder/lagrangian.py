@@ -64,8 +64,8 @@ class LagrangianTrajectory:
         Mapping ``stage_id -> ReactorNet`` giving access to the concrete
         stage-level network that solved each stage.  For stages driven by a
         plugin-provided :class:`~boulder.stage_network.CustomStageNetwork`
-        (e.g. a Forward-Backward Sweep PFR), this exposes per-stage scalars
-        via ``net.stage_metadata`` and full profiles via ``net.boulder_states``.
+        (i.e. a plugin-specific stage network), this exposes per-stage scalars
+        via ``net.scalars`` and full profiles via ``net.states``.
     """
 
     def __init__(self) -> None:

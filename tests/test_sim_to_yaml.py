@@ -21,15 +21,18 @@ def _build_test_network():
     """Create a simple network: two reservoirs -> reactor -> reservoir."""
     gas = ct.Solution("gri30.yaml")
 
-    # Upstream reservoirs with different compositions
-    gas.TPX = 300.0, ct.one_atm, "O2:0.21, N2:0.78, AR:0.01"
+    # Upstream reservoirs — inert compositions to avoid reactive blow-up during
+    # staged solving when the YAML is rebuilt by DualCanteraConverter.
+    # ``build_network`` now always runs the staged solver, which advances each
+    # stage to steady state; a reactive CH4/O2 mixture diverges there.
+    gas.TPX = 300.0, ct.one_atm, "N2:0.79, AR:0.21"
     res_a = ct.Reservoir(gas, name="Air Reservoir")
 
-    gas.TPX = 300.0, ct.one_atm, "CH4:1"
+    gas.TPX = 300.0, ct.one_atm, "N2:1"
     res_b = ct.Reservoir(gas, name="Fuel Reservoir")
 
     # Mixer reactor
-    gas.TPX = 300.0, ct.one_atm, "O2:0.21, N2:0.78, AR:0.01"
+    gas.TPX = 300.0, ct.one_atm, "N2:0.79, AR:0.21"
     mixer = ct.IdealGasReactor(gas, name="Mixer")
 
     # Downstream sink

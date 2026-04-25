@@ -78,7 +78,7 @@ def test_invalid_configs_fail_validation() -> None:
 
 @pytest.mark.unit
 def test_unit_coercion_ctwrap_compatibility() -> None:
-    """Unit-bearing strings are coerced to magnitudes in canonical units.
+    """Unit-bearing strings are coerced to magnitudes in canonical SI units.
 
     - temperature strings (e.g., "500 degC") become Kelvin magnitudes
     - pressure strings (e.g., "1 atm") become Pascals
@@ -102,8 +102,8 @@ def test_unit_coercion_ctwrap_compatibility() -> None:
     normalized = normalize_config(data)
     model = validate_normalized_config(normalized)
 
-    # temperature: 500 degC = 500 C (no conversion needed, already in target unit)
-    assert abs(model.nodes[0].properties["temperature"] - 500.0) < 1e-6
+    # temperature: 500 degC → 773.15 K (canonical unit for Cantera TPX)
+    assert abs(model.nodes[0].properties["temperature"] - 773.15) < 1e-6
     # pressure: 1 atm = 101325 Pa
     assert abs(model.nodes[0].properties["pressure"] - 101325.0) < 1e-6
     # dt: 10 ms = 0.01 s
@@ -215,7 +215,7 @@ def test_dynamic_unit_system_flexibility() -> None:
 
     # Check that all units were converted to their canonical forms
     node = model.nodes[0]
-    assert abs(node.properties["temperature"] - 26.85) < 1e-6  # 300 K = 26.85 C
+    assert abs(node.properties["temperature"] - 300.0) < 1e-6  # 300 K → 300 K (no offset)
     assert abs(node.properties["pressure"] - 200000.0) < 1e-6  # 2 bar = 200000 Pa
     assert abs(node.properties["mass"] - 0.005) < 1e-6  # 5 g = 0.005 kg
     assert abs(node.properties["volume"] - 0.002) < 1e-6  # 2 L = 0.002 m³

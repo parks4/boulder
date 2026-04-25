@@ -8,10 +8,20 @@ Validation is schema-only and does not build or inspect any simulation network.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Set
 
-from pint import UnitRegistry
 from pydantic import BaseModel, Field, validator
+
+#: Detect strings that look like "number unit" — mirrors the regex in utils.py
+#: and is used only to decide whether to surface a helpful error message.
+_LOOKS_LIKE_UNIT_RE = re.compile(
+    r"^\s*[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\s+\S", re.ASCII
+)
+
+
+def _looks_like_unit_string(val: str) -> bool:
+    return bool(_LOOKS_LIKE_UNIT_RE.match(val))
 
 try:
     from typing import Literal  # type: ignore[attr-defined]
@@ -338,219 +348,64 @@ class NormalizedConfigModel(BaseModel):
                     )
 
     def _coerce_units(self) -> None:
-        """Coerce unit-bearing strings to canonical units using pint.
+        """Coerce unit-bearing strings in node/connection/settings properties.
 
-        Mirrors ctwrap behavior: values defined as strings with units are converted
-        to base magnitudes in consistent units. Unknown keys remain unchanged.
+        Delegates to :func:`boulder.utils.coerce_unit_string` so the
+        conversion rules (Pint-based, temperature → Kelvin, pressure → Pa,
+        …) are defined in one place and reused by both :func:`normalize_config`
+        and the Pydantic validation layer.
 
-        This uses dynamic unit detection based on property names and pint's capabilities.
+        When the config passes through :func:`normalize_config` first (the
+        normal simulation path), values are already floats and this method
+        is a no-op.  When callers construct a :class:`NormalizedConfigModel`
+        directly from a dict (unit tests, CLI ``validate``), the coercion
+        fires here instead.
         """
-        unit_registry: UnitRegistry = UnitRegistry()
+        from .utils import _PROPERTY_UNIT_HINTS, coerce_unit_string  # noqa: PLC0415
 
-        # Define preferred target units for common physical quantities
-        # This maps dimensionalities to preferred units, not property names to units
-        preferred_units = {
-            "[temperature]": "celsius",
-            "[mass] / [length] / [time] ** 2": "pascal",  # pressure
-            "[mass]": "kilogram",
-            "[length] ** 3": "meter**3",  # volume
-            "[mass] / [time]": "kilogram/second",  # mass flow rate
-            "[time]": "second",
-            "[mass] * [length] ** 2 / [time] ** 3": "watt",  # power
-            "[mass] * [length] ** 2 / [time] ** 2": "joule",  # energy
-            "[length]": "meter",
-        }
+        # Provide a helpful error on unknown/invalid unit strings by wrapping
+        # coerce_unit_string and re-raising with context.
+        def _coerce(val: Any, prop: str) -> Any:
+            result = coerce_unit_string(val, property_name=prop)
+            if result is val and isinstance(val, str) and _looks_like_unit_string(val):
+                # coerce_unit_string returned the original string unchanged —
+                # likely an invalid unit.  Surface an actionable error.
+                # Look up suggestion first by property name, then by its
+                # canonical target-unit name (e.g. "temperature" → "kelvin").
+                canonical = _PROPERTY_UNIT_HINTS.get(prop, prop)
+                unit_hint = UNIT_SUGGESTIONS.get(prop) or UNIT_SUGGESTIONS.get(
+                    canonical,
+                    "valid units (e.g. 'degC', 'bar', 'kg/s', 'ms')",
+                )
+                raise ValueError(
+                    f"Could not convert '{val}' for property '{prop}'. "
+                    f"Please use {unit_hint}."
+                )
+            return result
 
-        # Special cases for property names that need specific handling
-        special_property_mappings = {
-            "electric_power_kW": "kilowatt",  # Keep in kW for backward compatibility
-        }
-
-        def _get_target_unit_for_property(
-            property_name: str, val: str
-        ) -> Optional[str]:
-            """Determine the target unit for a property based on its value and name."""
-            # Check special mappings first
-            if property_name in special_property_mappings:
-                return special_property_mappings[property_name]
-
-            # Property name-based hints for common properties
-            property_hints = {
-                "temperature": "celsius",
-                "pressure": "pascal",
-                "mass": "kilogram",
-                "volume": "meter**3",
-                "time": "second",
-                "dt": "second",
-                "end_time": "second",
-                "max_time": "second",
-            }
-
-            # Check if property name suggests a unit type
-            if property_name in property_hints:
-                return property_hints[property_name]
-
-            # Special handling for temperature strings (they fail in pint due to offset units)
-            import re
-
-            if re.search(r"\b(degc|celsius|degf|fahrenheit|k|kelvin)\b", val.lower()):
-                return "celsius"  # Changed to match the preferred unit
-
-            try:
-                # Parse the value to determine its dimensionality
-                qty: Any = unit_registry.Quantity(val)
-                dimensionality_str = str(qty.dimensionality)
-
-                # Look up preferred unit for this dimensionality
-                return preferred_units.get(dimensionality_str)
-            except Exception:
-                return None
-
-        def _coerce_value(val: Any, property_name: str = "") -> Any:
-            if isinstance(val, str):
-                try:
-                    # First, determine what unit we should convert to
-                    target_unit = _get_target_unit_for_property(property_name, val)
-                    if not target_unit:
-                        # If we can't determine a target unit, return as-is
-                        return val
-
-                    # Special handling for temperature conversion (offset units)
-                    if target_unit in ["kelvin", "celsius"]:
-                        import re
-
-                        match = re.match(
-                            r"([+-]?\d*\.?\d+)\s*([a-zA-Z°]+(?:[ -]?[a-zA-Z]+)*)",
-                            val.strip(),
-                        )
-                        if match:
-                            value, temp_unit = match.groups()
-                            try:
-                                value = float(value)
-                            except ValueError:
-                                raise ValueError(
-                                    f"Could not convert '{value}' to a float for property '{property_name}'. "
-                                    "Please ensure the value is a valid number followed by a "
-                                    "temperature unit, e.g. '25 degC', '77 degF', or '298 K'."
-                                )
-                            temp_unit = temp_unit.lower()
-
-                            # Convert to target temperature unit
-                            if target_unit == "kelvin":
-                                # Convert to Kelvin
-                                if temp_unit in ["degc", "celsius", "c"]:
-                                    return value + 273.15
-                                elif temp_unit in ["degf", "fahrenheit", "f"]:
-                                    return (value - 32) * 5 / 9 + 273.15
-                                elif temp_unit in ["k", "kelvin"]:
-                                    return value
-                            elif target_unit == "celsius":
-                                # Convert to Celsius
-                                if temp_unit in ["degc", "celsius", "c"]:
-                                    return value
-                                elif temp_unit in ["degf", "fahrenheit", "f"]:
-                                    return (value - 32) * 5 / 9
-                                elif temp_unit in ["k", "kelvin"]:
-                                    return value - 273.15
-
-                    # Use pint for all other conversions
-                    qty: Any = unit_registry.Quantity(val)
-                    return qty.to(target_unit).magnitude
-
-                except Exception as e:
-                    # Provide helpful error message with suggested units
-                    # First try to get suggestions based on target unit
-                    if target_unit:
-                        suggestion = UNIT_SUGGESTIONS.get(
-                            target_unit, f"units compatible with {target_unit}"
-                        )
-                    else:
-                        # Try to get suggestions based on dimensionality
-                        try:
-                            qty = unit_registry.Quantity(val)
-                            dimensionality = str(qty.dimensionality)
-
-                            suggestions_by_dim = {
-                                "[temperature]": "temperature units like 'degC', 'degF', 'K'",
-                                "[mass] / [length] / [time] ** 2": (
-                                    "pressure units like 'atm', 'bar', 'Pa', 'psi'"
-                                ),
-                                "[mass]": "mass units like 'kg', 'g', 'lb'",
-                                "[length] ** 3": "volume units like 'm**3', 'L', 'mL', 'ft**3'",
-                                "[mass] / [time]": "flow rate units like 'kg/s', 'g/min', 'lb/hr'",
-                                "[time]": "time units like 's', 'ms', 'min', 'hr'",
-                                "[mass] * [length] ** 2 / [time] ** 3": (
-                                    "power units like 'kW', 'W', 'MW', 'hp'"
-                                ),
-                                "[mass] * [length] ** 2 / [time] ** 2": (
-                                    "energy units like 'J', 'kJ', 'cal', 'BTU'"
-                                ),
-                                "[length]": "length units like 'm', 'cm', 'ft', 'in'",
-                            }
-                            suggestion = suggestions_by_dim.get(
-                                dimensionality,
-                                f"units with dimensionality {dimensionality}",
-                            )
-                        except Exception:
-                            suggestion = "valid units"
-
-                    prop_info = (
-                        f" for property '{property_name}'" if property_name else ""
-                    )
-                    raise ValueError(
-                        f"Could not convert '{val}'{prop_info}. "
-                        f"Please use {suggestion}. "
-                        f"Original error: {str(e)}"
-                    )
-            return val
-
-        # Process all properties in nodes dynamically
         for node in self.nodes:
-            for key, value in node.properties.items():
-                node.properties[key] = _coerce_value(value, key)
+            for key, value in list(node.properties.items()):
+                node.properties[key] = _coerce(value, key)
 
-        # Process all properties in connections dynamically
         for conn in self.connections:
-            for key, value in conn.properties.items():
-                conn.properties[key] = _coerce_value(value, key)
+            for key, value in list(conn.properties.items()):
+                conn.properties[key] = _coerce(value, key)
 
-        # Process settings properties dynamically
         if isinstance(self.settings, SettingsModel):
-            # For settings, we need to handle it differently since it's a Pydantic model
-            # with extra fields allowed. In Pydantic v1, extra fields are stored in __fields_set__
-            # and accessible via dict() method or direct attribute access.
-
-            # Get all the settings data as a dict
             settings_data = (
                 self.settings.dict()
                 if hasattr(self.settings, "dict")
                 else self.settings.__dict__
             )
-
-            # Process each field and mirror updates into __dict__ for compatibility
-            coerced_updates: Dict[str, Any] = {}
             for key, value in settings_data.items():
-                if isinstance(value, str):
-                    coerced = _coerce_value(value, key)
-                    try:
-                        setattr(self.settings, key, coerced)
-                        # Ensure __dict__ contains coerced values for downstream consumers
-                        coerced_updates[key] = coerced
-                    except Exception as e:
-                        import logging
-
-                        logging.warning(
-                            f"Failed to set attribute '{key}' on settings: {e}"
-                        )
-
-            # In pydantic v2, extras may live outside __dict__. Update __dict__ for consumers
-            # that expect direct dict access (e.g., tests using model.settings.__dict__).
-            if coerced_updates:
+                coerced = _coerce(value, key) if isinstance(value, str) else value
                 try:
-                    self.settings.__dict__.update(coerced_updates)
+                    setattr(self.settings, key, coerced)
+                    # Pydantic v2 stores extra fields in model_extra, not __dict__.
+                    # Mirror coerced values into __dict__ so that downstream code
+                    # using model.settings.__dict__["dt"] keeps working.
+                    self.settings.__dict__[key] = coerced
                 except Exception:
-                    # Best-effort: if __dict__ is not writable, ignore silently
-                    # (attributes have already been set above).
                     pass
 
 

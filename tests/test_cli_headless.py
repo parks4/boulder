@@ -24,13 +24,14 @@ class TestCLIHeadless:
            - "import cantera as ct"
            - "from boulder.cantera_converter import DualCanteraConverter"
            - "network = converter.build_network(config)"
-           - "network.advance("
-        5. Generated code uses proper numpy time stepping:
-           - "import numpy as np"
-           - "times = np.arange("
-        6. Generated Python code executes successfully:
-           - Simulation output contains "t=" (time values)
-           - Simulation output contains "T=" (temperature values)
+        5. Generated code reports the converged per-reactor states
+           (``build_network`` always routes through the staged solver, so the
+           downloadable script does not re-advance the network; instead it
+           iterates over ``network.reactors`` to print ``T``/``P``).
+        6. Generated Python code executes successfully and prints reactor
+           states:
+           - Simulation stdout contains "Reactor" (header line)
+           - Simulation stdout contains "T [K]" (header label)
         """
         # Get the path to the test config file
         config_path = (
@@ -91,7 +92,9 @@ class TestCLIHeadless:
                 in generated_code
             )
             assert "network = converter.build_network(config)" in generated_code
-            assert "network.advance(" in generated_code
+            # build_network always runs the staged solver, so the emitted script
+            # iterates over the converged reactors instead of re-advancing.
+            assert "for r in network.reactors:" in generated_code
 
             # Test that the generated Python code can be executed
             exec_result = subprocess.run(
@@ -103,15 +106,10 @@ class TestCLIHeadless:
                 timeout=30,  # 30 second timeout for execution
             )
 
-            # The generated code should start running and produce some output
-            # Even if the simulation fails due to numerical issues, we should see initial output
+            # The generated code should report the converged reactor states
             exec_stdout = exec_result.stdout or ""
-            assert "t=" in exec_stdout, "No simulation output found"
-            assert "T=" in exec_stdout, "No temperature output found"
-
-            # Verify that the code contains proper numpy usage for time steps
-            assert "import numpy as np" in generated_code
-            assert "times = np.arange(" in generated_code
+            assert "Reactor" in exec_stdout, "No reactor output header found"
+            assert "T [K]" in exec_stdout, "No temperature column found"
 
         finally:
             # Clean up the temporary file

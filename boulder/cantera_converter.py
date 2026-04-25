@@ -838,8 +838,8 @@ class DualCanteraConverter:
         converged states after a staged solve) and adds any inter-stage
         connections that were not built during the per-stage solve.
 
-        The returned network is **not advanced** – it exists solely for
-        ``ReactorNet.draw()`` and Sankey diagram generation.
+        The returned network is initialized with ``advance(0.0)`` so flow-device
+        properties (``mass_flow_rate``) are ready for downstream reporting.
 
         Parameters
         ----------
@@ -883,6 +883,7 @@ class DualCanteraConverter:
 
         non_res = [r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)]
         viz_net = ct.ReactorNet(non_res)
+        viz_net.advance(0.0)
         self.network = viz_net
         self.last_network = viz_net
         return viz_net
@@ -995,29 +996,52 @@ class DualCanteraConverter:
                 f"Using config parameters: time={simulation_time}s, step={time_step}s"
             )
 
-        # Add simulation loop code generation
+        # ``build_network`` always routes through the staged solver, so by the
+        # time we get here the reactor states are already converged.  Calling
+        # ``network.advance()`` on that fully-solved network is not only
+        # redundant, it can diverge numerically (mechanism-switch networks
+        # contain reactors with mismatched species lists that were only
+        # integrated independently inside their own stage sub-network).  We
+        # therefore emit a downloadable script that just prints the final
+        # states, and capture a single-time-point "trajectory" for the UI.
+        already_solved = getattr(self, "_staged_trajectory", None) is not None
+
         self.code_lines.append("")
         self.code_lines.append("# ===== SIMULATION EXECUTION =====")
-        self.code_lines.append("# Import numpy for time array generation")
-        self.code_lines.append("import numpy as np")
-        self.code_lines.append("")
-        self.code_lines.append(
-            f"# Create time array: 0 to {simulation_time}s with {time_step}s steps"
-        )
-        self.code_lines.append(f"times = np.arange(0, {simulation_time}, {time_step})")
-        self.code_lines.append("")
-        self.code_lines.append("# Run time integration loop")
-        self.code_lines.append("print('Starting simulation...')")
-        self.code_lines.append("print('Time (s)\\tTemperatures (K)')")
-        self.code_lines.append("for t in times:")
-        self.code_lines.append("    # Advance the reactor network to time t")
-        self.code_lines.append("    network.advance(t)")
-        self.code_lines.append("    # Print current time and reactor temperatures")
-        self.code_lines.append(
-            '    print(f"t={t:.4f}, T={[r.phase.T for r in network.reactors]}")'
-        )
-        self.code_lines.append("")
-        self.code_lines.append("print('Simulation completed!')")
+        if already_solved:
+            self.code_lines.append(
+                "# build_network() has already solved the staged network;"
+            )
+            self.code_lines.append("# just report the converged per-reactor states.")
+            self.code_lines.append("print('Simulation completed (staged solve).')")
+            self.code_lines.append("print('Reactor\\tT [K]\\tP [Pa]')")
+            self.code_lines.append("for r in network.reactors:")
+            self.code_lines.append(
+                '    print(f"{r.name}\\t{r.phase.T:.2f}\\t{r.phase.P:.2f}")'
+            )
+        else:
+            self.code_lines.append("# Import numpy for time array generation")
+            self.code_lines.append("import numpy as np")
+            self.code_lines.append("")
+            self.code_lines.append(
+                f"# Create time array: 0 to {simulation_time}s with {time_step}s steps"
+            )
+            self.code_lines.append(
+                f"times = np.arange(0, {simulation_time}, {time_step})"
+            )
+            self.code_lines.append("")
+            self.code_lines.append("# Run time integration loop")
+            self.code_lines.append("print('Starting simulation...')")
+            self.code_lines.append("print('Time (s)\\tTemperatures (K)')")
+            self.code_lines.append("for t in times:")
+            self.code_lines.append("    # Advance the reactor network to time t")
+            self.code_lines.append("    network.advance(t)")
+            self.code_lines.append("    # Print current time and reactor temperatures")
+            self.code_lines.append(
+                '    print(f"t={t:.4f}, T={[r.phase.T for r in network.reactors]}")'
+            )
+            self.code_lines.append("")
+            self.code_lines.append("print('Simulation completed!')")
 
         # Initialize data structures
         times: List[float] = []
@@ -1042,6 +1066,63 @@ class DualCanteraConverter:
                 "X": {s: [] for s in reactor_gas.species_names},
                 "Y": {s: [] for s in reactor_gas.species_names},
             }
+
+        if already_solved:
+            # Network already converged by the staged solver — record the
+            # final per-reactor state as a single time point and skip the
+            # (redundant, potentially-diverging) ``network.advance`` loop.
+            # We still call ``advance(0.0)`` once so that Cantera marks the
+            # flow devices as "ready" (otherwise downstream consumers such as
+            # the Sankey generator would raise ``FlowDevice::massFlowRate:
+            # Flow device is not ready``).
+            try:
+                self.network.advance(0.0)
+            except Exception as e:
+                logger.warning(
+                    f"Post-staged network.advance(0) warmup failed, "
+                    f"flow-device reads may be unavailable: {e}"
+                )
+            times.append(0.0)
+            for reactor in reactor_list:
+                reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+                reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
+                    "gas_solution", self.gas
+                )
+                reactor_species_names = reactor_gas.species_names
+                T = float(reactor.phase.T)
+                P = float(reactor.phase.P)
+                X_vec = reactor.phase.X
+                Y_vec = reactor.phase.Y
+                sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
+                reactors_series[reactor_id]["T"].append(T)
+                reactors_series[reactor_id]["P"].append(P)
+                for species_name, x_value in zip(reactor_species_names, X_vec):
+                    reactors_series[reactor_id]["X"][species_name].append(
+                        float(x_value)
+                    )
+                for species_name, y_value in zip(reactor_species_names, Y_vec):
+                    reactors_series[reactor_id]["Y"][species_name].append(
+                        float(y_value)
+                    )
+            if progress_callback:
+                progress_callback(
+                    {
+                        "time": times.copy(),
+                        "reactors": {
+                            k: {
+                                "T": v["T"].copy(),
+                                "P": v["P"].copy(),
+                                "X": {s: v["X"][s].copy() for s in v["X"]},
+                                "Y": {s: v["Y"][s].copy() for s in v["Y"]},
+                            }
+                            for k, v in reactors_series.items()
+                        },
+                    },
+                    simulation_time,
+                    simulation_time,
+                )
+            results = self.finalize_results(times, reactors_series)
+            return results, "\n".join(self.code_lines)
 
         # Simulation loop with streaming updates
         current_time = 0.0

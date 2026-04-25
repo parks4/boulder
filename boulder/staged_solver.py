@@ -461,7 +461,7 @@ def _collect_stage_states(
     # :mod:`boulder.stage_network`) may already hold the converged profile.
     # Use it verbatim, bypassing the generic CSTR-chain sampler below.
     if network is not None:
-        custom_states = getattr(network, "boulder_states", None)
+        custom_states = getattr(network, "states", None)
         if custom_states is not None and len(custom_states) > 0:
             return custom_states
 

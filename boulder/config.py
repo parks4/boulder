@@ -120,7 +120,15 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
             properties:
                 temperature: 1000
     """
+    from .utils import coerce_config_units  # noqa: PLC0415
+
     normalized = config.copy()
+
+    # Convert unit-bearing strings ("25 degC", "1.3 bar", "470 kg/d", …) to
+    # canonical SI floats before any further processing.  Plain numeric values
+    # are left untouched so existing YAML configs that already store SI values
+    # remain fully backward-compatible.
+    coerce_config_units(normalized)
 
     # Require new STONE schema keys and reject mixed dialects: the YAML must
     # contain only top-level keys from the locked STONE vocabulary.  Unknown
