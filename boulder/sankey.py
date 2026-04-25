@@ -1,4 +1,10 @@
-"""Sankey diagrams tools for Bloc."""
+"""Sankey diagrams for STONE reactor networks.
+
+Generic Sankey builder and renderer operating on any solved
+:class:`cantera.ReactorNet`.  An external package may register a custom
+``sankey_generator`` via the Boulder plugin system to override the default
+link/node extraction logic.
+"""
 
 from typing import List
 
@@ -557,10 +563,23 @@ def substract_value(
 
 
 if __name__ == "__main__":
-    from bloc.test import default_simulation, defaults
+    # Smoke test: use a plugin-provided default simulation if available.
+    # The plugin package must register a module path via entry point
+    # 'boulder.sankey_demo' exposing ``default_simulation()`` and ``defaults()``.
+    import importlib
+    from importlib.metadata import entry_points
 
-    config = defaults()
-    sim = default_simulation(**config)
+    demo_module = None
+    for ep in entry_points(group="boulder.sankey_demo"):
+        demo_module = importlib.import_module(ep.value)
+        break
+    if demo_module is None:
+        raise RuntimeError(
+            "No 'boulder.sankey_demo' entry point registered; "
+            "install a plugin package that exposes default_simulation/defaults."
+        )
+    config = demo_module.defaults()
+    sim = demo_module.default_simulation(**config)
 
     sim.advance_to_steady_state()
 

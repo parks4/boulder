@@ -35,7 +35,7 @@ class TrajectorySegment:
         by :meth:`LagrangianTrajectory.add_segment`.
     mapping_losses : dict, optional
         Species mole-fraction lost during the mechanism switch that preceded
-        this segment (from :func:`~bloc.reactors.switch_mechanism`).
+        this segment (from the registered ``mechanism_switch_fn`` plugin).
     """
 
     stage_id: str
@@ -60,11 +60,18 @@ class LagrangianTrajectory:
     viz_network : ct.ReactorNet or None
         Visualization-only :class:`~cantera.ReactorNet` built from all
         converged reactor states after the staged solve completes.
+    stage_nets : dict[str, ct.ReactorNet]
+        Mapping ``stage_id -> ReactorNet`` giving access to the concrete
+        stage-level network that solved each stage.  For stages driven by a
+        plugin-provided :class:`~boulder.stage_network.CustomStageNetwork`
+        (i.e. a plugin-specific stage network), this exposes per-stage scalars
+        via ``net.scalars`` and full profiles via ``net.states``.
     """
 
     def __init__(self) -> None:
         self.segments: List[TrajectorySegment] = []
         self.viz_network: Optional[ct.ReactorNet] = None
+        self.stage_nets: Dict[str, ct.ReactorNet] = {}
 
     # ------------------------------------------------------------------
     # Building the trajectory

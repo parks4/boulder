@@ -58,6 +58,9 @@ async def simulation_event_stream(
                 "sankey_links": progress.sankey_links,
                 "sankey_nodes": progress.sankey_nodes,
                 "elapsed_time": progress.get_calculation_time(),
+                # Connections list after post-build hooks — lets the client
+                # update the visual graph to reflect programmatic edges.
+                "updated_connections": progress.updated_connections,
             }
             yield _sse_event("complete", complete_data)
             return

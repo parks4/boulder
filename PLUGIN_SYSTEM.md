@@ -21,10 +21,81 @@ The plugin system allows external packages (like Bloc) to create custom visualiz
 
 ### Plugin Discovery
 
-Boulder discovers plugins through two mechanisms:
+Boulder discovers plugins through two complementary mechanisms. Both run at
+startup and *add* to the same `BoulderPlugins` container; they are not
+alternatives but different audiences:
 
-1. **Environment Variable**: Set `BOULDER_PLUGINS` to a comma-separated list of module names
-1. **Entry Points**: Register plugins using setuptools entry points under the `boulder.plugins` group
+1. **Entry points (`boulder.plugins`)** — the canonical path for **packaged**
+   plugins distributed via `pip`. Register your `register_plugins(plugins)`
+   callable in `pyproject.toml`:
+
+   ```toml
+   [project.entry-points."boulder.plugins"]
+   my_plugin = "my_package.boulder_plugins:register_plugins"
+   ```
+
+   This is how the bundled spatial output pane plugin is picked up.
+
+1. **`BOULDER_PLUGINS` environment variable** — a comma- or semicolon-separated
+   list of module names for **local / unpackaged / per-project** plugin
+   development. Boulder imports each module and calls its `register_plugins`.
+   `boulder/cli.py` and `boulder/api/main.py` automatically load a `.env` file
+   next to the repo so that per-project plugins can be wired without
+   reinstalling anything:
+
+   ```bash
+   # .env at the repo root
+   BOULDER_PLUGINS=my_local_pkg.boulder_plugins
+   ```
+
+### Inspecting what loaded
+
+Run
+
+```bash
+boulder plugins list
+```
+
+to print the plugins loaded from each discovery path and the counts of
+registered reactor builders, connection builders, post-build hooks, output
+panes, and summary builders.
+
+### Optional: declarative schema for a reactor kind
+
+Plugins registering new reactor kinds can opt into a Pydantic schema so that
+`boulder validate <yaml>` and `boulder describe <kind>` can check YAML files
+and render UI property panes without running Cantera. Use the helper
+`boulder.register_reactor_builder`:
+
+```python
+from pydantic import BaseModel, Field
+from boulder import register_reactor_builder
+
+class MyReactorSchema(BaseModel):
+    length:   float = Field(...,  description="[m] Reactor length")
+    diameter: float = Field(...,  description="[m] Reactor diameter")
+
+def register_plugins(plugins):
+    register_reactor_builder(
+        plugins,
+        kind="MyReactor",
+        builder=_build_my_reactor,
+        network_class=MyReactorNet,
+        schema=MyReactorSchema,
+        categories={
+            "inputs":  {"GEOMETRY": ["length", "diameter"]},
+            "outputs": {"OUTLET": ["T_outlet_K"]},
+        },
+        default_constraints=[
+            {"key": "T_outlet_K", "description": "Max outlet T",
+             "operator": "<", "threshold": 1800.0},
+        ],
+    )
+```
+
+Plugins that still write directly to `plugins.reactor_builders[kind] = fn`
+keep working exactly as before; they simply do not benefit from schema-based
+validation.
 
 ## Creating a Plugin
 

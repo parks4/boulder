@@ -210,10 +210,11 @@ class TestYAMLCommentRoundTrip:
         """Sample YAML for round-trip testing."""
         return """# Boulder Configuration with STONE Standard
 metadata:
+  description: "Round Trip Test Config"
   name: "Round Trip Test"
   version: "1.0"
 
-simulation:
+settings:
   end_time: 1.0  # seconds
 
 nodes:

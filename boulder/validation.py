@@ -8,10 +8,140 @@ Validation is schema-only and does not build or inspect any simulation network.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Set
 
-from pint import UnitRegistry
 from pydantic import BaseModel, Field, validator
+
+#: Detect strings that look like "number unit" — mirrors the regex in utils.py
+#: and is used only to decide whether to surface a helpful error message.
+_LOOKS_LIKE_UNIT_RE = re.compile(
+    r"^\s*[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\s+\S", re.ASCII
+)
+
+
+def _looks_like_unit_string(val: str) -> bool:
+    return bool(_LOOKS_LIKE_UNIT_RE.match(val))
+
+
+try:
+    from typing import Literal  # type: ignore[attr-defined]
+except ImportError:  # pragma: no cover - py<3.8
+    from typing_extensions import Literal  # type: ignore[assignment]
+
+
+class InletPort(BaseModel):
+    """Reactor-node inlet port shortcut.
+
+    Synthesised by :func:`boulder.config.expand_port_shortcuts` into a regular
+    ``MassFlowController`` entry in ``connections:``.  Omitting
+    ``mass_flow_rate`` asks the conservation resolver
+    (:func:`boulder.cantera_converter.resolve_unset_flow_rates`) to fill it.
+    """
+
+    source: str = Field(
+        ...,
+        alias="from",
+        description="Id of the upstream node feeding this reactor.",
+    )
+    mass_flow_rate: Optional[float] = Field(
+        default=None,
+        description=(
+            "[kg/s] Optional explicit flow rate; omit to let global mass "
+            "conservation determine it from the rest of the topology."
+        ),
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class OutletPort(BaseModel):
+    """Reactor-node outlet port shortcut.
+
+    By default expands to a ``PressureController`` with ``pressure_coeff=0``
+    so ``m_out = m_in`` at every timestep without a placeholder mass flow
+    rate.  Set ``device='MassFlowController'`` to get an MFC instead (useful
+    when the reactor has several inlets and the PressureController master is
+    ambiguous).
+    """
+
+    to: str = Field(
+        ...,
+        description="Id of the downstream node receiving this reactor's flow.",
+    )
+    device: Literal["PressureController", "MassFlowController"] = Field(
+        default="PressureController",
+        description="Cantera flow device kind to synthesise.",
+    )
+    pressure_coeff: float = Field(
+        default=0.0,
+        description=(
+            "[kg/s/Pa] PressureController pressure coefficient; 0 locks "
+            "m_out = m_primary at every step."
+        ),
+    )
+    master: Optional[str] = Field(
+        default=None,
+        description=(
+            "Id of the inlet MassFlowController that drives this "
+            "PressureController.  When omitted, the expander auto-picks "
+            "the unique inlet MFC; a multi-inlet reactor must set this "
+            "explicitly or switch to device='MassFlowController'."
+        ),
+    )
+    mass_flow_rate: Optional[float] = Field(
+        default=None,
+        description=(
+            "[kg/s] Only used when device='MassFlowController'; omit to let "
+            "global mass conservation resolve it."
+        ),
+    )
+
+    class Config:
+        extra = "forbid"
+
+
+#: Locked STONE ``metadata:`` vocabulary.  Mandatory keys identify the
+#: scenario and are consumed by reporting code (calc_note, report, ...).
+#: Optional keys cover documentation/provenance fields we standardise so
+#: report generators can rely on them.  Anything outside this vocabulary
+#: must live under ``metadata.extra:`` — this keeps the '# [unit] desc |
+#: remark' YAML comment convention intact at the value level.
+METADATA_MANDATORY_KEYS: frozenset = frozenset({"description"})
+
+METADATA_OPTIONAL_KEYS: frozenset = frozenset(
+    {
+        "scenario_id",
+        "title",
+        "name",
+        "scenario_name",
+        "architecture",
+        "author",
+        "date",
+        "project",
+        "version",
+        "assumptions",
+        "remarks",
+        # Documentation / control metadata commonly used in engineering notes
+        "pid_no",
+        "tag_name",
+        "doc_no",
+        "rev",
+        "checked_by",
+        "approved_by",
+        "client",
+        # Provenance
+        "original_yaml",
+        "part1_stone_yaml",
+        "source_file",
+        # Escape hatch for truly freeform user metadata
+        "extra",
+    }
+)
+
+METADATA_ALLOWED_KEYS: frozenset = METADATA_MANDATORY_KEYS | METADATA_OPTIONAL_KEYS
 
 # Unit suggestions for error messages
 UNIT_SUGGESTIONS = {
@@ -27,6 +157,53 @@ UNIT_SUGGESTIONS = {
     "joule": "energy units like 'J', 'kJ', 'cal', 'BTU'",
     "meter": "length units like 'm', 'cm', 'ft', 'in'",
 }
+
+
+class MetadataModel(BaseModel):
+    """STONE ``metadata:`` block with a locked vocabulary.
+
+    Mandatory keys (:data:`METADATA_MANDATORY_KEYS`) identify the scenario
+    and feed the report headers.  A set of well-known optional keys covers
+    authoring, provenance, and document-control fields.  Anything
+    user-specific must live under ``metadata.extra:`` so report generators
+    do not need to branch on ad-hoc top-level fields.
+
+    The ``# [unit] desc | remark`` YAML comment convention applies to
+    individual values and is preserved by ``ruamel.yaml``; this schema
+    only governs *which* keys are accepted.
+    """
+
+    description: str = Field(min_length=1)
+
+    scenario_id: Optional[str] = None
+    title: Optional[str] = None
+    name: Optional[str] = None
+    scenario_name: Optional[str] = None
+    architecture: Optional[str] = None
+    author: Optional[str] = None
+    # Date is kept untyped so YAML can emit either strings or date objects
+    date: Optional[Any] = None
+    project: Optional[str] = None
+    version: Optional[str] = None
+    assumptions: Optional[List[Any]] = None
+    remarks: Optional[Dict[str, Any]] = None
+
+    pid_no: Optional[str] = None
+    tag_name: Optional[str] = None
+    doc_no: Optional[str] = None
+    rev: Optional[str] = None
+    checked_by: Optional[str] = None
+    approved_by: Optional[str] = None
+    client: Optional[str] = None
+
+    original_yaml: Optional[str] = None
+    part1_stone_yaml: Optional[str] = None
+    source_file: Optional[str] = None
+
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        extra = "forbid"
 
 
 class PhasesModel(BaseModel):
@@ -50,6 +227,13 @@ class NodeModel(BaseModel):
     type: str = Field(min_length=1)
     properties: Dict[str, Any] = Field(default_factory=dict)
     metadata: Optional[Dict[str, Any]] = None
+    #: Staged-solving group tag (set automatically by normalize_config's
+    #: default-group synthesis when the YAML has no ``groups:`` section).
+    group: Optional[str] = None
+    #: Optional dotted path or import ref pointing to a custom
+    #: ``ct.ReactorNet`` subclass; takes precedence over ``NETWORK_CLASS``
+    #: class attributes during staged solving.
+    network_class: Optional[str] = None
 
     @validator("properties")
     def ensure_properties_is_object(cls, value: Dict[str, Any]) -> Dict[str, Any]:
@@ -70,6 +254,8 @@ class ConnectionModel(BaseModel):
     #: Optional mechanism-switch annotation for inter-stage connections.
     #: ``{"htol": float, "Xtol": float}``
     mechanism_switch: Optional[Dict[str, Any]] = None
+    #: Staged-solving group tag (same semantics as NodeModel.group).
+    group: Optional[str] = None
 
     @validator("properties")
     def ensure_properties_is_object(cls, value: Dict[str, Any]) -> Dict[str, Any]:
@@ -81,7 +267,7 @@ class ConnectionModel(BaseModel):
 class NormalizedConfigModel(BaseModel):
     """Top-level normalized configuration model."""
 
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[MetadataModel] = None
     phases: Optional[PhasesModel] = None
     settings: Optional[SettingsModel] = None
     nodes: List[NodeModel]
@@ -135,221 +321,127 @@ class NormalizedConfigModel(BaseModel):
                     f"Connection '{conn.id}' target '{conn.target}' does not reference an existing node"
                 )
 
-    def _coerce_units(self) -> None:
-        """Coerce unit-bearing strings to canonical units using pint.
-
-        Mirrors ctwrap behavior: values defined as strings with units are converted
-        to base magnitudes in consistent units. Unknown keys remain unchanged.
-
-        This uses dynamic unit detection based on property names and pint's capabilities.
-        """
-        unit_registry: UnitRegistry = UnitRegistry()
-
-        # Define preferred target units for common physical quantities
-        # This maps dimensionalities to preferred units, not property names to units
-        preferred_units = {
-            "[temperature]": "celsius",
-            "[mass] / [length] / [time] ** 2": "pascal",  # pressure
-            "[mass]": "kilogram",
-            "[length] ** 3": "meter**3",  # volume
-            "[mass] / [time]": "kilogram/second",  # mass flow rate
-            "[time]": "second",
-            "[mass] * [length] ** 2 / [time] ** 3": "watt",  # power
-            "[mass] * [length] ** 2 / [time] ** 2": "joule",  # energy
-            "[length]": "meter",
-        }
-
-        # Special cases for property names that need specific handling
-        special_property_mappings = {
-            "electric_power_kW": "kilowatt",  # Keep in kW for backward compatibility
-        }
-
-        def _get_target_unit_for_property(
-            property_name: str, val: str
-        ) -> Optional[str]:
-            """Determine the target unit for a property based on its value and name."""
-            # Check special mappings first
-            if property_name in special_property_mappings:
-                return special_property_mappings[property_name]
-
-            # Property name-based hints for common properties
-            property_hints = {
-                "temperature": "celsius",
-                "pressure": "pascal",
-                "mass": "kilogram",
-                "volume": "meter**3",
-                "time": "second",
-                "dt": "second",
-                "end_time": "second",
-                "max_time": "second",
-            }
-
-            # Check if property name suggests a unit type
-            if property_name in property_hints:
-                return property_hints[property_name]
-
-            # Special handling for temperature strings (they fail in pint due to offset units)
-            import re
-
-            if re.search(r"\b(degc|celsius|degf|fahrenheit|k|kelvin)\b", val.lower()):
-                return "celsius"  # Changed to match the preferred unit
-
-            try:
-                # Parse the value to determine its dimensionality
-                qty: Any = unit_registry.Quantity(val)
-                dimensionality_str = str(qty.dimensionality)
-
-                # Look up preferred unit for this dimensionality
-                return preferred_units.get(dimensionality_str)
-            except Exception:
-                return None
-
-        def _coerce_value(val: Any, property_name: str = "") -> Any:
-            if isinstance(val, str):
-                try:
-                    # First, determine what unit we should convert to
-                    target_unit = _get_target_unit_for_property(property_name, val)
-                    if not target_unit:
-                        # If we can't determine a target unit, return as-is
-                        return val
-
-                    # Special handling for temperature conversion (offset units)
-                    if target_unit in ["kelvin", "celsius"]:
-                        import re
-
-                        match = re.match(
-                            r"([+-]?\d*\.?\d+)\s*([a-zA-Z°]+(?:[ -]?[a-zA-Z]+)*)",
-                            val.strip(),
-                        )
-                        if match:
-                            value, temp_unit = match.groups()
-                            try:
-                                value = float(value)
-                            except ValueError:
-                                raise ValueError(
-                                    f"Could not convert '{value}' to a float for property '{property_name}'. "
-                                    "Please ensure the value is a valid number followed by a "
-                                    "temperature unit, e.g. '25 degC', '77 degF', or '298 K'."
-                                )
-                            temp_unit = temp_unit.lower()
-
-                            # Convert to target temperature unit
-                            if target_unit == "kelvin":
-                                # Convert to Kelvin
-                                if temp_unit in ["degc", "celsius", "c"]:
-                                    return value + 273.15
-                                elif temp_unit in ["degf", "fahrenheit", "f"]:
-                                    return (value - 32) * 5 / 9 + 273.15
-                                elif temp_unit in ["k", "kelvin"]:
-                                    return value
-                            elif target_unit == "celsius":
-                                # Convert to Celsius
-                                if temp_unit in ["degc", "celsius", "c"]:
-                                    return value
-                                elif temp_unit in ["degf", "fahrenheit", "f"]:
-                                    return (value - 32) * 5 / 9
-                                elif temp_unit in ["k", "kelvin"]:
-                                    return value - 273.15
-
-                    # Use pint for all other conversions
-                    qty: Any = unit_registry.Quantity(val)
-                    return qty.to(target_unit).magnitude
-
-                except Exception as e:
-                    # Provide helpful error message with suggested units
-                    # First try to get suggestions based on target unit
-                    if target_unit:
-                        suggestion = UNIT_SUGGESTIONS.get(
-                            target_unit, f"units compatible with {target_unit}"
-                        )
-                    else:
-                        # Try to get suggestions based on dimensionality
-                        try:
-                            qty = unit_registry.Quantity(val)
-                            dimensionality = str(qty.dimensionality)
-
-                            suggestions_by_dim = {
-                                "[temperature]": "temperature units like 'degC', 'degF', 'K'",
-                                "[mass] / [length] / [time] ** 2": (
-                                    "pressure units like 'atm', 'bar', 'Pa', 'psi'"
-                                ),
-                                "[mass]": "mass units like 'kg', 'g', 'lb'",
-                                "[length] ** 3": "volume units like 'm**3', 'L', 'mL', 'ft**3'",
-                                "[mass] / [time]": "flow rate units like 'kg/s', 'g/min', 'lb/hr'",
-                                "[time]": "time units like 's', 'ms', 'min', 'hr'",
-                                "[mass] * [length] ** 2 / [time] ** 3": (
-                                    "power units like 'kW', 'W', 'MW', 'hp'"
-                                ),
-                                "[mass] * [length] ** 2 / [time] ** 2": (
-                                    "energy units like 'J', 'kJ', 'cal', 'BTU'"
-                                ),
-                                "[length]": "length units like 'm', 'cm', 'ft', 'in'",
-                            }
-                            suggestion = suggestions_by_dim.get(
-                                dimensionality,
-                                f"units with dimensionality {dimensionality}",
-                            )
-                        except Exception:
-                            suggestion = "valid units"
-
-                    prop_info = (
-                        f" for property '{property_name}'" if property_name else ""
-                    )
-                    raise ValueError(
-                        f"Could not convert '{val}'{prop_info}. "
-                        f"Please use {suggestion}. "
-                        f"Original error: {str(e)}"
-                    )
-            return val
-
-        # Process all properties in nodes dynamically
-        for node in self.nodes:
-            for key, value in node.properties.items():
-                node.properties[key] = _coerce_value(value, key)
-
-        # Process all properties in connections dynamically
+        by_conn_id = {c.id: c for c in self.connections}
         for conn in self.connections:
-            for key, value in conn.properties.items():
-                conn.properties[key] = _coerce_value(value, key)
+            if conn.type == "PressureController":
+                master = (conn.properties or {}).get("master")
+                if not master or not str(master).strip():
+                    raise ValueError(
+                        f"Connection '{conn.id}' (PressureController) must set "
+                        f"properties.master to the id of a MassFlowController connection."
+                    )
+                if master not in seen_conns:
+                    raise ValueError(
+                        f"Connection '{conn.id}': PressureController master "
+                        f"'{master}' is not a connection id. Declare the master "
+                        f"MassFlowController first (or use an `inlet:` port)."
+                    )
+                if master == conn.id:
+                    raise ValueError(
+                        f"Connection '{conn.id}': PressureController cannot be its own master."
+                    )
+                mconn = by_conn_id.get(master)
+                if mconn is not None and mconn.type != "MassFlowController":
+                    raise ValueError(
+                        f"Connection '{conn.id}': PressureController master "
+                        f"'{master}' must reference a MassFlowController, not "
+                        f"'{mconn.type}'."
+                    )
 
-        # Process settings properties dynamically
+    def _coerce_units(self) -> None:
+        """Coerce unit-bearing strings in node/connection/settings properties.
+
+        Delegates to :func:`boulder.utils.coerce_unit_string` so the
+        conversion rules (Pint-based, temperature → Kelvin, pressure → Pa,
+        …) are defined in one place and reused by both :func:`normalize_config`
+        and the Pydantic validation layer.
+
+        When the config passes through :func:`normalize_config` first (the
+        normal simulation path), values are already floats and this method
+        is a no-op.  When callers construct a :class:`NormalizedConfigModel`
+        directly from a dict (unit tests, CLI ``validate``), the coercion
+        fires here instead.
+        """
+        from .utils import _PROPERTY_UNIT_HINTS, coerce_unit_string  # noqa: PLC0415
+
+        # Provide a helpful error on unknown/invalid unit strings by wrapping
+        # coerce_unit_string and re-raising with context.
+        def _coerce(val: Any, prop: str) -> Any:
+            result = coerce_unit_string(val, property_name=prop)
+            if result is val and isinstance(val, str) and _looks_like_unit_string(val):
+                # coerce_unit_string returned the original string unchanged —
+                # likely an invalid unit.  Surface an actionable error.
+                # Look up suggestion first by property name, then by its
+                # canonical target-unit name (e.g. "temperature" → "kelvin").
+                canonical = _PROPERTY_UNIT_HINTS.get(prop, prop)
+                unit_hint = UNIT_SUGGESTIONS.get(prop) or UNIT_SUGGESTIONS.get(
+                    canonical,
+                    "valid units (e.g. 'degC', 'bar', 'kg/s', 'ms')",
+                )
+                raise ValueError(
+                    f"Could not convert '{val}' for property '{prop}'. "
+                    f"Please use {unit_hint}."
+                )
+            return result
+
+        for node in self.nodes:
+            for key, value in list(node.properties.items()):
+                node.properties[key] = _coerce(value, key)
+
+        for conn in self.connections:
+            for key, value in list(conn.properties.items()):
+                conn.properties[key] = _coerce(value, key)
+
         if isinstance(self.settings, SettingsModel):
-            # For settings, we need to handle it differently since it's a Pydantic model
-            # with extra fields allowed. In Pydantic v1, extra fields are stored in __fields_set__
-            # and accessible via dict() method or direct attribute access.
-
-            # Get all the settings data as a dict
             settings_data = (
                 self.settings.dict()
                 if hasattr(self.settings, "dict")
                 else self.settings.__dict__
             )
-
-            # Process each field and mirror updates into __dict__ for compatibility
-            coerced_updates: Dict[str, Any] = {}
             for key, value in settings_data.items():
-                if isinstance(value, str):
-                    coerced = _coerce_value(value, key)
-                    try:
-                        setattr(self.settings, key, coerced)
-                        # Ensure __dict__ contains coerced values for downstream consumers
-                        coerced_updates[key] = coerced
-                    except Exception as e:
-                        import logging
-
-                        logging.warning(
-                            f"Failed to set attribute '{key}' on settings: {e}"
-                        )
-
-            # In pydantic v2, extras may live outside __dict__. Update __dict__ for consumers
-            # that expect direct dict access (e.g., tests using model.settings.__dict__).
-            if coerced_updates:
+                coerced = _coerce(value, key) if isinstance(value, str) else value
                 try:
-                    self.settings.__dict__.update(coerced_updates)
+                    setattr(self.settings, key, coerced)
+                    # Pydantic v2 stores extra fields in model_extra, not __dict__.
+                    # Mirror coerced values into __dict__ so that downstream code
+                    # using model.settings.__dict__["dt"] keeps working.
+                    self.settings.__dict__[key] = coerced
                 except Exception:
-                    # Best-effort: if __dict__ is not writable, ignore silently
-                    # (attributes have already been set above).
                     pass
+
+
+def warn_flow_device_conventions(config: Dict[str, Any]) -> List[str]:
+    """Return non-fatal notes about ``MassFlowController`` values that are often legacies.
+
+    A declared ``mass_flow_rate: 0.0`` is valid for a intentionally closed
+    side feed (e.g. ``feed_secondary`` in SPRING) but is also the obsolete
+    placeholder for a tube-furnace outlet; :func:`warn_flow_device_conventions`
+    nudges authors toward :func:`boulder.config.expand_port_shortcuts` or
+    omitting the rate.  Call from ``boulder validate`` only — not from every
+    :func:`boulder.config.validate_config` invocation, to keep library calls quiet.
+    """
+    messages: List[str] = []
+    for raw in config.get("connections") or []:
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("type") != "MassFlowController":
+            continue
+        props = raw.get("properties") or {}
+        mfr = props.get("mass_flow_rate")
+        if mfr is None:
+            continue
+        try:
+            if float(mfr) != 0.0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        cid = raw.get("id", "?")
+        messages.append(
+            f"Connection '{cid}' has mass_flow_rate: 0.0. If this is a main "
+            f"outlet, use a reactor `outlet:` port (PressureController) or omit "
+            f"mass_flow_rate; 0.0 is OK for a deliberately closed side feed."
+        )
+    return messages
 
 
 def validate_normalized_config(config: Dict[str, Any]) -> NormalizedConfigModel:

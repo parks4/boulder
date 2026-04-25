@@ -118,7 +118,7 @@ class DefaultSummaryBuilder(SummaryBuilder):
                     "reactor": reactor_name,
                     "quantity": "pressure",
                     "label": f"{reactor_name} Pressure",
-                    "value": reactor.thermo.P,
+                    "value": reactor.phase.P,
                     "unit": "Pa",
                 }
             )
@@ -145,11 +145,14 @@ class SummaryBuilderRegistry:
     builders: Dict[str, SummaryBuilder] = field(default_factory=dict)
 
     def register(self, builder: SummaryBuilder) -> None:
-        """Register a new summary builder."""
+        """Register a new summary builder.
+
+        Re-registering the same builder ID is a no-op so that plugins
+        discovered via both entry points *and* ``BOULDER_PLUGINS`` do not
+        raise on the second call.
+        """
         if builder.builder_id in self.builders:
-            raise ValueError(
-                f"Builder with ID '{builder.builder_id}' already registered"
-            )
+            return
 
         self.builders[builder.builder_id] = builder
 

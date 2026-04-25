@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useSimulationStore } from "@/stores/simulationStore";
+import { useConfigStore } from "@/stores/configStore";
 import type { SimulationProgress, SimulationResults } from "@/types/simulation";
+// useConfigStore is accessed via .getState() inside callbacks to avoid stale closures.
 
 /**
  * Hook that connects to the simulation SSE stream and updates the store.
@@ -31,6 +33,29 @@ export function useSimulationSSE() {
       try {
         const data = JSON.parse(e.data) as SimulationResults;
         setResults(data);
+
+        // Sync programmatically-created connections back into the visual graph.
+        // Post-build hooks may add edges (e.g. tube_furnace → outlet) that were
+        // not declared in the YAML; merge any that are not yet in the config.
+        // Read fresh state via getState() to avoid a stale closure.
+        if (data.updated_connections) {
+          const { config: currentConfig, addConnection } =
+            useConfigStore.getState();
+          const existingIds = new Set(
+            currentConfig.connections.map((c) => c.id),
+          );
+          for (const conn of data.updated_connections) {
+            if (!existingIds.has(conn.id)) {
+              addConnection({
+                id: conn.id,
+                source: conn.source,
+                target: conn.target,
+                type: conn.type,
+                properties: conn.properties ?? {},
+              });
+            }
+          }
+        }
       } catch {
         /* ignore parse errors */
       }

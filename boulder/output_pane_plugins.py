@@ -144,10 +144,15 @@ class OutputPaneRegistry:
     plugins: List[OutputPanePlugin] = field(default_factory=list)
 
     def register(self, plugin: OutputPanePlugin) -> None:
-        """Register a new output pane plugin."""
+        """Register a new output pane plugin.
+
+        Re-registering the same plugin ID is a no-op so that plugins
+        discovered via both entry points *and* ``BOULDER_PLUGINS`` do not
+        raise on the second call.
+        """
         existing_ids = {p.plugin_id for p in self.plugins}
         if plugin.plugin_id in existing_ids:
-            raise ValueError(f"Plugin with ID '{plugin.plugin_id}' already registered")
+            return
 
         self.plugins.append(plugin)
 

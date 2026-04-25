@@ -36,4 +36,12 @@ export interface SimulationResults extends SimulationProgress {
   sankey_links?: Record<string, unknown> | null;
   sankey_nodes?: string[] | null;
   elapsed_time?: number | null;
+  /** Connections list after post-build hooks, for visual graph sync. */
+  updated_connections?: Array<{
+    id: string;
+    source: string;
+    target: string;
+    type: string;
+    properties: Record<string, unknown>;
+  }> | null;
 }
