@@ -29,7 +29,6 @@ import pytest
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import normalize_config, validate_config
 
-
 # ---------------------------------------------------------------------------
 # (a) two-stage linear chain
 # ---------------------------------------------------------------------------

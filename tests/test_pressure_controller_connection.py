@@ -223,6 +223,4 @@ def test_pressure_controller_topological_sort() -> None:
 
     converter = DualCanteraConverter()
     converter.build_network(validate_config(normalized))
-    assert isinstance(
-        converter.connections["r1_to_outlet"], ct.PressureController
-    )
+    assert isinstance(converter.connections["r1_to_outlet"], ct.PressureController)

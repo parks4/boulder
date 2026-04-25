@@ -3,7 +3,18 @@ import math
 import os
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    cast,
+)
 
 import cantera as ct  # type: ignore
 import numpy as np
@@ -409,7 +420,7 @@ class DualCanteraConverter:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         # Cache of mechanisms -> Solution to support per-node overrides
         self._gases_by_mech: Dict[str, ct.Solution] = {resolved_mechanism: self.gas}
-        self.reactors: Dict[str, ct.Reactor] = {}
+        self.reactors: Dict[str, ct.ReactorBase] = {}
         self.reactor_meta: Dict[str, Dict[str, Any]] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.walls: Dict[str, Any] = {}
@@ -658,7 +669,7 @@ class DualCanteraConverter:
         inlet_states: Dict[str, "ct.Solution"],
         stage_id: str = "",
         stage: Optional[Any] = None,
-    ) -> Tuple["ct.ReactorNet", Dict[str, "ct.Reactor"]]:
+    ) -> Tuple["ct.ReactorNet", Dict[str, "ct.ReactorBase"]]:
         """Build (and solve) a :class:`~cantera.ReactorNet` for one stage.
 
         Reactors whose IDs appear in *inlet_states* are initialised from the
@@ -686,8 +697,8 @@ class DualCanteraConverter:
         -------
         (network, stage_reactors)
             ``network`` is the solved :class:`~cantera.ReactorNet`.
-            ``stage_reactors`` is a ``{node_id: ct.Reactor}`` dict for this
-            stage (a subset of ``self.reactors``).
+            ``stage_reactors`` is a ``{node_id: ct.ReactorBase}`` dict for
+            this stage (a subset of ``self.reactors``).
         """
         stage_reactor_ids: List[str] = []
 
@@ -800,7 +811,8 @@ class DualCanteraConverter:
             self, stage_id, stage_nodes, non_res_ids
         )
 
-        network = ReactorNetClass([self.reactors[rid] for rid in non_res_ids], **net_kw)
+        rseq = [self.reactors[rid] for rid in non_res_ids]
+        network = ReactorNetClass(cast(Sequence[ct.Reactor], rseq), **net_kw)
         if ReactorNetClass is ct.ReactorNet:
             network.rtol = 1e-6
             network.atol = 1e-8
@@ -882,7 +894,7 @@ class DualCanteraConverter:
         self._apply_flow_conservation()
 
         non_res = [r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)]
-        viz_net = ct.ReactorNet(non_res)
+        viz_net = ct.ReactorNet(cast(Sequence[ct.Reactor], non_res))
         viz_net.advance(0.0)
         self.network = viz_net
         self.last_network = viz_net

@@ -19,11 +19,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Type
 
+_PydBaseModel: Optional[Type[Any]]
+_PydValidationError: type[BaseException]
 try:  # pydantic is an existing boulder dependency (>=2.0)
-    from pydantic import BaseModel, ValidationError
+    from pydantic import BaseModel as _ImportedBaseModel
+    from pydantic import ValidationError as _ImportedValidationError
+
+    _PydBaseModel = _ImportedBaseModel
+    _PydValidationError = _ImportedValidationError
 except ImportError:  # pragma: no cover - pydantic is required
-    BaseModel = None  # type: ignore[assignment]
-    ValidationError = Exception  # type: ignore[assignment]
+    _PydBaseModel = None
+    _PydValidationError = Exception
+
+BaseModel: Optional[Type[Any]] = _PydBaseModel
+ValidationError: type[BaseException] = _PydValidationError
 
 
 @dataclass
@@ -199,7 +208,11 @@ def validate_against_plugin_schemas(config: Dict[str, Any]) -> List[str]:
             try:
                 entry.schema(**(props or {}))
             except ValidationError as exc:
-                for err in exc.errors():
+                # Pydantic's ValidationError exposes ``errors()``; the ImportError
+                # fallback is plain ``Exception`` and we never call this when
+                # ``BaseModel is None`` above.
+                pexc: Any = exc
+                for err in pexc.errors():
                     loc = ".".join(str(x) for x in err.get("loc", ()))
                     msg = err.get("msg", "invalid")
                     errors.append(f"node {nid!r} [{kind}].{loc}: {msg}")

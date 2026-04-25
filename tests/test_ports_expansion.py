@@ -191,7 +191,5 @@ def test_inlet_without_mfr_stays_unresolved() -> None:
     """
     cfg = _minimal_ported_config(with_mfr=False)
     normalized = normalize_config(cfg)
-    inlet_conn = next(
-        c for c in normalized["connections"] if c["id"] == "feed_to_r1"
-    )
+    inlet_conn = next(c for c in normalized["connections"] if c["id"] == "feed_to_r1")
     assert "mass_flow_rate" not in (inlet_conn.get("properties") or {})

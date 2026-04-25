@@ -215,7 +215,9 @@ def test_dynamic_unit_system_flexibility() -> None:
 
     # Check that all units were converted to their canonical forms
     node = model.nodes[0]
-    assert abs(node.properties["temperature"] - 300.0) < 1e-6  # 300 K → 300 K (no offset)
+    assert (
+        abs(node.properties["temperature"] - 300.0) < 1e-6
+    )  # 300 K → 300 K (no offset)
     assert abs(node.properties["pressure"] - 200000.0) < 1e-6  # 2 bar = 200000 Pa
     assert abs(node.properties["mass"] - 0.005) < 1e-6  # 5 g = 0.005 kg
     assert abs(node.properties["volume"] - 0.002) < 1e-6  # 2 L = 0.002 m³

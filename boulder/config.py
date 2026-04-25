@@ -357,7 +357,7 @@ def expand_port_shortcuts(config: Dict[str, Any]) -> None:
                 f"Outlet port on node '{nid}' duplicates an explicit "
                 f"connection from '{nid}' to '{to_id}'. Remove one of them."
             )
-        conn_props: Dict[str, Any] = {}
+        outlet_conn_props: Dict[str, Any] = {}
         if device == "PressureController":
             master = outlet.get("master")
             if master is None:
@@ -380,17 +380,19 @@ def expand_port_shortcuts(config: Dict[str, Any]) -> None:
                         "MassFlowController' and omit 'mass_flow_rate' so "
                         "global conservation resolves it."
                     )
-            conn_props["master"] = master
-            conn_props["pressure_coeff"] = float(outlet.get("pressure_coeff", 0.0))
+            outlet_conn_props["master"] = master
+            outlet_conn_props["pressure_coeff"] = float(
+                outlet.get("pressure_coeff", 0.0)
+            )
         else:
             if "mass_flow_rate" in outlet and outlet["mass_flow_rate"] is not None:
-                conn_props["mass_flow_rate"] = outlet["mass_flow_rate"]
+                outlet_conn_props["mass_flow_rate"] = outlet["mass_flow_rate"]
         entry = {
             "id": cid,
             "type": device,
             "source": nid,
             "target": to_id,
-            "properties": conn_props,
+            "properties": outlet_conn_props,
         }
         group = _node_group(node)
         if group:

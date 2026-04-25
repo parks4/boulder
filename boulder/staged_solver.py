@@ -428,7 +428,7 @@ def _flow_order_within_stage(stage: Stage) -> List[str]:
 
 def _collect_stage_states(
     stage: Stage,
-    stage_reactors: Dict[str, ct.Reactor],
+    stage_reactors: Dict[str, ct.ReactorBase],
     flow_order: List[str],
     converter: "DualCanteraConverter",
     network: Optional[ct.ReactorNet] = None,
@@ -523,7 +523,7 @@ def _collect_stage_states(
     return states
 
 
-def _estimate_dt_from_volume(reactor: ct.Reactor, stage: Stage) -> float:
+def _estimate_dt_from_volume(reactor: ct.ReactorBase, stage: Stage) -> float:
     """Estimate residence time [s] from volume, density, and first outgoing MFC."""
     try:
         volume = reactor.volume
@@ -542,7 +542,7 @@ def _estimate_dt_from_volume(reactor: ct.Reactor, stage: Stage) -> float:
 
 
 def _extract_gas_state(
-    reactor: ct.Reactor,
+    reactor: ct.ReactorBase,
     mechanism: str,
     converter: "DualCanteraConverter",
 ) -> ct.Solution:

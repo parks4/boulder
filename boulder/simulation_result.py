@@ -72,7 +72,7 @@ class SimulationResult:
     node_outlet_mass_flows_kg_s: Dict[str, float] = field(default_factory=dict)
 
     def stage_net(self, stage_id: str) -> Optional[ct.ReactorNet]:
-        """Convenience accessor mirroring :attr:`stage_nets`.__getitem__."""
+        """Return the reactor net for ``stage_id``, like :attr:`stage_nets` lookup."""
         return self.stage_nets.get(stage_id)
 
 
@@ -107,8 +107,8 @@ def make_simulation_result(
         per_reactor_states[rid] = states
 
     scalars: Dict[str, Any] = {}
-    for stage_id, net in stage_nets.items():
-        net_scalars = getattr(net, "scalars", None)
+    for stage_id, stage_rnet in stage_nets.items():
+        net_scalars = getattr(stage_rnet, "scalars", None)
         if not isinstance(net_scalars, dict):
             continue
         for key, value in net_scalars.items():
@@ -146,9 +146,15 @@ def make_simulation_result(
             node_inlet_mass_flows_kg_s.get(tgt, 0.0) + mdot
         )
 
+    net = converter.network
+    if net is None:
+        raise ValueError(
+            "Cannot build SimulationResult: converter.network is None. Call "
+            "build_network (and the staged solve) before make_simulation_result."
+        )
     return SimulationResult(
         config=config,
-        network=converter.network,
+        network=net,
         stage_nets=stage_nets,
         trajectory=trajectory,
         per_reactor_states=per_reactor_states,

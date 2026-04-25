@@ -23,6 +23,7 @@ _LOOKS_LIKE_UNIT_RE = re.compile(
 def _looks_like_unit_string(val: str) -> bool:
     return bool(_LOOKS_LIKE_UNIT_RE.match(val))
 
+
 try:
     from typing import Literal  # type: ignore[attr-defined]
 except ImportError:  # pragma: no cover - py<3.8
