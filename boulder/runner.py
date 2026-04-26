@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Type
 
 if TYPE_CHECKING:
     import cantera as ct
+
     from boulder.cantera_converter import BoulderPlugins, DualCanteraConverter
     from boulder.lagrangian import LagrangianTrajectory
     from boulder.simulation_result import SimulationResult
@@ -73,18 +74,21 @@ class BoulderRunner:
     def load(path: str) -> Dict[str, Any]:
         """Load raw config dict from a YAML file."""
         from .config import load_config_file
+
         return load_config_file(path)
 
     @classmethod
     def normalize(cls, cfg: Dict[str, Any]) -> Dict[str, Any]:
         """Apply Boulder's structural normalisation to a raw config."""
         from .config import normalize_config
+
         return normalize_config(cfg)
 
     @classmethod
     def validate(cls, cfg: Dict[str, Any]) -> Dict[str, Any]:
         """Validate a normalised config, raising on schema errors."""
         from .config import validate_config
+
         return validate_config(cfg)
 
     def _default_mechanism_name(self) -> str:
@@ -97,18 +101,21 @@ class BoulderRunner:
         gas = phases.get("gas") if isinstance(phases, dict) else {}
         return (gas or {}).get("mechanism") or "gri30.yaml"
 
-    def _ensure_converter(self) -> None:
+    def _ensure_converter(self) -> "DualCanteraConverter":
         """Instantiate ``self.converter`` if not already done."""
         if self.converter is not None:
-            return
+            return self.converter
         from .cantera_converter import DualCanteraConverter
+
         converter_cls = self.__class__.converter_class or DualCanteraConverter
-        self.converter = converter_cls(
+        c = converter_cls(
             mechanism=self._default_mechanism_name(),
             plugins=self.plugins,
         )
         if self.config_path is not None:
-            self.converter._download_config_path = self.config_path
+            c._download_config_path = self.config_path
+        self.converter = c
+        return c
 
     # ------------------------------------------------------------------
     # Staged-solve public API (mirrors the live simulation call chain)
@@ -121,11 +128,13 @@ class BoulderRunner:
         node lists are available immediately after this call.
         """
         from .staged_solver import build_stage_graph as _bsg
+
         return _bsg(self.config)
 
     def new_trajectory(self) -> "LagrangianTrajectory":
         """Return a fresh, empty :class:`~boulder.lagrangian.LagrangianTrajectory`."""
         from .lagrangian import LagrangianTrajectory
+
         return LagrangianTrajectory()
 
     def solve_stage(
@@ -166,13 +175,14 @@ class BoulderRunner:
             _flow_order_within_stage,
         )
 
-        self._ensure_converter()
+        converter = self._ensure_converter()
 
         stage_nodes = [
-            n for n in (self.config.get("nodes") or [])
+            n
+            for n in (self.config.get("nodes") or [])
             if n["id"] in set(stage.node_ids)
         ]
-        network, stage_reactors = self.converter.build_sub_network(
+        network, stage_reactors = converter.build_sub_network(
             stage_nodes=stage_nodes,
             stage_connections=stage.intra_connections,
             stage_mechanism=stage.mechanism,
@@ -184,7 +194,7 @@ class BoulderRunner:
 
         flow_order = _flow_order_within_stage(stage)
         states = _collect_stage_states(
-            stage, stage_reactors, flow_order, self.converter, network=network
+            stage, stage_reactors, flow_order, converter, network=network
         )
         mapping_losses = None
 
@@ -193,12 +203,11 @@ class BoulderRunner:
             if source_reactor is None:
                 logger.warning(
                     "Inter-stage connection '%s': source reactor '%s' not found.",
-                    ic.id, ic.source_node,
+                    ic.id,
+                    ic.source_node,
                 )
                 continue
-            outlet_gas = _extract_gas_state(
-                source_reactor, stage.mechanism, self.converter
-            )
+            outlet_gas = _extract_gas_state(source_reactor, stage.mechanism, converter)
             if ic.mechanism_switch is not None:
                 target_stage = next(
                     (s for s in plan.ordered_stages if s.id == ic.target_stage),
@@ -213,7 +222,7 @@ class BoulderRunner:
                     outlet_gas,
                     target_stage.mechanism,
                     ic.mechanism_switch,
-                    self.converter,
+                    converter,
                 )
             inlet_states[ic.target_node] = outlet_gas
 
@@ -247,12 +256,11 @@ class BoulderRunner:
         .. minigallery:: boulder.runner.BoulderRunner.build_viz_network
            :add-heading: Examples using build_viz_network
         """
-        self._ensure_converter()
-        viz_net = self.converter.build_viz_network(
+        converter = self._ensure_converter()
+        viz_net = converter.build_viz_network(
             all_connections=self.config.get("connections") or [],
             built_conn_ids=(
-                set(self.converter.connections.keys())
-                | set(self.converter.walls.keys())
+                set(converter.connections.keys()) | set(converter.walls.keys())
             ),
         )
         trajectory.viz_network = viz_net
@@ -275,7 +283,7 @@ class BoulderRunner:
         - ``self.network`` is the visualisation :class:`~cantera.ReactorNet`.
         - ``self.code`` is the generated standalone Python script string.
         """
-        self._ensure_converter()
+        converter = self._ensure_converter()
 
         plan = self.build_stage_graph()
         trajectory = self.new_trajectory()
@@ -288,16 +296,16 @@ class BoulderRunner:
 
         # Mark the converter as staged-solved so run_streaming_simulation
         # knows to emit the steady-state report instead of a time loop.
-        self.converter._staged_trajectory = trajectory
+        converter._staged_trajectory = trajectory
 
         # Generate the downloadable script now that stage names are known.
         config_path = self.config_path or "config.yaml"
         script_lines = [
             "# Load configuration from YAML and build Cantera network",
             "import cantera as ct",
-            *self.converter.script_load_lines(config_path, plan),
+            *converter.script_load_lines(config_path, plan),
         ]
-        self.converter.code_lines = script_lines
+        converter.code_lines = script_lines
         self.code = "\n".join(script_lines)
         return self
 
@@ -309,7 +317,9 @@ class BoulderRunner:
         if self.network is None:
             self.build()
         from .simulation_result import make_simulation_result
-        self.result = make_simulation_result(self.converter, self.config)
+
+        converter = self._ensure_converter()
+        self.result = make_simulation_result(converter, self.config)
         return self
 
     def run_headless(
@@ -344,12 +354,13 @@ class BoulderRunner:
             # contains the full reactor-state reporting section.  When the YAML
             # has no end_time we use a dummy 0.0 so only the steady-state report
             # is emitted (no time-stepping), which mirrors the old headless path.
-            self.converter.run_streaming_simulation(
+            converter = self._ensure_converter()
+            converter.run_streaming_simulation(
                 simulation_time=float(end_time) if end_time is not None else 0.0,
                 time_step=(dt or 1.0),
                 config=self.config,
             )
-            self.code = "\n".join(self.converter.code_lines)
+            self.code = "\n".join(converter.code_lines)
         if download_path is not None:
             with open(download_path, "w", encoding="utf-8") as fh:
                 fh.write(self.code or "")

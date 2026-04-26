@@ -12,8 +12,6 @@ Covers:
 from __future__ import annotations
 
 import textwrap
-from typing import Any, Dict, Optional
-
 
 # ---------------------------------------------------------------------------
 # Minimal YAML fixture (no Bloc plugins, pure Boulder)
@@ -69,6 +67,7 @@ MINIMAL_YAML_CONTENT = textwrap.dedent("""\
 # Fixture helper
 # ---------------------------------------------------------------------------
 
+
 def _write_minimal_yaml(tmp_path) -> str:
     p = tmp_path / "minimal.yaml"
     p.write_text(MINIMAL_YAML_CONTENT, encoding="utf-8")
@@ -78,6 +77,7 @@ def _write_minimal_yaml(tmp_path) -> str:
 # ---------------------------------------------------------------------------
 # Test 1: from_yaml round-trip
 # ---------------------------------------------------------------------------
+
 
 def test_boulder_runner_from_yaml_round_trip(tmp_path):
     """BoulderRunner.from_yaml loads, normalises, and validates a minimal YAML.
@@ -101,6 +101,7 @@ def test_boulder_runner_from_yaml_round_trip(tmp_path):
 # Test 2: build() returns self with network and code
 # ---------------------------------------------------------------------------
 
+
 def test_boulder_runner_build_returns_self(tmp_path):
     """BoulderRunner.build() returns self; runner.network and runner.code are set.
 
@@ -108,6 +109,7 @@ def test_boulder_runner_build_returns_self(tmp_path):
     after build().
     """
     import cantera as ct  # type: ignore
+
     from boulder.runner import BoulderRunner
 
     path = _write_minimal_yaml(tmp_path)
@@ -122,6 +124,7 @@ def test_boulder_runner_build_returns_self(tmp_path):
 # ---------------------------------------------------------------------------
 # Test 3: solve() returns self with non-None result
 # ---------------------------------------------------------------------------
+
 
 def test_boulder_runner_solve_returns_self(tmp_path):
     """BoulderRunner.solve() returns self; runner.result is a SimulationResult.
@@ -141,6 +144,7 @@ def test_boulder_runner_solve_returns_self(tmp_path):
 # ---------------------------------------------------------------------------
 # Test 4: CLI main() accepts runner_class kwarg
 # ---------------------------------------------------------------------------
+
 
 def test_boulder_cli_main_accepts_runner_class_kwarg(tmp_path, monkeypatch):
     """boulder.cli.main(argv, runner_class=...) instantiates the given runner.
@@ -163,8 +167,9 @@ def test_boulder_cli_main_accepts_runner_class_kwarg(tmp_path, monkeypatch):
     download = str(tmp_path / "out.py")
 
     # Call CLI with headless + download via the runner_class kwarg
-    from boulder.cli import main as boulder_main
     import sys
+
+    from boulder.cli import main as boulder_main
 
     # Monkeypatch sys.exit to prevent process exit
     monkeypatch.setattr(sys, "exit", lambda code=0: None)
@@ -177,12 +182,15 @@ def test_boulder_cli_main_accepts_runner_class_kwarg(tmp_path, monkeypatch):
     except SystemExit:
         pass
 
-    assert DummyRunner in instantiated or True  # Dummy may not be called if headless fails
+    assert (
+        DummyRunner in instantiated or True
+    )  # Dummy may not be called if headless fails
 
 
 # ---------------------------------------------------------------------------
 # Test 5: resolve_mechanism default returns name unchanged
 # ---------------------------------------------------------------------------
+
 
 def test_boulder_runner_resolve_mechanism_identity():
     """DualCanteraConverter.resolve_mechanism returns name unchanged by default.

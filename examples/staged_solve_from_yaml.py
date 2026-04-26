@@ -33,7 +33,7 @@ Requires: cantera, boulder
 .. tags:: Python, reactor network, staged solve, STONE YAML, PSR, PFR
 """
 
-import cantera as ct
+from typing import Any
 
 from boulder.runner import BoulderRunner
 
@@ -41,7 +41,7 @@ config_path = "configs/staged_psr_pfr.yaml"
 runner = BoulderRunner.from_yaml(config_path)
 plan = runner.build_stage_graph()
 trajectory = runner.new_trajectory()
-inlet_states = {}
+inlet_states: dict[str, Any] = {}
 
 # Stage 1/2: psr_stage  [nodes: psr]
 runner.solve_stage(plan, plan.ordered_stages[0], inlet_states, trajectory)
@@ -52,6 +52,7 @@ runner.solve_stage(plan, plan.ordered_stages[1], inlet_states, trajectory)
 # Assemble visualization network from all converged states
 runner.build_viz_network(plan, trajectory)
 network = runner.network
+assert network is not None
 
 # %%
 # Report converged reactor states

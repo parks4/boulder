@@ -310,7 +310,7 @@ def _run_plugins_subcommand(argv: list[str]) -> int:
     print(f"  reactor_builders       : {sorted(plugins.reactor_builders)}")
     print(f"  connection_builders    : {sorted(plugins.connection_builders)}")
     print(f"  post_build_hooks       : {len(plugins.post_build_hooks)}")
-    print(f"  mechanism resolution   : via converter.resolve_mechanism()")
+    print("  mechanism resolution   : via converter.resolve_mechanism()")
     print(f"  mechanism_switch_fn    : {plugins.mechanism_switch_fn is not None}")
     print(f"  sankey_generator       : {plugins.sankey_generator is not None}")
     print(f"  output_pane_plugins    : {len(plugins.output_pane_plugins)}")
@@ -404,6 +404,7 @@ def _run_describe_subcommand(argv: list[str]) -> int:
 def _resolve_runner_class(dotted: str | None):
     """Resolve a dotted ``pkg.mod:Class`` string to a class object."""
     from .runner import BoulderRunner
+
     if dotted is None:
         return BoulderRunner
     if ":" in dotted:
@@ -411,6 +412,7 @@ def _resolve_runner_class(dotted: str | None):
     else:
         mod_name, _, cls_name = dotted.rpartition(".")
     import importlib
+
     mod = importlib.import_module(mod_name)
     return getattr(mod, cls_name)
 
@@ -451,6 +453,7 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
         runner_class = _resolve_runner_class(args.runner)
     if runner_class is None:
         from .runner import BoulderRunner
+
         runner_class = BoulderRunner
 
     # Handle --dev mode: start both backend and frontend dev server
@@ -668,6 +671,7 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     # so the lifespan handler picks it up via boulder.api.main._converter_class.
     # We import the module directly (same process – uvicorn reuses cached module).
     from boulder.api import main as _api_main
+
     _api_main._converter_class = getattr(runner_class, "converter_class", None)
 
     log_level = "info" if args.verbose else "warning"

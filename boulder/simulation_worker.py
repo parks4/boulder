@@ -168,6 +168,7 @@ class SimulationWorker:
             # show build-phase progress before time integration begins.
             # Count stages up front so the UI can show "Stage N / M" immediately.
             from .staged_solver import build_stage_graph as _build_stage_graph
+
             _plan = _build_stage_graph(config)
             _n_stages = len(_plan.ordered_stages)
 
@@ -181,18 +182,20 @@ class SimulationWorker:
                 self.progress.stages_done = 0
                 self.progress.n_stages = _n_stages
 
-            logger.info("Building Cantera network in background (%d stages)...", _n_stages)
+            logger.info(
+                "Building Cantera network in background (%d stages)...", _n_stages
+            )
 
             # Callback fired by solve_staged after each stage completes.
-            def _build_stage_callback(
-                stage_id: str, n_done: int, n_total: int
-            ) -> None:
+            def _build_stage_callback(stage_id: str, n_done: int, n_total: int) -> None:
                 with self._lock:
                     self.progress.stages_done = n_done
                     self.progress.n_stages = n_total
 
             # Build the network first
-            network = converter.build_network(config, progress_callback=_build_stage_callback)
+            network = converter.build_network(
+                config, progress_callback=_build_stage_callback
+            )
             logger.info("Network built successfully, starting streaming simulation...")
 
             # Mark build fully complete.

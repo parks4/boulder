@@ -39,7 +39,7 @@ Requires: cantera, boulder, graphviz (optional, for ``network.draw``)
 .. tags:: Python, reactor network, staged solve, STONE YAML, PSR, PFR, visualization
 """
 
-import cantera as ct
+from typing import Any
 
 from boulder.runner import BoulderRunner
 
@@ -55,14 +55,16 @@ plan = runner.build_stage_graph()
 
 print(f"Staged execution plan: {len(plan.ordered_stages)} stage(s)")
 for i, stage in enumerate(plan.ordered_stages):
-    print(f"  Stage {i + 1}: '{stage.id}'  nodes={stage.node_ids}"
-          f"  mechanism={stage.mechanism}")
+    print(
+        f"  Stage {i + 1}: '{stage.id}'  nodes={stage.node_ids}"
+        f"  mechanism={stage.mechanism}"
+    )
 
 # %%
 # Initialise trajectory and inter-stage state carrier
 # ----------------------------------------------------
 trajectory = runner.new_trajectory()
-inlet_states = {}
+inlet_states: dict[str, Any] = {}
 
 # %%
 # Stage 1/2: psr_stage — perfectly-stirred reactor
@@ -75,6 +77,7 @@ inlet_states = {}
 stage_1 = plan.ordered_stages[0]
 runner.solve_stage(plan, stage_1, inlet_states, trajectory)
 print(f"\n[{stage_1.id}] solved")
+assert runner.converter is not None
 for nid in stage_1.node_ids:
     r = runner.converter.reactors[nid]
     print(f"  {nid}: T = {r.phase.T:.1f} K  P = {r.phase.P / 1e5:.3f} bar")
@@ -87,6 +90,7 @@ for nid in stage_1.node_ids:
 # all reactor objects built so far.  After stage 1 it contains only the PSR.
 runner.build_viz_network(plan, trajectory)
 net_after_stage1 = runner.network
+assert net_after_stage1 is not None
 print(f"\nViz network after stage 1: {[r.name for r in net_after_stage1.reactors]}")
 
 try:
@@ -105,6 +109,7 @@ except ImportError:
 stage_2 = plan.ordered_stages[1]
 runner.solve_stage(plan, stage_2, inlet_states, trajectory)
 print(f"\n[{stage_2.id}] solved")
+assert runner.converter is not None
 for nid in stage_2.node_ids:
     r = runner.converter.reactors[nid]
     print(f"  {nid}: T = {r.phase.T:.1f} K  P = {r.phase.P / 1e5:.3f} bar")
@@ -117,6 +122,7 @@ for nid in stage_2.node_ids:
 # connections (MassFlowControllers etc.) in the full ``ct.ReactorNet``.
 runner.build_viz_network(plan, trajectory)
 network = runner.network
+assert network is not None
 print(f"\nFull viz network: {[r.name for r in network.reactors]}")
 
 try:

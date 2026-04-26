@@ -474,7 +474,9 @@ class DualCanteraConverter:
         """
         runner_import = "from boulder.runner import BoulderRunner"
         runner_class = "BoulderRunner"
-        return self._script_lines_for_runner(runner_import, runner_class, config_path, plan)
+        return self._script_lines_for_runner(
+            runner_import, runner_class, config_path, plan
+        )
 
     @staticmethod
     def _script_lines_for_runner(
@@ -1005,7 +1007,9 @@ class DualCanteraConverter:
         from .staged_solver import build_stage_graph, solve_staged
 
         plan = build_stage_graph(config)
-        trajectory = solve_staged(self, plan, config, progress_callback=progress_callback)
+        trajectory = solve_staged(
+            self, plan, config, progress_callback=progress_callback
+        )
         self._staged_trajectory = trajectory
 
         # Generate a downloadable script mirroring the staged load+build flow.

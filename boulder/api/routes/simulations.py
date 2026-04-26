@@ -76,7 +76,9 @@ async def start_simulation(
         # Build a converter with the resolved mechanism.
         # Use the converter class registered at startup (e.g. BlocConverter)
         # so subclass overrides (like resolve_mechanism) are respected.
-        converter_cls = getattr(request.app.state, "converter_class", DualCanteraConverter)
+        converter_cls = getattr(
+            request.app.state, "converter_class", DualCanteraConverter
+        )
         converter = converter_cls(mechanism=mechanism)
         # Propagate the original YAML path so the generated downloadable script
         # references the correct file instead of the "config.yaml" placeholder.

@@ -56,7 +56,7 @@ print(f"Wrote STONE YAML to {output_yaml}")
 
 runner = BoulderRunner.from_yaml(output_yaml)
 runner.build()
-network = runner.network
+assert runner.converter is not None
 converter = runner.converter
 
 print(

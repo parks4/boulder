@@ -2,6 +2,8 @@
 
 __version__ = "0.5.0"
 
+from .lagrangian import LagrangianTrajectory
+from .runner import BoulderRunner
 from .schema_registry import (
     ReactorSchemaEntry,
     describe_kind,
@@ -11,8 +13,6 @@ from .schema_registry import (
     registered_kinds,
     validate_against_plugin_schemas,
 )
-from .lagrangian import LagrangianTrajectory
-from .runner import BoulderRunner
 from .simulation_result import SimulationResult, make_simulation_result
 from .stage_network import CustomStageNetwork
 from .validation import (
