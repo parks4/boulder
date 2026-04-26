@@ -11,6 +11,7 @@ from .schema_registry import (
     registered_kinds,
     validate_against_plugin_schemas,
 )
+from .lagrangian import LagrangianTrajectory
 from .runner import BoulderRunner
 from .simulation_result import SimulationResult, make_simulation_result
 from .stage_network import CustomStageNetwork
@@ -23,6 +24,7 @@ from .validation import (
 
 __all__ = [
     "BoulderRunner",
+    "LagrangianTrajectory",
     "CustomStageNetwork",
     "METADATA_ALLOWED_KEYS",
     "METADATA_MANDATORY_KEYS",

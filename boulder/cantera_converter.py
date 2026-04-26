@@ -452,40 +452,67 @@ class DualCanteraConverter:
         """
         return name
 
-    def script_converter_lines(self) -> list:
-        """Return Python source lines that import and alias the converter class.
+    def script_load_lines(self, config_path: str, plan: Any = None) -> list:
+        """Return the staged-solve block for the generated standalone script.
 
-        Subclasses override this to emit their own import.  The lines must
-        define a local name ``converter_class`` that is a subclass of
-        ``DualCanteraConverter``.
+        The block uses :class:`~boulder.runner.BoulderRunner` class methods
+        only — no free-function imports.  When *plan* is provided its stage
+        list is unrolled into one :meth:`~boulder.runner.BoulderRunner.solve_stage`
+        call per stage with a comment showing the stage id and node list.
+
+        Subclasses (e.g. ``BlocConverter``) override this to substitute their
+        own runner class (``BlocRunner``).
+
+        Parameters
+        ----------
+        config_path :
+            Path to the original YAML file, embedded verbatim in the script.
+        plan :
+            :class:`~boulder.staged_solver.StageExecutionPlan` produced by
+            ``build_stage_graph()``.  When ``None`` the stage loop is omitted
+            and a plain ``runner.build()`` call is emitted instead.
         """
-        return [
-            "from boulder.cantera_converter import DualCanteraConverter",
-            "converter_class = DualCanteraConverter",
-        ]
+        runner_import = "from boulder.runner import BoulderRunner"
+        runner_class = "BoulderRunner"
+        return self._script_lines_for_runner(runner_import, runner_class, config_path, plan)
 
-    def script_load_lines(self, config_path: str) -> list:
-        """Return the full config-loading + build block for the generated script.
-
-        Subclasses override this to use a higher-level runner (e.g.
-        ``BlocRunner``) instead of the raw Boulder config functions.
-        ``config_path`` is the absolute path to the original YAML file.
-        """
-        return [
-            "from boulder.config import (",
-            "    load_config_file_with_py_support,",
-            "    normalize_config,",
-            "    validate_config,",
-            ")",
-            *self.script_converter_lines(),
+    @staticmethod
+    def _script_lines_for_runner(
+        runner_import: str,
+        runner_class: str,
+        config_path: str,
+        plan: Any,
+    ) -> list:
+        """Shared helper: emit the runner-based staged-solve script block."""
+        lines = [
+            runner_import,
             "",
             f"config_path = {repr(config_path)}",
-            "config, _ = load_config_file_with_py_support(config_path, False)",
-            "config = validate_config(normalize_config(config))",
+            f"runner = {runner_class}.from_yaml(config_path)",
+            "plan = runner.build_stage_graph()",
+            "trajectory = runner.new_trajectory()",
+            "inlet_states = {}",
             "",
-            "converter = converter_class()",
-            "network = converter.build_network(config)",
         ]
+        if plan is not None and plan.ordered_stages:
+            n = len(plan.ordered_stages)
+            for i, stage in enumerate(plan.ordered_stages):
+                node_list = ", ".join(stage.node_ids)
+                lines += [
+                    f"# Stage {i + 1}/{n}: {stage.id}  [nodes: {node_list}]",
+                    f"runner.solve_stage(plan, plan.ordered_stages[{i}], "
+                    "inlet_states, trajectory)",
+                    "",
+                ]
+        else:
+            lines += ["runner.build()", ""]
+        lines += [
+            "# Assemble visualization network from all converged states",
+            "runner.build_viz_network(plan, trajectory)",
+            "network = runner.network",
+            "converter = runner.converter",
+        ]
+        return lines
 
     def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
         """Return (creating and caching if needed) a :class:`~cantera.Solution`.
@@ -982,11 +1009,14 @@ class DualCanteraConverter:
         self._staged_trajectory = trajectory
 
         # Generate a downloadable script mirroring the staged load+build flow.
+        # When called from BoulderRunner.build(), code_lines is overwritten
+        # afterwards with the plan-aware unrolled version. This fallback
+        # serves direct callers (e.g. SimulationWorker) that bypass the runner.
         download_path = getattr(self, "_download_config_path", None) or "config.yaml"
         self.code_lines = [
             "# Load configuration from YAML and build Cantera network",
             "import cantera as ct",
-            *self.script_load_lines(download_path),
+            *self.script_load_lines(download_path, plan),
         ]
         # viz_network is already set on self.network by build_viz_network
         return self.network  # type: ignore[return-value]
@@ -1064,9 +1094,11 @@ class DualCanteraConverter:
         self.code_lines.append("# ===== SIMULATION EXECUTION =====")
         if already_solved:
             self.code_lines.append(
-                "# runner.build() has already solved the staged network;"
+                "# solve_stage() has already solved each stage sequentially;"
             )
-            self.code_lines.append("# just report the converged per-reactor states.")
+            self.code_lines.append(
+                "# network = runner.network holds the converged reactor states."
+            )
             self.code_lines.append("print('Simulation completed (staged solve).')")
             self.code_lines.append("print('Reactor\\tT [K]\\tP [Pa]')")
             self.code_lines.append("for r in network.reactors:")
