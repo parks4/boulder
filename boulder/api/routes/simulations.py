@@ -78,6 +78,11 @@ async def start_simulation(
         # so subclass overrides (like resolve_mechanism) are respected.
         converter_cls = getattr(request.app.state, "converter_class", DualCanteraConverter)
         converter = converter_cls(mechanism=mechanism)
+        # Propagate the original YAML path so the generated downloadable script
+        # references the correct file instead of the "config.yaml" placeholder.
+        config_path = getattr(request.app.state, "preloaded_config_path", None)
+        if config_path is not None:
+            converter._download_config_path = config_path
 
         # Extract simulation parameters
         settings = config.get("settings", {}) or {}

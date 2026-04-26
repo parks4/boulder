@@ -66,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.preloaded_config = None
     app.state.preloaded_yaml = None
     app.state.preloaded_filename = None
+    app.state.preloaded_config_path = None  # full path for script generation
 
     if env_config_path and env_config_path.strip():
         try:
@@ -90,6 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app.state.preloaded_config = validated
             app.state.preloaded_yaml = original_yaml
             app.state.preloaded_filename = os.path.basename(actual_yaml_path)
+            app.state.preloaded_config_path = str(actual_yaml_path)
 
             logger.info(f"Preloaded configuration: {app.state.preloaded_filename}")
         except Exception as e:

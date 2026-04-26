@@ -21,6 +21,9 @@ export interface SimulationProgress {
   is_running: boolean;
   is_complete: boolean;
   error_message?: string | null;
+  /** Staged-solver build counters — updated after each stage completes. */
+  stages_done?: number;
+  n_stages?: number;
   times: number[];
   reactors_series: Record<string, ReactorSeries>;
   reactor_reports?: Record<string, unknown>;

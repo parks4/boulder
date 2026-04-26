@@ -455,15 +455,36 @@ class DualCanteraConverter:
     def script_converter_lines(self) -> list:
         """Return Python source lines that import and alias the converter class.
 
-        Injected verbatim into the generated standalone script by
-        ``build_network``.  Subclasses override this to emit their own import
-        (e.g. ``BlocConverter`` from ``bloc``).  The lines must define a local
-        name ``converter_class`` that is a subclass of
+        Subclasses override this to emit their own import.  The lines must
+        define a local name ``converter_class`` that is a subclass of
         ``DualCanteraConverter``.
         """
         return [
             "from boulder.cantera_converter import DualCanteraConverter",
             "converter_class = DualCanteraConverter",
+        ]
+
+    def script_load_lines(self, config_path: str) -> list:
+        """Return the full config-loading + build block for the generated script.
+
+        Subclasses override this to use a higher-level runner (e.g.
+        ``BlocRunner``) instead of the raw Boulder config functions.
+        ``config_path`` is the absolute path to the original YAML file.
+        """
+        return [
+            "from boulder.config import (",
+            "    load_config_file_with_py_support,",
+            "    normalize_config,",
+            "    validate_config,",
+            ")",
+            *self.script_converter_lines(),
+            "",
+            f"config_path = {repr(config_path)}",
+            "config, _ = load_config_file_with_py_support(config_path, False)",
+            "config = validate_config(normalize_config(config))",
+            "",
+            "converter = converter_class()",
+            "network = converter.build_network(config)",
         ]
 
     def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
@@ -920,7 +941,11 @@ class DualCanteraConverter:
         self.last_network = viz_net
         return viz_net
 
-    def build_network(self, config: Dict[str, Any]) -> ct.ReactorNet:
+    def build_network(
+        self,
+        config: Dict[str, Any],
+        progress_callback: Optional[Callable] = None,
+    ) -> ct.ReactorNet:
         """Build and solve the Cantera network through the staged solver.
 
         ``normalize_config`` guarantees that the config has a top-level
@@ -931,6 +956,15 @@ class DualCanteraConverter:
         ``solve_directive`` and returns a visualization ReactorNet with all
         reactors in their converged state.  The Lagrangian trajectory is
         stored on ``self._staged_trajectory``.
+
+        Parameters
+        ----------
+        config :
+            Normalised and validated configuration dict.
+        progress_callback :
+            Optional ``(stage_id: str, n_done: int, n_total: int) -> None``
+            called after each stage completes.  Forwarded to
+            :func:`~boulder.staged_solver.solve_staged`.
         """
         self._last_config = config
 
@@ -944,7 +978,7 @@ class DualCanteraConverter:
         from .staged_solver import build_stage_graph, solve_staged
 
         plan = build_stage_graph(config)
-        trajectory = solve_staged(self, plan, config)
+        trajectory = solve_staged(self, plan, config, progress_callback=progress_callback)
         self._staged_trajectory = trajectory
 
         # Generate a downloadable script mirroring the staged load+build flow.
@@ -952,19 +986,7 @@ class DualCanteraConverter:
         self.code_lines = [
             "# Load configuration from YAML and build Cantera network",
             "import cantera as ct",
-            "from boulder.config import (",
-            "    load_config_file_with_py_support,",
-            "    normalize_config,",
-            "    validate_config,",
-            ")",
-            *self.script_converter_lines(),
-            "",
-            f"config_path = {repr(download_path)}",
-            "config, _ = load_config_file_with_py_support(config_path, False)",
-            "config = validate_config(normalize_config(config))",
-            "",
-            "converter = converter_class()",
-            "network = converter.build_network(config)",
+            *self.script_load_lines(download_path),
         ]
         # viz_network is already set on self.network by build_viz_network
         return self.network  # type: ignore[return-value]
@@ -1042,7 +1064,7 @@ class DualCanteraConverter:
         self.code_lines.append("# ===== SIMULATION EXECUTION =====")
         if already_solved:
             self.code_lines.append(
-                "# build_network() has already solved the staged network;"
+                "# runner.build() has already solved the staged network;"
             )
             self.code_lines.append("# just report the converged per-reactor states.")
             self.code_lines.append("print('Simulation completed (staged solve).')")
