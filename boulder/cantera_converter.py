@@ -1532,8 +1532,14 @@ class DualCanteraConverter:
                 rid: {
                     "T": [float(r.phase.T)],
                     "P": [float(r.phase.P)],
-                    "X": {s: [float(r.phase[s].X[0])] for s in r.phase.species_names},
-                    "Y": {s: [float(r.phase[s].Y[0])] for s in r.phase.species_names},
+                    "X": {
+                        s: [float(r.phase.X[r.phase.species_index(s)])]
+                        for s in r.phase.species_names
+                    },
+                    "Y": {
+                        s: [float(r.phase.Y[r.phase.species_index(s)])]
+                        for s in r.phase.species_names
+                    },
                 }
                 for rid, r in self.reactors.items()
                 if not isinstance(r, ct.Reservoir)
