@@ -443,11 +443,10 @@ def _collect_stage_states(
     """
     # Resolve mechanism and create template
     mech = stage.mechanism
-    if converter.plugins.mechanism_path_resolver:
-        try:
-            mech = converter.plugins.mechanism_path_resolver(mech)
-        except Exception:
-            pass
+    try:
+        mech = converter.resolve_mechanism(mech)
+    except Exception:
+        pass
     try:
         gas_template = ct.Solution(mech)
     except Exception as exc:
@@ -547,11 +546,10 @@ def _extract_gas_state(
     converter: "DualCanteraConverter",
 ) -> ct.Solution:
     """Return a new ``ct.Solution`` carrying the reactor's current thermo state."""
-    if converter.plugins.mechanism_path_resolver:
-        try:
-            mechanism = converter.plugins.mechanism_path_resolver(mechanism)
-        except Exception:
-            pass
+    try:
+        mechanism = converter.resolve_mechanism(mechanism)
+    except Exception:
+        pass
     gas = ct.Solution(mechanism)
     gas.TPY = reactor.phase.T, reactor.phase.P, reactor.phase.Y
     return gas
@@ -590,9 +588,8 @@ def _apply_mechanism_switch(
         registered.
     """
     # Resolve paths for comparison
-    resolve = converter.plugins.mechanism_path_resolver
-    resolved_src = resolve(gas.source) if resolve else gas.source
-    resolved_tgt = resolve(new_mechanism) if resolve else new_mechanism
+    resolved_src = converter.resolve_mechanism(gas.source)
+    resolved_tgt = converter.resolve_mechanism(new_mechanism)
 
     if resolved_src == resolved_tgt:
         return gas, None  # same mechanism, no-op

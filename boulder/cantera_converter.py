@@ -40,7 +40,6 @@ class BoulderPlugins:
     reactor_builders: Dict[str, ReactorBuilder] = field(default_factory=dict)
     connection_builders: Dict[str, ConnectionBuilder] = field(default_factory=dict)
     post_build_hooks: List[PostBuildHook] = field(default_factory=list)
-    mechanism_path_resolver: Optional[Callable[[str], str]] = None
     output_pane_plugins: List[Any] = field(
         default_factory=list
     )  # Import will be handled dynamically
@@ -408,13 +407,7 @@ class DualCanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         self.plugins = plugins or get_plugins()
         try:
-            # Use plugin mechanism path resolver if available
-            if self.plugins.mechanism_path_resolver:
-                resolved_mechanism = self.plugins.mechanism_path_resolver(
-                    self.mechanism
-                )
-            else:
-                resolved_mechanism = self.mechanism
+            resolved_mechanism = self.resolve_mechanism(self.mechanism)
             self.gas = ct.Solution(resolved_mechanism)
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
@@ -445,7 +438,48 @@ class DualCanteraConverter:
             comp_dict[species.strip()] = float(value)
         return comp_dict
 
-    def _set_reactor_volume(
+    # ------------------------------------------------------------------
+    # Low-level helpers shared by build_network / build_sub_network
+    # ------------------------------------------------------------------
+
+    def resolve_mechanism(self, name: str) -> str:
+        """Resolve a mechanism name to a path.
+
+        Default implementation returns ``name`` unchanged, allowing Cantera to
+        handle bare built-in names (e.g. ``"gri30.yaml"``) directly.
+        Subclasses (e.g. ``BlocConverter``) override this to implement custom
+        search paths without requiring a plugin registration.
+        """
+        return name
+
+    def script_converter_lines(self) -> list:
+        """Return Python source lines that import and alias the converter class.
+
+        Injected verbatim into the generated standalone script by
+        ``build_network``.  Subclasses override this to emit their own import
+        (e.g. ``BlocConverter`` from ``bloc``).  The lines must define a local
+        name ``converter_class`` that is a subclass of
+        ``DualCanteraConverter``.
+        """
+        return [
+            "from boulder.cantera_converter import DualCanteraConverter",
+            "converter_class = DualCanteraConverter",
+        ]
+
+    def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
+        """Return (creating and caching if needed) a :class:`~cantera.Solution`.
+
+        Uses ``resolve_mechanism`` so subclass overrides are honored for both
+        the top-level mechanism and per-node mechanism switches.
+        """
+        resolved = self.resolve_mechanism(mech_name)
+        if resolved in self._gases_by_mech:
+            return self._gases_by_mech[resolved]
+        gas_obj = ct.Solution(resolved)
+        self._gases_by_mech[resolved] = gas_obj
+        return gas_obj
+
+    def set_reactor_volume(
         self, reactor: ct.Reactor, props: Dict[str, Any], reactor_id: str
     ) -> None:
         """Set reactor volume if specified in properties."""
@@ -463,28 +497,7 @@ class DualCanteraConverter:
             except (ValueError, TypeError, AttributeError) as e:
                 logger.warning(f"Failed to set volume for {reactor_id}: {e}")
 
-    # ------------------------------------------------------------------
-    # Low-level helpers shared by build_network / build_sub_network
-    # ------------------------------------------------------------------
-
-    def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
-        """Return (creating and caching if needed) a :class:`~cantera.Solution`.
-
-        Uses the registered mechanism path resolver so that both short names
-        (``"gri30.yaml"``) and absolute paths work uniformly.
-        """
-        resolved = (
-            self.plugins.mechanism_path_resolver(mech_name)
-            if self.plugins.mechanism_path_resolver
-            else mech_name
-        )
-        if resolved in self._gases_by_mech:
-            return self._gases_by_mech[resolved]
-        gas_obj = ct.Solution(resolved)
-        self._gases_by_mech[resolved] = gas_obj
-        return gas_obj
-
-    def _create_reactor_from_node(
+    def create_reactor_from_node(
         self, node: Dict[str, Any], gas_for_node: ct.Solution
     ) -> ct.Reactor:
         """Instantiate a Cantera reactor from a normalized node dict.
@@ -530,7 +543,7 @@ class DualCanteraConverter:
         else:
             raise ValueError(f"Unsupported reactor type: '{typ}'")
 
-        self._set_reactor_volume(reactor, props, rid)
+        self.set_reactor_volume(reactor, props, rid)
         try:
             reactor.group_name = str(props.get("group", props.get("group_name", "")))
         except Exception:
@@ -538,7 +551,7 @@ class DualCanteraConverter:
 
         return reactor
 
-    def _build_single_connection(self, conn: Dict[str, Any]) -> None:
+    def build_connection(self, conn: Dict[str, Any]) -> None:
         """Create and register one Cantera flow device or wall from a connection dict.
 
         The connection is added to ``self.connections`` (for
@@ -616,7 +629,7 @@ class DualCanteraConverter:
         else:
             raise ValueError(f"Unsupported connection type: '{typ}'")
 
-    def _apply_flow_conservation(self) -> None:
+    def apply_flow_conservation(self) -> None:
         """Resolve unset MFC flow rates via mass conservation, then reset tracking state.
 
         Called after all connections for a network (or sub-network stage) have been
@@ -656,6 +669,19 @@ class DualCanteraConverter:
         # later stages (and the post-solve viz network pass) can resolve MFCs
         # against the FULL cross-stage topology.
         self._unresolved_mfc_ids = set()
+
+    def post_build(self, config: Dict[str, Any]) -> None:
+        """Run registered post-build hooks on a (sub-)config.
+
+        Called once per stage (with the stage subset config) and once after the
+        full viz network is built. Default iterates ``plugins.post_build_hooks``.
+        Subclasses may override to add behavior without touching the plugin list.
+        """
+        for hook in self.plugins.post_build_hooks:
+            try:
+                hook(self, config)
+            except Exception as exc:
+                logger.warning("Post-build hook failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Staged solving
@@ -728,7 +754,7 @@ class DualCanteraConverter:
                 "gas_solution": gas_for_node,
             }
 
-            reactor = self._create_reactor_from_node(node, gas_for_node)
+            reactor = self.create_reactor_from_node(node, gas_for_node)
 
             # Guarantee gas_solution and mechanism are always present in meta.
             # Plugin builders overwrite reactor_meta[rid] entirely, losing these keys.
@@ -768,7 +794,7 @@ class DualCanteraConverter:
                 )
                 continue
             try:
-                self._build_single_connection(conn)
+                self.build_connection(conn)
             except Exception as exc:
                 logger.warning(
                     "Stage '%s': failed to build connection '%s': %s",
@@ -777,20 +803,14 @@ class DualCanteraConverter:
                     exc,
                 )
 
-        self._apply_flow_conservation()
+        self.apply_flow_conservation()
 
         # Apply post-build hooks for this stage's subset
         stage_config_subset: Dict[str, Any] = {
             "nodes": stage_nodes,
             "connections": stage_connections,
         }
-        for hook in self.plugins.post_build_hooks:
-            try:
-                hook(self, stage_config_subset)
-            except Exception as exc:
-                logger.warning(
-                    "Post-build hook failed for stage '%s': %s", stage_id, exc
-                )
+        self.post_build(stage_config_subset)
 
         # Build ReactorNet (non-Reservoir reactors only)
         non_res_ids = [
@@ -880,7 +900,7 @@ class DualCanteraConverter:
                 )
                 continue
             try:
-                self._build_single_connection(conn)
+                self.build_connection(conn)
             except Exception as exc:
                 logger.warning(
                     "Viz network: could not build connection '%s': %s", cid, exc
@@ -891,7 +911,7 @@ class DualCanteraConverter:
         # saw a sub-topology; mixers on stage boundaries (SPRING_A3 shape) or
         # inter-stage MFCs without explicit mass_flow_rate would otherwise
         # stay at 0 kg/s and make Sankey bands collapse.
-        self._apply_flow_conservation()
+        self.apply_flow_conservation()
 
         non_res = [r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)]
         viz_net = ct.ReactorNet(cast(Sequence[ct.Reactor], non_res))
@@ -937,13 +957,13 @@ class DualCanteraConverter:
             "    normalize_config,",
             "    validate_config,",
             ")",
-            "from boulder.cantera_converter import DualCanteraConverter",
+            *self.script_converter_lines(),
             "",
             f"config_path = {repr(download_path)}",
             "config, _ = load_config_file_with_py_support(config_path, False)",
             "config = validate_config(normalize_config(config))",
             "",
-            "converter = DualCanteraConverter()",
+            "converter = converter_class()",
             "network = converter.build_network(config)",
         ]
         # viz_network is already set on self.network by build_viz_network

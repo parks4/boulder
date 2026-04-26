@@ -73,8 +73,11 @@ async def start_simulation(
             mechanism = "gri30.yaml"
 
     try:
-        # Build a converter with the resolved mechanism and any plugins
-        converter = DualCanteraConverter(mechanism=mechanism)
+        # Build a converter with the resolved mechanism.
+        # Use the converter class registered at startup (e.g. BlocConverter)
+        # so subclass overrides (like resolve_mechanism) are respected.
+        converter_cls = getattr(request.app.state, "converter_class", DualCanteraConverter)
+        converter = converter_cls(mechanism=mechanism)
 
         # Extract simulation parameters
         settings = config.get("settings", {}) or {}

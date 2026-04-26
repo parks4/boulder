@@ -35,6 +35,9 @@ from .routes import configs, graph, mechanisms, plugins, simulations
 logger = logging.getLogger(__name__)
 
 
+_converter_class = None  # overridable by CLI before uvicorn starts
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
@@ -43,15 +46,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from ..network_plugin import register_network_plugin
 
     register_network_plugin()
+    converter_cls = _converter_class or DualCanteraConverter
+    # Store converter class so simulation routes can instantiate their own.
+    app.state.converter_class = converter_cls
     # Store a shared converter on the app state for routes to access
     # Handle potential Unicode issues on Windows by creating with a safe default
     try:
-        app.state.converter = DualCanteraConverter()
+        app.state.converter = converter_cls()
     except (UnicodeEncodeError, ValueError) as e:
         logger.warning(f"Failed to initialize converter with plugins: {e}")
         logger.warning("Starting with minimal plugin support")
         # Create a basic converter without problematic plugins
-        app.state.converter = DualCanteraConverter()
+        app.state.converter = converter_cls()
 
     # Load initial configuration from environment variable if provided
     env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(

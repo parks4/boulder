@@ -1,6 +1,6 @@
 """Boulder - A Cantera ReactorNet Visualization Tool."""
 
-__version__ = "0.2.0"
+__version__ = "0.5.0"
 
 from .schema_registry import (
     ReactorSchemaEntry,
@@ -11,6 +11,7 @@ from .schema_registry import (
     registered_kinds,
     validate_against_plugin_schemas,
 )
+from .runner import BoulderRunner
 from .simulation_result import SimulationResult, make_simulation_result
 from .stage_network import CustomStageNetwork
 from .validation import (
@@ -21,6 +22,7 @@ from .validation import (
 )
 
 __all__ = [
+    "BoulderRunner",
     "CustomStageNetwork",
     "METADATA_ALLOWED_KEYS",
     "METADATA_MANDATORY_KEYS",
