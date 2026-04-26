@@ -115,10 +115,10 @@ def _converter_with_reactors() -> DualCanteraConverter:
     """Return a converter with ``feed``/``r1``/``outlet`` pre-populated.
 
     Used by the error-path tests below: the staged solver wraps
-    ``_build_single_connection`` in a ``try/except-log`` so exceptions
+    ``build_connection`` in a ``try/except-log`` so exceptions
     raised during connection building are swallowed at the orchestration
     level.  To assert the exception *type and message*, we therefore
-    exercise :meth:`DualCanteraConverter._build_single_connection`
+    exercise :meth:`DualCanteraConverter.build_connection`
     directly with the reactors already registered.
     """
     gas = ct.Solution("gri30.yaml")
@@ -148,7 +148,7 @@ def test_pressure_controller_missing_master_raises() -> None:
         "properties": {"pressure_coeff": 0.0},
     }
     with pytest.raises(ValueError, match="requires a 'master'"):
-        converter._build_single_connection(pc_conn)
+        converter.build_connection(pc_conn)
 
 
 @pytest.mark.unit
@@ -167,7 +167,7 @@ def test_pressure_controller_master_not_found_raises() -> None:
         "properties": {"master": "no_such_mfc", "pressure_coeff": 0.0},
     }
     with pytest.raises(ValueError, match="master 'no_such_mfc' not found"):
-        converter._build_single_connection(pc_conn)
+        converter.build_connection(pc_conn)
 
 
 @pytest.mark.unit
@@ -199,10 +199,10 @@ def test_pressure_controller_master_wrong_type_raises() -> None:
         "target": "outlet",
         "properties": {"master": "r1_to_outlet", "pressure_coeff": 0.0},
     }
-    converter._build_single_connection(mfc_conn)
-    converter._build_single_connection(pc_conn)
+    converter.build_connection(mfc_conn)
+    converter.build_connection(pc_conn)
     with pytest.raises(ValueError, match="must be a MassFlowController"):
-        converter._build_single_connection(extra_pc)
+        converter.build_connection(extra_pc)
 
 
 @pytest.mark.unit

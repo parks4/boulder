@@ -84,16 +84,15 @@ class TestCLIHeadless:
                 generated_code = f.read()
 
             # Verify the generated code has expected content.
-            # The headless generator emits a Boulder-based script (DualCanteraConverter)
-            # rather than raw Cantera calls, so we check for the high-level API.
+            # The headless generator emits a BoulderRunner-based staged-solve
+            # script with one solve_stage() call per stage.
             assert "import cantera as ct" in generated_code
-            assert (
-                "from boulder.cantera_converter import DualCanteraConverter"
-                in generated_code
-            )
-            assert "network = converter.build_network(config)" in generated_code
-            # build_network always runs the staged solver, so the emitted script
-            # iterates over the converged reactors instead of re-advancing.
+            assert "from boulder.runner import BoulderRunner" in generated_code
+            assert "runner.build_stage_graph()" in generated_code
+            assert "runner.solve_stage(" in generated_code
+            assert "runner.build_viz_network(plan, trajectory)" in generated_code
+            assert "network = runner.network" in generated_code
+            # The execution section iterates over converged reactors.
             assert "for r in network.reactors:" in generated_code
 
             # Test that the generated Python code can be executed

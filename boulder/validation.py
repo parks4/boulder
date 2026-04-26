@@ -173,7 +173,7 @@ class MetadataModel(BaseModel):
     only governs *which* keys are accepted.
     """
 
-    description: str = Field(min_length=1)
+    description: Optional[str] = None
 
     scenario_id: Optional[str] = None
     title: Optional[str] = None

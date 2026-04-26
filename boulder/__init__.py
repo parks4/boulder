@@ -1,7 +1,9 @@
 """Boulder - A Cantera ReactorNet Visualization Tool."""
 
-__version__ = "0.2.0"
+__version__ = "0.5.0"
 
+from .lagrangian import LagrangianTrajectory
+from .runner import BoulderRunner
 from .schema_registry import (
     ReactorSchemaEntry,
     describe_kind,
@@ -21,6 +23,8 @@ from .validation import (
 )
 
 __all__ = [
+    "BoulderRunner",
+    "LagrangianTrajectory",
     "CustomStageNetwork",
     "METADATA_ALLOWED_KEYS",
     "METADATA_MANDATORY_KEYS",

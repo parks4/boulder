@@ -36,6 +36,11 @@ class SimulationProgress:
     # visual graph can be updated to reflect the actual network topology.
     updated_connections: Optional[List[Dict[str, Any]]] = None
 
+    # Build-phase progress counters.  Updated after each staged-solver stage.
+    # The UI uses these directly so it can show "Stage 2 / 3" etc.
+    stages_done: int = 0
+    n_stages: int = 0
+
     # Status flags
     is_running: bool = False
     is_complete: bool = False
@@ -140,6 +145,8 @@ class SimulationWorker:
                     if self.progress.updated_connections is not None
                     else None
                 ),
+                stages_done=self.progress.stages_done,
+                n_stages=self.progress.n_stages,
                 is_running=self.progress.is_running,
                 is_complete=self.progress.is_complete,
                 error_message=self.progress.error_message,
@@ -157,12 +164,43 @@ class SimulationWorker:
     ) -> None:
         """Background worker function that runs the actual simulation."""
         try:
-            # Build network using the unified converter
-            logger.info("Building Cantera network in background...")
+            # Mark running immediately so the UI overlay appears and can
+            # show build-phase progress before time integration begins.
+            # Count stages up front so the UI can show "Stage N / M" immediately.
+            from .staged_solver import build_stage_graph as _build_stage_graph
+
+            _plan = _build_stage_graph(config)
+            _n_stages = len(_plan.ordered_stages)
+
+            with self._lock:
+                self.progress.is_running = True
+                self.progress.is_complete = False
+                self.progress.error_message = None
+                self.progress.start_time = time.time()
+                self.progress.end_time = None
+                self.progress.total_time = simulation_time
+                self.progress.stages_done = 0
+                self.progress.n_stages = _n_stages
+
+            logger.info(
+                "Building Cantera network in background (%d stages)...", _n_stages
+            )
+
+            # Callback fired by solve_staged after each stage completes.
+            def _build_stage_callback(stage_id: str, n_done: int, n_total: int) -> None:
+                with self._lock:
+                    self.progress.stages_done = n_done
+                    self.progress.n_stages = n_total
 
             # Build the network first
-            network = converter.build_network(config)
+            network = converter.build_network(
+                config, progress_callback=_build_stage_callback
+            )
             logger.info("Network built successfully, starting streaming simulation...")
+
+            # Mark build fully complete.
+            with self._lock:
+                self.progress.stages_done = _n_stages
 
             # Capture the connections list after post-build hooks have run.
             # Post-build hooks may inject synthetic connections into config so
@@ -216,7 +254,7 @@ class SimulationWorker:
                             f"Streaming reactor report generation failed: {stream_err}"
                         )
 
-            # Initialize progress
+            # Register network on progress now that build is complete
             with self._lock:
                 self.progress.network = network
                 self.progress.reactors_dict = converter.reactors
@@ -226,12 +264,6 @@ class SimulationWorker:
                 self.progress.code_str = ""
                 self.progress.reactor_reports = {}
                 self.progress.connection_reports = {}
-                self.progress.is_running = True
-                self.progress.is_complete = False
-                self.progress.error_message = None
-                self.progress.start_time = time.time()
-                self.progress.end_time = None
-                self.progress.total_time = simulation_time
 
             # Update the live simulation singleton so plugins
             # (e.g. NetworkPlugin) can access the network

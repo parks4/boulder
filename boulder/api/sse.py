@@ -38,6 +38,8 @@ async def simulation_event_stream(
             "is_running": progress.is_running,
             "is_complete": progress.is_complete,
             "error_message": progress.error_message,
+            "stages_done": progress.stages_done,
+            "n_stages": progress.n_stages,
             "times": progress.times,
             "reactors_series": progress.reactors_series,
             "reactor_reports": _serialise_reports(progress.reactor_reports),

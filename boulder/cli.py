@@ -121,6 +121,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run the development frontend (starts both backend and Vite dev server)",
     )
+    parser.add_argument(
+        "--runner",
+        metavar="PKG.MOD:CLASS",
+        default=None,
+        help=(
+            "Dotted-path to a BoulderRunner subclass to use (e.g. "
+            "'bloc.runner:BlocRunner').  Primarily used by the `bloc` CLI."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -301,7 +310,7 @@ def _run_plugins_subcommand(argv: list[str]) -> int:
     print(f"  reactor_builders       : {sorted(plugins.reactor_builders)}")
     print(f"  connection_builders    : {sorted(plugins.connection_builders)}")
     print(f"  post_build_hooks       : {len(plugins.post_build_hooks)}")
-    print(f"  mechanism_path_resolver: {plugins.mechanism_path_resolver is not None}")
+    print("  mechanism resolution   : via converter.resolve_mechanism()")
     print(f"  mechanism_switch_fn    : {plugins.mechanism_switch_fn is not None}")
     print(f"  sankey_generator       : {plugins.sankey_generator is not None}")
     print(f"  output_pane_plugins    : {len(plugins.output_pane_plugins)}")
@@ -392,7 +401,35 @@ def _run_describe_subcommand(argv: list[str]) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> None:
+def _resolve_runner_class(dotted: str | None):
+    """Resolve a dotted ``pkg.mod:Class`` string to a class object."""
+    from .runner import BoulderRunner
+
+    if dotted is None:
+        return BoulderRunner
+    if ":" in dotted:
+        mod_name, _, cls_name = dotted.partition(":")
+    else:
+        mod_name, _, cls_name = dotted.rpartition(".")
+    import importlib
+
+    mod = importlib.import_module(mod_name)
+    return getattr(mod, cls_name)
+
+
+def main(argv: list[str] | None = None, *, runner_class=None) -> None:
+    """Entry point for the Boulder CLI.
+
+    Parameters
+    ----------
+    argv :
+        Argument list (defaults to ``sys.argv[1:]``).
+    runner_class :
+        :class:`~boulder.runner.BoulderRunner` subclass to use for YAML
+        loading and headless execution.  When ``None`` (default) the base
+        ``BoulderRunner`` is used.  The ``--runner`` CLI flag is an
+        alternative for shell-level overrides.
+    """
     if argv is None:
         argv = sys.argv[1:]
 
@@ -410,6 +447,14 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(rc)
 
     args = parse_args(argv)
+
+    # --runner flag overrides the kwarg (shell users)
+    if args.runner:
+        runner_class = _resolve_runner_class(args.runner)
+    if runner_class is None:
+        from .runner import BoulderRunner
+
+        runner_class = BoulderRunner
 
     # Handle --dev mode: start both backend and frontend dev server
     if args.dev:
@@ -549,8 +594,26 @@ def main(argv: list[str] | None = None) -> None:
             )
             sys.exit(1)
 
-        # Run headless mode: load YAML/py, run simulation, write Python script
-        run_headless_mode(args.config, args.download, args.verbose)
+        # Run headless mode via the runner (single source of truth for both
+        # `boulder` and `bloc` CLIs).
+        try:
+            runner = runner_class.from_yaml(args.config)
+            settings = runner.config.get("settings") or {}
+            end_time_val = settings.get("end_time")
+            dt_val = settings.get("dt")
+            runner.run_headless(
+                download_path=args.download,
+                simulate=True,
+                end_time=float(end_time_val) if end_time_val is not None else None,
+                dt=float(dt_val) if dt_val is not None else None,
+            )
+            print(f"Python code generated: {args.download}")
+        except FileNotFoundError as exc:
+            print(f"Error: Configuration file not found: {exc.filename}")
+            sys.exit(1)
+        except Exception as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
         return
 
     # If a config path is provided, propagate it via environment for app initialization
@@ -603,6 +666,13 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Boulder server will start on {url}")
 
     import uvicorn
+
+    # Register the converter class on the API module before uvicorn starts
+    # so the lifespan handler picks it up via boulder.api.main._converter_class.
+    # We import the module directly (same process – uvicorn reuses cached module).
+    from boulder.api import main as _api_main
+
+    _api_main._converter_class = getattr(runner_class, "converter_class", None)
 
     log_level = "info" if args.verbose else "warning"
     uvicorn.run(

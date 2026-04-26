@@ -40,7 +40,6 @@ class BoulderPlugins:
     reactor_builders: Dict[str, ReactorBuilder] = field(default_factory=dict)
     connection_builders: Dict[str, ConnectionBuilder] = field(default_factory=dict)
     post_build_hooks: List[PostBuildHook] = field(default_factory=list)
-    mechanism_path_resolver: Optional[Callable[[str], str]] = None
     output_pane_plugins: List[Any] = field(
         default_factory=list
     )  # Import will be handled dynamically
@@ -408,13 +407,7 @@ class DualCanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         self.plugins = plugins or get_plugins()
         try:
-            # Use plugin mechanism path resolver if available
-            if self.plugins.mechanism_path_resolver:
-                resolved_mechanism = self.plugins.mechanism_path_resolver(
-                    self.mechanism
-                )
-            else:
-                resolved_mechanism = self.mechanism
+            resolved_mechanism = self.resolve_mechanism(self.mechanism)
             self.gas = ct.Solution(resolved_mechanism)
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
@@ -445,7 +438,98 @@ class DualCanteraConverter:
             comp_dict[species.strip()] = float(value)
         return comp_dict
 
-    def _set_reactor_volume(
+    # ------------------------------------------------------------------
+    # Low-level helpers shared by build_network / build_sub_network
+    # ------------------------------------------------------------------
+
+    def resolve_mechanism(self, name: str) -> str:
+        """Resolve a mechanism name to a path.
+
+        Default implementation returns ``name`` unchanged, allowing Cantera to
+        handle bare built-in names (e.g. ``"gri30.yaml"``) directly.
+        Subclasses (e.g. ``BlocConverter``) override this to implement custom
+        search paths without requiring a plugin registration.
+        """
+        return name
+
+    def script_load_lines(self, config_path: str, plan: Any = None) -> list:
+        """Return the staged-solve block for the generated standalone script.
+
+        The block uses :class:`~boulder.runner.BoulderRunner` class methods
+        only — no free-function imports.  When *plan* is provided its stage
+        list is unrolled into one :meth:`~boulder.runner.BoulderRunner.solve_stage`
+        call per stage with a comment showing the stage id and node list.
+
+        Subclasses (e.g. ``BlocConverter``) override this to substitute their
+        own runner class (``BlocRunner``).
+
+        Parameters
+        ----------
+        config_path :
+            Path to the original YAML file, embedded verbatim in the script.
+        plan :
+            :class:`~boulder.staged_solver.StageExecutionPlan` produced by
+            ``build_stage_graph()``.  When ``None`` the stage loop is omitted
+            and a plain ``runner.build()`` call is emitted instead.
+        """
+        runner_import = "from boulder.runner import BoulderRunner"
+        runner_class = "BoulderRunner"
+        return self._script_lines_for_runner(
+            runner_import, runner_class, config_path, plan
+        )
+
+    @staticmethod
+    def _script_lines_for_runner(
+        runner_import: str,
+        runner_class: str,
+        config_path: str,
+        plan: Any,
+    ) -> list:
+        """Shared helper: emit the runner-based staged-solve script block."""
+        lines = [
+            runner_import,
+            "",
+            f"config_path = {repr(config_path)}",
+            f"runner = {runner_class}.from_yaml(config_path)",
+            "plan = runner.build_stage_graph()",
+            "trajectory = runner.new_trajectory()",
+            "inlet_states = {}",
+            "",
+        ]
+        if plan is not None and plan.ordered_stages:
+            n = len(plan.ordered_stages)
+            for i, stage in enumerate(plan.ordered_stages):
+                node_list = ", ".join(stage.node_ids)
+                lines += [
+                    f"# Stage {i + 1}/{n}: {stage.id}  [nodes: {node_list}]",
+                    f"runner.solve_stage(plan, plan.ordered_stages[{i}], "
+                    "inlet_states, trajectory)",
+                    "",
+                ]
+        else:
+            lines += ["runner.build()", ""]
+        lines += [
+            "# Assemble visualization network from all converged states",
+            "runner.build_viz_network(plan, trajectory)",
+            "network = runner.network",
+            "converter = runner.converter",
+        ]
+        return lines
+
+    def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
+        """Return (creating and caching if needed) a :class:`~cantera.Solution`.
+
+        Uses ``resolve_mechanism`` so subclass overrides are honored for both
+        the top-level mechanism and per-node mechanism switches.
+        """
+        resolved = self.resolve_mechanism(mech_name)
+        if resolved in self._gases_by_mech:
+            return self._gases_by_mech[resolved]
+        gas_obj = ct.Solution(resolved)
+        self._gases_by_mech[resolved] = gas_obj
+        return gas_obj
+
+    def set_reactor_volume(
         self, reactor: ct.Reactor, props: Dict[str, Any], reactor_id: str
     ) -> None:
         """Set reactor volume if specified in properties."""
@@ -463,28 +547,7 @@ class DualCanteraConverter:
             except (ValueError, TypeError, AttributeError) as e:
                 logger.warning(f"Failed to set volume for {reactor_id}: {e}")
 
-    # ------------------------------------------------------------------
-    # Low-level helpers shared by build_network / build_sub_network
-    # ------------------------------------------------------------------
-
-    def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
-        """Return (creating and caching if needed) a :class:`~cantera.Solution`.
-
-        Uses the registered mechanism path resolver so that both short names
-        (``"gri30.yaml"``) and absolute paths work uniformly.
-        """
-        resolved = (
-            self.plugins.mechanism_path_resolver(mech_name)
-            if self.plugins.mechanism_path_resolver
-            else mech_name
-        )
-        if resolved in self._gases_by_mech:
-            return self._gases_by_mech[resolved]
-        gas_obj = ct.Solution(resolved)
-        self._gases_by_mech[resolved] = gas_obj
-        return gas_obj
-
-    def _create_reactor_from_node(
+    def create_reactor_from_node(
         self, node: Dict[str, Any], gas_for_node: ct.Solution
     ) -> ct.Reactor:
         """Instantiate a Cantera reactor from a normalized node dict.
@@ -530,7 +593,7 @@ class DualCanteraConverter:
         else:
             raise ValueError(f"Unsupported reactor type: '{typ}'")
 
-        self._set_reactor_volume(reactor, props, rid)
+        self.set_reactor_volume(reactor, props, rid)
         try:
             reactor.group_name = str(props.get("group", props.get("group_name", "")))
         except Exception:
@@ -538,7 +601,7 @@ class DualCanteraConverter:
 
         return reactor
 
-    def _build_single_connection(self, conn: Dict[str, Any]) -> None:
+    def build_connection(self, conn: Dict[str, Any]) -> None:
         """Create and register one Cantera flow device or wall from a connection dict.
 
         The connection is added to ``self.connections`` (for
@@ -616,7 +679,7 @@ class DualCanteraConverter:
         else:
             raise ValueError(f"Unsupported connection type: '{typ}'")
 
-    def _apply_flow_conservation(self) -> None:
+    def apply_flow_conservation(self) -> None:
         """Resolve unset MFC flow rates via mass conservation, then reset tracking state.
 
         Called after all connections for a network (or sub-network stage) have been
@@ -656,6 +719,19 @@ class DualCanteraConverter:
         # later stages (and the post-solve viz network pass) can resolve MFCs
         # against the FULL cross-stage topology.
         self._unresolved_mfc_ids = set()
+
+    def post_build(self, config: Dict[str, Any]) -> None:
+        """Run registered post-build hooks on a (sub-)config.
+
+        Called once per stage (with the stage subset config) and once after the
+        full viz network is built. Default iterates ``plugins.post_build_hooks``.
+        Subclasses may override to add behavior without touching the plugin list.
+        """
+        for hook in self.plugins.post_build_hooks:
+            try:
+                hook(self, config)
+            except Exception as exc:
+                logger.warning("Post-build hook failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Staged solving
@@ -728,7 +804,7 @@ class DualCanteraConverter:
                 "gas_solution": gas_for_node,
             }
 
-            reactor = self._create_reactor_from_node(node, gas_for_node)
+            reactor = self.create_reactor_from_node(node, gas_for_node)
 
             # Guarantee gas_solution and mechanism are always present in meta.
             # Plugin builders overwrite reactor_meta[rid] entirely, losing these keys.
@@ -768,7 +844,7 @@ class DualCanteraConverter:
                 )
                 continue
             try:
-                self._build_single_connection(conn)
+                self.build_connection(conn)
             except Exception as exc:
                 logger.warning(
                     "Stage '%s': failed to build connection '%s': %s",
@@ -777,20 +853,14 @@ class DualCanteraConverter:
                     exc,
                 )
 
-        self._apply_flow_conservation()
+        self.apply_flow_conservation()
 
         # Apply post-build hooks for this stage's subset
         stage_config_subset: Dict[str, Any] = {
             "nodes": stage_nodes,
             "connections": stage_connections,
         }
-        for hook in self.plugins.post_build_hooks:
-            try:
-                hook(self, stage_config_subset)
-            except Exception as exc:
-                logger.warning(
-                    "Post-build hook failed for stage '%s': %s", stage_id, exc
-                )
+        self.post_build(stage_config_subset)
 
         # Build ReactorNet (non-Reservoir reactors only)
         non_res_ids = [
@@ -880,7 +950,7 @@ class DualCanteraConverter:
                 )
                 continue
             try:
-                self._build_single_connection(conn)
+                self.build_connection(conn)
             except Exception as exc:
                 logger.warning(
                     "Viz network: could not build connection '%s': %s", cid, exc
@@ -891,7 +961,7 @@ class DualCanteraConverter:
         # saw a sub-topology; mixers on stage boundaries (SPRING_A3 shape) or
         # inter-stage MFCs without explicit mass_flow_rate would otherwise
         # stay at 0 kg/s and make Sankey bands collapse.
-        self._apply_flow_conservation()
+        self.apply_flow_conservation()
 
         non_res = [r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)]
         viz_net = ct.ReactorNet(cast(Sequence[ct.Reactor], non_res))
@@ -900,7 +970,11 @@ class DualCanteraConverter:
         self.last_network = viz_net
         return viz_net
 
-    def build_network(self, config: Dict[str, Any]) -> ct.ReactorNet:
+    def build_network(
+        self,
+        config: Dict[str, Any],
+        progress_callback: Optional[Callable] = None,
+    ) -> ct.ReactorNet:
         """Build and solve the Cantera network through the staged solver.
 
         ``normalize_config`` guarantees that the config has a top-level
@@ -911,6 +985,15 @@ class DualCanteraConverter:
         ``solve_directive`` and returns a visualization ReactorNet with all
         reactors in their converged state.  The Lagrangian trajectory is
         stored on ``self._staged_trajectory``.
+
+        Parameters
+        ----------
+        config :
+            Normalised and validated configuration dict.
+        progress_callback :
+            Optional ``(stage_id: str, n_done: int, n_total: int) -> None``
+            called after each stage completes.  Forwarded to
+            :func:`~boulder.staged_solver.solve_staged`.
         """
         self._last_config = config
 
@@ -924,27 +1007,20 @@ class DualCanteraConverter:
         from .staged_solver import build_stage_graph, solve_staged
 
         plan = build_stage_graph(config)
-        trajectory = solve_staged(self, plan, config)
+        trajectory = solve_staged(
+            self, plan, config, progress_callback=progress_callback
+        )
         self._staged_trajectory = trajectory
 
         # Generate a downloadable script mirroring the staged load+build flow.
+        # When called from BoulderRunner.build(), code_lines is overwritten
+        # afterwards with the plan-aware unrolled version. This fallback
+        # serves direct callers (e.g. SimulationWorker) that bypass the runner.
         download_path = getattr(self, "_download_config_path", None) or "config.yaml"
         self.code_lines = [
             "# Load configuration from YAML and build Cantera network",
             "import cantera as ct",
-            "from boulder.config import (",
-            "    load_config_file_with_py_support,",
-            "    normalize_config,",
-            "    validate_config,",
-            ")",
-            "from boulder.cantera_converter import DualCanteraConverter",
-            "",
-            f"config_path = {repr(download_path)}",
-            "config, _ = load_config_file_with_py_support(config_path, False)",
-            "config = validate_config(normalize_config(config))",
-            "",
-            "converter = DualCanteraConverter()",
-            "network = converter.build_network(config)",
+            *self.script_load_lines(download_path, plan),
         ]
         # viz_network is already set on self.network by build_viz_network
         return self.network  # type: ignore[return-value]
@@ -1022,9 +1098,11 @@ class DualCanteraConverter:
         self.code_lines.append("# ===== SIMULATION EXECUTION =====")
         if already_solved:
             self.code_lines.append(
-                "# build_network() has already solved the staged network;"
+                "# solve_stage() has already solved each stage sequentially;"
             )
-            self.code_lines.append("# just report the converged per-reactor states.")
+            self.code_lines.append(
+                "# network = runner.network holds the converged reactor states."
+            )
             self.code_lines.append("print('Simulation completed (staged solve).')")
             self.code_lines.append("print('Reactor\\tT [K]\\tP [Pa]')")
             self.code_lines.append("for r in network.reactors:")
