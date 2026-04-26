@@ -153,6 +153,11 @@ class BoulderRunner:
             Updated in place with this stage's outlet states.
         trajectory :
             Accumulates per-stage :class:`~cantera.SolutionArray` segments.
+
+        Examples
+        --------
+        .. minigallery:: boulder.runner.BoulderRunner.solve_stage
+           :add-heading: Examples using solve_stage
         """
         from .staged_solver import (
             _apply_mechanism_switch,
@@ -236,6 +241,11 @@ class BoulderRunner:
             Execution plan (provides inter-stage connection list).
         trajectory :
             Updated in place: ``trajectory.viz_network`` is set.
+
+        Examples
+        --------
+        .. minigallery:: boulder.runner.BoulderRunner.build_viz_network
+           :add-heading: Examples using build_viz_network
         """
         self._ensure_converter()
         viz_net = self.converter.build_viz_network(

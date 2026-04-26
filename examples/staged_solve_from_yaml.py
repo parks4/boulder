@@ -22,6 +22,12 @@ outlet initialises a chain of plug-flow reactor (PFR) cells.
     You can use that script as a starting point for offline batch runs,
     parameter sweeps, or post-processing without launching the GUI.
 
+.. seealso::
+
+    :doc:`staged_solve_progressive_draw` — detailed companion example showing
+    how to call :meth:`~boulder.runner.BoulderRunner.build_viz_network` and
+    ``network.draw()`` after each stage to inspect intermediate results.
+
 Requires: cantera, boulder
 
 .. tags:: Python, reactor network, staged solve, STONE YAML, PSR, PFR
