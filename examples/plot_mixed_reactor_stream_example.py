@@ -20,7 +20,7 @@ https://cantera.org/3.1/examples/python/reactors/mix1.html.
     *Download Python*, the downloaded ``.py`` file follows the same
     :meth:`~boulder.runner.BoulderRunner.solve_stage` pattern used here.
     For a multi-stage (PSR → PFR) example see
-    :doc:`staged_solve_from_yaml`.
+    :doc:`plot_staged_solve_from_yaml`.
 
 Requires: cantera, boulder
 

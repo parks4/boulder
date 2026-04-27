@@ -24,7 +24,7 @@ outlet initialises a chain of plug-flow reactor (PFR) cells.
 
 .. seealso::
 
-    :doc:`staged_solve_progressive_draw` — detailed companion example showing
+    :doc:`plot_staged_solve_progressive_draw` — detailed companion example showing
     how to call :meth:`~boulder.runner.BoulderRunner.build_viz_network` and
     ``network.draw()`` after each stage to inspect intermediate results.
 
