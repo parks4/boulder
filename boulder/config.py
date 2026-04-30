@@ -86,7 +86,64 @@ def load_config_file_with_comments(config_path: str):
         return yaml_obj.load(f)
 
 
-def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
+def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
+    """Append satellite nodes/connections produced by reactor-kind unfolders.
+
+    For each node whose ``type`` has a registered
+    :data:`~boulder.cantera_converter.ReactorUnfolder`, invoke the unfolder and
+    append the returned nodes/connections into *config* in place.
+
+    Generated ids must be unique: if the unfolder emits an id that already
+    exists and the existing entry is **not** byte-identical, a ``ValueError``
+    is raised.  Silent overrides are forbidden so that composite reactors
+    compose cleanly with each other and with explicit user-declared nodes.
+
+    This function runs **after** :func:`expand_port_shortcuts` so any
+    user-declared ``inlet:``/``outlet:`` ports have already been converted
+    into explicit connections before unfolders read the node.
+
+    Parameters
+    ----------
+    config :
+        Normalized config dict, mutated in place.
+    plugins :
+        :class:`~boulder.cantera_converter.BoulderPlugins` whose
+        ``reactor_unfolders`` dict is consulted.
+    """
+    nodes = config.get("nodes") or []
+    conns = config.setdefault("connections", [])
+    by_node_id: Dict[str, Any] = {n["id"]: n for n in nodes if "id" in n}
+    by_conn_id: Dict[str, Any] = {c["id"]: c for c in conns if "id" in c}
+    for node in list(nodes):  # snapshot — we may append to nodes below
+        unfolder = plugins.reactor_unfolders.get(node.get("type"))
+        if unfolder is None:
+            continue
+        result = unfolder(node) or {}
+        for n in result.get("nodes", []):
+            existing = by_node_id.get(n["id"])
+            if existing is None:
+                nodes.append(n)
+                by_node_id[n["id"]] = n
+            elif existing != n:
+                raise ValueError(
+                    f"Composite unfold collision: node id '{n['id']}' "
+                    f"emitted by unfolder for '{node['id']}' conflicts "
+                    "with an existing node. Rename one of them."
+                )
+        for c in result.get("connections", []):
+            existing = by_conn_id.get(c["id"])
+            if existing is None:
+                conns.append(c)
+                by_conn_id[c["id"]] = c
+            elif existing != c:
+                raise ValueError(
+                    f"Composite unfold collision: connection id '{c['id']}' "
+                    f"emitted by unfolder for '{node['id']}' conflicts "
+                    "with an existing connection."
+                )
+
+
+def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, Any]:
     """Normalize configuration from YAML with 🪨 STONE standard to internal format.
 
     The 🪨 STONE standard format:
@@ -121,6 +178,11 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
                 temperature: 1000
     """
     from .utils import coerce_config_units  # noqa: PLC0415
+
+    if plugins is None:
+        from .cantera_converter import get_plugins  # noqa: PLC0415
+
+        plugins = get_plugins()
 
     normalized = config.copy()
 
@@ -208,6 +270,11 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # the canonical shape.  Must run AFTER the node/connection normalisation
     # loops above because it reads node.properties and writes to connections.
     expand_port_shortcuts(normalized)
+
+    # Expand composite reactor kinds into their satellite nodes/connections.
+    # Runs after port shortcuts so user-declared inlet/outlet ports have already
+    # become real connections before unfolders read the node.
+    expand_composite_kinds(normalized, plugins)
 
     # Topologically order connections so every PressureController is built
     # after the MassFlowController it points at via `master:`.  This is a

@@ -10,6 +10,7 @@ from .schema_registry import (
     get_report_metadata_for_config,
     get_schema_entry,
     register_reactor_builder,
+    register_reactor_unfolder,
     registered_kinds,
     validate_against_plugin_schemas,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "get_schema_entry",
     "make_simulation_result",
     "register_reactor_builder",
+    "register_reactor_unfolder",
     "registered_kinds",
     "validate_against_plugin_schemas",
 ]
