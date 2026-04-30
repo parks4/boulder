@@ -108,6 +108,28 @@ def register_reactor_builder(
     _SCHEMA_REGISTRY[kind] = entry
 
 
+def register_reactor_unfolder(plugins: Any, kind: str, unfolder: Any) -> None:
+    """Register a config-time unfolder for a reactor kind.
+
+    An unfolder is a callable ``(node_dict) -> {"nodes": [...], "connections":
+    [...]}`` that emits satellite nodes and connections (e.g. an ambient
+    Reservoir and a radial-loss Wall) to be inserted into the normalized STONE
+    config before any Cantera build runs.
+
+    Parameters
+    ----------
+    plugins :
+        :class:`~boulder.cantera_converter.BoulderPlugins` instance to register
+        into.
+    kind :
+        STONE reactor kind (e.g. ``"DesignPFR"``).
+    unfolder :
+        Callable matching the :data:`~boulder.cantera_converter.ReactorUnfolder`
+        signature.
+    """
+    plugins.reactor_unfolders[kind] = unfolder
+
+
 def get_report_metadata_for_config(
     config: Dict[str, Any],
     *,

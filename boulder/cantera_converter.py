@@ -31,6 +31,10 @@ logger = get_verbose_logger(__name__)
 ReactorBuilder = Callable[["DualCanteraConverter", Dict[str, Any]], ct.Reactor]
 ConnectionBuilder = Callable[["DualCanteraConverter", Dict[str, Any]], ct.FlowDevice]
 PostBuildHook = Callable[["DualCanteraConverter", Dict[str, Any]], None]
+#: ``node_dict -> {"nodes": [...], "connections": [...]}``
+#: Called during ``normalize_config`` to expand a composite reactor kind into
+#: its satellite nodes and connections before any Cantera build runs.
+ReactorUnfolder = Callable[[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]
 
 
 @dataclass
@@ -40,6 +44,9 @@ class BoulderPlugins:
     reactor_builders: Dict[str, ReactorBuilder] = field(default_factory=dict)
     connection_builders: Dict[str, ConnectionBuilder] = field(default_factory=dict)
     post_build_hooks: List[PostBuildHook] = field(default_factory=list)
+    #: Per-kind unfolders that emit satellite nodes/connections at config-normalise time.
+    #: Registered via :func:`boulder.register_reactor_unfolder`.
+    reactor_unfolders: Dict[str, ReactorUnfolder] = field(default_factory=dict)
     output_pane_plugins: List[Any] = field(
         default_factory=list
     )  # Import will be handled dynamically
@@ -664,17 +671,30 @@ class DualCanteraConverter:
             pc.pressure_coeff = coeff  # type: ignore[attr-defined]
             self.connections[cid] = pc
         elif typ == "Wall":
-            electric_power_kW = float(props.get("electric_power_kW", 0.0))
-            torch_eff = float(props.get("torch_eff", 1.0))
-            gen_eff = float(props.get("gen_eff", 1.0))
-            Q_watts = electric_power_kW * 1e3 * torch_eff * gen_eff
-            wall = ct.Wall(
-                self.reactors[src],
-                self.reactors[tgt],
-                A=1.0,
-                Q=lambda t: Q_watts,
-                name=cid,  # type: ignore[arg-type]
-            )
+            if "electric_power_kW" in props:
+                # Torch-style wall: constant power delivered via electric heating.
+                torch_eff = float(props.get("torch_eff", 1.0))
+                gen_eff = float(props.get("gen_eff", 1.0))
+                Q_watts = float(props["electric_power_kW"]) * 1e3 * torch_eff * gen_eff
+                area = float(props.get("area", 1.0))
+                wall = ct.Wall(
+                    self.reactors[src],
+                    self.reactors[tgt],
+                    A=area,
+                    Q=lambda t: Q_watts,
+                    name=cid,  # type: ignore[arg-type]
+                )
+            else:
+                # Generic passive wall: heat_flux=0 by default, settable post-build.
+                area = float(props.get("area", 1.0))
+                wall = ct.Wall(
+                    self.reactors[src],
+                    self.reactors[tgt],
+                    A=area,
+                    name=cid,  # type: ignore[arg-type]
+                )
+                if "heat_flux" in props:
+                    wall.heat_flux = float(props["heat_flux"])
             self.walls[cid] = wall
         else:
             raise ValueError(f"Unsupported connection type: '{typ}'")

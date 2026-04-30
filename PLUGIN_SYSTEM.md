@@ -222,6 +222,80 @@ The `OutputPaneContext` object provides plugins with access to:
 - **Callback conflicts**: Use unique component IDs in your plugin
 - **Performance issues**: Profile plugin code and optimize heavy operations
 
+## Composite Reactors — `ReactorUnfolder`
+
+Some reactor kinds are _composite_: they conceptually own satellite Cantera
+objects such as an ambient `Reservoir` and a radial-loss `Wall`. The
+`ReactorUnfolder` API lets a plugin declare these satellites **at config
+normalisation time**, so they appear as first-class nodes/connections in:
+
+- the Cytoscape IDE graph (`/api/graph/elements`),
+- the staged solver's per-group networks,
+- the `ct.ReactorNet` topology (enabling the standard `draw()` without custom
+  overrides).
+
+### Registering an unfolder
+
+```python
+from boulder import register_reactor_unfolder
+
+def _my_unfolder(node):
+    rid = node["id"]
+    group = node.get("group") or (node.get("properties") or {}).get("group")
+    mech  = node.get("mechanism") or (node.get("properties") or {}).get("mechanism")
+    ambient_props = {
+        "temperature": 298.15, "pressure": 101325.0, "composition": "N2:1",
+        **({"group": group} if group else {}),
+        **({"mechanism": mech} if mech else {}),
+    }
+    return {
+        "nodes": [{
+            "id": f"{rid}_ambient", "type": "Reservoir",
+            "properties": ambient_props,
+            **({"group": group} if group else {}),
+        }],
+        "connections": [{
+            "id": f"{rid}_loss_wall", "type": "Wall",
+            "source": f"{rid}_ambient", "target": rid,
+            "properties": {"area": 1.0},
+        }],
+    }
+
+def register_plugins(plugins):
+    register_reactor_unfolder(plugins, "MyCompositeReactor", _my_unfolder)
+```
+
+### Design rules
+
+1. **Parent-prefixed ids**: generated ids must start with `{node_id}_` to
+   prevent collisions when multiple instances of the same kind appear in a YAML.
+1. **Collision-intolerant**: if the config already contains an id emitted by
+   the unfolder, the entries must be byte-identical or `ValueError` is raised.
+1. **Adiabatic / conditional satellites**: return `{}` to suppress satellites
+   for specific configurations (e.g. `adiabatic: true`).
+1. **Group + mechanism propagation**: copy both `node["group"]` (top-level) and
+   `node["properties"]["group"]` to each emitted node so Cytoscape assigns
+   the satellite to the correct stage group. Copy `mechanism` into
+   `properties.mechanism` of emitted Reservoirs so the staged solver uses the
+   same Cantera `Solution` as the parent.
+1. **Post-build hooks still apply**: the unfolder produces STONE config entries;
+   the post-build hook then looks up the built `ct.Wall` / `ct.Reservoir` in
+   `converter.walls` / `converter.reactors` (by the deterministic ids above)
+   and stores them as `reactor._loss_wall` / `reactor._ambient_reservoir` for
+   physics use.
+
+### Relationship to `expand_port_shortcuts`
+
+`expand_composite_kinds` runs **after** `expand_port_shortcuts` in
+`normalize_config`, so inline `inlet:`/`outlet:` ports on the parent node
+have already been converted to real connections before the unfolder is called.
+The two passes together form Boulder's full config pre-processing pipeline:
+
+```
+STONE normalisation → expand_port_shortcuts → expand_composite_kinds
+  → _sort_connections_by_master → synthesize_default_group
+```
+
 ## Future Enhancements
 
 Planned improvements to the plugin system:
