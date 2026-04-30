@@ -33,11 +33,13 @@ Requires: cantera, boulder
 .. tags:: Python, reactor network, staged solve, STONE YAML, PSR, PFR
 """
 
+from pathlib import Path
 from typing import Any
 
 from boulder.runner import BoulderRunner
 
-config_path = "configs/staged_psr_pfr.yaml"
+# sphinx-gallery sets cwd to the examples directory; configs/ is one level up.
+config_path = str(Path.cwd().parent / "configs" / "staged_psr_pfr.yaml")
 runner = BoulderRunner.from_yaml(config_path)
 plan = runner.build_stage_graph()
 trajectory = runner.new_trajectory()

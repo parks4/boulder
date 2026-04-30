@@ -33,8 +33,9 @@ from pathlib import Path
 from boulder.runner import BoulderRunner
 from boulder.sim2stone import write_sim_as_yaml
 
-# Add the examples directory to the path to import mix1
-examples_dir = Path(__file__).parent
+# sphinx-gallery sets cwd to the examples directory before executing each
+# script, so Path.cwd() is the reliable way to locate sibling files.
+examples_dir = Path.cwd()
 sys.path.insert(0, str(examples_dir))
 
 import mix1  # noqa: E402

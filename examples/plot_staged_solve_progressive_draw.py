@@ -39,6 +39,7 @@ Requires: cantera, boulder, graphviz (optional, for ``network.draw``)
 .. tags:: Python, reactor network, staged solve, STONE YAML, PSR, PFR, visualization
 """
 
+from pathlib import Path
 from typing import Any
 
 from boulder.runner import BoulderRunner
@@ -49,7 +50,9 @@ from boulder.runner import BoulderRunner
 #
 # ``from_yaml`` runs load → normalize → validate.
 # ``build_stage_graph`` is pure config parsing; no Cantera code runs yet.
-config_path = "configs/staged_psr_pfr.yaml"
+
+# sphinx-gallery sets cwd to the examples directory; configs/ is one level up.
+config_path = str(Path.cwd().parent / "configs" / "staged_psr_pfr.yaml")
 runner = BoulderRunner.from_yaml(config_path)
 plan = runner.build_stage_graph()
 
