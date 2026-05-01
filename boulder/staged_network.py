@@ -124,8 +124,4 @@ class StagedReactorNet:
     def __repr__(self) -> str:
         stage_ids = list(self.networks.keys())
         n_reactors = len(self.reactors)
-        return (
-            f"StagedReactorNet("
-            f"stages={stage_ids}, "
-            f"n_reactors={n_reactors})"
-        )
+        return f"StagedReactorNet(stages={stage_ids}, n_reactors={n_reactors})"

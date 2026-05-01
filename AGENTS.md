@@ -38,7 +38,7 @@ Deep-dive architecture: [ARCHITECTURE.md](ARCHITECTURE.md).
    pip install -e .
    ```
 
-2. Build the production frontend when you change UI code:
+1. Build the production frontend when you change UI code:
 
    ```bash
    cd frontend

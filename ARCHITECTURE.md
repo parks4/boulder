@@ -142,7 +142,7 @@ Two mechanisms both **add** to the same `BoulderPlugins` container:
    my_plugin = "my_package.boulder_plugins:register_plugins"
    ```
 
-2. **`BOULDER_PLUGINS`** — comma- or semicolon-separated module names for local development. `boulder/cli.py` and `boulder/api/main.py` load a repo-root `.env` so you can set:
+1. **`BOULDER_PLUGINS`** — comma- or semicolon-separated module names for local development. `boulder/cli.py` and `boulder/api/main.py` load a repo-root `.env` so you can set:
 
    ```bash
    BOULDER_PLUGINS=my_local_pkg.boulder_plugins
@@ -255,10 +255,10 @@ nodes:
 ### Best practices
 
 1. **Graceful degradation** for missing optional dependencies
-2. **Error handling** in plugin code paths
-3. **Avoid heavy work** in `is_available()`
-4. **UI consistency** with existing components
-5. **Document** requirements and usage
+1. **Error handling** in plugin code paths
+1. **Avoid heavy work** in `is_available()`
+1. **UI consistency** with existing components
+1. **Document** requirements and usage
 
 ### Troubleshooting
 
@@ -314,10 +314,10 @@ def register_plugins(plugins):
 **Design rules**
 
 1. **Parent-prefixed ids** — `{node_id}_...` to avoid collisions across instances
-2. **Collisions** — duplicate id with different content → `ValueError`; byte-identical re-unfold is a no-op
-3. **Conditional satellites** — return `{}` when no satellites (e.g. adiabatic)
-4. **Group + mechanism** — propagate to emitted nodes for correct staging and mechanisms
-5. **Post-build hooks** — may attach physics on the built `Wall` / `Reservoir` using deterministic ids
+1. **Collisions** — duplicate id with different content → `ValueError`; byte-identical re-unfold is a no-op
+1. **Conditional satellites** — return `{}` when no satellites (e.g. adiabatic)
+1. **Group + mechanism** — propagate to emitted nodes for correct staging and mechanisms
+1. **Post-build hooks** — may attach physics on the built `Wall` / `Reservoir` using deterministic ids
 
 **Order vs port shortcuts**
 
