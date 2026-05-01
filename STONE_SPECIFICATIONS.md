@@ -6,7 +6,7 @@ current authored format.
 
 For a quick introduction and worked examples, see `docs/stone.rst` (online) or `configs/README.md`.
 
----
+______________________________________________________________________
 
 ## 1. Dialect Detection
 
@@ -22,7 +22,7 @@ shape:
 
 Files that mix `stages:` and `network:` at the same level are rejected.
 
----
+______________________________________________________________________
 
 ## 2. Allowed Top-Level Keys
 
@@ -35,7 +35,7 @@ Dynamic stage block names (declared under `stages:`) are also allowed at the top
 **Reserved names that cannot be used as stage ids:** `metadata`, `phases`, `settings`, `stages`,
 `network`, `nodes`, `connections`.
 
----
+______________________________________________________________________
 
 ## 3. Common Sections
 
@@ -71,7 +71,7 @@ plugin documentation for recognized keys.
 KPI functions, figure generators, calc-note targets. Consumed by `bloc.yaml_utils` and
 `bloc.calc_note`. Not interpreted by Boulder core.
 
----
+______________________________________________________________________
 
 ## 4. Staged Networks — `stages:`
 
@@ -124,7 +124,7 @@ a readability hint only. Cycles in the stage dependency graph fail validation.
 Inter-stage edges are declared in the **downstream** stage block. The downstream stage is the one
 whose reactor is initialized from the upstream outlet state.
 
----
+______________________________________________________________________
 
 ## 5. Single-Stage Networks — `network:`
 
@@ -151,7 +151,7 @@ network:
 
 `network:` is sugar for a single stage named `default`. It is mutually exclusive with `stages:`.
 
----
+______________________________________________________________________
 
 ## 6. Item Schema
 
@@ -209,7 +209,7 @@ A reactor may declare an `initial:` sub-block to seed integration when needed:
 `initial:` is a guess or seed, never a constraint. If omitted, Boulder seeds the reactor from the
 upstream state source. A reactor with no upstream state source must declare `initial:`.
 
----
+______________________________________________________________________
 
 ## 7. Node Kinds
 
@@ -255,7 +255,7 @@ A visualization-only terminal node with no physical state:
 `OutletSink` has no required fields, may carry a `description:`, accepts inbound edges only, and
 cannot be a `source:` in any connection.
 
----
+______________________________________________________________________
 
 ## 8. Connection Kinds
 
@@ -329,7 +329,7 @@ the logical connection:
 - `Xtol` — dropped mole-fraction mass tolerance (dimensionless). Exceeding it is a hard error.
 - `mechanism_switch:` belongs on logical connections, not on `MassFlowController`.
 
----
+______________________________________________________________________
 
 ## 9. Physics Rules
 
@@ -343,7 +343,7 @@ the logical connection:
 - Intra-stage nodes should use one coherent mechanism. Cross-mechanism remapping belongs at a stage
   boundary on a logical connection.
 
----
+______________________________________________________________________
 
 ## 10. Valid Examples
 
@@ -450,7 +450,7 @@ network:
   OutletSink: {}
 ```
 
----
+______________________________________________________________________
 
 ## 11. Invalid Examples
 
@@ -564,7 +564,7 @@ network:
 *Error: Inline `inlet:` / `outlet:` ports are not valid in STONE v2. Author the edge as an
 explicit connection item in the same block. See STONE_SPECIFICATIONS.md.*
 
----
+______________________________________________________________________
 
 ## 12. Historical STONE v1 (for reference only)
 

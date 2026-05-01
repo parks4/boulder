@@ -1,4 +1,4 @@
-﻿import pathlib
+import pathlib
 import re
 
 import pytest
@@ -20,7 +20,9 @@ def test_valid_fixture(path):
     validate_normalized_config(norm)
 
 
-@pytest.mark.parametrize("path", sorted(INVALID_DIR.glob("*.yaml")), ids=lambda p: p.stem)
+@pytest.mark.parametrize(
+    "path", sorted(INVALID_DIR.glob("*.yaml")), ids=lambda p: p.stem
+)
 def test_invalid_fixture(path):
     """Each STONE v2 invalid fixture raises ValueError with a useful message."""
     from boulder.config import normalize_config

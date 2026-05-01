@@ -437,6 +437,10 @@ class DualCanteraConverter:
         self._unresolved_mfc_ids: Set[str] = set()
         self._mfc_topology: Dict[str, Tuple[str, str]] = {}  # conn_id -> (src, tgt)
         self._mfc_flow_rates: Dict[str, float] = {}  # known flow rates (kg/s)
+        # Persistent record of MFCs that had no explicit mass_flow_rate in the
+        # YAML. Used by build_viz_network to re-attempt conservation resolution
+        # for MFCs prematurely resolved to 0 during a partial-topology stage pass.
+        self._originally_unspecified_mfc_ids: Set[str] = set()
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -644,6 +648,7 @@ class DualCanteraConverter:
             else:
                 mfc.mass_flow_rate = 0.0  # type: ignore[misc]  # resolved by conservation
                 self._unresolved_mfc_ids.add(cid)
+                self._originally_unspecified_mfc_ids.add(cid)
             self.connections[cid] = mfc
         elif typ == "Valve":
             coeff = float(props.get("valve_coeff", 1.0))
@@ -983,6 +988,16 @@ class DualCanteraConverter:
                 logger.warning(
                     "Viz network: could not build connection '%s': %s", cid, exc
                 )
+
+        # Re-enqueue any MFCs that (a) had no explicit mass_flow_rate in the
+        # YAML and (b) were resolved to 0 during a per-stage conservation pass
+        # when the full cross-stage topology was not yet visible.  Now that all
+        # inter-stage devices are built the full topology is available and a
+        # second conservation pass can assign the correct flow rate.
+        for cid in list(self._originally_unspecified_mfc_ids):
+            if self._mfc_flow_rates.get(cid, -1.0) == 0.0:
+                self._unresolved_mfc_ids.add(cid)
+                self._mfc_flow_rates.pop(cid, None)
 
         # Resolve any MFC mass flow rates that were still pending once all
         # inter-stage devices are in place.  Until now intra-stage passes only
