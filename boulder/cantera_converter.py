@@ -441,6 +441,10 @@ class DualCanteraConverter:
         # YAML. Used by build_viz_network to re-attempt conservation resolution
         # for MFCs prematurely resolved to 0 during a partial-topology stage pass.
         self._originally_unspecified_mfc_ids: Set[str] = set()
+        # PressureControllers deferred during stage builds because their master
+        # MFC was a logical inter-stage connection not yet registered.  These
+        # are built in build_viz_network once the full topology is available.
+        self._deferred_pc_conn_dicts: List[Dict[str, Any]] = []
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -876,6 +880,22 @@ class DualCanteraConverter:
                     cid,
                 )
                 continue
+            # Detect PressureControllers whose master MFC has not been
+            # registered yet (logical inter-stage MFCs are materialized only
+            # in build_viz_network).  Defer these cleanly rather than letting
+            # build_connection raise and swallowing the error silently.
+            if conn.get("type") == "PressureController":
+                master_id = (conn.get("properties") or {}).get("master")
+                if master_id and master_id not in self.connections:
+                    logger.debug(
+                        "Stage '%s': deferring PressureController '%s' — "
+                        "master '%s' not yet registered (logical inter-stage MFC).",
+                        stage_id,
+                        cid,
+                        master_id,
+                    )
+                    self._deferred_pc_conn_dicts.append(conn)
+                    continue
             try:
                 self.build_connection(conn)
             except Exception as exc:
@@ -998,6 +1018,31 @@ class DualCanteraConverter:
             if self._mfc_flow_rates.get(cid, -1.0) == 0.0:
                 self._unresolved_mfc_ids.add(cid)
                 self._mfc_flow_rates.pop(cid, None)
+
+        # Build any PressureControllers that were deferred during stage builds
+        # because their master MFC was a logical inter-stage connection not yet
+        # registered at stage-build time.  Now that all inter-stage devices
+        # have been materialized above, the masters exist in self.connections.
+        for conn in self._deferred_pc_conn_dicts:
+            cid = conn["id"]
+            if cid in self.connections:
+                continue  # already built via all_connections loop
+            src = conn["source"]
+            tgt = conn["target"]
+            if src not in self.reactors or tgt not in self.reactors:
+                logger.warning(
+                    "Viz network: cannot build deferred PC '%s' — reactor not found.",
+                    cid,
+                )
+                continue
+            try:
+                self.build_connection(conn)
+            except Exception as exc:
+                logger.warning(
+                    "Viz network: failed to build deferred PressureController '%s': %s",
+                    cid,
+                    exc,
+                )
 
         # Resolve any MFC mass flow rates that were still pending once all
         # inter-stage devices are in place.  Until now intra-stage passes only

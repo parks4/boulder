@@ -23,7 +23,6 @@ import pytest
 
 from boulder.config import normalize_config
 
-
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
@@ -43,7 +42,8 @@ def _base() -> dict:
 def test_process_pressure_propagates_from_outlet_sink_to_upstream_nodes():
     """Single flow-connected component: OutletSink declares 1.3 bar;
     upstream Reservoir has no pressure; after normalize_config the Reservoir
-    must carry 1.3 bar (130 000 Pa after unit coercion)."""
+    must carry 1.3 bar (130 000 Pa after unit coercion).
+    """
     cfg = {
         **_base(),
         "network": [
@@ -97,7 +97,8 @@ def test_process_pressure_propagates_from_outlet_sink_to_upstream_nodes():
 
 def test_ambient_reservoir_connected_only_via_wall_keeps_its_own_pressure():
     """The pfr_ambient Reservoir is connected to the process via a Wall only.
-    It must NOT receive the process pressure (1.3 bar); it keeps 101 325 Pa."""
+    It must NOT receive the process pressure (1.3 bar); it keeps 101 325 Pa.
+    """
     cfg = {
         **_base(),
         "network": [
@@ -167,7 +168,8 @@ def test_ambient_reservoir_connected_only_via_wall_keeps_its_own_pressure():
 def test_conflicting_process_pressures_raise_value_error():
     """Two nodes in the same flow-connected component declare different
     pressures (1.3 bar vs 1.0 bar).  normalize_config must raise ValueError
-    with a message that names both nodes."""
+    with a message that names both nodes.
+    """
     cfg = {
         **_base(),
         "network": [
@@ -204,7 +206,8 @@ def test_conflicting_process_pressures_raise_value_error():
 
 def test_existing_pressures_not_overwritten_when_consistent():
     """If every node already carries the same pressure value, the defaulting
-    pass leaves them all intact — backward-compatible with old configs."""
+    pass leaves them all intact — backward-compatible with old configs.
+    """
     cfg = {
         **_base(),
         "network": [

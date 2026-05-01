@@ -41,6 +41,10 @@ _converter_class = None  # overridable by CLI before uvicorn starts
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
+    from ..verbose_utils import ensure_boulder_console_logging
+
+    ensure_boulder_console_logging()
+
     # Startup: register built-in plugins and create global converter
     from ..cantera_converter import DualCanteraConverter
     from ..network_plugin import register_network_plugin
