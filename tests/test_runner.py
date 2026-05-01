@@ -129,8 +129,14 @@ def test_boulder_runner_build_returns_self(tmp_path):
 def test_boulder_runner_solve_returns_self(tmp_path):
     """BoulderRunner.solve() returns self; runner.result is a SimulationResult.
 
-    Asserts the result container is populated after solve().
+    Asserts:
+    - result is a SimulationResult instance.
+    - result.network_viz is the global visualization ct.ReactorNet.
+    - result.networks maps stage ids to concrete stage solvers.
+    - Old attribute names network and stage_nets are absent.
     """
+    import cantera as ct  # type: ignore
+
     from boulder.runner import BoulderRunner
     from boulder.simulation_result import SimulationResult
 
@@ -139,6 +145,10 @@ def test_boulder_runner_solve_returns_self(tmp_path):
 
     assert runner.result is not None
     assert isinstance(runner.result, SimulationResult)
+    assert isinstance(runner.result.network_viz, ct.ReactorNet)
+    assert isinstance(runner.result.networks, dict)
+    assert not hasattr(runner.result, "network"), "old 'network' field must not exist"
+    assert not hasattr(runner.result, "stage_nets"), "old 'stage_nets' field must not exist"
 
 
 # ---------------------------------------------------------------------------

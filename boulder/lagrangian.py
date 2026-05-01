@@ -60,7 +60,7 @@ class LagrangianTrajectory:
     viz_network : ct.ReactorNet or None
         Visualization-only :class:`~cantera.ReactorNet` built from all
         converged reactor states after the staged solve completes.
-    stage_nets : dict[str, ct.ReactorNet]
+    networks : dict[str, ct.ReactorNet]
         Mapping ``stage_id -> ReactorNet`` giving access to the concrete
         stage-level network that solved each stage.  For stages driven by a
         plugin-provided :class:`~boulder.stage_network.CustomStageNetwork`
@@ -71,7 +71,7 @@ class LagrangianTrajectory:
     def __init__(self) -> None:
         self.segments: List[TrajectorySegment] = []
         self.viz_network: Optional[ct.ReactorNet] = None
-        self.stage_nets: Dict[str, ct.ReactorNet] = {}
+        self.networks: Dict[str, ct.ReactorNet] = {}
 
     # ------------------------------------------------------------------
     # Building the trajectory

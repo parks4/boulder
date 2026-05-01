@@ -16,12 +16,17 @@ Structure
 ---------
 ``config``:
     The fully normalised (post :func:`boulder.config.normalize_config`) config.
-``network``:
+``network_viz``:
     Visualization :class:`cantera.ReactorNet` produced by
     :meth:`~boulder.cantera_converter.DualCanteraConverter.build_viz_network`.
-``stage_nets``:
+    This global network contains all converged reactors and cross-stage
+    connections and is suitable for drawing, Sankey diagrams, and generic
+    flow reporting.
+``networks``:
     Mapping ``stage_id -> ReactorNet`` exposing the concrete stage solvers
-    (i.e. plugin-specific stage networks) for plugin-specific post-processing.
+    (i.e. plugin-specific stage networks such as ``DesignPFRNet`` or
+    ``DesignTubeFurnaceNet``) for plugin-specific post-processing.  Use this
+    to access per-stage scalars and profiles.
 ``trajectory``:
     The :class:`~boulder.lagrangian.LagrangianTrajectory` aggregating all
     stage segments.  Always present (even for a single-stage simulation).
@@ -61,8 +66,8 @@ class SimulationResult:
     """Typed snapshot of a built + solved STONE simulation."""
 
     config: Dict[str, Any]
-    network: ct.ReactorNet
-    stage_nets: Dict[str, ct.ReactorNet] = field(default_factory=dict)
+    network_viz: ct.ReactorNet
+    networks: Dict[str, ct.ReactorNet] = field(default_factory=dict)
     trajectory: Optional["LagrangianTrajectory"] = None
     per_reactor_states: Dict[str, ct.SolutionArray] = field(default_factory=dict)
     scalars: Dict[str, Any] = field(default_factory=dict)
@@ -71,9 +76,9 @@ class SimulationResult:
     node_inlet_mass_flows_kg_s: Dict[str, float] = field(default_factory=dict)
     node_outlet_mass_flows_kg_s: Dict[str, float] = field(default_factory=dict)
 
-    def stage_net(self, stage_id: str) -> Optional[ct.ReactorNet]:
-        """Return the reactor net for ``stage_id``, like :attr:`stage_nets` lookup."""
-        return self.stage_nets.get(stage_id)
+    def get_network(self, stage_id: str) -> Optional[ct.ReactorNet]:
+        """Return the stage solver network for ``stage_id``, or ``None``."""
+        return self.networks.get(stage_id)
 
 
 def make_simulation_result(
@@ -94,8 +99,8 @@ def make_simulation_result(
        namespace.
     """
     trajectory = getattr(converter, "_staged_trajectory", None)
-    stage_nets: Dict[str, ct.ReactorNet] = (
-        dict(trajectory.stage_nets) if trajectory is not None else {}
+    networks: Dict[str, ct.ReactorNet] = (
+        dict(trajectory.networks) if trajectory is not None else {}
     )
 
     per_reactor_states: Dict[str, ct.SolutionArray] = {}
@@ -107,7 +112,7 @@ def make_simulation_result(
         per_reactor_states[rid] = states
 
     scalars: Dict[str, Any] = {}
-    for stage_id, stage_rnet in stage_nets.items():
+    for stage_id, stage_rnet in networks.items():
         net_scalars = getattr(stage_rnet, "scalars", None)
         if not isinstance(net_scalars, dict):
             continue
@@ -154,8 +159,8 @@ def make_simulation_result(
         )
     return SimulationResult(
         config=config,
-        network=net,
-        stage_nets=stage_nets,
+        network_viz=net,
+        networks=networks,
         trajectory=trajectory,
         per_reactor_states=per_reactor_states,
         scalars=scalars,

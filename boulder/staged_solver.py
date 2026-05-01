@@ -320,7 +320,7 @@ def solve_staged(
             stage_id=stage.id,
             stage=stage,
         )
-        trajectory.stage_nets[stage.id] = network
+        trajectory.networks[stage.id] = network
 
         # Collect SolutionArray in flow order through the stage
         flow_order = _flow_order_within_stage(stage)

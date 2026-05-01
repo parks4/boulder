@@ -190,7 +190,7 @@ class BoulderRunner:
             stage_id=stage.id,
             stage=stage,
         )
-        trajectory.stage_nets[stage.id] = network
+        trajectory.networks[stage.id] = network
 
         flow_order = _flow_order_within_stage(stage)
         states = _collect_stage_states(
