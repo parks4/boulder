@@ -14,7 +14,7 @@ from __future__ import annotations
 import textwrap
 
 # ---------------------------------------------------------------------------
-# Minimal YAML fixture (no Bloc plugins, pure Boulder)
+# Minimal YAML fixture (no external plugins; pure Boulder)
 # ---------------------------------------------------------------------------
 
 MINIMAL_YAML_CONTENT = textwrap.dedent("""\
@@ -194,7 +194,8 @@ def test_boulder_cli_main_accepts_runner_class_kwarg(tmp_path, monkeypatch):
     """boulder.cli.main(argv, runner_class=...) instantiates the given runner.
 
     Asserts that the runner_class kwarg is forwarded through the CLI so that
-    the Bloc CLI (and any custom subclass) can be injected without sys.argv
+    a thin CLI wrapper (and any custom subclass) can inject the runner without
+    sys.argv
     manipulation.
     """
     from boulder.runner import BoulderRunner

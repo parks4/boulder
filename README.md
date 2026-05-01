@@ -6,6 +6,12 @@ A web-based tool for visually constructing and simulating Cantera ReactorNet sys
 
 **Architecture:** FastAPI (Python backend) + React (TypeScript frontend) with Vite, Tailwind CSS, Zustand, and TanStack Query.
 
+## Documentation
+
+- **[AGENTS.md](AGENTS.md)** — setup, verification commands, coding and testing conventions for contributors and agents.
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — system design, API, frontend, staged solve, and plugin extension points.
+- **Sphinx** — build with `make docs-build`; published from `docs/` (see Contributing below).
+
 ## Features
 
 - Interactive graph editor for creating reactor networks (Cytoscape.js)
@@ -168,9 +174,6 @@ or open the [Makefile](./Makefile) and execute the lines therein manually.
 
 ## License
 
-```
-Copyright (C) Spark Cleantech SAS (SIREN 909736068) - All Rights Reserved
-Unauthorized copying of this file, via any medium is strictly prohibited
-Proprietary and confidential
-Written by Erwan Pannier <erwan.pannier@spark-cleantech.eu>, June2025
-```
+Boulder is released under the [MIT License](LICENSE).
+
+Copyright (c) 2025 Spark Cleantech SAS

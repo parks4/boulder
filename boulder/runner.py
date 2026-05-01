@@ -1,8 +1,8 @@
 """BoulderRunner — orchestrator for the YAML → network → result pipeline.
 
 Provides a single class that subclasses can override to inject custom
-converters (e.g. ``BlocRunner`` with ``BlocConverter``).  The Boulder CLI
-uses the base class; Bloc CLI passes ``runner_class=BlocRunner``.
+converters (e.g. ``MyRunner`` with ``MyConverter``).  The Boulder CLI uses
+the base class; other entrypoints may pass ``runner_class=MyRunner``.
 """
 
 from __future__ import annotations
@@ -342,8 +342,8 @@ class BoulderRunner:
         """Solve the network and optionally write a downloadable Python script.
 
         This is the single source of truth for the ``--headless --download``
-        CLI flow.  Both ``boulder`` and ``bloc`` CLIs call this method so the
-        generated scripts are always identical (same code path, same converter).
+        CLI flow.  Custom ``BoulderRunner`` subclasses use the same method so the
+        generated scripts stay on one code path (same converter wiring).
 
         Parameters
         ----------

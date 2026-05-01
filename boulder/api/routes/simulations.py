@@ -74,7 +74,7 @@ async def start_simulation(
 
     try:
         # Build a converter with the resolved mechanism.
-        # Use the converter class registered at startup (e.g. BlocConverter)
+        # Use the converter class registered at startup (may be substituted by subclass)
         # so subclass overrides (like resolve_mechanism) are respected.
         converter_cls = getattr(
             request.app.state, "converter_class", DualCanteraConverter

@@ -44,9 +44,8 @@ class StagedReactorNet:
         The global, drawable, post-solve :class:`~cantera.ReactorNet` built
         from all converged reactors and cross-stage connections.
     networks:
-        Mapping ``stage_id -> stage solver network`` (e.g.
-        :class:`~bloc.design_reactors.DesignPFRNet` or
-        :class:`~bloc.reactors.DesignTubeFurnaceNet`).
+        Mapping ``stage_id -> stage solver network`` (may be plugin-defined
+        custom ``ReactorNet``-like types).
     trajectory:
         The :class:`~boulder.lagrangian.LagrangianTrajectory` accumulated
         during the staged solve.

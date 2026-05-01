@@ -75,4 +75,4 @@ Inspect which plugins loaded with::
 See :doc:`auto_examples/plugin_example` for a complete, runnable demonstration
 using a ``Monolith`` reactor that exercises all extension points above.
 
-Full plugin system reference: ``PLUGIN_SYSTEM.md`` at the repository root.
+Full architecture and plugin reference: ``ARCHITECTURE.md`` at the repository root (plugin system, staged networks, discovery).

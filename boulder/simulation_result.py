@@ -24,8 +24,7 @@ Structure
       :class:`cantera.ReactorNet` containing all converged reactors and
       cross-stage connections.
     * ``network.networks``: mapping ``stage_id -> stage solver network``
-      (e.g. :class:`~bloc.design_reactors.DesignPFRNet` or
-      :class:`~bloc.reactors.DesignTubeFurnaceNet`).
+      (plugin-defined types such as custom PFR or furnace nets are opaque here).
     * ``network.reactors``: unique global reactor objects, deduplicated by
       object identity; same Python instances as those inside each stage
       solver where the solver is reactor-backed.
