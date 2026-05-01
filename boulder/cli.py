@@ -127,7 +127,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "Dotted-path to a BoulderRunner subclass to use (e.g. "
-            "'bloc.runner:BlocRunner').  Primarily used by the `bloc` CLI."
+            "'my_pkg.runner:CustomRunner').  Intended for wrappers that inject "
+            "a custom converter."
         ),
     )
     return parser.parse_args(argv)
@@ -594,8 +595,8 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
             )
             sys.exit(1)
 
-        # Run headless mode via the runner (single source of truth for both
-        # `boulder` and `bloc` CLIs).
+        # Run headless mode via the runner (single source of truth for this CLI
+        # and any thin wrapper that passes runner_class).
         try:
             runner = runner_class.from_yaml(args.config)
             settings = runner.config.get("settings") or {}

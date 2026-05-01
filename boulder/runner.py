@@ -1,14 +1,14 @@
 """BoulderRunner — orchestrator for the YAML → network → result pipeline.
 
 Provides a single class that subclasses can override to inject custom
-converters (e.g. ``BlocRunner`` with ``BlocConverter``).  The Boulder CLI
-uses the base class; Bloc CLI passes ``runner_class=BlocRunner``.
+converters (e.g. ``MyRunner`` with ``MyConverter``).  The Boulder CLI uses
+the base class; other entrypoints may pass ``runner_class=MyRunner``.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, Optional, Type, Union
 
 if TYPE_CHECKING:
     import cantera as ct
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from boulder.cantera_converter import BoulderPlugins, DualCanteraConverter
     from boulder.lagrangian import LagrangianTrajectory
     from boulder.simulation_result import SimulationResult
+    from boulder.staged_network import StagedReactorNet
     from boulder.staged_solver import Stage, StageExecutionPlan
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ class BoulderRunner:
         self.config_path = config_path
         self.plugins = plugins
         self.converter: Optional["DualCanteraConverter"] = None
-        self.network: Optional["ct.ReactorNet"] = None
+        self.network: Optional[Union["StagedReactorNet", "ct.ReactorNet"]] = None
         self.results: Optional[Dict[str, Any]] = None
         self.code: Optional[str] = None
         self.result: Optional["SimulationResult"] = None
@@ -190,7 +191,7 @@ class BoulderRunner:
             stage_id=stage.id,
             stage=stage,
         )
-        trajectory.stage_nets[stage.id] = network
+        trajectory.networks[stage.id] = network
 
         flow_order = _flow_order_within_stage(stage)
         states = _collect_stage_states(
@@ -280,7 +281,9 @@ class BoulderRunner:
         Returns ``self`` for chaining.  After this call:
 
         - ``self.converter`` is the :class:`~boulder.cantera_converter.DualCanteraConverter`.
-        - ``self.network`` is the visualisation :class:`~cantera.ReactorNet`.
+        - ``self.network`` is a raw visualization :class:`~cantera.ReactorNet`
+          (upgraded to the :class:`~boulder.staged_network.StagedReactorNet`
+          facade after :meth:`solve` is called).
         - ``self.code`` is the generated standalone Python script string.
         """
         converter = self._ensure_converter()
@@ -312,14 +315,20 @@ class BoulderRunner:
     def solve(self) -> "BoulderRunner":
         """Build (if not done) and produce a typed :class:`~boulder.SimulationResult`.
 
+        After this call ``self.result`` is a :class:`~boulder.SimulationResult`
+        and ``self.network`` is the same
+        :class:`~boulder.staged_network.StagedReactorNet` facade as
+        ``self.result.network`` — i.e. ``self.network is self.result.network``.
+
         Returns ``self`` for chaining.
         """
-        if self.network is None:
+        if self.network is None or not hasattr(self.network, "visualization_network"):
             self.build()
         from .simulation_result import make_simulation_result
 
         converter = self._ensure_converter()
         self.result = make_simulation_result(converter, self.config)
+        self.network = self.result.network
         return self
 
     def run_headless(
@@ -333,8 +342,8 @@ class BoulderRunner:
         """Solve the network and optionally write a downloadable Python script.
 
         This is the single source of truth for the ``--headless --download``
-        CLI flow.  Both ``boulder`` and ``bloc`` CLIs call this method so the
-        generated scripts are always identical (same code path, same converter).
+        CLI flow.  Custom ``BoulderRunner`` subclasses use the same method so the
+        generated scripts stay on one code path (same converter wiring).
 
         Parameters
         ----------

@@ -19,7 +19,7 @@ import { toast } from "sonner";
 export function AppShell() {
   const { theme, toggleTheme } = useThemeStore();
   const { config, fileName, setConfig } = useConfigStore();
-  const { isRunning, startSimulation: setStarted } = useSimulationStore();
+  const { isRunning, beginSimulationRun, startSimulation: setStarted, setError } = useSimulationStore();
   const [showYamlEditor, setShowYamlEditor] = useState(false);
 
   // Connect SSE stream
@@ -52,13 +52,16 @@ export function AppShell() {
   // Keyboard shortcut: Ctrl+Enter
   const handleRunSimulation = useCallback(async () => {
     if (isRunning || config.nodes.length === 0) return;
+    beginSimulationRun();
     try {
       const resp = await startSimulation(config);
       setStarted(resp.simulation_id);
     } catch (err) {
-      toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed: ${msg}`);
+      setError(msg);
     }
-  }, [isRunning, config, setStarted]);
+  }, [isRunning, config, beginSimulationRun, setStarted, setError]);
 
   useKeyboardShortcuts(handleRunSimulation);
 

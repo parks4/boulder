@@ -9,7 +9,7 @@ This directory contains the comprehensive test suite for the Boulder application
 - **`test_unit.py`** - Unit tests for core Boulder functionality
 - **`test_yaml_comment_system.py`** - Comprehensive YAML comment preservation tests
 - **`test_e2e.py`** - End-to-end tests (requires ChromeDriver)
-- **`test_blocscape.py`** - Basic version/import tests
+- **`test_package_import.py`** - Basic version/import tests
 
 ### Test Categories
 

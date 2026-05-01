@@ -7,7 +7,14 @@ import { toast } from "sonner";
 
 export function SimulateCard() {
   const config = useConfigStore((s) => s.config);
-  const { isRunning, simulationId, pythonCode, startSimulation: setStarted } = useSimulationStore();
+  const {
+    isRunning,
+    simulationId,
+    pythonCode,
+    beginSimulationRun,
+    startSimulation: setStarted,
+    setError,
+  } = useSimulationStore();
   const [simTime, setSimTime] = useState("10");
   const [timeStep, setTimeStep] = useState("1");
 
@@ -16,6 +23,7 @@ export function SimulateCard() {
       toast.error("Add at least one reactor before simulating");
       return;
     }
+    beginSimulationRun();
     try {
       const resp = await startSimulation(
         config,
@@ -24,9 +32,11 @@ export function SimulateCard() {
       );
       setStarted(resp.simulation_id);
     } catch (err) {
-      toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed: ${msg}`);
+      setError(msg);
     }
-  }, [config, simTime, timeStep, setStarted]);
+  }, [config, simTime, timeStep, beginSimulationRun, setStarted, setError]);
 
   const handleDownloadPy = useCallback(() => {
     if (!pythonCode) return;

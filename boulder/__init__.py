@@ -16,6 +16,7 @@ from .schema_registry import (
 )
 from .simulation_result import SimulationResult, make_simulation_result
 from .stage_network import CustomStageNetwork
+from .staged_network import StagedReactorNet
 from .validation import (
     METADATA_ALLOWED_KEYS,
     METADATA_MANDATORY_KEYS,
@@ -33,6 +34,7 @@ __all__ = [
     "MetadataModel",
     "ReactorSchemaEntry",
     "SimulationResult",
+    "StagedReactorNet",
     "describe_kind",
     "get_report_metadata_for_config",
     "get_schema_entry",

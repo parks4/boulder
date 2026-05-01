@@ -1,4 +1,4 @@
-"""Test suite for boulder."""
+"""Smoke tests for package import and version."""
 
 
 def test_version() -> None:

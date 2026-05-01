@@ -14,7 +14,7 @@ from __future__ import annotations
 import textwrap
 
 # ---------------------------------------------------------------------------
-# Minimal YAML fixture (no Bloc plugins, pure Boulder)
+# Minimal YAML fixture (no external plugins; pure Boulder)
 # ---------------------------------------------------------------------------
 
 MINIMAL_YAML_CONTENT = textwrap.dedent("""\
@@ -129,16 +129,60 @@ def test_boulder_runner_build_returns_self(tmp_path):
 def test_boulder_runner_solve_returns_self(tmp_path):
     """BoulderRunner.solve() returns self; runner.result is a SimulationResult.
 
-    Asserts the result container is populated after solve().
+    Asserts:
+    - result is a SimulationResult instance.
+    - result.network is a StagedReactorNet facade.
+    - runner.network is the same object as runner.result.network.
+    - result.network.visualization_network is a ct.ReactorNet.
+    - result.network.networks maps stage ids to concrete stage solvers.
+    - result.network.get_stage("default") returns the stage solver.
+    - Old split fields network_viz and top-level networks are absent from result.
+    - Stage solver reactor objects share identity with facade global reactors.
     """
+    import cantera as ct  # type: ignore
+
     from boulder.runner import BoulderRunner
     from boulder.simulation_result import SimulationResult
+    from boulder.staged_network import StagedReactorNet
 
     path = _write_minimal_yaml(tmp_path)
     runner = BoulderRunner.from_yaml(path).solve()
 
     assert runner.result is not None
     assert isinstance(runner.result, SimulationResult)
+
+    # Facade type and identity
+    assert isinstance(runner.result.network, StagedReactorNet)
+    assert runner.network is runner.result.network, (
+        "runner.network must be the same StagedReactorNet as runner.result.network"
+    )
+
+    # Visualization network
+    assert isinstance(runner.result.network.visualization_network, ct.ReactorNet)
+
+    # Stage solver access
+    assert isinstance(runner.result.network.networks, dict)
+    stage = runner.result.network.get_stage("default")
+    assert stage is not None, "get_stage('default') must return the stage solver"
+
+    # Old split fields must not exist on SimulationResult
+    assert not hasattr(runner.result, "network_viz"), (
+        "old 'network_viz' field must not exist"
+    )
+    assert not hasattr(runner.result, "networks"), (
+        "old top-level 'networks' field must not exist"
+    )
+
+    # Reactor identity invariant: stage solver reactors are global facade reactors
+    global_reactor_ids = {id(r) for r in runner.result.network.reactors}
+    for stage_id, stage_net in runner.result.network.networks.items():
+        for r in getattr(stage_net, "reactors", []) or []:
+            if isinstance(r, ct.Reservoir):
+                continue
+            assert id(r) in global_reactor_ids, (
+                f"Stage '{stage_id}' reactor '{r.name}' is not the same Python object "
+                "as any reactor in the global facade reactors."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +194,8 @@ def test_boulder_cli_main_accepts_runner_class_kwarg(tmp_path, monkeypatch):
     """boulder.cli.main(argv, runner_class=...) instantiates the given runner.
 
     Asserts that the runner_class kwarg is forwarded through the CLI so that
-    the Bloc CLI (and any custom subclass) can be injected without sys.argv
+    a thin CLI wrapper (and any custom subclass) can inject the runner without
+    sys.argv
     manipulation.
     """
     from boulder.runner import BoulderRunner

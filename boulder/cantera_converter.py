@@ -454,8 +454,8 @@ class DualCanteraConverter:
 
         Default implementation returns ``name`` unchanged, allowing Cantera to
         handle bare built-in names (e.g. ``"gri30.yaml"``) directly.
-        Subclasses (e.g. ``BlocConverter``) override this to implement custom
-        search paths without requiring a plugin registration.
+        Subclasses may override this to implement custom mechanism search paths
+        without requiring a plugin registration.
         """
         return name
 
@@ -467,8 +467,8 @@ class DualCanteraConverter:
         list is unrolled into one :meth:`~boulder.runner.BoulderRunner.solve_stage`
         call per stage with a comment showing the stage id and node list.
 
-        Subclasses (e.g. ``BlocConverter``) override this to substitute their
-        own runner class (``BlocRunner``).
+        Subclasses may override this to substitute their own runner class name
+        and import line in emitted scripts.
 
         Parameters
         ----------

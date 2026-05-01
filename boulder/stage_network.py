@@ -12,7 +12,7 @@ A plugin opts in by registering the class via :func:`register_reactor_builder`
 below.  Boulder then:
 
 1. Stores the concrete network on the :class:`LagrangianTrajectory`
-   (``trajectory.stage_nets[stage_id]``) so downstream callers (Calculation
+   (``trajectory.networks[stage_id]``) so downstream callers (Calculation
    Note, figures, KPIs) can inspect any plugin-specific scalars via
    :attr:`CustomStageNetwork.scalars`.
 2. Uses :attr:`CustomStageNetwork.states` verbatim when collecting the
