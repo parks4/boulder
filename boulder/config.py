@@ -683,6 +683,9 @@ def _process_stage_items(
             if kind == "Reservoir":
                 _validate_reservoir(item_id, kind_props, stage_id)
             else:
+                # Nodes always carry a kind key in STONE v2; ``kind`` is only
+                # Optional for connections (logical inter-stage edges).
+                assert kind is not None
                 _validate_node_state_placement(item_id, kind, kind_props, stage_id)
 
             node = {
