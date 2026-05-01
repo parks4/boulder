@@ -4,6 +4,7 @@ channels:
 - nodefaults
 dependencies:
 - make
+- matplotlib
 - mypy
 - myst-parser
 - pip
