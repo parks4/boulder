@@ -1,0 +1,12 @@
+# Rule: Typo on a stage item key (sources: instead of source:) | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: typo_edge
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  sources: inlet_typo
+  target: reactor_typo

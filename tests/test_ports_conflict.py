@@ -1,11 +1,13 @@
-"""Tests for port/connection conflict detection in ``normalize_config``.
+"""Tests for port/connection conflict detection in expand_port_shortcuts.
 
-When a YAML declares both a node-level ``inlet:`` / ``outlet:`` port and
-an explicit ``connections:`` entry that synthesises to the same id (or
-same ``(source, target)`` edge), ``normalize_config`` must raise rather
-than silently override one side.  Also covers multi-inlet ambiguity: a
-default ``outlet: PressureController`` on a reactor with two MFC inlets
-cannot auto-pick a master and must raise an actionable error.
+When an internal-format config declares both a node-level inlet:/outlet:
+property and an explicit connection that would produce the same id (or
+same source/target edge), expand_port_shortcuts must raise rather than
+silently override. Also covers multi-inlet ambiguity for PC outlets.
+
+Note: In STONE v2, inline inlet:/outlet: port syntax is rejected at parse
+time. These tests exercise the internal expand_port_shortcuts function
+which operates on the internal normalized format and is used by plugins.
 """
 
 from __future__ import annotations
@@ -14,31 +16,43 @@ from typing import Any, Dict
 
 import pytest
 
-from boulder.config import normalize_config
+from boulder.config import expand_port_shortcuts
 
 
-def _node(nid: str, kind: str, **props: Any) -> Dict[str, Any]:
-    return {"id": nid, kind: props}
+def _internal_node(nid: str, kind: str, **props: Any) -> Dict[str, Any]:
+    """Create an internal-format node dict."""
+    return {"id": nid, "type": kind, "properties": props, "group": "default"}
+
+
+def _internal_conn(
+    cid: str, kind: str, source: str, target: str, **props: Any
+) -> Dict[str, Any]:
+    return {
+        "id": cid,
+        "type": kind,
+        "source": source,
+        "target": target,
+        "properties": props,
+    }
 
 
 @pytest.mark.unit
 def test_inlet_port_conflicts_with_explicit_connection() -> None:
-    """Inlet port + explicit MFC on the same edge raises ``ValueError``.
+    """Inlet port + explicit MFC on the same edge raises ValueError.
 
-    Asserts the error message mentions both the offending edge and asks
+    Asserts the error message mentions the offending edge and asks
     the user to remove one of the two declarations.
     """
     cfg: Dict[str, Any] = {
-        "phases": {"gas": {"mechanism": "gri30.yaml"}},
         "nodes": [
-            _node(
+            _internal_node(
                 "feed",
                 "Reservoir",
                 temperature=300.0,
                 pressure=101325.0,
                 composition="N2:1",
             ),
-            _node(
+            _internal_node(
                 "r1",
                 "IdealGasReactor",
                 temperature=300.0,
@@ -49,37 +63,33 @@ def test_inlet_port_conflicts_with_explicit_connection() -> None:
             ),
         ],
         "connections": [
-            {
-                "id": "feed_to_r1",
-                "MassFlowController": {"mass_flow_rate": 2e-4},
-                "source": "feed",
-                "target": "r1",
-            },
+            _internal_conn(
+                "feed_to_r1", "MassFlowController", "feed", "r1", mass_flow_rate=2e-4
+            ),
         ],
     }
     with pytest.raises(ValueError, match="Inlet port on node 'r1'"):
-        normalize_config(cfg)
+        expand_port_shortcuts(cfg)
 
 
 @pytest.mark.unit
 def test_outlet_port_conflicts_with_explicit_connection() -> None:
-    """Outlet port + explicit connection on the same edge raises ``ValueError``.
+    """Outlet port + explicit connection on the same edge raises ValueError.
 
-    Asserts that declaring both an ``outlet: { to: sink }`` port and an
+    Asserts that declaring both an outlet: {to: sink} property and an
     explicit connection from the same source to the same target trips
     the duplicate-edge guard.
     """
     cfg: Dict[str, Any] = {
-        "phases": {"gas": {"mechanism": "gri30.yaml"}},
         "nodes": [
-            _node(
+            _internal_node(
                 "feed",
                 "Reservoir",
                 temperature=300.0,
                 pressure=101325.0,
                 composition="N2:1",
             ),
-            _node(
+            _internal_node(
                 "r1",
                 "IdealGasReactor",
                 temperature=300.0,
@@ -89,7 +99,7 @@ def test_outlet_port_conflicts_with_explicit_connection() -> None:
                 inlet={"from": "feed", "mass_flow_rate": 1e-4},
                 outlet={"to": "sink"},
             ),
-            _node(
+            _internal_node(
                 "sink",
                 "Reservoir",
                 temperature=300.0,
@@ -98,16 +108,13 @@ def test_outlet_port_conflicts_with_explicit_connection() -> None:
             ),
         ],
         "connections": [
-            {
-                "id": "r1_to_sink",
-                "MassFlowController": {"mass_flow_rate": 1e-4},
-                "source": "r1",
-                "target": "sink",
-            },
+            _internal_conn(
+                "r1_to_sink", "MassFlowController", "r1", "sink", mass_flow_rate=1e-4
+            ),
         ],
     }
     with pytest.raises(ValueError, match="Outlet port on node 'r1'"):
-        normalize_config(cfg)
+        expand_port_shortcuts(cfg)
 
 
 @pytest.mark.unit
@@ -115,29 +122,26 @@ def test_outlet_port_multi_inlet_ambiguity_raises() -> None:
     """Default PC outlet on a 2-inlet reactor refuses to guess a master.
 
     Builds a mixer reactor with two explicit MFC inlets plus a default
-    ``outlet: {to: sink}`` port (which would default to
-    ``PressureController``).  Because two candidate masters exist,
-    ``normalize_config`` must raise and list both candidates so the
-    user can pick one.
+    outlet: {to: sink} property. Because two candidate masters exist,
+    expand_port_shortcuts must raise and list both candidates.
     """
     cfg: Dict[str, Any] = {
-        "phases": {"gas": {"mechanism": "gri30.yaml"}},
         "nodes": [
-            _node(
+            _internal_node(
                 "a",
                 "Reservoir",
                 temperature=300.0,
                 pressure=101325.0,
                 composition="N2:1",
             ),
-            _node(
+            _internal_node(
                 "b",
                 "Reservoir",
                 temperature=300.0,
                 pressure=101325.0,
                 composition="N2:1",
             ),
-            _node(
+            _internal_node(
                 "mixer",
                 "IdealGasReactor",
                 temperature=300.0,
@@ -146,7 +150,7 @@ def test_outlet_port_multi_inlet_ambiguity_raises() -> None:
                 volume=1e-5,
                 outlet={"to": "sink"},
             ),
-            _node(
+            _internal_node(
                 "sink",
                 "Reservoir",
                 temperature=300.0,
@@ -155,49 +159,42 @@ def test_outlet_port_multi_inlet_ambiguity_raises() -> None:
             ),
         ],
         "connections": [
-            {
-                "id": "a_to_mixer",
-                "MassFlowController": {"mass_flow_rate": 1e-4},
-                "source": "a",
-                "target": "mixer",
-            },
-            {
-                "id": "b_to_mixer",
-                "MassFlowController": {"mass_flow_rate": 2e-4},
-                "source": "b",
-                "target": "mixer",
-            },
+            _internal_conn(
+                "a_to_mixer", "MassFlowController", "a", "mixer", mass_flow_rate=1e-4
+            ),
+            _internal_conn(
+                "b_to_mixer", "MassFlowController", "b", "mixer", mass_flow_rate=2e-4
+            ),
         ],
     }
     with pytest.raises(ValueError, match="ambiguous"):
-        normalize_config(cfg)
+        expand_port_shortcuts(cfg)
 
 
 @pytest.mark.unit
 def test_outlet_port_multi_inlet_explicit_master_resolves() -> None:
-    """Ambiguity goes away when ``master:`` is set explicitly in the port.
+    """Ambiguity goes away when master: is set explicitly in the outlet port.
 
-    Asserts that the outlet expands to a ``PressureController`` whose
-    ``master`` is the user-chosen MFC, and no error is raised.
+    Asserts the outlet expands to PressureController with the user-chosen
+    master, and no error is raised.
     """
     cfg: Dict[str, Any] = {
-        "phases": {"gas": {"mechanism": "gri30.yaml"}},
         "nodes": [
-            _node(
+            _internal_node(
                 "a",
                 "Reservoir",
                 temperature=300.0,
                 pressure=101325.0,
                 composition="N2:1",
             ),
-            _node(
+            _internal_node(
                 "b",
                 "Reservoir",
                 temperature=300.0,
                 pressure=101325.0,
                 composition="N2:1",
             ),
-            _node(
+            _internal_node(
                 "mixer",
                 "IdealGasReactor",
                 temperature=300.0,
@@ -206,7 +203,7 @@ def test_outlet_port_multi_inlet_explicit_master_resolves() -> None:
                 volume=1e-5,
                 outlet={"to": "sink", "master": "a_to_mixer"},
             ),
-            _node(
+            _internal_node(
                 "sink",
                 "Reservoir",
                 temperature=300.0,
@@ -215,21 +212,15 @@ def test_outlet_port_multi_inlet_explicit_master_resolves() -> None:
             ),
         ],
         "connections": [
-            {
-                "id": "a_to_mixer",
-                "MassFlowController": {"mass_flow_rate": 1e-4},
-                "source": "a",
-                "target": "mixer",
-            },
-            {
-                "id": "b_to_mixer",
-                "MassFlowController": {"mass_flow_rate": 2e-4},
-                "source": "b",
-                "target": "mixer",
-            },
+            _internal_conn(
+                "a_to_mixer", "MassFlowController", "a", "mixer", mass_flow_rate=1e-4
+            ),
+            _internal_conn(
+                "b_to_mixer", "MassFlowController", "b", "mixer", mass_flow_rate=2e-4
+            ),
         ],
     }
-    normalized = normalize_config(cfg)
-    pc = next(c for c in normalized["connections"] if c["id"] == "mixer_to_sink")
+    expand_port_shortcuts(cfg)
+    pc = next(c for c in cfg["connections"] if c["id"] == "mixer_to_sink")
     assert pc["type"] == "PressureController"
     assert pc["properties"]["master"] == "a_to_mixer"

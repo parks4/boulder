@@ -1,0 +1,10 @@
+# Rule: Reservoir with no temperature or composition | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: incomplete_reservoir
+  Reservoir:
+    pressure: 1 atm

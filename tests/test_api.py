@@ -132,22 +132,28 @@ class TestConfigRoutes:
     @pytest.mark.asyncio
     async def test_parse_yaml(self):
         yaml_str = (
-            "nodes:\n"
+            "network:\n"
+            "  - id: feed\n"
+            "    Reservoir:\n"
+            "      temperature: 300\n"
+            '      composition: "N2:1"\n'
             "  - id: reactor1\n"
             "    IdealGasReactor:\n"
-            "      temperature: 1000\n"
-            "      pressure: 101325\n"
-            '      composition: "CH4:1,O2:2,N2:7.52"\n'
-            "\n"
-            "connections: []\n"
+            "      volume: 1.0e-3\n"
+            "  - id: mfc1\n"
+            "    MassFlowController:\n"
+            "      mass_flow_rate: 0.001\n"
+            "    source: feed\n"
+            "    target: reactor1\n"
         )
         async with _make_client() as client:
             resp = await client.post("/api/configs/parse", json={"yaml": yaml_str})
             assert resp.status_code == 200
             data = resp.json()
             assert "config" in data
-            assert data["config"]["nodes"][0]["id"] == "reactor1"
-            assert data["config"]["nodes"][0]["type"] == "IdealGasReactor"
+            nodes_by_id = {n["id"]: n for n in data["config"]["nodes"]}
+            assert "reactor1" in nodes_by_id
+            assert nodes_by_id["reactor1"]["type"] == "IdealGasReactor"
 
     @pytest.mark.asyncio
     async def test_parse_yaml_invalid(self):

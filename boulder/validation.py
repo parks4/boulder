@@ -256,6 +256,10 @@ class ConnectionModel(BaseModel):
     mechanism_switch: Optional[Dict[str, Any]] = None
     #: Staged-solving group tag (same semantics as NodeModel.group).
     group: Optional[str] = None
+    #: True when this connection was synthesized from a STONE v2 logical
+    #: (kind-less) inter-stage edge.  The downstream staged solver uses this
+    #: flag to skip Cantera device instantiation and instead copy state.
+    logical: Optional[bool] = None
 
     @validator("properties")
     def ensure_properties_is_object(cls, value: Dict[str, Any]) -> Dict[str, Any]:
@@ -301,6 +305,9 @@ class NormalizedConfigModel(BaseModel):
                 raise ValueError(f"Duplicate connection id detected: '{conn.id}'")
             seen_conns.add(conn.id)
 
+        # Build a set of OutletSink node ids for source validation.
+        outlet_sink_ids: Set[str] = {n.id for n in self.nodes if n.type == "OutletSink"}
+
         # Source/target references must exist (node id or node_id_outlet alias)
         valid_nodes: Set[str] = set(node_ids)
 
@@ -319,6 +326,13 @@ class NormalizedConfigModel(BaseModel):
             if not _valid_ref(conn.target):
                 raise ValueError(
                     f"Connection '{conn.id}' target '{conn.target}' does not reference an existing node"
+                )
+            # OutletSink nodes cannot be connection sources.
+            if conn.source in outlet_sink_ids:
+                raise ValueError(
+                    f"Connection '{conn.id}' uses 'OutletSink' node '{conn.source}' as source. "
+                    "OutletSink is a visualization-only terminal node and cannot be a source. "
+                    "See STONE_SPECIFICATIONS.md."
                 )
 
         by_conn_id = {c.id: c for c in self.connections}
@@ -347,6 +361,24 @@ class NormalizedConfigModel(BaseModel):
                         f"'{master}' must reference a MassFlowController, not "
                         f"'{mconn.type}'."
                     )
+
+        # Ambiguous conservation: multiple empty MFCs outgoing from the same source node.
+        # An "empty" MFC has no explicit mass_flow_rate (or mass_flow_rate is None).
+        empty_mfc_sources: Dict[str, List[str]] = {}
+        for conn in self.connections:
+            if conn.type == "MassFlowController" and not conn.logical:
+                mfr = (conn.properties or {}).get("mass_flow_rate")
+                if mfr is None:
+                    empty_mfc_sources.setdefault(conn.source, []).append(conn.id)
+        for src, mfc_ids in empty_mfc_sources.items():
+            if len(mfc_ids) > 1:
+                raise ValueError(
+                    f"Ambiguous conservation: node '{src}' has {len(mfc_ids)} outgoing "
+                    f"MassFlowController connections with no explicit mass_flow_rate "
+                    f"({mfc_ids}). Conservation cannot uniquely determine the split. "
+                    "Set 'mass_flow_rate:' on all but one, or on all. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
 
     def _coerce_units(self) -> None:
         """Coerce unit-bearing strings in node/connection/settings properties.

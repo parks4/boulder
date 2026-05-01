@@ -4,6 +4,7 @@ export interface ConfigNode {
   type: string;
   properties: Record<string, unknown>;
   metadata?: Record<string, unknown> | null;
+  group?: string | null;
 }
 
 /** A connection (MFC, Valve, Wall) between two nodes. */

@@ -2,14 +2,24 @@ from boulder.config import convert_to_stone_format, normalize_config, validate_c
 
 
 def test_output_block_is_preserved_through_validation_and_conversion():
+    """Assert that output: block survives normalize + validate + convert_to_stone_format."""
     config = {
-        "nodes": [
+        "network": [
+            {
+                "id": "upstream",
+                "Reservoir": {"temperature": 300, "composition": "N2:1"},
+            },
             {
                 "id": "reactor_id1",
-                "IdealGasReactor": {"temperature": 300, "pressure": 101325},
+                "IdealGasReactor": {"volume": 1.0e-3},
+            },
+            {
+                "id": "mfc1",
+                "MassFlowController": {"mass_flow_rate": 0.001},
+                "source": "upstream",
+                "target": "reactor_id1",
             },
         ],
-        "connections": [],
         "settings": {"end_time": 1.0, "dt": 1.0},
         "output": {
             "reactor_id1": ["temperature, K", "pressure, bar"],

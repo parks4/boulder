@@ -2,10 +2,15 @@
 
 Supports YAML format with 🪨 STONE standard - an elegant configuration format
 where component types are keys containing their properties.
+
+STONE v2 is the current authored format. Files using top-level ``network:``
+(single stage) or ``stages:`` + dynamic stage blocks (multi-stage) are v2.
+Historic STONE v1 files using top-level ``nodes:`` / ``connections:`` /
+``groups:`` are rejected. See STONE_SPECIFICATIONS.md.
 """
 
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 from ruamel.yaml import YAML
@@ -42,6 +47,725 @@ STONE_TOP_LEVEL_KEYS: frozenset = frozenset(
         "scenarios",
     }
 )
+
+# Allowed top-level keys in a STONE v2 file (before dynamic stage blocks are
+# added).  Dynamic stage block names (declared under ``stages:``) are also
+# permitted; they are validated separately by :func:`_normalize_v2`.
+STONE_V2_BASE_KEYS: frozenset = frozenset(
+    {
+        "metadata",
+        "phases",
+        "settings",
+        "stages",
+        "network",
+        "output",
+        "export",
+        "sweeps",
+        "scenarios",
+    }
+)
+
+# Names that may not be used as stage ids.
+STONE_V2_RESERVED_STAGE_NAMES: frozenset = frozenset(
+    {
+        "metadata",
+        "phases",
+        "settings",
+        "stages",
+        "network",
+        "nodes",
+        "connections",
+    }
+)
+
+# Keys that are valid on a connection item (in addition to the kind key).
+_CONN_STANDARD_FIELDS: frozenset = frozenset(
+    {
+        "id",
+        "source",
+        "target",
+        "metadata",
+        "mechanism_switch",
+        "mass_flow_rate",
+        "logical",
+        "description",
+        "label",
+    }
+)
+
+# Keys that are valid on a node item (in addition to the kind key).
+_NODE_STANDARD_FIELDS: frozenset = frozenset(
+    {
+        "id",
+        "metadata",
+        "mechanism",
+        "description",
+        "label",
+    }
+)
+
+# Known Cantera flow-device kinds.
+_FLOW_DEVICE_KINDS: frozenset = frozenset(
+    {"MassFlowController", "Valve", "PressureController", "Wall"}
+)
+
+# Reactor kinds that forbid a top-level ``temperature:`` field (all const-volume
+# kinds). Since the kind registry is open-ended, we check the inverse: only
+# kinds that explicitly model an isothermal/fixed-T option may carry it.
+_ISOTHERMAL_KINDS: frozenset = frozenset(
+    {"IdealGasConstPressureReactor", "ConstPressureReactor"}
+)
+
+# Const-pressure kinds that allow a top-level ``pressure:`` as an operating
+# constraint.
+_CONST_PRESSURE_KINDS: frozenset = frozenset(
+    {
+        "IdealGasConstPressureReactor",
+        "ConstPressureReactor",
+        "DesignPSR",
+        "DesignTorchInstantaneousHeating",
+        "DesignPFR",
+        "DesignPFRThinShell",
+        "DesignTubeFurnace",
+    }
+)
+
+
+# ---------------------------------------------------------------------------
+# STONE v2 — dialect detection and normalization
+# ---------------------------------------------------------------------------
+
+
+def _detect_stone_dialect(raw: Dict[str, Any]) -> str:
+    """Detect STONE dialect from raw YAML dict.
+
+    Returns
+    -------
+    str
+        One of ``'v2_network'``, ``'v2_staged'``, ``'internal'``.
+        ``'internal'`` means the dict is already in the internal normalized
+        format (produced by a previous call to :func:`normalize_config` or
+        constructed directly by tests/plugins).
+
+    Raises
+    ------
+    ValueError
+        For STONE v1 files (actionable error) or completely unknown shapes.
+    """
+    has_nodes = "nodes" in raw
+    has_connections = "connections" in raw
+    has_groups = "groups" in raw
+    has_stages = "stages" in raw
+    has_network = "network" in raw
+
+    # Internal format: has nodes + (already has type/properties on first node).
+    # This happens when tests or plugins pass a pre-normalized dict directly.
+    if has_nodes and not has_stages and not has_network:
+        nodes = raw.get("nodes") or []
+        if nodes and isinstance(nodes[0], dict) and "type" in nodes[0]:
+            return "internal"
+        # Has nodes but first node doesn't have `type` → v1 YAML shape.
+        raise ValueError(
+            "STONE v1 format detected (top-level 'nodes:', 'connections:', or 'groups:'). "
+            "Migrate to STONE v2. See STONE_SPECIFICATIONS.md."
+        )
+
+    if has_groups and not has_nodes and not has_stages and not has_network:
+        # Could be internal format with groups only (empty network). Treat as internal.
+        return "internal"
+
+    if has_connections and not has_nodes and not has_stages and not has_network:
+        raise ValueError(
+            "STONE v1 format detected (top-level 'connections:' without 'network:' or 'stages:'). "
+            "Migrate to STONE v2. See STONE_SPECIFICATIONS.md."
+        )
+
+    if has_stages and has_network:
+        raise ValueError(
+            "STONE v2 format error: 'stages:' and 'network:' are mutually exclusive. "
+            "Use 'network:' for a single-stage network or 'stages:' for a multi-stage network. "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+    if has_stages:
+        return "v2_staged"
+
+    if has_network:
+        return "v2_network"
+
+    raise ValueError(
+        "Cannot detect STONE dialect: no 'network:', 'stages:', or 'nodes:' found. "
+        "Use 'network:' (single stage) or 'stages:' + stage blocks (multi-stage). "
+        "See STONE_SPECIFICATIONS.md."
+    )
+
+
+def _classify_item(item: Dict[str, Any], stage_id: str) -> str:
+    """Return ``'node'`` or ``'connection'`` for a STONE v2 stage item.
+
+    Raises
+    ------
+    ValueError
+        When the item is ambiguous or malformed.
+    """
+    item_id = item.get("id", "<unnamed>")
+    has_source = "source" in item
+    has_target = "target" in item
+
+    if has_source and not has_target:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': item '{item_id}' has 'source:' but "
+            "no 'target:'. Both 'source:' and 'target:' are required for connections. "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+    if has_target and not has_source:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': item '{item_id}' has 'target:' but "
+            "no 'source:'. Both 'source:' and 'target:' are required for connections. "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+    return "connection" if (has_source and has_target) else "node"
+
+
+def _extract_kind(
+    item: Dict[str, Any],
+    item_type: str,
+    stage_id: str,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """Extract the kind key and its properties from a stage item.
+
+    Returns
+    -------
+    (kind_name, kind_props)
+        ``kind_name`` is ``None`` for a logical connection (no kind key).
+    """
+    item_id = item.get("id", "<unnamed>")
+    standard = (
+        _CONN_STANDARD_FIELDS if item_type == "connection" else _NODE_STANDARD_FIELDS
+    )
+    kind_keys = [k for k in item if k not in standard and k != "id"]
+
+    if len(kind_keys) > 1:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': item '{item_id}' has multiple "
+            f"kind keys {kind_keys}. An item may declare exactly one kind. "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+    if kind_keys:
+        kind = kind_keys[0]
+        raw_props = item[kind]
+        if raw_props is None:
+            props: Dict[str, Any] = {}
+        elif isinstance(raw_props, dict):
+            props = raw_props
+        else:
+            raise ValueError(
+                f"STONE v2 error in stage '{stage_id}': item '{item_id}' kind "
+                f"'{kind}' value must be a mapping or null, got {type(raw_props).__name__}."
+            )
+        return kind, props
+
+    # No kind key → logical connection (permitted only for inter-stage connections)
+    if item_type == "node":
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': item '{item_id}' has no node "
+            "kind key (e.g. 'IdealGasReactor', 'Reservoir'). "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+    return None, {}
+
+
+def _validate_node_state_placement(
+    node_id: str,
+    kind: str,
+    props: Dict[str, Any],
+    stage_id: str,
+) -> None:
+    """Raise ValueError when a reactor has forbidden top-level state fields."""
+    if kind in ("Reservoir", "OutletSink"):
+        return
+
+    if "inlet" in props or "outlet" in props:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': node '{node_id}' uses inline "
+            "'inlet:' or 'outlet:' port syntax which is not valid in STONE v2. "
+            "Author the edge as an explicit connection item in the same block. "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+    if "composition" in props or "mass_composition" in props:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': reactor '{node_id}' declares "
+            "top-level 'composition:' or 'mass_composition:'. Reactor operating "
+            "composition is inferred from upstream inlets. Use 'initial:' for a "
+            "seeding guess. See STONE_SPECIFICATIONS.md."
+        )
+
+    if "temperature" in props and kind not in _ISOTHERMAL_KINDS:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': reactor '{node_id}' declares "
+            "top-level 'temperature:' which is invalid for const-volume reactor kinds. "
+            "Use 'initial:' for a seeding guess. See STONE_SPECIFICATIONS.md."
+        )
+
+    initial = props.get("initial") or {}
+    if "composition" in initial and "mass_composition" in initial:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': reactor '{node_id}' initial: "
+            "block has both 'composition:' and 'mass_composition:'. They are mutually "
+            "exclusive. See STONE_SPECIFICATIONS.md."
+        )
+
+    known_sizing_keys = {"volume", "t_res_s"}
+    sizing = [k for k in props if k in known_sizing_keys]
+    if len(sizing) > 1:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': reactor '{node_id}' is "
+            f"over-specified: {sizing}. Use one sizing basis per reactor. "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+
+def _validate_reservoir(node_id: str, props: Dict[str, Any], stage_id: str) -> None:
+    """Raise ValueError when a Reservoir is missing required state."""
+    if "composition" not in props and "mass_composition" not in props:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': Reservoir '{node_id}' is missing "
+            "'composition:' (required boundary state). See STONE_SPECIFICATIONS.md."
+        )
+    if "temperature" not in props:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': Reservoir '{node_id}' is missing "
+            "'temperature:' (required boundary state). See STONE_SPECIFICATIONS.md."
+        )
+    if "composition" in props and "mass_composition" in props:
+        raise ValueError(
+            f"STONE v2 error in stage '{stage_id}': Reservoir '{node_id}' has both "
+            "'composition:' and 'mass_composition:'. They are mutually exclusive. "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+
+def _build_stage_graph(
+    stage_ids: List[str],
+    items_by_stage: Dict[str, List[Dict[str, Any]]],
+    node_to_stage: Dict[str, str],
+) -> Dict[str, List[str]]:
+    """Build stage DAG: {stage_id: [upstream stage ids]}.
+
+    A logical inter-stage connection in stage S declares source from a node in
+    stage U → S depends on U.
+    """
+    deps: Dict[str, List[str]] = {s: [] for s in stage_ids}
+    for stage_id in stage_ids:
+        for item in items_by_stage.get(stage_id, []):
+            kind_type = _classify_item(item, stage_id)
+            if kind_type != "connection":
+                continue
+            source_id = item.get("source", "")
+            source_stage = node_to_stage.get(source_id)
+            if source_stage and source_stage != stage_id:
+                deps[stage_id].append(source_stage)
+    return deps
+
+
+def _topological_sort(stage_ids: List[str], deps: Dict[str, List[str]]) -> List[str]:
+    """Kahn's algorithm topological sort. Raises ValueError on cycle."""
+    in_degree: Dict[str, int] = {s: 0 for s in stage_ids}
+    adj: Dict[str, List[str]] = {s: [] for s in stage_ids}
+    for stage, upstream_list in deps.items():
+        for upstream in upstream_list:
+            adj[upstream].append(stage)
+            in_degree[stage] += 1
+
+    queue = [s for s in stage_ids if in_degree[s] == 0]
+    result: List[str] = []
+    while queue:
+        node = queue.pop(0)
+        result.append(node)
+        for nxt in adj[node]:
+            in_degree[nxt] -= 1
+            if in_degree[nxt] == 0:
+                queue.append(nxt)
+
+    if len(result) != len(stage_ids):
+        remaining = [s for s in stage_ids if s not in result]
+        raise ValueError(
+            f"STONE v2 error: stage dependency cycle detected among stages {remaining}. "
+            "Inter-stage edges must form a DAG. See STONE_SPECIFICATIONS.md."
+        )
+    return result
+
+
+def _normalize_v2(raw: Dict[str, Any], dialect: str) -> Dict[str, Any]:
+    """Convert a STONE v2 dict into the internal normalized format.
+
+    The internal format uses flat ``nodes``, ``connections``, and ``groups``
+    sections as consumed by the rest of the Boulder pipeline (staged solver,
+    converter, validation). All STONE v2 structural rules are enforced here.
+
+    Parameters
+    ----------
+    raw:
+        Raw dict loaded from a STONE v2 YAML file.
+    dialect:
+        ``'v2_network'`` or ``'v2_staged'``.
+
+    Returns
+    -------
+    dict
+        Internal-format config ready for :func:`normalize_config`'s existing
+        pipeline (unit coercion, port shortcuts — now rejected — and group
+        synthesis).
+    """
+    if dialect == "v2_network":
+        return _normalize_v2_network(raw)
+    return _normalize_v2_staged(raw)
+
+
+def _normalize_v2_network(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a single-stage ``network:`` STONE v2 file."""
+    unknown = sorted(set(raw.keys()) - STONE_V2_BASE_KEYS)
+    if unknown:
+        raise ValueError(
+            f"STONE v2 error: unknown top-level keys {unknown}. "
+            f"Allowed keys for a single-stage 'network:' file: "
+            f"{sorted(STONE_V2_BASE_KEYS)}. "
+            "See STONE_SPECIFICATIONS.md."
+        )
+
+    network_items = raw.get("network") or []
+    if not isinstance(network_items, list):
+        raise ValueError("STONE v2 error: 'network:' must be a list of items.")
+
+    # Resolve global mechanism for the default stage
+    phases = raw.get("phases") or {}
+    default_mech = "gri30.yaml"
+    if isinstance(phases, dict):
+        gas_phase = phases.get("gas") or {}
+        if isinstance(gas_phase, dict):
+            default_mech = gas_phase.get("mechanism") or default_mech
+
+    nodes, connections = _process_stage_items(
+        network_items, "network", intra_stage=True
+    )
+
+    # Build internal format
+    result = {k: raw[k] for k in ("metadata", "phases", "settings") if k in raw}
+    for k in ("output", "export", "sweeps", "scenarios"):
+        if k in raw:
+            result[k] = raw[k]
+
+    result["nodes"] = nodes
+    result["connections"] = connections
+    result["groups"] = {
+        "default": {
+            "stage_order": 1,
+            "mechanism": default_mech,
+            "solve": "advance_to_steady_state",
+        }
+    }
+    for n in result["nodes"]:
+        n["group"] = "default"
+    for c in result["connections"]:
+        c["group"] = "default"
+    return result
+
+
+def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize a multi-stage ``stages:`` STONE v2 file."""
+    stages_meta = raw.get("stages") or {}
+    if not isinstance(stages_meta, dict):
+        raise ValueError(
+            "STONE v2 error: 'stages:' must be a mapping of stage metadata."
+        )
+
+    stage_ids = list(stages_meta.keys())
+
+    # Check reserved stage names
+    for sid in stage_ids:
+        if sid in STONE_V2_RESERVED_STAGE_NAMES:
+            raise ValueError(
+                f"STONE v2 error: stage id '{sid}' is a reserved name. "
+                f"Reserved names: {sorted(STONE_V2_RESERVED_STAGE_NAMES)}. "
+                "See STONE_SPECIFICATIONS.md."
+            )
+
+    # Determine which top-level keys are expected: base keys + stage block names
+    allowed_top = STONE_V2_BASE_KEYS | set(stage_ids)
+    unknown = sorted(set(raw.keys()) - allowed_top)
+    if unknown:
+        raise ValueError(
+            f"STONE v2 error: unknown top-level keys {unknown}. "
+            "Each top-level block must either be a known section key or a stage "
+            "declared under 'stages:'. See STONE_SPECIFICATIONS.md."
+        )
+
+    # Bijection: every stage in stages: must have a block; every block must be in stages:
+    for sid in stage_ids:
+        if sid not in raw:
+            raise ValueError(
+                f"STONE v2 error: stage '{sid}' is declared in 'stages:' but has no "
+                f"matching top-level block '{sid}:'. See STONE_SPECIFICATIONS.md."
+            )
+    for key in raw:
+        if key in STONE_V2_BASE_KEYS:
+            continue
+        if key not in stages_meta:
+            raise ValueError(
+                f"STONE v2 error: top-level block '{key}' has no matching entry in "
+                "'stages:'. Declare it under 'stages:' or remove the block. "
+                "See STONE_SPECIFICATIONS.md."
+            )
+
+    # Validate stage metadata (solve, advance_time)
+    for sid, smeta in stages_meta.items():
+        if not isinstance(smeta, dict):
+            raise ValueError(
+                f"STONE v2 error: stage '{sid}' metadata must be a mapping."
+            )
+        solve = smeta.get("solve")
+        if solve not in ("advance", "advance_to_steady_state"):
+            raise ValueError(
+                f"STONE v2 error: stage '{sid}' has invalid 'solve:' value '{solve}'. "
+                "Allowed values: 'advance', 'advance_to_steady_state'. "
+                "See STONE_SPECIFICATIONS.md."
+            )
+        has_at = "advance_time" in smeta
+        if solve == "advance" and not has_at:
+            raise ValueError(
+                f"STONE v2 error: stage '{sid}' uses solve: advance but is missing "
+                "'advance_time:'. See STONE_SPECIFICATIONS.md."
+            )
+        if solve == "advance_to_steady_state" and has_at:
+            raise ValueError(
+                f"STONE v2 error: stage '{sid}' uses solve: advance_to_steady_state "
+                "but declares 'advance_time:' which is forbidden for this mode. "
+                "See STONE_SPECIFICATIONS.md."
+            )
+
+    # Process items for each stage to get node/connection lists
+    items_by_stage: Dict[str, List[Dict[str, Any]]] = {}
+    all_nodes: List[Dict[str, Any]] = []
+    all_connections: List[Dict[str, Any]] = []
+    node_to_stage: Dict[str, str] = {}  # node_id → stage_id
+
+    for sid in stage_ids:
+        stage_items = raw.get(sid) or []
+        if not isinstance(stage_items, list):
+            raise ValueError(
+                f"STONE v2 error: stage block '{sid}' must be a list of items, "
+                f"got {type(stage_items).__name__}."
+            )
+        items_by_stage[sid] = stage_items
+        # First pass: collect node ids to build node_to_stage mapping
+        for item in stage_items:
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("id")
+            if item_id and "source" not in item and "target" not in item:
+                node_to_stage[item_id] = sid
+
+    # Second pass: duplicate id check across stages
+    seen_ids: Dict[str, str] = {}
+    for sid in stage_ids:
+        for item in items_by_stage.get(sid, []):
+            if not isinstance(item, dict):
+                continue
+            iid = item.get("id")
+            if not iid:
+                continue
+            if iid in seen_ids:
+                raise ValueError(
+                    f"STONE v2 error: id '{iid}' appears in both stage '{seen_ids[iid]}' "
+                    f"and stage '{sid}'. Node ids must be globally unique. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+            seen_ids[iid] = sid
+
+    # Build the stage DAG and determine execution order
+    deps = _build_stage_graph(stage_ids, items_by_stage, node_to_stage)
+    ordered_stages = _topological_sort(stage_ids, deps)
+
+    # Now process stage items with intra-stage logical connection detection
+    for sid in stage_ids:
+        stage_nodes, stage_conns = _process_stage_items(
+            items_by_stage.get(sid, []),
+            sid,
+            intra_stage=False,
+            node_to_stage=node_to_stage,
+        )
+        for n in stage_nodes:
+            n["group"] = sid
+        for c in stage_conns:
+            c["group"] = sid
+        all_nodes.extend(stage_nodes)
+        all_connections.extend(stage_conns)
+
+    # Build groups section from stage metadata (topological order)
+    groups: Dict[str, Any] = {}
+    for order_idx, sid in enumerate(ordered_stages):
+        smeta = stages_meta[sid]
+        group_entry: Dict[str, Any] = {
+            "stage_order": order_idx + 1,
+            "mechanism": smeta.get("mechanism", "gri30.yaml"),
+            "solve": smeta["solve"],
+        }
+        if "advance_time" in smeta:
+            group_entry["advance_time"] = smeta["advance_time"]
+        groups[sid] = group_entry
+
+    result = {k: raw[k] for k in ("metadata", "phases", "settings") if k in raw}
+    for k in ("output", "export", "sweeps", "scenarios"):
+        if k in raw:
+            result[k] = raw[k]
+
+    result["nodes"] = all_nodes
+    result["connections"] = all_connections
+    result["groups"] = groups
+    return result
+
+
+def _process_stage_items(
+    items: List[Any],
+    stage_id: str,
+    intra_stage: bool,
+    node_to_stage: Optional[Dict[str, str]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Parse a list of STONE v2 stage items into (nodes, connections).
+
+    Parameters
+    ----------
+    items:
+        List of raw item dicts from a stage block.
+    stage_id:
+        Stage name (used for error messages).
+    intra_stage:
+        ``True`` for ``network:`` (single stage) — logical connections are invalid.
+    node_to_stage:
+        Mapping of node_id → stage_id for detecting inter/intra-stage edges.
+    """
+    nodes: List[Dict[str, Any]] = []
+    connections: List[Dict[str, Any]] = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"STONE v2 error in stage '{stage_id}': each item must be a mapping."
+            )
+        item_id = item.get("id")
+        if not item_id:
+            raise ValueError(
+                f"STONE v2 error in stage '{stage_id}': every item must have an 'id:' field."
+            )
+
+        item_type = _classify_item(item, stage_id)
+        kind, kind_props = _extract_kind(item, item_type, stage_id)
+
+        if item_type == "node":
+            # Validate OutletSink separately (no required state)
+            if kind == "OutletSink":
+                node: Dict[str, Any] = {
+                    "id": item_id,
+                    "type": "OutletSink",
+                    "properties": kind_props,
+                }
+                for fld in ("metadata", "description", "label", "mechanism"):
+                    if fld in item:
+                        node[fld] = item[fld]
+                nodes.append(node)
+                continue
+
+            if kind == "Reservoir":
+                _validate_reservoir(item_id, kind_props, stage_id)
+            else:
+                # Nodes always carry a kind key in STONE v2; ``kind`` is only
+                # Optional for connections (logical inter-stage edges).
+                assert kind is not None
+                _validate_node_state_placement(item_id, kind, kind_props, stage_id)
+
+            node = {
+                "id": item_id,
+                "type": kind,
+                "properties": kind_props,
+            }
+            for fld in ("metadata", "description", "label"):
+                if fld in item:
+                    node[fld] = item[fld]
+            if "mechanism" in item:
+                node["mechanism"] = item["mechanism"]
+            nodes.append(node)
+
+        else:
+            # Connection
+            source = item["source"]
+            target = item["target"]
+
+            if kind is None:
+                # Logical connection — only valid inter-stage
+                if intra_stage:
+                    raise ValueError(
+                        f"STONE v2 error in stage '{stage_id}': item '{item_id}' is a "
+                        "logical connection (no kind key) inside a single-stage 'network:'. "
+                        "Logical connections are only valid between stages. "
+                        "See STONE_SPECIFICATIONS.md."
+                    )
+                if node_to_stage is not None:
+                    src_stage = node_to_stage.get(source)
+                    tgt_stage = node_to_stage.get(target)
+                    if (
+                        src_stage is not None
+                        and tgt_stage is not None
+                        and src_stage == tgt_stage
+                    ):
+                        raise ValueError(
+                            f"STONE v2 error in stage '{stage_id}': logical connection "
+                            f"'{item_id}' connects '{source}' and '{target}' which are in "
+                            f"the same stage '{src_stage}'. Logical connections must be "
+                            "inter-stage. See STONE_SPECIFICATIONS.md."
+                        )
+                conn_props: Dict[str, Any] = {}
+                if "mass_flow_rate" in item:
+                    conn_props["mass_flow_rate"] = item["mass_flow_rate"]
+                conn: Dict[str, Any] = {
+                    "id": item_id,
+                    "type": "MassFlowController",
+                    "source": source,
+                    "target": target,
+                    "properties": conn_props,
+                    "logical": True,
+                }
+                if "mechanism_switch" in item:
+                    conn["mechanism_switch"] = item["mechanism_switch"]
+                if "metadata" in item:
+                    conn["metadata"] = item["metadata"]
+                connections.append(conn)
+            else:
+                # OutletSink cannot be a source
+                if node_to_stage is not None:
+                    pass  # OutletSink check happens at validation time
+
+                conn_props = dict(kind_props)
+                conn = {
+                    "id": item_id,
+                    "type": kind,
+                    "source": source,
+                    "target": target,
+                    "properties": conn_props,
+                }
+                if "mechanism_switch" in item:
+                    conn["mechanism_switch"] = item["mechanism_switch"]
+                if "metadata" in item:
+                    conn["metadata"] = item["metadata"]
+                if "mass_flow_rate" in item and "mass_flow_rate" not in conn_props:
+                    conn_props["mass_flow_rate"] = item["mass_flow_rate"]
+                connections.append(conn)
+
+    return nodes, connections
 
 
 def get_yaml_with_comments():
@@ -146,28 +870,12 @@ def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
 def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, Any]:
     """Normalize configuration from YAML with 🪨 STONE standard to internal format.
 
-    The 🪨 STONE standard format:
-    - nodes: list of components (reactors, reservoirs, etc.)
-    - connections: list of connections between nodes
-    - phases: chemistry/phase configuration (e.g., gas mechanisms)
-    - settings: simulation-level settings
-    - metadata: optional configuration metadata
+    Accepts STONE v2 (``network:`` or ``stages:`` dialect) and converts to the
+    internal flat format (``nodes``, ``connections``, ``groups``) consumed by the
+    rest of the Boulder pipeline.
 
-    Converted to the internal format used by converters:
-    - nodes: list with { id, type, properties }
-    - connections: list with { id, type, properties, source, target }
-    - phases: chemistry/phase configuration (preserved)
-    - settings: simulation-level settings (preserved)
-
-    Example
-    -------
-
-        🪨 STONE format::
-
-        nodes:
-          - id: reactor1
-            IdealGasReactor:
-                temperature: 1000
+    Historic STONE v1 files (``nodes:``, ``connections:``, ``groups:``) are
+    rejected with an actionable error message.
 
     Internal format::
 
@@ -184,7 +892,15 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
 
         plugins = get_plugins()
 
-    normalized = config.copy()
+    # --- STONE v2 detection and normalization ---
+    # Detect dialect first; this raises ValueError for v1 or unknown shapes.
+    dialect = _detect_stone_dialect(config)
+    if dialect == "internal":
+        # Already in internal format (passed by tests/plugins); skip v2 normalization.
+        normalized = config.copy()
+    else:
+        # Convert v2 to internal flat format (nodes/connections/groups).
+        normalized = _normalize_v2(config, dialect)
 
     # Convert unit-bearing strings ("25 degC", "1.3 bar", "470 kg/d", …) to
     # canonical SI floats before any further processing.  Plain numeric values
@@ -192,40 +908,23 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
     # remain fully backward-compatible.
     coerce_config_units(normalized)
 
-    # Require new STONE schema keys and reject mixed dialects: the YAML must
-    # contain only top-level keys from the locked STONE vocabulary.  Unknown
-    # keys almost always indicate a partially-ported legacy config (e.g. a
-    # ctwrap ``defaults`` block left over from the SPRING dialect).  Failing
-    # fast here gives a clearer error than downstream Pydantic validation.
-    if isinstance(normalized, dict):
-        if "nodes" not in normalized:
-            raise ValueError(
-                "STONE format required: top-level 'nodes' missing. "
-                "Please update your YAML configuration to use the new STONE schema with 'nodes', "
-                "'phases', and 'settings'."
-            )
-        unknown = sorted(set(normalized.keys()) - STONE_TOP_LEVEL_KEYS)
-        if unknown:
-            raise ValueError(
-                "STONE format violation: unknown top-level keys "
-                f"{unknown}. Allowed keys: {sorted(STONE_TOP_LEVEL_KEYS)}. "
-                "Remove legacy dialect keys (e.g. 'defaults', 'parameters', "
-                "'model_type') or move them under 'settings'/'export'."
-            )
+    # At this point `normalized` has the internal flat shape with `nodes`,
+    # `connections`, and `groups` (produced by _normalize_v2). The type/
+    # properties extraction already happened in _process_stage_items, so the
+    # loops below are no-ops for v2 but are kept to remain compatible with
+    # any internal callers that pass an already-internal dict directly.
 
-    # Normalize nodes
+    # Normalize nodes — ensure every node has type/properties keys.
     if "nodes" in normalized:
         for node in normalized["nodes"]:
             if "type" not in node:
-                # Find the type key (anything that's not id, metadata, etc.)
-                standard_fields = {"id", "metadata", "mechanism"}
+                standard_fields = {"id", "metadata", "mechanism", "group", "logical"}
                 type_keys = [k for k in node.keys() if k not in standard_fields]
 
                 if type_keys:
-                    type_name = type_keys[0]  # Use the first type key found
+                    type_name = type_keys[0]
                     properties = node[type_name]
 
-                    # Remove the type key and add type + properties
                     del node[type_name]
                     node["type"] = type_name
                     node["properties"] = (
@@ -237,27 +936,25 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
                 if "mechanism" not in props:
                     props["mechanism"] = node["mechanism"]
 
-    # Normalize connections
+    # Normalize connections — ensure every connection has type/properties keys.
     if "connections" in normalized:
         for connection in normalized["connections"]:
             if "type" not in connection:
-                # Find the type key (anything that's not id, source, target, metadata,
-                # or the mechanism_switch block – which is a connection-level annotation,
-                # not a Cantera object type).
                 standard_fields = {
                     "id",
                     "source",
                     "target",
                     "metadata",
                     "mechanism_switch",
+                    "group",
+                    "logical",
                 }
                 type_keys = [k for k in connection.keys() if k not in standard_fields]
 
                 if type_keys:
-                    type_name = type_keys[0]  # Use the first type key found
+                    type_name = type_keys[0]
                     properties = connection[type_name]
 
-                    # Remove the type key and add type + properties
                     del connection[type_name]
                     connection["type"] = type_name
                     connection["properties"] = (
@@ -275,6 +972,11 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
     # Runs after port shortcuts so user-declared inlet/outlet ports have already
     # become real connections before unfolders read the node.
     expand_composite_kinds(normalized, plugins)
+
+    # Propagate process pressure from terminal boundary nodes (e.g. OutletSink)
+    # to flow-connected upstream nodes that lack an explicit pressure.  Wall
+    # edges are excluded so ambient/satellite Reservoirs keep their own pressure.
+    propagate_terminal_pressure_defaults(normalized)
 
     # Topologically order connections so every PressureController is built
     # after the MassFlowController it points at via `master:`.  This is a
@@ -574,6 +1276,117 @@ def synthesize_default_group(config: Dict[str, Any]) -> None:
         has_group = bool(conn.get("group") or props.get("group"))
         if not has_group:
             conn["group"] = "default"
+
+
+def propagate_terminal_pressure_defaults(config: Dict[str, Any]) -> None:
+    """Propagate a declared process pressure from terminal nodes to their flow-connected peers.
+
+    Groups nodes into connected components using only flow/logical connection edges
+    (``MassFlowController``, ``PressureController``, ``Valve``).  ``Wall`` edges are
+    excluded so ambient/satellite Reservoirs keep their own pressure.
+
+    Within each component:
+    - If zero or one distinct pressure is declared, no conflict exists.
+    - If exactly one distinct pressure exists, fill missing ``properties.pressure``
+      on all other nodes in the component (only ``Reservoir``, ``OutletSink``,
+      and constant-pressure reactor kinds).
+    - If multiple distinct pressures are declared, raise ``ValueError``.
+
+    This is a defaulting pass.  Nodes that already carry a pressure that matches
+    the component pressure are left unchanged.  The pass is a no-op when every
+    node already has an explicit pressure (backward-compatible).
+    """
+    nodes: List[Dict[str, Any]] = config.get("nodes") or []
+    connections: List[Dict[str, Any]] = config.get("connections") or []
+
+    if not nodes:
+        return
+
+    # Flow-device connection types that carry process pressure.
+    _FLOW_TYPES = frozenset({"MassFlowController", "PressureController", "Valve"})
+
+    # Node types that should receive a defaulted pressure when missing.
+    _PRESSURE_BEARING_TYPES = frozenset(
+        {
+            "Reservoir",
+            "OutletSink",
+            "IdealGasConstPressureReactor",
+            "IdealGasConstPressureMoleReactor",
+            "DesignPSR",
+            "DesignTorchInstantaneousHeating",
+            "DesignTorch",
+            "DesignPFR",
+            "DesignPFRThinShell",
+            "DesignTubeFurnace",
+        }
+    )
+
+    node_ids = [n["id"] for n in nodes]
+    id_to_node = {n["id"]: n for n in nodes}
+
+    # Build adjacency list from flow-only edges (undirected).
+    adjacency: Dict[str, List[str]] = {nid: [] for nid in node_ids}
+    for conn in connections:
+        ctype = conn.get("type", "MassFlowController")
+        if ctype not in _FLOW_TYPES:
+            continue
+        src = conn.get("source")
+        tgt = conn.get("target")
+        if src in adjacency and tgt in adjacency:
+            adjacency[src].append(tgt)
+            adjacency[tgt].append(src)
+
+    # BFS/DFS to find connected components.
+    visited: set = set()
+    components: List[List[str]] = []
+    for start in node_ids:
+        if start in visited:
+            continue
+        component: List[str] = []
+        stack = [start]
+        while stack:
+            nid = stack.pop()
+            if nid in visited:
+                continue
+            visited.add(nid)
+            component.append(nid)
+            stack.extend(adjacency[nid])
+        components.append(component)
+
+    # For each component, check declared pressures and propagate.
+    for component in components:
+        declared: Dict[str, float] = {}
+        for nid in component:
+            node = id_to_node[nid]
+            raw_props = node.get("properties")
+            props = raw_props if isinstance(raw_props, dict) else {}
+            p = props.get("pressure")
+            if p is not None:
+                declared[nid] = float(p)
+
+        distinct = set(round(v, 3) for v in declared.values())
+
+        if len(distinct) > 1:
+            # Multiple conflicting pressures in the same flow-connected component.
+            details = ", ".join(f"'{nid}': {p:.1f} Pa" for nid, p in declared.items())
+            raise ValueError(
+                f"STONE v2 error: flow-connected component contains nodes with "
+                f"conflicting process pressures ({details}). "
+                "Declare process pressure on exactly one boundary node "
+                "(e.g. the downstream OutletSink) and leave others unset. "
+                "See STONE_SPECIFICATIONS.md."
+            )
+
+        if len(distinct) == 1:
+            process_pressure = next(iter(declared.values()))
+            for nid in component:
+                node = id_to_node[nid]
+                ntype = node.get("type", "")
+                if ntype not in _PRESSURE_BEARING_TYPES:
+                    continue
+                props = node.setdefault("properties", {})
+                if props.get("pressure") is None:
+                    props["pressure"] = process_pressure
 
 
 def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:

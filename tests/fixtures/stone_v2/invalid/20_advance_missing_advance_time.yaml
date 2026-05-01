@@ -1,0 +1,15 @@
+# Rule: advance stage without required advance_time | Expected: invalid
+
+stages:
+  bad_stage2:
+    mechanism: gri30.yaml
+    solve: advance
+
+bad_stage2:
+- id: reactor_bad_no_at
+  IdealGasReactor:
+    volume: 1 L
+    initial:
+      temperature: 1200 K
+      pressure: 1 atm
+      composition: CH4:1

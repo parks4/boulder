@@ -1,0 +1,11 @@
+# Rule: Top-level nodes: / connections: = STONE v1 shape | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+nodes:
+- id: reactor
+  IdealGasReactor: {}
+
+connections: []

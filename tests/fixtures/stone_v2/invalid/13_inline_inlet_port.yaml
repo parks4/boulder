@@ -1,0 +1,13 @@
+# Rule: Reactor with inline inlet: sub-block (STONE v1 port syntax) | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: reactor_inline
+  IdealGasReactor:
+    volume: 1 L
+    inlet:
+      from: inlet_inline
+      mass_flow_rate: 0.1 kg/s

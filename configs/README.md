@@ -1,391 +1,137 @@
-# YAML with 🪨 STONE Standard - Boulder Configuration Files
+﻿# Boulder Configuration Files — STONE v2
 
-**YAML format with 🪨 STONE standard** is Boulder's elegant configuration format that makes reactor network definitions clean and intuitive.
+This directory contains example configuration files using the **STONE v2** format.
+See [STONE_SPECIFICATIONS.md](../STONE_SPECIFICATIONS.md) for the full normative specification and [docs/stone.rst](../docs/stone.rst) for the Sphinx documentation page.
 
-## What is the 🪨 STONE Standard?
+## What is STONE v2?
 
-**🪨 STONE** stands for **Structured Type-Oriented Network Expressions** - a YAML configuration standard where component types become keys that contain their properties. This creates a visually clear hierarchy that's both human-readable and programmatically robust.
+**STONE** (Standardized Topology Of Network Elements) is Boulder's YAML format for reactor networks.
+**v2** (current) uses a `network:` key (single stage) or `stages:` + dynamic stage blocks (multi-stage).
+STONE v1 files with top-level `nodes:`/`connections:`/`groups:` are rejected.
 
-## Format Overview
+## File Structure
 
-### Traditional vs 🪨 STONE Standard
+### Single-stage (`network:`)
 
-**Traditional YAML format:**
-
-```yaml
-nodes:
-  - id: reactor1
-    type: IdealGasReactor
-    properties:
-      temperature: 1000
-      pressure: 101325
-```
-
-**YAML with 🪨 STONE standard:**
-
-```yaml
-nodes:
-  - id: reactor1
-    IdealGasReactor:
-      temperature: 1000      # K
-      pressure: 101325       # Pa
-```
-
-### Key Benefits
-
-- **🎯 Type Prominence**: Component types are visually prominent as keys
-- **🧹 Clean Structure**: No nested `properties` sections
-- **📖 Better Readability**: Properties are clearly grouped under their component type
-- **✅ Valid YAML**: Follows standard YAML syntax without mixed structures
-- **🚀 Intuitive**: Type-properties relationship is immediately clear
-
-## YAML with 🪨 STONE Standard Specification
-
-### File Structure
-
-```yaml
+\`yaml
 metadata:
-  name: "Configuration Name"
-  description: "Brief description"
-  version: "1.0"
-
-simulation:
-  mechanism: "gri30.yaml"
-  time_step: 0.001          # s
-  max_time: 10.0            # s
-  solver: "CVODE_BDF"
-  relative_tolerance: 1.0e-6
-  absolute_tolerance: 1.0e-9
-
-nodes:
-  - id: component_id
-    ComponentType:
-      property1: value1
-      property2: value2
-      # ... more properties
-
-connections:
-  - id: connection_id
-    ConnectionType:
-      property1: value1
-      property2: value2
-    source: source_component_id
-    target: target_component_id
-```
-
-### Component Types
-
-#### IdealGasReactor
-
-```yaml
-nodes:
-  - id: reactor1
-    IdealGasReactor:
-      temperature: 1000      # K
-      pressure: 101325       # Pa
-      composition: "CH4:1,O2:2,N2:7.52"
-      volume: 0.01           # m³ (optional)
-```
-
-#### Reservoir
-
-```yaml
-nodes:
-  - id: inlet
-    Reservoir:
-      temperature: 300       # K
-      pressure: 101325       # Pa (optional)
-      composition: "O2:1,N2:3.76"
-```
-
-### Connection Types
-
-#### MassFlowController
-
-```yaml
-connections:
-  - id: mfc1
-    MassFlowController:
-      mass_flow_rate: 0.1    # kg/s
-    source: inlet
-    target: reactor1
-```
-
-#### Valve
-
-```yaml
-connections:
-  - id: valve1
-    Valve:
-      valve_coeff: 1.0       # valve coefficient
-    source: reactor1
-    target: outlet
-```
-
-## Example Configurations
-
-### 📁 default.yaml
-
-Basic single reactor with reservoir inlet:
-
-```yaml
-metadata:
-  name: "Basic Reactor Configuration"
-  description: "Simple configuration with one reactor and one reservoir"
-  version: "1.0"
-
-simulation:
-  mechanism: "gri30.yaml"
-  time_step: 0.001
-  max_time: 10.0
-  solver: "CVODE_BDF"
-
-nodes:
-  - id: reactor1
-    IdealGasReactor:
-      temperature: 1000      # K
-      pressure: 101325       # Pa
-      composition: "CH4:1,O2:2,N2:7.52"
-
-  - id: res1
-    Reservoir:
-      temperature: 300       # K
-      composition: "O2:1,N2:3.76"
-
-connections:
-  - id: mfc1
-    MassFlowController:
-      mass_flow_rate: 0.1    # kg/s
-    source: res1
-    target: reactor1
-```
-
-### 📁 sample_configs2.yaml
-
-Extended configuration with multiple nodes:
-
-```yaml
-metadata:
-  name: "Extended Reactor Configuration"
-  description: "Multi-component reactor system with different flow controllers"
-  version: "2.0"
-
-nodes:
-  - id: reactor1
-    IdealGasReactor:
-      temperature: 1200      # K
-      pressure: 101325       # Pa
-      composition: "CH4:1,O2:2,N2:7.52"
-      volume: 0.01           # m³
-
-  - id: res1
-    Reservoir:
-      temperature: 300       # K
-      composition: "O2:1,N2:3.76"
-
-  - id: res2
-    Reservoir:
-      temperature: 350       # K
-      pressure: 202650       # Pa
-      composition: "CH4:1"
-
-connections:
-  - id: mfc1
-    MassFlowController:
-      mass_flow_rate: 0.05   # kg/s
-    source: res1
-    target: reactor1
-
-  - id: mfc2
-    MassFlowController:
-      mass_flow_rate: 0.02   # kg/s
-    source: res2
-    target: reactor1
-```
-
-### 📁 mix_react_streams.yaml
-
-Complex multi-reactor network:
-
-```yaml
-metadata:
-  name: "Mixed Reactor Streams"
-  description: "Complex multi-reactor network with interconnected streams"
-  version: "3.0"
-
-nodes:
-  - id: reactor1
-    IdealGasReactor:
-      temperature: 1100      # K
-      pressure: 101325       # Pa
-      composition: "CH4:0.8,O2:1.6,N2:6.0"
-      volume: 0.005          # m³
-
-  - id: reactor2
-    IdealGasReactor:
-      temperature: 900       # K
-      pressure: 101325       # Pa
-      composition: "H2:2,O2:1,N2:3.76"
-      volume: 0.008          # m³
-
-  - id: mixer1
-    IdealGasReactor:
-      temperature: 400       # K
-      pressure: 101325       # Pa
-      composition: "N2:1"
-      volume: 0.002          # m³
-
-connections:
-  - id: mfc3
-    MassFlowController:
-      mass_flow_rate: 0.025  # kg/s
-    source: reactor1
-    target: mixer1
-
-  - id: mfc4
-    MassFlowController:
-      mass_flow_rate: 0.035  # kg/s
-    source: mixer1
-    target: reactor2
-```
-
-### 📁 grouped_nodes.yaml
-
-Group multiple reactors together so they are solved together and appear as a group in the Reactor Network (compound node):
-
-```yaml
-metadata:
-  name: "Grouped Reactors"
-  description: "Two reactors solved together, displayed under a common group"
-  version: "1.0"
-
-simulation:
-  mechanism: "gri30.yaml"
-
-nodes:
-  - id: res_in
-    Reservoir:
-      temperature: 300       # K
-      composition: "CH4:1,O2:2,N2:7.52"
-
-  - id: r1
-    IdealGasReactor:
-      temperature: 1000      # K
-      pressure: 101325       # Pa
-      composition: "CH4:1,O2:2,N2:7.52"
-      group: "Train A"       # <— group membership
-
-  - id: r2
-    IdealGasReactor:
-      temperature: 950       # K
-      pressure: 101325       # Pa
-      composition: "N2:1"
-      group: "Train A"       # <— same group; will appear inside one compound node
-
-  - id: res_out
-    Reservoir:
-      temperature: 300       # K
-      composition: "N2:1"
-
-connections:
-  - id: mfc_in
-    MassFlowController:
-      mass_flow_rate: 0.05   # kg/s
-    source: res_in
-    target: r1
-
-  - id: mfc_mid
-    MassFlowController:
-      mass_flow_rate: 0.05   # kg/s
-    source: r1
-    target: r2
-
-  - id: mfc_out
-    MassFlowController:
-      mass_flow_rate: 0.05   # kg/s
-    source: r2
-    target: res_out
-```
-
-Notes:
-
-- Reactors that share the same `group` (or `group_name`) are assigned to a compound node labeled with the group name in the Reactor Network view.
-- The simulation solver treats grouped reactors as individual Cantera reactors, but they are collected and handled together by analysis utilities (e.g., when building Sankey inputs) via their `group_name`.
-
-## Property Reference
-
-### Common Properties
-
-| Property | Unit | Description | Components |
-|----------|------|-------------|------------|
-| `temperature` | K | Gas temperature | All |
-| `pressure` | Pa | Gas pressure | All |
-| `composition` | - | Species mole fractions (e.g., "CH4:1,O2:2") | All |
-| `volume` | m³ | Reactor volume | IdealGasReactor |
-| `mass_flow_rate` | kg/s | Mass flow rate | MassFlowController |
-| `valve_coeff` | - | Valve coefficient | Valve |
-
-### Composition Format
-
-Compositions are specified as comma-separated species:mole_fraction pairs:
-
-```yaml
-composition: "CH4:1,O2:2,N2:7.52"
-# Equivalent to: 1 mol CH4, 2 mol O2, 7.52 mol N2
-```
-
-### Units and Comments
-
-Always include units in comments for clarity:
-
-```yaml
-IdealGasReactor:
-  temperature: 1000      # K
-  pressure: 101325       # Pa
-  mass_flow_rate: 0.1    # kg/s
-  volume: 0.01           # m³
-```
-
-## Best Practices
-
-### 🎨 Formatting
-
-1. **Use consistent indentation** (2 spaces recommended)
-1. **Include unit comments** for all physical quantities
-1. **Group related components** logically
-1. **Use descriptive IDs** (e.g., `fuel_inlet`, `main_reactor`)
-
-### 🏗️ Structure
-
-1. **Start with metadata** to describe your configuration
-1. **Define simulation parameters** before components
-1. **List components** before connections
-1. **Order connections** by flow direction when possible
-
-### 🔄 Composition
-
-1. **Use standard species names** from your mechanism
-1. **Normalize compositions** (they don't need to sum to 1)
-1. **Include inert species** (like N2) for realistic mixtures
-
-## Validation
-
-YAML with 🪨 STONE standard includes automatic validation:
-
-- ✅ **Syntax validation**: YAML parser ensures proper syntax
-- ✅ **Structure validation**: Required sections and fields are checked
-- ✅ **Reference validation**: All connection sources/targets must exist
-- ✅ **Type validation**: Component and connection types are verified
-
-## Getting Started
-
-1. **Copy an example** configuration file as a starting point
-1. **Modify metadata** to describe your system
-1. **Update simulation parameters** for your mechanism and time scales
-1. **Define your components** with appropriate properties
-1. **Connect components** with flow controllers or valves
-1. **Test and iterate** using Boulder's simulation interface
-
-______________________________________________________________________
-
-*YAML with 🪨 STONE standard makes reactor network configuration as solid as stone - reliable, clear, and built to last.*
+title: "My Network"
+
+phases:
+gas:
+mechanism: gri30.yaml
+
+network:
+
+- id: feed
+  Reservoir:
+  temperature: 300 K
+  composition: N2:0.79,O2:0.21
+
+- id: reactor
+  IdealGasReactor:
+  volume: 1.0e-3 m\*\*3
+
+- id: feed_to_reactor
+  MassFlowController:
+  mass_flow_rate: 0.01 kg/s
+  source: feed
+  target: reactor
+
+settings:
+end_time: 1.0
+dt: 0.01
+\`
+
+### Multi-stage (`stages:` + dynamic blocks)
+
+\`yaml
+phases:
+gas:
+mechanism: gri30.yaml
+
+stages:
+stage_a:
+solve: advance_to_steady_state
+stage_b:
+solve: advance
+advance_time: 1.0e-3
+
+stage_a:
+
+- id: feed
+  Reservoir:
+  temperature: 300 K
+  composition: CH4:1,O2:2,N2:7.52
+- id: psr
+  IdealGasConstPressureMoleReactor:
+  volume: 1.0e-5 m\*\*3
+  initial:
+  temperature: 2200 K
+  composition: CO2:1,H2O:2,N2:7.52
+- id: feed_to_psr
+  MassFlowController:
+  mass_flow_rate: 1.0e-4 kg/s
+  source: feed
+  target: psr
+
+stage_b:
+
+- id: pfr_cell_1
+  IdealGasConstPressureMoleReactor:
+  volume: 2.5e-6 m\*\*3
+- id: psr_to_pfr
+  source: psr
+  target: pfr_cell_1
+  mass_flow_rate: 1.0e-4 kg/s
+  \`
+
+## Item Schema
+
+Each item in a stage block or `network:` list is a YAML mapping:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | Yes | Unique identifier |
+| `<KindName>: {...}` | Yes (nodes); No (logical connections) | Kind key with properties |
+| `source:` | For connections | Source node id |
+| `target:` | For connections | Target node id |
+
+**Nodes** have a kind key without `source`/`target`.
+**Connections** have `source` + `target` (and usually a kind key for flow device type).
+
+## Node Kinds
+
+| Kind | Type | Notes |
+|------|------|-------|
+| `Reservoir` | Boundary | Requires `temperature:` + `composition:` |
+| `IdealGasReactor` | Reactor | Use `initial:` for seeding state |
+| `IdealGasConstPressureReactor` | Reactor | Const-pressure variant |
+| `IdealGasConstPressureMoleReactor` | Reactor | Mole-based const-pressure |
+| `OutletSink` | Terminal | Visualization-only sink; cannot be a connection source |
+
+## Connection Kinds
+
+| Kind | Notes |
+|------|-------|
+| `MassFlowController` | Mass flow device; use `mass_flow_rate:` property |
+| `Valve` | Pressure-driven flow; use `valve_coeff:` property |
+| `PressureController` | Pressure controller (needs `master:` MFC) |
+| `Wall` | Heat coupling between adjacent reactors |
+| *(none)* | Logical connection (inter-stage state handoff only) |
+
+## Units
+
+Numeric values may carry explicit units:
+
+`yaml temperature: 300 K        # Kelvin volume: 1.0e-3 m**3       # cubic metres mass_flow_rate: 0.1 kg/s  # kilograms per second pressure: 101325 Pa       # Pascals advance_time: 1.0e-3      # seconds (bare number) `
+
+## Example Files
+
+| File | Description |
+|------|-------------|
+| `default.yaml` | Single reactor with reservoir inlet |
+| `sample_configs2.yaml` | Two-reservoir, two-MFC network |
+| `mix_react_streams.yaml` | Mixer with two inlet streams and valve outlet |
+| `grouped_nodes.yaml` | Grouped reactors in one stage |
+| `staged_psr_pfr.yaml` | Two-stage PSR → PFR chain |

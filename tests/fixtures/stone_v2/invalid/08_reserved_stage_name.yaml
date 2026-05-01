@@ -1,0 +1,12 @@
+# Rule: Stage named with reserved word "network" | Expected: invalid
+
+stages:
+  network:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+
+network:
+- id: some_reactor
+  IdealGasReactor:
+    volume: 1 L

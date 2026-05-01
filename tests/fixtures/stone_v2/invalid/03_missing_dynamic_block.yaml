@@ -1,0 +1,7 @@
+# Rule: Stage declared in stages: but no matching top-level block | Expected: invalid
+
+stages:
+  stage_a:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms

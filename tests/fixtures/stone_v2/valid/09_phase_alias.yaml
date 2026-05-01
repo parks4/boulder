@@ -1,0 +1,25 @@
+# Rule: mechanism: specified as a phases.* alias | Expected: valid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+stages:
+  stage_a:
+    mechanism: gas
+    solve: advance
+    advance_time: 1 ms
+
+stage_a:
+- id: inlet_alias
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+- id: reactor_alias
+  IdealGasReactor:
+    volume: 1 L
+- id: inlet_to_reactor_alias
+  MassFlowController:
+    mass_flow_rate: 0.05 kg/s
+  source: inlet_alias
+  target: reactor_alias

@@ -1,0 +1,36 @@
+# Rule: Two stages linked by a logical connection (no MFC between stages) | Expected: valid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+stages:
+  torch_stage:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+  psr_stage:
+    mechanism: gri30.yaml
+    solve: advance_to_steady_state
+
+torch_stage:
+- id: inlet
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+- id: torch
+  IdealGasReactor:
+    volume: 1 L
+- id: inlet_to_torch
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: inlet
+  target: torch
+
+psr_stage:
+- id: psr
+  IdealGasReactor:
+    volume: 5 L
+- id: torch_to_psr
+  source: torch
+  target: psr

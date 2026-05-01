@@ -370,6 +370,13 @@ def solve_staged(
             mapping_losses=mapping_losses,
         )
 
+        logger.info(
+            "Staged solve: stage '%s' finished (%d/%d)",
+            stage.id,
+            stage_idx + 1,
+            n_stages,
+        )
+
         if progress_callback is not None:
             try:
                 progress_callback(stage.id, stage_idx + 1, n_stages)

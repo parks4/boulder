@@ -1,0 +1,22 @@
+# Rule: Single-stage network with Reservoir + reactor + MFC | Expected: valid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: inlet
+  Reservoir:
+    temperature: 300 K
+    pressure: 1 atm
+    composition: CH4:1
+
+- id: reactor
+  IdealGasReactor:
+    volume: 1 L
+
+- id: inlet_to_reactor
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: inlet
+  target: reactor

@@ -1,0 +1,12 @@
+# Rule: Both composition: and mass_composition: on same node | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: inlet_mixed
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+    mass_composition: CH4:1

@@ -1,0 +1,10 @@
+# Rule: Top-level block with no stages: entry | Expected: invalid
+
+stages:
+  stage_a:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+
+stage_a: []
+stage_b: []

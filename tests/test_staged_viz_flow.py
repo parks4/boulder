@@ -425,3 +425,119 @@ def test_staged_pressure_controller_cross_stage_master() -> None:
     # (its getter ``PressureController.primary`` is not exposed in
     # Cantera 3.2); the master MFC's resolved rate is what downstream
     # viewers use when they query the PC master in the Sankey.
+
+
+def _staged_pc_on_logical_master() -> Dict[str, Any]:
+    """Two-stage PSR→PFR chain with PC outlet mastering logical ``psr_to_pfr``."""
+    return {
+        "phases": {"gas": {"mechanism": "gri30.yaml"}},
+        "groups": {
+            "psr_stage": {
+                "stage_order": 1,
+                "mechanism": "gri30.yaml",
+                "solve": "advance",
+                "advance_time": 1e-4,
+            },
+            "pfr_stage": {
+                "stage_order": 2,
+                "mechanism": "gri30.yaml",
+                "solve": "advance",
+                "advance_time": 1e-4,
+            },
+        },
+        "nodes": [
+            {
+                "id": "feed",
+                "type": "Reservoir",
+                "properties": {
+                    "group": "psr_stage",
+                    "temperature": 300.0,
+                    "pressure": 101325.0,
+                    "composition": "N2:1",
+                },
+            },
+            {
+                "id": "psr",
+                "type": "IdealGasConstPressureMoleReactor",
+                "properties": {
+                    "group": "psr_stage",
+                    "temperature": 1000.0,
+                    "pressure": 101325.0,
+                    "composition": "N2:1",
+                    "volume": 1e-5,
+                },
+            },
+            {
+                "id": "pfr",
+                "type": "IdealGasConstPressureMoleReactor",
+                "properties": {
+                    "group": "pfr_stage",
+                    "temperature": 1000.0,
+                    "pressure": 101325.0,
+                    "composition": "N2:1",
+                    "volume": 1e-5,
+                },
+            },
+            {
+                "id": "downstream",
+                "type": "Reservoir",
+                "properties": {
+                    "group": "pfr_stage",
+                    "temperature": 300.0,
+                    "pressure": 101325.0,
+                    "composition": "N2:1",
+                },
+            },
+        ],
+        "connections": [
+            {
+                "id": "feed_to_psr",
+                "type": "MassFlowController",
+                "source": "feed",
+                "target": "psr",
+                "properties": {"mass_flow_rate": 5e-4},
+                "group": "psr_stage",
+            },
+            {
+                "id": "psr_to_pfr",
+                "type": "MassFlowController",
+                "source": "psr",
+                "target": "pfr",
+                "properties": {},
+                "logical": True,
+            },
+            {
+                "id": "pfr_to_downstream",
+                "type": "PressureController",
+                "source": "pfr",
+                "target": "downstream",
+                "properties": {"master": "psr_to_pfr", "pressure_coeff": 0.0},
+                "group": "pfr_stage",
+            },
+        ],
+    }
+
+
+@pytest.mark.slow
+def test_pc_mastered_on_logical_inter_stage_mfc_builds_in_viz_network() -> None:
+    """PC mastered on a logical inter-stage MFC defers gracefully.
+
+    Asserts:
+    1. build_network succeeds without raising on 'master not found'.
+    2. pfr_to_downstream is a PressureController in the final viz network.
+    3. psr_to_pfr is a MassFlowController in the final viz network (materialized).
+    4. The primary MFC (psr_to_pfr) carries the upstream feed flow (5e-4 kg/s).
+    """
+    cfg = validate_config(normalize_config(_staged_pc_on_logical_master()))
+    conv = DualCanteraConverter(mechanism="gri30.yaml")
+    conv.build_network(cfg)
+
+    assert isinstance(
+        conv.connections.get("pfr_to_downstream"), ct.PressureController
+    ), "pfr_to_downstream must be a PressureController in the viz network"
+    assert isinstance(conv.connections.get("psr_to_pfr"), ct.MassFlowController), (
+        "psr_to_pfr must be a MassFlowController (materialized logical MFC) in viz network"
+    )
+    rates = conv._mfc_flow_rates
+    assert rates.get("feed_to_psr") == pytest.approx(5e-4, rel=1e-9)
+    assert rates.get("psr_to_pfr") == pytest.approx(5e-4, rel=1e-9)

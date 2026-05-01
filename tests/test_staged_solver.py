@@ -86,26 +86,29 @@ _INERT_TWO_STAGE = {
 
 
 class TestStagedConfig:
-    """The example config file loads, validates, and survives normalize_config."""
+    """The example config file (STONE v2) loads, validates, and survives normalize_config."""
 
     def test_config_file_exists(self):
+        """The staged_psr_pfr.yaml config file exists on disk."""
         assert STAGED_CONFIG.exists(), f"Config file not found: {STAGED_CONFIG}"
 
     def test_config_loads(self):
+        """Raw STONE v2 file has 'stages:' and named stage blocks instead of 'groups:'/'nodes:'."""
         cfg = load_config_file(str(STAGED_CONFIG))
-        assert "groups" in cfg, "groups section missing"
-        assert "nodes" in cfg
-        assert "connections" in cfg
+        assert "stages" in cfg, "STONE v2 requires 'stages:' section"
+        assert "psr_stage" in cfg, "Stage block 'psr_stage' missing from raw v2 file"
+        assert "pfr_stage" in cfg, "Stage block 'pfr_stage' missing from raw v2 file"
 
     def test_config_normalizes(self):
+        """normalize_config converts v2 to internal format with 'groups' and 'connections'."""
         cfg = load_config_file(str(STAGED_CONFIG))
         norm = normalize_config(cfg)
-        assert "groups" in norm
-        # inter-stage connection preserves mechanism_switch (even when commented → None)
+        assert "groups" in norm, "Normalized config must have 'groups'"
         conn_ids = {c["id"] for c in norm["connections"]}
-        assert "psr_to_pfr" in conn_ids
+        assert "psr_to_pfr" in conn_ids, "Inter-stage connection 'psr_to_pfr' missing"
 
     def test_config_validates(self):
+        """normalize_config + validate_config round-trip succeeds."""
         cfg = load_config_file(str(STAGED_CONFIG))
         norm = normalize_config(cfg)
         validated = validate_config(norm)
@@ -114,8 +117,10 @@ class TestStagedConfig:
         assert len(validated["nodes"]) == 6  # feed + psr + 4 pfr cells
 
     def test_groups_section_structure(self):
+        """After normalization, groups has psr_stage and pfr_stage with mechanism and solve."""
         cfg = load_config_file(str(STAGED_CONFIG))
-        groups = cfg["groups"]
+        norm = normalize_config(cfg)
+        groups = norm["groups"]
         assert "psr_stage" in groups
         assert "pfr_stage" in groups
         for gid, gcfg in groups.items():
@@ -123,12 +128,10 @@ class TestStagedConfig:
             assert "solve" in gcfg, f"groups.{gid} missing solve"
 
     def test_inter_stage_connection_present(self):
-        """psr_to_pfr must cross stage boundaries."""
+        """psr_to_pfr logical connection must cross stage boundaries (different group tags)."""
         cfg = load_config_file(str(STAGED_CONFIG))
         norm = normalize_config(cfg)
-        node_group = {
-            n["id"]: (n.get("properties") or {}).get("group") for n in norm["nodes"]
-        }
+        node_group = {n["id"]: n.get("group") for n in norm["nodes"]}
         psr_to_pfr = next(
             (c for c in norm["connections"] if c["id"] == "psr_to_pfr"), None
         )
@@ -336,10 +339,11 @@ class TestStagedSolveExampleConfig:
 
     def test_five_reactors_registered(self, result):
         conv, _ = result
-        # Only grouped nodes are processed by the staged solver:
-        # psr + 4 pfr cells = 5.  The ungrouped `feed` Reservoir is not added
-        # to conv.reactors since it has no group and belongs to no sub-network.
-        assert len(conv.reactors) == 5
+        # In STONE v2 all items in a stage block share that stage's group.
+        # psr_stage: feed (Reservoir) + psr = 2 nodes.
+        # pfr_stage: pfr_cell_1/2/3/4 = 4 nodes.
+        # Total: 6 reactors registered in conv.reactors.
+        assert len(conv.reactors) == 6
 
     def test_two_stage_trajectory(self, result):
         conv, _ = result

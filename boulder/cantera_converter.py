@@ -437,6 +437,14 @@ class DualCanteraConverter:
         self._unresolved_mfc_ids: Set[str] = set()
         self._mfc_topology: Dict[str, Tuple[str, str]] = {}  # conn_id -> (src, tgt)
         self._mfc_flow_rates: Dict[str, float] = {}  # known flow rates (kg/s)
+        # Persistent record of MFCs that had no explicit mass_flow_rate in the
+        # YAML. Used by build_viz_network to re-attempt conservation resolution
+        # for MFCs prematurely resolved to 0 during a partial-topology stage pass.
+        self._originally_unspecified_mfc_ids: Set[str] = set()
+        # PressureControllers deferred during stage builds because their master
+        # MFC was a logical inter-stage connection not yet registered.  These
+        # are built in build_viz_network once the full topology is available.
+        self._deferred_pc_conn_dicts: List[Dict[str, Any]] = []
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -597,6 +605,10 @@ class DualCanteraConverter:
         elif typ == "Reservoir":
             reactor = ct.Reservoir(gas_for_node, clone=True)  # type: ignore[assignment]
             reactor.name = rid
+        elif typ == "OutletSink":
+            # STONE v2 visual-only terminal node; modelled as a Reservoir sink.
+            reactor = ct.Reservoir(gas_for_node, clone=True)  # type: ignore[assignment]
+            reactor.name = rid
         else:
             raise ValueError(f"Unsupported reactor type: '{typ}'")
 
@@ -640,6 +652,7 @@ class DualCanteraConverter:
             else:
                 mfc.mass_flow_rate = 0.0  # type: ignore[misc]  # resolved by conservation
                 self._unresolved_mfc_ids.add(cid)
+                self._originally_unspecified_mfc_ids.add(cid)
             self.connections[cid] = mfc
         elif typ == "Valve":
             coeff = float(props.get("valve_coeff", 1.0))
@@ -813,9 +826,13 @@ class DualCanteraConverter:
                     props.get("mechanism") or node.get("mechanism") or stage_mechanism
                 )
                 gas_for_node = self._get_gas_for_mech(node_mech)
-                temp = props.get("temperature", 300)
-                pres = props.get("pressure", 101325)
-                compo = props.get("composition", "N2:1")
+                # STONE v2: reactor state may live under props["initial"] for
+                # non-Reservoir nodes; fall back to props directly for Reservoir
+                # boundary nodes and legacy internal format.
+                initial = props.get("initial") or {}
+                temp = initial.get("temperature") or props.get("temperature", 300)
+                pres = initial.get("pressure") or props.get("pressure", 101325)
+                compo = initial.get("composition") or props.get("composition", "N2:1")
                 gas_for_node.TPX = (temp, pres, self.parse_composition(compo))
 
             self.gas = gas_for_node
@@ -863,6 +880,22 @@ class DualCanteraConverter:
                     cid,
                 )
                 continue
+            # Detect PressureControllers whose master MFC has not been
+            # registered yet (logical inter-stage MFCs are materialized only
+            # in build_viz_network).  Defer these cleanly rather than letting
+            # build_connection raise and swallowing the error silently.
+            if conn.get("type") == "PressureController":
+                master_id = (conn.get("properties") or {}).get("master")
+                if master_id and master_id not in self.connections:
+                    logger.debug(
+                        "Stage '%s': deferring PressureController '%s' — "
+                        "master '%s' not yet registered (logical inter-stage MFC).",
+                        stage_id,
+                        cid,
+                        master_id,
+                    )
+                    self._deferred_pc_conn_dicts.append(conn)
+                    continue
             try:
                 self.build_connection(conn)
             except Exception as exc:
@@ -974,6 +1007,41 @@ class DualCanteraConverter:
             except Exception as exc:
                 logger.warning(
                     "Viz network: could not build connection '%s': %s", cid, exc
+                )
+
+        # Re-enqueue any MFCs that (a) had no explicit mass_flow_rate in the
+        # YAML and (b) were resolved to 0 during a per-stage conservation pass
+        # when the full cross-stage topology was not yet visible.  Now that all
+        # inter-stage devices are built the full topology is available and a
+        # second conservation pass can assign the correct flow rate.
+        for cid in list(self._originally_unspecified_mfc_ids):
+            if self._mfc_flow_rates.get(cid, -1.0) == 0.0:
+                self._unresolved_mfc_ids.add(cid)
+                self._mfc_flow_rates.pop(cid, None)
+
+        # Build any PressureControllers that were deferred during stage builds
+        # because their master MFC was a logical inter-stage connection not yet
+        # registered at stage-build time.  Now that all inter-stage devices
+        # have been materialized above, the masters exist in self.connections.
+        for conn in self._deferred_pc_conn_dicts:
+            cid = conn["id"]
+            if cid in self.connections:
+                continue  # already built via all_connections loop
+            src = conn["source"]
+            tgt = conn["target"]
+            if src not in self.reactors or tgt not in self.reactors:
+                logger.warning(
+                    "Viz network: cannot build deferred PC '%s' — reactor not found.",
+                    cid,
+                )
+                continue
+            try:
+                self.build_connection(conn)
+            except Exception as exc:
+                logger.warning(
+                    "Viz network: failed to build deferred PressureController '%s': %s",
+                    cid,
+                    exc,
                 )
 
         # Resolve any MFC mass flow rates that were still pending once all

@@ -1,0 +1,11 @@
+# Rule: Connection with source: but no target: | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: incomplete_edge
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: inlet_incomplete

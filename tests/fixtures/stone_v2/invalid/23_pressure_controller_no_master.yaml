@@ -1,0 +1,42 @@
+# Rule: PressureController with ambiguous master (two upstream MFCs) | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: feed_a
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+
+- id: feed_b
+  Reservoir:
+    temperature: 300 K
+    composition: N2:1
+
+- id: reactor_pc
+  IdealGasReactor:
+    volume: 1 L
+
+- id: exhaust_pc
+  Reservoir:
+    temperature: 300 K
+    composition: N2:1
+
+- id: mfc_a
+  MassFlowController:
+    mass_flow_rate: 0.05 kg/s
+  source: feed_a
+  target: reactor_pc
+
+- id: mfc_b
+  MassFlowController:
+    mass_flow_rate: 0.05 kg/s
+  source: feed_b
+  target: reactor_pc
+
+- id: pc_out
+  PressureController: {}
+  source: reactor_pc
+  target: exhaust_pc

@@ -34,7 +34,7 @@ export function ReactorGraph() {
 
     for (const node of config.nodes) {
       const group = String(
-        node.properties?.group ?? node.properties?.group_name ?? "",
+        node.group ?? node.properties?.group ?? node.properties?.group_name ?? "",
       ).trim();
 
       if (group) {

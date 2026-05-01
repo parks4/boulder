@@ -1,0 +1,11 @@
+# Rule: Reactor with both volume: and t_res_s: (over-specified sizing) | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: overspec_reactor
+  IdealGasReactor:
+    volume: 1 L
+    t_res_s: 1 ms

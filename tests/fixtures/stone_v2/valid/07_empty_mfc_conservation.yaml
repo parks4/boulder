@@ -1,0 +1,31 @@
+# Rule: MassFlowController: {} resolved by conservation | Expected: valid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: feed
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+
+- id: main_reactor
+  IdealGasReactor:
+    volume: 1 L
+
+- id: exhaust
+  Reservoir:
+    temperature: 300 K
+    composition: N2:1
+
+- id: feed_to_reactor
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: feed
+  target: main_reactor
+
+- id: reactor_to_exhaust
+  MassFlowController: {}
+  source: main_reactor
+  target: exhaust
