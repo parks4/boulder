@@ -10,6 +10,8 @@ interface SimulationState {
   error: string | null;
 
   // Actions
+  /** Set running=true immediately (before the POST returns) so the overlay shows at once. */
+  beginSimulationRun: () => void;
   startSimulation: (simulationId: string) => void;
   updateProgress: (progress: SimulationProgress) => void;
   setResults: (results: SimulationResults) => void;
@@ -25,6 +27,16 @@ export const useSimulationStore = create<SimulationState>((set) => ({
   results: null,
   pythonCode: "",
   error: null,
+
+  beginSimulationRun: () =>
+    set({
+      isRunning: true,
+      simulationId: null,
+      progress: null,
+      results: null,
+      pythonCode: "",
+      error: null,
+    }),
 
   startSimulation: (simulationId) =>
     set({
