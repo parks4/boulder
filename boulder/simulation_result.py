@@ -1,9 +1,9 @@
 """Typed container for the result of a STONE simulation.
 
 :class:`SimulationResult` replaces the previous loose ``sim_extra`` dict and
-per-reactor back-references to plugin internals with a single
-dataclass that every downstream consumer — Calculation Note writer, figure
-generators, KPI extractors, UI dashboard — can depend on.
+per-reactor back-references to plugin internals with a single dataclass that
+every downstream consumer — Calculation Note writer, figure generators, KPI
+extractors, UI dashboard — can depend on.
 
 Construction
 ------------
@@ -16,28 +16,33 @@ Structure
 ---------
 ``config``:
     The fully normalised (post :func:`boulder.config.normalize_config`) config.
-``network_viz``:
-    Visualization :class:`cantera.ReactorNet` produced by
-    :meth:`~boulder.cantera_converter.DualCanteraConverter.build_viz_network`.
-    This global network contains all converged reactors and cross-stage
-    connections and is suitable for drawing, Sankey diagrams, and generic
-    flow reporting.
-``networks``:
-    Mapping ``stage_id -> ReactorNet`` exposing the concrete stage solvers
-    (i.e. plugin-specific stage networks such as ``DesignPFRNet`` or
-    ``DesignTubeFurnaceNet``) for plugin-specific post-processing.  Use this
-    to access per-stage scalars and profiles.
+``network``:
+    A :class:`~boulder.staged_network.StagedReactorNet` — a
+    ReactorNet-compatible staged network facade that owns:
+
+    * ``network.visualization_network``: the global, drawable, post-solve
+      :class:`cantera.ReactorNet` containing all converged reactors and
+      cross-stage connections.
+    * ``network.networks``: mapping ``stage_id -> stage solver network``
+      (e.g. :class:`~bloc.design_reactors.DesignPFRNet` or
+      :class:`~bloc.reactors.DesignTubeFurnaceNet`).
+    * ``network.reactors``: unique global reactor objects, deduplicated by
+      object identity; same Python instances as those inside each stage
+      solver where the solver is reactor-backed.
+    * ``network.trajectory``: the :class:`~boulder.lagrangian.LagrangianTrajectory`.
+    * ``network.scalars``: flat dict of plugin-produced scalars.
+
+    This facade is **not** a single global CVODE integration — staged solves
+    with mechanism switches and custom PFR solvers are not one monolithic ODE
+    problem.
+
+``scalars``:
+    Read-only convenience property delegating to ``network.scalars``.
 ``trajectory``:
-    The :class:`~boulder.lagrangian.LagrangianTrajectory` aggregating all
-    stage segments.  Always present (even for a single-stage simulation).
+    Read-only convenience property delegating to ``network.trajectory``.
 ``per_reactor_states``:
     Mapping ``reactor_id -> ct.SolutionArray`` giving the final converged
     thermodynamic state of every non-reservoir reactor.
-``scalars``:
-    Flat dict of plugin-produced scalars, merged from every
-    :attr:`CustomStageNetwork.scalars`.  Keys are namespaced with the
-    stage id (``"{stage_id}.{key}"``) to avoid collisions when two stages
-    expose the same metric.
 ``connection_mass_flows_kg_s``:
     Mapping ``connection_id -> mass flow rate`` captured from the solved network.
 ``connection_endpoints``:
@@ -56,6 +61,7 @@ import cantera as ct
 if TYPE_CHECKING:
     from .cantera_converter import DualCanteraConverter
     from .lagrangian import LagrangianTrajectory
+    from .staged_network import StagedReactorNet
 
 
 __all__ = ["SimulationResult", "make_simulation_result"]
@@ -66,19 +72,28 @@ class SimulationResult:
     """Typed snapshot of a built + solved STONE simulation."""
 
     config: Dict[str, Any]
-    network_viz: ct.ReactorNet
-    networks: Dict[str, ct.ReactorNet] = field(default_factory=dict)
-    trajectory: Optional["LagrangianTrajectory"] = None
+    network: "StagedReactorNet"
     per_reactor_states: Dict[str, ct.SolutionArray] = field(default_factory=dict)
-    scalars: Dict[str, Any] = field(default_factory=dict)
     connection_mass_flows_kg_s: Dict[str, float] = field(default_factory=dict)
     connection_endpoints: Dict[str, tuple[str, str]] = field(default_factory=dict)
     node_inlet_mass_flows_kg_s: Dict[str, float] = field(default_factory=dict)
     node_outlet_mass_flows_kg_s: Dict[str, float] = field(default_factory=dict)
 
-    def get_network(self, stage_id: str) -> Optional[ct.ReactorNet]:
-        """Return the stage solver network for ``stage_id``, or ``None``."""
-        return self.networks.get(stage_id)
+    @property
+    def scalars(self) -> Dict[str, Any]:
+        """Flat plugin-produced scalars, namespaced by ``"{stage_id}.{key}"``.
+
+        Delegates to :attr:`network.scalars`.
+        """
+        return self.network.scalars
+
+    @property
+    def trajectory(self) -> Optional["LagrangianTrajectory"]:
+        """Lagrangian trajectory accumulated during the staged solve.
+
+        Delegates to :attr:`network.trajectory`.
+        """
+        return self.network.trajectory
 
 
 def make_simulation_result(
@@ -92,24 +107,19 @@ def make_simulation_result(
     returned.  The helper:
 
     1. Pulls the staged-solve trajectory off the converter.
-    2. Takes a single-frame :class:`cantera.SolutionArray` snapshot of every
+    2. Constructs a :class:`~boulder.staged_network.StagedReactorNet` facade
+       from the visualization network and stage solver networks.
+    3. Takes a single-frame :class:`cantera.SolutionArray` snapshot of every
        non-reservoir reactor.
-    3. Flattens each ``CustomStageNetwork.scalars`` into
-       :attr:`SimulationResult.scalars` under the ``"{stage_id}.{key}"``
-       namespace.
+    4. Flattens each ``CustomStageNetwork.scalars`` into the facade's
+       ``scalars`` under the ``"{stage_id}.{key}"`` namespace.
     """
+    from .staged_network import StagedReactorNet  # noqa: PLC0415
+
     trajectory = getattr(converter, "_staged_trajectory", None)
-    networks: Dict[str, ct.ReactorNet] = (
+    networks: Dict[str, Any] = (
         dict(trajectory.networks) if trajectory is not None else {}
     )
-
-    per_reactor_states: Dict[str, ct.SolutionArray] = {}
-    for rid, reactor in getattr(converter, "reactors", {}).items():
-        if isinstance(reactor, ct.Reservoir):
-            continue
-        states = ct.SolutionArray(reactor.phase, extra=["t"])
-        states.append(reactor.phase.state, t=0.0)  # type: ignore[call-arg]
-        per_reactor_states[rid] = states
 
     scalars: Dict[str, Any] = {}
     for stage_id, stage_rnet in networks.items():
@@ -119,8 +129,15 @@ def make_simulation_result(
         for key, value in net_scalars.items():
             scalars[f"{stage_id}.{key}"] = value
 
+    per_reactor_states: Dict[str, ct.SolutionArray] = {}
+    for rid, reactor in getattr(converter, "reactors", {}).items():
+        if isinstance(reactor, ct.Reservoir):
+            continue
+        states = ct.SolutionArray(reactor.phase, extra=["t"])
+        states.append(reactor.phase.state, t=0.0)  # type: ignore[call-arg]
+        per_reactor_states[rid] = states
+
     # Authoritative flow map captured once from the solved converter.
-    # This avoids re-probing transient flow-device state later in reporting.
     connection_endpoints: Dict[str, tuple[str, str]] = {}
     for conn in config.get("connections") or []:
         cid = conn.get("id")
@@ -133,8 +150,6 @@ def make_simulation_result(
     node_inlet_mass_flows_kg_s: Dict[str, float] = {}
     node_outlet_mass_flows_kg_s: Dict[str, float] = {}
     for cid, dev in getattr(converter, "connections", {}).items():
-        # Only flow devices expose mass_flow_rate; walls and custom non-flow
-        # objects are ignored.
         try:
             mdot = float(dev.mass_flow_rate)
         except Exception:
@@ -151,19 +166,24 @@ def make_simulation_result(
             node_inlet_mass_flows_kg_s.get(tgt, 0.0) + mdot
         )
 
-    net = converter.network
-    if net is None:
+    viz_net = converter.network
+    if viz_net is None:
         raise ValueError(
             "Cannot build SimulationResult: converter.network is None. Call "
             "build_network (and the staged solve) before make_simulation_result."
         )
-    return SimulationResult(
-        config=config,
-        network_viz=net,
+
+    staged_net = StagedReactorNet(
+        viz_network=viz_net,
         networks=networks,
         trajectory=trajectory,
-        per_reactor_states=per_reactor_states,
         scalars=scalars,
+    )
+
+    return SimulationResult(
+        config=config,
+        network=staged_net,
+        per_reactor_states=per_reactor_states,
         connection_mass_flows_kg_s=connection_mass_flows_kg_s,
         connection_endpoints=connection_endpoints,
         node_inlet_mass_flows_kg_s=node_inlet_mass_flows_kg_s,
