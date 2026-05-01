@@ -970,6 +970,11 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
     # become real connections before unfolders read the node.
     expand_composite_kinds(normalized, plugins)
 
+    # Propagate process pressure from terminal boundary nodes (e.g. OutletSink)
+    # to flow-connected upstream nodes that lack an explicit pressure.  Wall
+    # edges are excluded so ambient/satellite Reservoirs keep their own pressure.
+    propagate_terminal_pressure_defaults(normalized)
+
     # Topologically order connections so every PressureController is built
     # after the MassFlowController it points at via `master:`.  This is a
     # Cantera requirement (the primary device must exist first).
@@ -1268,6 +1273,117 @@ def synthesize_default_group(config: Dict[str, Any]) -> None:
         has_group = bool(conn.get("group") or props.get("group"))
         if not has_group:
             conn["group"] = "default"
+
+
+def propagate_terminal_pressure_defaults(config: Dict[str, Any]) -> None:
+    """Propagate a declared process pressure from terminal nodes to their flow-connected peers.
+
+    Groups nodes into connected components using only flow/logical connection edges
+    (``MassFlowController``, ``PressureController``, ``Valve``).  ``Wall`` edges are
+    excluded so ambient/satellite Reservoirs keep their own pressure.
+
+    Within each component:
+    - If zero or one distinct pressure is declared, no conflict exists.
+    - If exactly one distinct pressure exists, fill missing ``properties.pressure``
+      on all other nodes in the component (only ``Reservoir``, ``OutletSink``,
+      and constant-pressure reactor kinds).
+    - If multiple distinct pressures are declared, raise ``ValueError``.
+
+    This is a defaulting pass.  Nodes that already carry a pressure that matches
+    the component pressure are left unchanged.  The pass is a no-op when every
+    node already has an explicit pressure (backward-compatible).
+    """
+    nodes: List[Dict[str, Any]] = config.get("nodes") or []
+    connections: List[Dict[str, Any]] = config.get("connections") or []
+
+    if not nodes:
+        return
+
+    # Flow-device connection types that carry process pressure.
+    _FLOW_TYPES = frozenset({"MassFlowController", "PressureController", "Valve"})
+
+    # Node types that should receive a defaulted pressure when missing.
+    _PRESSURE_BEARING_TYPES = frozenset(
+        {
+            "Reservoir",
+            "OutletSink",
+            "IdealGasConstPressureReactor",
+            "IdealGasConstPressureMoleReactor",
+            "DesignPSR",
+            "DesignTorchInstantaneousHeating",
+            "DesignTorch",
+            "DesignPFR",
+            "DesignPFRThinShell",
+            "DesignTubeFurnace",
+        }
+    )
+
+    node_ids = [n["id"] for n in nodes]
+    id_to_node = {n["id"]: n for n in nodes}
+
+    # Build adjacency list from flow-only edges (undirected).
+    adjacency: Dict[str, List[str]] = {nid: [] for nid in node_ids}
+    for conn in connections:
+        ctype = conn.get("type", "MassFlowController")
+        if ctype not in _FLOW_TYPES:
+            continue
+        src = conn.get("source")
+        tgt = conn.get("target")
+        if src in adjacency and tgt in adjacency:
+            adjacency[src].append(tgt)
+            adjacency[tgt].append(src)
+
+    # BFS/DFS to find connected components.
+    visited: set = set()
+    components: List[List[str]] = []
+    for start in node_ids:
+        if start in visited:
+            continue
+        component: List[str] = []
+        stack = [start]
+        while stack:
+            nid = stack.pop()
+            if nid in visited:
+                continue
+            visited.add(nid)
+            component.append(nid)
+            stack.extend(adjacency[nid])
+        components.append(component)
+
+    # For each component, check declared pressures and propagate.
+    for component in components:
+        declared: Dict[str, float] = {}
+        for nid in component:
+            node = id_to_node[nid]
+            raw_props = node.get("properties")
+            props = raw_props if isinstance(raw_props, dict) else {}
+            p = props.get("pressure")
+            if p is not None:
+                declared[nid] = float(p)
+
+        distinct = set(round(v, 3) for v in declared.values())
+
+        if len(distinct) > 1:
+            # Multiple conflicting pressures in the same flow-connected component.
+            details = ", ".join(f"'{nid}': {p:.1f} Pa" for nid, p in declared.items())
+            raise ValueError(
+                f"STONE v2 error: flow-connected component contains nodes with "
+                f"conflicting process pressures ({details}). "
+                "Declare process pressure on exactly one boundary node "
+                "(e.g. the downstream OutletSink) and leave others unset. "
+                "See STONE_SPECIFICATIONS.md."
+            )
+
+        if len(distinct) == 1:
+            process_pressure = next(iter(declared.values()))
+            for nid in component:
+                node = id_to_node[nid]
+                ntype = node.get("type", "")
+                if ntype not in _PRESSURE_BEARING_TYPES:
+                    continue
+                props = node.setdefault("properties", {})
+                if props.get("pressure") is None:
+                    props["pressure"] = process_pressure
 
 
 def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
