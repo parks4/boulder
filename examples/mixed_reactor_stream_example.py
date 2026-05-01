@@ -43,7 +43,9 @@ import mix1  # noqa: E402
 # Serialize the running Cantera simulation to STONE YAML
 # -------------------------------------------------------
 
-output_yaml = "mixed_reactor_stream.yaml"
+# Resolve beside this script so Sphinx-Gallery (runs from its output dir) still
+# writes and reloads the same file.
+output_yaml = str(examples_dir / "mixed_reactor_stream.yaml")
 write_sim_as_yaml(mix1.sim, output_yaml)
 print(f"Wrote STONE YAML to {output_yaml}")
 

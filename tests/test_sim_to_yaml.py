@@ -346,56 +346,31 @@ def test_sim2stone_yaml_validation_with_comments():
 
 
 def test_sim2stone_yaml_format_compliance():
-    """Test that sim2stone generated YAML is compatible with pre-commit formatting."""
-    import subprocess
-    import sys
+    """sim2stone YAML must parse like pre-commit ``check-yaml`` (ruamel safe loader).
+
+    We call ``ruamel.yaml.YAML(typ='safe').load`` directly instead of
+    ``pre-commit run check-yaml``: that hook uses the same API and prints parse
+    errors to stdout, so subprocess failures were easy to mis-diagnose; temp
+    files under ``/tmp`` and hook subprocess setup also varied across CI runners.
+    """
+    from io import StringIO
+
+    import ruamel.yaml
+    import yaml
 
     sim, _ = _build_test_network()
-
-    # Generate YAML with sim2stone
     yaml_str = sim_to_stone_yaml(sim, default_mechanism="gri30.yaml")
 
-    # Write to a temporary file
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(yaml_str)
-        f.flush()
-        temp_name = f.name
-
+    safe = ruamel.yaml.YAML(typ="safe")
     try:
-        # Test that the YAML passes check-yaml hook
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pre_commit",
-                "run",
-                "check-yaml",
-                "--files",
-                temp_name,
-            ],
-            capture_output=True,
-            text=True,
+        safe.load(StringIO(yaml_str))
+    except ruamel.yaml.YAMLError as exc:
+        pytest.fail(
+            f"Generated YAML failed ruamel safe parse (check-yaml parity): {exc}"
         )
-        # Note: pre-commit may not be available in all test environments
-        # so we'll make this test conditional
-        if result.returncode == 0 or "command not found" in result.stderr.lower():
-            # Either passed or pre-commit not available - both are acceptable
-            pass
-        else:
-            pytest.fail(f"Generated YAML failed check-yaml validation: {result.stderr}")
 
-        # Test that the YAML can be loaded by PyYAML (basic syntax check)
-        import yaml
-
-        with open(temp_name, "r") as f:
-            parsed = yaml.safe_load(f)
-        assert parsed is not None
-
-    finally:
-        try:
-            os.unlink(temp_name)
-        except (OSError, PermissionError):
-            pass  # Ignore cleanup errors on Windows
+    parsed = yaml.safe_load(yaml_str)
+    assert parsed is not None
 
 
 def test_mix1_example_yaml_validation():
