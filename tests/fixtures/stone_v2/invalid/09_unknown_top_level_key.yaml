@@ -1,0 +1,12 @@
+# Rule: Unknown key at file root | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: r1
+  IdealGasReactor:
+    volume: 1 L
+
+unknown_key: some_value

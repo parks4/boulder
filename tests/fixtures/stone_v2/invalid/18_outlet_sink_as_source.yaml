@@ -1,0 +1,19 @@
+# Rule: Edge sourced from an OutletSink | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: outlet_src
+  OutletSink: {}
+
+- id: reactor_src
+  IdealGasReactor:
+    volume: 1 L
+
+- id: outlet_to_reactor
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: outlet_src
+  target: reactor_src

@@ -1,0 +1,16 @@
+# Rule: stages: and network: both present (mutex) | Expected: invalid
+
+stages:
+  stage_x:
+    mechanism: gri30.yaml
+    solve: advance_to_steady_state
+
+network:
+- id: stray_reactor
+  IdealGasReactor:
+    volume: 1 L
+
+stage_x:
+- id: reactor_x
+  IdealGasReactor:
+    volume: 1 L

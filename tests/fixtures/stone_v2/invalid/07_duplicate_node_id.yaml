@@ -1,0 +1,21 @@
+# Rule: Same id used in two stage blocks | Expected: invalid
+
+stages:
+  stage_one:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+  stage_two:
+    mechanism: gri30.yaml
+    solve: advance_to_steady_state
+
+stage_one:
+- id: shared_id
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+
+stage_two:
+- id: shared_id
+  IdealGasReactor:
+    volume: 1 L

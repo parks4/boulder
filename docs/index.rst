@@ -30,6 +30,7 @@ From the CLI::
 
    installation
    usage
+   stone
    auto_examples/index
    api
 

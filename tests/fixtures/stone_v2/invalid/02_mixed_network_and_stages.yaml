@@ -1,0 +1,11 @@
+# Rule: Both network: and stages: present at top level | Expected: invalid
+
+stages:
+  stage_a:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+
+network: []
+
+stage_a: []

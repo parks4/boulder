@@ -1,0 +1,14 @@
+# Rule: Isolated reactor with required initial: block | Expected: valid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: batch
+  IdealGasReactor:
+    volume: 1 L
+    initial:
+      temperature: 1000 K
+      pressure: 1 atm
+      composition: CH4:1, O2:2, N2:7.52

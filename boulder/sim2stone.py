@@ -345,10 +345,12 @@ def sim_to_internal_config(
         mech_override = getattr(r, "_boulder_mechanism", None)
 
         if isinstance(r, ct.Reservoir):
-            # Reservoirs are infinite boundary conditions – T, P, X, and mechanism
-            # are not meaningful in the YAML.  Emit an empty properties block so
-            # the node round-trips cleanly (builder applies sensible defaults).
-            props: Dict[str, Any] = {}
+            # Reservoirs are boundary conditions; capture their T and composition
+            # so STONE v2's Reservoir validation requirements are met.
+            props: Dict[str, Any] = {
+                "temperature": float(r.thermo.T),
+                "composition": _composition_to_string(r.thermo),
+            }
         else:
             props = {
                 "temperature": float(r.thermo.T),
@@ -539,10 +541,11 @@ def sim_to_stone_yaml(
     source_file: Optional[str] = None,
     include_comments: bool = True,
 ) -> str:
-    """Convert a Cantera ReactorNet to a STONE YAML string.
+    """Convert a Cantera ReactorNet to a STONE v2 YAML string.
 
-    Includes top-level `phases` (with `gas/mechanism`) and an explicit `settings` section.
-    Adds a blank line before `nodes` and `connections` for readability.
+    Emits STONE v2 format with a top-level ``network:`` key containing all
+    nodes and connections as typed items. Each node is ``{id, KindName: {props}}``
+    and each connection is ``{id, KindName: {props}, source, target}``.
     """
     internal = sim_to_internal_config(
         sim,
@@ -556,7 +559,6 @@ def sim_to_stone_yaml(
     gas = phases.get("gas", {}) if isinstance(phases, dict) else {}
     mechanism = gas.get("mechanism") or default_mechanism or CANTERA_MECHANISM
 
-    # Build STONE format using ruamel structures to control formatting
     from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
     stone_cm = CommentedMap()
@@ -566,7 +568,6 @@ def sim_to_stone_yaml(
         metadata_cm = CommentedMap()
         for key, value in internal["metadata"].items():
             if key == "description" and isinstance(value, str) and "\n" in value:
-                # Use literal block style for multi-line descriptions
                 from ruamel.yaml.scalarstring import LiteralScalarString
 
                 metadata_cm[key] = LiteralScalarString(value)
@@ -584,24 +585,35 @@ def sim_to_stone_yaml(
     # settings (explicit section even if empty)
     stone_cm["settings"] = CommentedMap()
 
-    # nodes
-    nodes_seq = CommentedSeq()
+    # network: list of node and connection items in STONE v2 format
+    network_seq = CommentedSeq()
+
     for node in internal.get("nodes", []):
         node_cm = CommentedMap()
         node_cm["id"] = node["id"]
         # Copy properties to avoid mutating internal
         props = dict(node.get("properties", {}) or {})
-        # Extract per-node mechanism and emit at node level (not inside class block)
+        # Extract per-node mechanism; emit at node level (not inside kind block)
         node_mech = props.pop("mechanism", None)
-        # Drop per-node mechanism if it matches the global phases gas mechanism
         if node_mech == mechanism:
             node_mech = None
-        # Emit null (renders as bare key) when there are no properties,
-        # so Reservoir nodes appear as `Reservoir:` rather than `Reservoir: {}`.
-        node_cm[node["type"]] = props if props else None
+        # Remove group from props — group assignment is inferred in v2
+        props.pop("group", None)
+        # Reservoir state fields are valid in v2; other reactor state is in initial:
+        # Keep temperature/pressure/composition for Reservoir nodes only.
+        node_type = node.get("type", "")
+        if node_type not in ("Reservoir", "OutletSink"):
+            # Move state to initial: block for non-boundary nodes
+            initial: Dict[str, Any] = {}
+            for state_key in ("temperature", "pressure", "composition"):
+                if state_key in props:
+                    initial[state_key] = props.pop(state_key)
+            if initial:
+                props["initial"] = initial
+        # Emit null (bare key) when props are empty
+        node_cm[node_type] = props if props else None
         if node_mech is not None:
             node_cm["mechanism"] = node_mech
-        # Add description if available
         if "description" in node:
             desc = node["description"]
             if isinstance(desc, str) and "\n" in desc:
@@ -610,23 +622,15 @@ def sim_to_stone_yaml(
                 node_cm["description"] = LiteralScalarString(desc)
             else:
                 node_cm["description"] = desc
-        nodes_seq.append(node_cm)
-    stone_cm["nodes"] = nodes_seq
-    # blank line before nodes
-    try:
-        stone_cm.yaml_set_comment_before_after_key("nodes", before="\n")
-    except Exception:
-        pass
+        network_seq.append(node_cm)
 
-    # connections
-    conns_seq = CommentedSeq()
     for conn in internal.get("connections", []):
         conn_cm = CommentedMap()
         conn_cm["id"] = conn["id"]
-        conn_cm[conn["type"]] = conn.get("properties", {})
+        conn_props = dict(conn.get("properties", {}) or {})
+        conn_cm[conn["type"]] = conn_props if conn_props else None
         conn_cm["source"] = conn["source"]
         conn_cm["target"] = conn["target"]
-        # Add description if available
         if "description" in conn:
             desc = conn["description"]
             if isinstance(desc, str) and "\n" in desc:
@@ -635,11 +639,11 @@ def sim_to_stone_yaml(
                 conn_cm["description"] = LiteralScalarString(desc)
             else:
                 conn_cm["description"] = desc
-        conns_seq.append(conn_cm)
-    stone_cm["connections"] = conns_seq
-    # blank line before connections
+        network_seq.append(conn_cm)
+
+    stone_cm["network"] = network_seq
     try:
-        stone_cm.yaml_set_comment_before_after_key("connections", before="\n")
+        stone_cm.yaml_set_comment_before_after_key("network", before="\n")
     except Exception:
         pass
 

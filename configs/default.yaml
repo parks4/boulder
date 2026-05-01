@@ -8,26 +8,28 @@ phases:
     mechanism: "gri30.yaml"
 
 settings:
-  time_step: 0.001  # s
-  max_time: 10.0    # s
+  time_step: 0.001
+  max_time: 10.0
   solver: "CVODE_BDF"
   relative_tolerance: 1.0e-6
   absolute_tolerance: 1.0e-9
 
-nodes:
-- id: reactor1
-  IdealGasReactor:
-    temperature: 1000        # K
-    pressure: 101325         # Pa
-    composition: "CH4:1,O2:2,N2:7.52"
+network:
 - id: res1
   Reservoir:
-    temperature: 300         # K
+    temperature: 300 K
     composition: "O2:1,N2:3.76"
 
-connections:
+- id: reactor1
+  IdealGasReactor:
+    volume: 0.01 m**3
+    initial:
+      temperature: 1000 K
+      pressure: 101325 Pa
+      composition: "CH4:1,O2:2,N2:7.52"
+
 - id: mfc1
   MassFlowController:
-    mass_flow_rate: 0.1      # kg/s
+    mass_flow_rate: 0.1 kg/s
   source: res1
   target: reactor1

@@ -1,0 +1,40 @@
+# Rule: Logical connection with explicit mass_flow_rate annotation | Expected: valid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+stages:
+  torch_stage:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+  psr_stage:
+    mechanism: gri30.yaml
+    solve: advance_to_steady_state
+
+torch_stage:
+- id: inlet2
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+- id: torch2
+  IdealGasReactor:
+    volume: 1 L
+- id: inlet2_to_torch2
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: inlet2
+  target: torch2
+
+psr_stage:
+- id: psr2
+  IdealGasReactor:
+    volume: 5 L
+- id: torch2_to_psr2
+  source: torch2
+  target: psr2
+  mass_flow_rate: 0.1 kg/s
+  mechanism_switch:
+    htol: 3.0e-2
+    Xtol: 1.0e-2

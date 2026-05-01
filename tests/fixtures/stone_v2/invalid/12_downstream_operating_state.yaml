@@ -1,0 +1,29 @@
+# Rule: Const-volume reactor with top-level temperature (invalid) | Expected: invalid
+
+stages:
+  stage_a:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+  stage_b:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+
+stage_a:
+- id: upstream_ds
+  IdealGasReactor:
+    volume: 1 L
+    initial:
+      temperature: 1200 K
+      composition: CH4:1
+
+stage_b:
+- id: downstream_ds
+  IdealGasReactor:
+    temperature: 1200 K
+    composition: CH4:1
+    volume: 2 L
+- id: upstream_to_downstream_ds
+  source: upstream_ds
+  target: downstream_ds

@@ -1,0 +1,22 @@
+# Rule: Logical connection (no kind) inside a single stage | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: r_intra_1
+  IdealGasReactor:
+    volume: 1 L
+    initial:
+      temperature: 1200 K
+      pressure: 1 atm
+      composition: CH4:1
+
+- id: r_intra_2
+  IdealGasReactor:
+    volume: 2 L
+
+- id: r1_to_r2_logical
+  source: r_intra_1
+  target: r_intra_2

@@ -597,6 +597,10 @@ class DualCanteraConverter:
         elif typ == "Reservoir":
             reactor = ct.Reservoir(gas_for_node, clone=True)  # type: ignore[assignment]
             reactor.name = rid
+        elif typ == "OutletSink":
+            # STONE v2 visual-only terminal node; modelled as a Reservoir sink.
+            reactor = ct.Reservoir(gas_for_node, clone=True)  # type: ignore[assignment]
+            reactor.name = rid
         else:
             raise ValueError(f"Unsupported reactor type: '{typ}'")
 
@@ -813,9 +817,13 @@ class DualCanteraConverter:
                     props.get("mechanism") or node.get("mechanism") or stage_mechanism
                 )
                 gas_for_node = self._get_gas_for_mech(node_mech)
-                temp = props.get("temperature", 300)
-                pres = props.get("pressure", 101325)
-                compo = props.get("composition", "N2:1")
+                # STONE v2: reactor state may live under props["initial"] for
+                # non-Reservoir nodes; fall back to props directly for Reservoir
+                # boundary nodes and legacy internal format.
+                initial = props.get("initial") or {}
+                temp = initial.get("temperature") or props.get("temperature", 300)
+                pres = initial.get("pressure") or props.get("pressure", 101325)
+                compo = initial.get("composition") or props.get("composition", "N2:1")
                 gas_for_node.TPX = (temp, pres, self.parse_composition(compo))
 
             self.gas = gas_for_node

@@ -1,0 +1,31 @@
+# Rule: Inter-stage edges forming a cycle in the stage DAG | Expected: invalid
+
+stages:
+  stage_p:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+  stage_q:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+
+stage_p:
+- id: reactor_p
+  IdealGasReactor:
+    volume: 1 L
+    initial:
+      temperature: 1200 K
+      pressure: 1 atm
+      composition: CH4:1
+- id: reactor_q_to_p
+  source: reactor_q
+  target: reactor_p
+
+stage_q:
+- id: reactor_q
+  IdealGasReactor:
+    volume: 1 L
+- id: reactor_p_to_q
+  source: reactor_p
+  target: reactor_q

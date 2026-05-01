@@ -1,0 +1,29 @@
+# Rule: OutletSink as visualization-only terminal node | Expected: valid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: inlet_sink
+  Reservoir:
+    temperature: 300 K
+    composition: O2:1, N2:3.76
+
+- id: reactor_sink
+  IdealGasReactor:
+    volume: 1 L
+
+- id: outlet
+  OutletSink: {}
+
+- id: feed_to_reactor
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: inlet_sink
+  target: reactor_sink
+
+- id: reactor_to_outlet
+  MassFlowController: {}
+  source: reactor_sink
+  target: outlet

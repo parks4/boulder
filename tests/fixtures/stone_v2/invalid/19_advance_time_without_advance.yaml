@@ -1,0 +1,16 @@
+# Rule: advance_time on an advance_to_steady_state stage | Expected: invalid
+
+stages:
+  bad_stage:
+    mechanism: gri30.yaml
+    solve: advance_to_steady_state
+    advance_time: 1 ms
+
+bad_stage:
+- id: reactor_bad_at
+  IdealGasReactor:
+    volume: 1 L
+    initial:
+      temperature: 1200 K
+      pressure: 1 atm
+      composition: CH4:1

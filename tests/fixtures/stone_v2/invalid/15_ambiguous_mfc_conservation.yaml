@@ -1,0 +1,36 @@
+# Rule: Two empty MFCs at the same node (ambiguous conservation) | Expected: invalid
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+- id: feed_ambig
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+
+- id: reactor_ambig
+  IdealGasReactor:
+    volume: 1 L
+
+- id: outlet_ambig
+  Reservoir:
+    temperature: 300 K
+    composition: N2:1
+
+- id: feed_to_reactor_ambig
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: feed_ambig
+  target: reactor_ambig
+
+- id: reactor_to_outlet_ambig1
+  MassFlowController: {}
+  source: reactor_ambig
+  target: outlet_ambig
+
+- id: reactor_to_outlet_ambig2
+  MassFlowController: {}
+  source: reactor_ambig
+  target: outlet_ambig

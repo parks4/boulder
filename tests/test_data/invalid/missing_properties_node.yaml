@@ -1,4 +1,5 @@
 # Invalid: properties not a mapping in normalized form
+# This is internal format (already normalized) - properties must be a dict
 nodes:
 - id: r1
   type: IdealGasReactor
