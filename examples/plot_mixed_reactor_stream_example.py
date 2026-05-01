@@ -5,12 +5,22 @@ Boulder context
 
 This example demonstrates how to use Boulder's sim2stone functionality to
 convert a Cantera reactor network simulation to a STONE serialised ``.yaml``
-format, and how to reload and re-solve it with
+format, and how to reload and inspect it with
 :class:`~boulder.runner.BoulderRunner`.
 
-The Cantera simulation setup is imported from ``mix1.py``, which implements
+The Cantera simulation setup is described in ``mix1.py``, which implements
 the mixing example from
 https://cantera.org/3.1/examples/python/reactors/mix1.html.
+
+The corresponding ``mix1.yaml`` STONE file is already present in the
+``examples/`` directory.  In practice you generate it once with::
+
+    sim2stone mix1.py
+
+or by calling :func:`~boulder.sim2stone.write_sim_as_yaml` directly, then
+commit the resulting YAML to your repository.  Subsequent runs (CI, docs)
+load from the committed file so that the full Cantera solve is not repeated
+on every build.
 
 .. note::
 
@@ -27,54 +37,64 @@ Requires: cantera, boulder
 .. tags:: Python, reactor network, STONE YAML, mixing, sim2stone
 """
 
-import sys
 from pathlib import Path
 
 from boulder.runner import BoulderRunner
-from boulder.sim2stone import write_sim_as_yaml
 
 # sphinx-gallery sets cwd to the examples directory before executing each
 # script, so Path.cwd() is the reliable way to locate sibling files.
-examples_dir = Path.cwd()
-sys.path.insert(0, str(examples_dir))
-
-import mix1  # noqa: E402
+yaml_path = str(Path.cwd() / "mix1.yaml")
 
 # %%
-# Serialize the running Cantera simulation to STONE YAML
-# -------------------------------------------------------
+# Load the STONE YAML produced by sim2stone
+# -----------------------------------------
+#
+# ``from_yaml`` runs load → normalise → validate without executing any
+# Cantera code.  The YAML was generated once from mix1.py via::
+#
+#     from boulder.sim2stone import write_sim_as_yaml
+#     import mix1
+#     write_sim_as_yaml(mix1.sim, "mix1.yaml")
+#
+# and is committed to the repository so the docs build does not need to
+# re-run the Cantera simulation.
 
-output_yaml = "mixed_reactor_stream.yaml"
-write_sim_as_yaml(mix1.sim, output_yaml)
-print(f"Wrote STONE YAML to {output_yaml}")
-
-# The STONE YAML can now be loaded in the Boulder GUI or re-solved below.
-# From the command line:  sim2stone mix1.py
-
-# %%
-# Reload and re-solve from STONE YAML using BoulderRunner
-# --------------------------------------------------------
-
-runner = BoulderRunner.from_yaml(output_yaml)
-runner.build()
-assert runner.converter is not None
-converter = runner.converter
-
-print(
-    f"Rebuilt network with {len(converter.reactors)} nodes and "
-    f"{len(converter.connections)} connections."
-)
+runner = BoulderRunner.from_yaml(yaml_path)
+print(f"Loaded STONE YAML: {yaml_path}")
 
 # %%
-# Verify the regenerated network matches the original
+# Inspect the network topology (no Cantera required)
 # ---------------------------------------------------
+#
+# ``build_stage_graph`` is pure config parsing; no Cantera objects are
+# created.  It returns the topologically-sorted execution plan.
 
-expected_nodes = {
-    mix1.res_a.name,
-    mix1.res_b.name,
-    mix1.mixer.name,
-    mix1.downstream.name,
-}
-assert set(converter.reactors.keys()) == expected_nodes
-assert len(converter.connections) == 3
-print("Network regeneration successful - all assertions passed!")
+plan = runner.build_stage_graph()
+print(f"Execution plan: {len(plan.ordered_stages)} stage(s)")
+for i, stage in enumerate(plan.ordered_stages):
+    print(
+        f"  Stage {i + 1}: '{stage.id}'  nodes={stage.node_ids}"
+        f"  mechanism={stage.mechanism}"
+    )
+
+# %%
+# Inspect nodes and connections from the config
+# ---------------------------------------------
+
+nodes = runner.config.get("nodes", [])
+connections = runner.config.get("connections", [])
+print(f"\nNetwork has {len(nodes)} nodes and {len(connections)} connections.")
+for node in nodes:
+    nid = node["id"]
+    reactor_type = node.get("type", "?")
+    print(f"  {nid!r:25s}  type={reactor_type}")
+
+# %%
+# Verify the YAML structure matches expectations
+# ----------------------------------------------
+
+expected_node_ids = {"Air Reservoir", "Fuel Reservoir", "Mixer", "Outlet Reservoir"}
+actual_node_ids = {n["id"] for n in nodes}
+assert actual_node_ids == expected_node_ids, f"Unexpected nodes: {actual_node_ids}"
+assert len(connections) == 3
+print("\nYAML structure verified — all assertions passed!")
