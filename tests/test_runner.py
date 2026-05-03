@@ -4,14 +4,18 @@ Covers:
 1. ``from_yaml`` round-trip with a minimal YAML (no plugins, pure Boulder).
 2. ``build()`` returns self; ``runner.network`` and ``runner.code`` are set.
 3. ``solve()`` returns self with a non-None ``result``.
-4. ``boulder.cli.main`` accepts a ``runner_class`` kwarg and instantiates it.
-5. ``resolve_mechanism`` on the base class returns the name unchanged
+4. Shipped ``configs/default.yaml`` (GUI default when no CLI config) executes via ``solve()``.
+5. ``boulder.cli.main`` accepts a ``runner_class`` kwarg and instantiates it.
+6. ``resolve_mechanism`` on the base class returns the name unchanged
    (no resolver registered; Cantera handles built-ins).
 """
 
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Minimal YAML fixture (no external plugins; pure Boulder)
@@ -186,7 +190,37 @@ def test_boulder_runner_solve_returns_self(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Test 4: CLI main() accepts runner_class kwarg
+# Test 4: configs/default.yaml executes end-to-end
+# ---------------------------------------------------------------------------
+
+
+def test_default_yaml_executes():
+    """configs/default.yaml loads and BoulderRunner.solve() completes.
+
+    Asserts the repository default (same file as ``get_initial_config`` / GUI no-args
+    preload) runs without error and returns a ``SimulationResult`` with a staged network.
+    """
+    import cantera as ct  # type: ignore
+
+    from boulder.runner import BoulderRunner
+    from boulder.simulation_result import SimulationResult
+    from boulder.staged_network import StagedReactorNet
+
+    repo_root = Path(__file__).resolve().parent.parent
+    default_path = repo_root / "configs" / "default.yaml"
+    if not default_path.is_file():
+        pytest.skip(f"Missing default config: {default_path}")
+
+    runner = BoulderRunner.from_yaml(str(default_path)).solve()
+
+    assert runner.result is not None
+    assert isinstance(runner.result, SimulationResult)
+    assert isinstance(runner.result.network, StagedReactorNet)
+    assert isinstance(runner.result.network.visualization_network, ct.ReactorNet)
+
+
+# ---------------------------------------------------------------------------
+# Test 5: CLI main() accepts runner_class kwarg
 # ---------------------------------------------------------------------------
 
 
@@ -233,7 +267,7 @@ def test_boulder_cli_main_accepts_runner_class_kwarg(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Test 5: resolve_mechanism default returns name unchanged
+# Test 6: resolve_mechanism default returns name unchanged
 # ---------------------------------------------------------------------------
 
 
