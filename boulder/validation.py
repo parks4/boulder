@@ -115,6 +115,7 @@ METADATA_OPTIONAL_KEYS: frozenset = frozenset(
     {
         "scenario_id",
         "title",
+        "gui_app_title",
         "name",
         "scenario_name",
         "architecture",
@@ -177,6 +178,8 @@ class MetadataModel(BaseModel):
 
     scenario_id: Optional[str] = None
     title: Optional[str] = None
+    #: Short label for the web UI header (e.g. ``Bloc``); omitted defaults to "Boulder".
+    gui_app_title: Optional[str] = None
     name: Optional[str] = None
     scenario_name: Optional[str] = None
     architecture: Optional[str] = None

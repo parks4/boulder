@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from boulder.config import get_initial_config
+from boulder.config import get_initial_config, normalize_config, validate_config
 from boulder.styles import CYTOSCAPE_STYLESHEET
 from boulder.utils import config_to_cyto_elements
 from boulder.validation import validate_normalized_config
@@ -56,6 +56,21 @@ class TestBoulderConfig:
         }
         model = validate_normalized_config(config)
         assert model.nodes[0].id == "r1"
+
+    def test_metadata_gui_app_title_round_trip(self):
+        """``metadata.gui_app_title`` validates and appears on the validated dict.
+
+        Assertions:
+        1. Normalized config with ``gui_app_title`` passes ``validate_config``
+        2. Returned metadata contains the same non-empty string
+        """
+        raw = {
+            "metadata": {"gui_app_title": "Bloc", "description": "test"},
+            "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
+            "connections": [],
+        }
+        validated = validate_config(normalize_config(raw))
+        assert validated["metadata"]["gui_app_title"] == "Bloc"
 
     def test_get_initial_config_components(self):
         """Test initial config components have required fields.

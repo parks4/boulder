@@ -1,0 +1,80 @@
+﻿metadata:
+  title: Lean methane/air CSTR — residence-time sweep template
+  description: >-
+    Well-stirred reactor (CSTR) for lean methane/air combustion at
+    equivalence ratio phi = 0.5.  The key tuning knobs are annotated
+    inline: change mass_flow_rate to sweep residence time, or
+    change the reactor volume to fix a different reference length scale.
+
+    Physical context
+    ----------------
+    At phi = 0.5 and T_inlet = 300 K, the adiabatic flame temperature is
+    approximately 1475 K (HP equilibrium on GRI-Mech 3.0).  The burning branch
+    is stable for residence times roughly above 1.5 ms; below that the reactor
+    extinguishes to the cold branch.  This file is pre-set to tres ~ 10 ms.
+
+    Inspired by: cantera.org/stable/examples/python/reactors/combustor.html
+  remarks:
+    phi: 0.5
+    fuel: CH4
+    oxidizer: "air (O2:N2 = 1:3.76)"
+    T_adiabatic_K: 1475
+    tres_ms: 10
+
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+network:
+  # ── Inlet (lean CH4/air, phi = 0.5) ────────────────────────────────────
+  - id: feed
+    Reservoir:
+      temperature: 300 K
+      pressure: 101325 Pa
+      # phi = 0.5: CH4:0.5 : O2:1.0 : N2:3.76 (mole ratios)
+      composition: "CH4:0.5,O2:1.0,N2:3.76"
+
+  # ── CSTR combustor ──────────────────────────────────────────────────────
+  # Residence time  tres = combustor.mass / mass_flow_rate
+  #               ~ rho * volume / mdot
+  # At atmospheric pressure, rho_products ~ 0.24 kg/m3 (1475 K, 1 atm).
+  # tres ~ 0.24 * 1e-3 / 1e-4 ~ 2.4 s  (very stable; reduce mdot or volume
+  # to approach the blowout limit near tres = 1.5 ms).
+  - id: combustor
+    IdealGasConstPressureMoleReactor:
+      volume: 1.0e-3 m**3   # [m^3]  — tune this for different geometries
+      initial:
+        # Seed at HP-equilibrium products to start on the reacting branch.
+        temperature: 1475 K
+        pressure: 101325 Pa
+        composition: "CO2:0.04476,H2O:0.08951,N2:0.86573"
+
+  # ── Exhaust sink ────────────────────────────────────────────────────────
+  - id: exhaust
+    OutletSink: {}
+
+  # ── Flow devices ────────────────────────────────────────────────────────
+  # Tune mass_flow_rate to change residence time.
+  - id: feed_to_combustor
+    MassFlowController:
+      mass_flow_rate: 1.0e-4 kg/s   # [kg/s] — key sweep parameter
+    source: feed
+    target: combustor
+
+  # PressureController keeps the system isobaric; its mass flow mirrors the
+  # upstream MFC so no extra accumulation occurs.
+  - id: combustor_to_exhaust
+    PressureController:
+      pressure_coeff: 0.0
+      master: feed_to_combustor
+    source: combustor
+    target: exhaust
+
+settings:
+  end_time: 0.5   # [s] — long enough to reach steady state at tres ~ 10 ms
+  dt: 5.0e-3      # [s]
+
+output:
+  combustor:
+    - "temperature, K"
+    - "pressure, Pa"
