@@ -32,6 +32,7 @@ def _subprocess_env() -> dict[str, str]:
         parts.append(prev)
     return {**os.environ, "CANTERA_DATA": os.pathsep.join(parts)}
 
+
 # (script filename, default ``--mechanism`` for sim2stone phases.gas)
 _FIXTURES: tuple[tuple[str, str], ...] = (
     ("combustor.py", "gri30.yaml"),
@@ -138,16 +139,19 @@ def test_cantera_examples_headless_download_script_runs(
 
     from boulder.sim2stone_cli import main as sim2stone_main
 
-    assert sim2stone_main(
-        [
-            str(script),
-            "-o",
-            str(stone_yaml),
-            "--no-comments",
-            "--mechanism",
-            mechanism,
-        ]
-    ) == 0
+    assert (
+        sim2stone_main(
+            [
+                str(script),
+                "-o",
+                str(stone_yaml),
+                "--no-comments",
+                "--mechanism",
+                mechanism,
+            ]
+        )
+        == 0
+    )
 
     cmd_gen = [
         sys.executable,
@@ -258,7 +262,10 @@ def test_boulder_headless_py_writes_valid_stone_yaml(
 def test_boulder_headless_py_yaml_validate_download_run_roundtrip(
     tmp_path: Path, script_name: str, mechanism: str
 ) -> None:
-    """After native .py→YAML, ``--headless --download`` then ``python`` completes (xfail where upstream fails)."""
+    """After native .py→YAML, headless download then ``python`` completes.
+
+    Uses ``--headless --download``; xfail where upstream fails.
+    """
     script = _EXAMPLES_DIR / script_name
     if not script.is_file():
         pytest.skip(f"{script_name} not found under docs/cantera_examples")
