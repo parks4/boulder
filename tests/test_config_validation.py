@@ -15,7 +15,7 @@ from typing import List
 import pytest
 
 from boulder.config import load_config_file, normalize_config
-from boulder.validation import validate_normalized_config
+from boulder.validation import validate_normalized_config, warn_simulation_quality
 
 
 @pytest.mark.unit
@@ -236,3 +236,41 @@ def test_dynamic_unit_system_flexibility() -> None:
     sim_dict = model.settings.__dict__
     assert abs(sim_dict["dt"] - 0.001) < 1e-6  # 1 ms = 0.001 s
     assert abs(sim_dict["end_time"] - 600.0) < 1e-6  # 10 min = 600 s
+
+
+@pytest.mark.unit
+def test_warn_simulation_quality_missing_output() -> None:
+    """Missing top-level output block should trigger a non-fatal quality note."""
+    data = {
+        "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
+        "connections": [],
+    }
+    normalized = normalize_config(data)
+    notes = warn_simulation_quality(normalized)
+    assert any("No top-level 'output:' block configured" in note for note in notes)
+
+
+@pytest.mark.unit
+def test_warn_simulation_quality_empty_output() -> None:
+    """Empty top-level output block should trigger a non-fatal quality note."""
+    data = {
+        "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
+        "connections": [],
+        "output": {},
+    }
+    normalized = normalize_config(data)
+    notes = warn_simulation_quality(normalized)
+    assert any("Top-level 'output:' block is empty" in note for note in notes)
+
+
+@pytest.mark.unit
+def test_warn_simulation_quality_with_output_configured() -> None:
+    """Configured output block should not trigger simulation-quality notes."""
+    data = {
+        "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
+        "connections": [],
+        "output": {"r1": ["temperature"]},
+    }
+    normalized = normalize_config(data)
+    notes = warn_simulation_quality(normalized)
+    assert notes == []

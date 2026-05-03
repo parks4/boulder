@@ -476,6 +476,31 @@ def warn_flow_device_conventions(config: Dict[str, Any]) -> List[str]:
     return messages
 
 
+def warn_simulation_quality(config: Dict[str, Any]) -> List[str]:
+    """Return non-fatal notes for configurations that are valid but uninformative.
+
+    These checks intentionally do not fail validation: they guide authors toward
+    practical defaults without blocking intentionally minimal/diagnostic cases.
+    """
+    messages: List[str] = []
+    output_block = config.get("output")
+
+    if output_block is None:
+        messages.append(
+            "No top-level 'output:' block configured. The simulation can run, but there may be "
+            "no structured results selected for reporting/export."
+        )
+        return messages
+
+    if output_block == {} or output_block == []:
+        messages.append(
+            "Top-level 'output:' block is empty. Configure at least one output target "
+            "(temperature, pressure, composition, custom summary, etc.)."
+        )
+
+    return messages
+
+
 def validate_normalized_config(config: Dict[str, Any]) -> NormalizedConfigModel:
     """Validate a normalized config dict using Pydantic models.
 

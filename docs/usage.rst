@@ -37,6 +37,16 @@ Boulder's plugin system lets downstream packages add custom reactor kinds,
 post-build hooks, mechanism resolvers, and UI panes without modifying
 the core library.
 
+**What counts as a plugin**
+
+A plugin is a Python module that exposes a registrar function::
+
+    def register_plugins(plugins):
+        ...
+
+The registrar receives the shared ``BoulderPlugins`` container and registers
+one or more extension points on it.
+
 **Quick summary of extension points**
 
 - ``plugins.reactor_builders[kind] = fn`` — register a callable
@@ -61,10 +71,15 @@ Boulder discovers plugins automatically at startup via two mechanisms:
        [project.entry-points."boulder.plugins"]
        my_plugin = "my_package.boulder_plugins:register_plugins"
 
-2. *Environment variable* (``BOULDER_PLUGINS``) — comma-separated module names
+2. *Environment variable* (``BOULDER_PLUGINS``) — comma- or semicolon-separated
+   module names
    for local or unpackaged plugins::
 
        BOULDER_PLUGINS=my_local_pkg.boulder_plugins boulder
+
+   Module names are imported with ``importlib.import_module(...)``, so
+   resolution follows normal Python ``sys.path`` rules from your active
+   environment.
 
 Inspect which plugins loaded with::
 
@@ -75,4 +90,5 @@ Inspect which plugins loaded with::
 See :doc:`auto_examples/plugin_example` for a complete, runnable demonstration
 using a ``Monolith`` reactor that exercises all extension points above.
 
-Full architecture and plugin reference: ``ARCHITECTURE.md`` at the repository root (plugin system, staged networks, discovery).
+Full architecture and plugin reference: ``ARCHITECTURE.md`` at the repository
+root (plugin system, staged networks, definition, and discovery).

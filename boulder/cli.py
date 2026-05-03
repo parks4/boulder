@@ -328,7 +328,7 @@ def _run_validate_subcommand(argv: list[str]) -> int:
 
     from .config import load_config_file, normalize_config, validate_config
     from .schema_registry import validate_against_plugin_schemas
-    from .validation import warn_flow_device_conventions
+    from .validation import warn_flow_device_conventions, warn_simulation_quality
 
     if not os.path.isfile(config_path):
         print(f"Error: configuration file not found: {config_path}")
@@ -344,6 +344,7 @@ def _run_validate_subcommand(argv: list[str]) -> int:
             print(f"  - {err}")
         return 1
     notes = warn_flow_device_conventions(normalized)
+    notes.extend(warn_simulation_quality(normalized))
     for line in notes:
         print(f"  Note: {line}")
     print(f"OK: {config_path} is a valid STONE configuration.")

@@ -884,6 +884,7 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
             type: IdealGasReactor
             properties:
                 temperature: 1000
+
     """
     from .utils import coerce_config_units  # noqa: PLC0415
 
