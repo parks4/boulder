@@ -14,8 +14,25 @@ from typing import Any, Dict, List, Optional
 #: Plain numbers without a trailing unit do NOT match (backward-compatible).
 _UNIT_STRING_RE = re.compile(
     r"^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s+(\S.*?)\s*$",
-    re.ASCII,
 )
+
+
+def _normalize_unit_string(val: str) -> str:
+    """Normalize Unicode punctuation so Pint can parse common unit spellings.
+
+    Handles minus signs, non-breaking spaces, and degree Celsius/Fahrenheit
+    spellings that appear in user-authored YAML (copy-paste from word
+    processors).
+    """
+    v = val.replace("\u00a0", " ").replace("\u202f", " ")
+    for ch in ("\u2212", "\u2013", "\u2014", "\ufe63", "\uff0d"):
+        v = v.replace(ch, "-")
+    v = v.replace("\u2103", "degC")  # ℃
+    v = v.replace("\u2109", "degF")  # ℉
+    v = v.replace("\u00b0C", "degC").replace("\u00b0F", "degF")
+    v = v.replace("°C", "degC").replace("°F", "degF")
+    return v.strip()
+
 
 #: Property-name → preferred target Pint unit.
 #: Temperature maps to "kelvin" because Cantera's TPX setter expects K.
@@ -60,6 +77,10 @@ def coerce_unit_string(val: Any, property_name: str = "") -> Any:
     numeric and unit parts with a regex and constructing
     ``pint.Quantity(number, unit)`` explicitly.
 
+    If the string matches the ``number + unit`` pattern but Pint cannot parse
+    the unit, a :class:`ValueError` is raised (no silent pass-through of bad
+    unit strings).
+
     Parameters
     ----------
     val:
@@ -72,11 +93,12 @@ def coerce_unit_string(val: Any, property_name: str = "") -> Any:
     -------
     float | Any
         SI magnitude when a unit string was detected and parsed; the
-        original *val* otherwise (including on Pint parse errors).
+        original *val* otherwise when the pattern does not match.
     """
     if not isinstance(val, str):
         return val
-    m = _UNIT_STRING_RE.match(val)
+    val_norm = _normalize_unit_string(val)
+    m = _UNIT_STRING_RE.match(val_norm)
     if not m:
         return val
 
@@ -90,8 +112,10 @@ def coerce_unit_string(val: Any, property_name: str = "") -> Any:
         if target_unit_name is not None:
             return float(qty.to(target_unit_name).magnitude)
         return float(qty.to_base_units().magnitude)
-    except Exception:
-        return val
+    except Exception as exc:
+        raise ValueError(
+            f"Could not parse unit string {val!r} (property {property_name!r}): {exc}"
+        ) from exc
 
 
 def coerce_config_units(obj: Any, _key: str = "") -> Any:

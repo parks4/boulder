@@ -163,15 +163,37 @@ def test_invalid_unit_error_message() -> None:
         "connections": [],
     }
 
-    normalized = normalize_config(data)
-
     with pytest.raises(ValueError) as exc_info:
-        validate_normalized_config(normalized)
+        normalize_config(data)
 
     error_msg = str(exc_info.value)
-    assert "Could not convert '500 invalid_unit'" in error_msg
-    assert "temperature units like 'degC', 'degF', 'K'" in error_msg
-    assert "for property 'temperature'" in error_msg
+    assert "Could not parse unit string" in error_msg
+    assert "temperature" in error_msg
+
+
+@pytest.mark.unit
+def test_unicode_degree_celsius_reservoir_inlet_normalizes() -> None:
+    """Unicode degree in °C on a boundary reservoir normalizes to Kelvin."""
+    data = {
+        "nodes": [
+            {
+                "id": "inlet",
+                "type": "Reservoir",
+                "properties": {
+                    "temperature": "1200 °C",
+                    "pressure": "101325",
+                    "composition": "CH4:1",
+                },
+            }
+        ],
+        "connections": [],
+    }
+    normalized = normalize_config(data)
+    reservoir = next(n for n in normalized["nodes"] if n["id"] == "inlet")
+    props = reservoir.get("properties", {})
+    t_k = props.get("temperature")
+    assert t_k is not None, "temperature missing after normalization"
+    assert abs(t_k - 1473.15) < 0.01, f"Expected 1473.15 K, got {t_k}"
 
 
 @pytest.mark.unit

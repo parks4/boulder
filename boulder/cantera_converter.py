@@ -915,26 +915,49 @@ class DualCanteraConverter:
                 temp = initial.get("temperature") or props.get("temperature")
                 pres = initial.get("pressure") or props.get("pressure")
                 compo = initial.get("composition") or props.get("composition")
-                if temp is None and pres is None and compo is None:
+                mass_compo = initial.get("mass_composition") or props.get(
+                    "mass_composition"
+                )
+                # Inherit full (T, P, Y) from an upstream boundary reservoir when
+                # temperature and both composition specs are absent.  Pressure alone
+                # (e.g. auto-filled 1 atm) must not block inheritance.
+                if temp is None and compo is None and mass_compo is None:
                     upstream_tpy = self._upstream_reservoir_tpy(stage_connections, rid)
                     if upstream_tpy is not None:
                         T_u, P_u, Y_u = upstream_tpy
                         gas_for_node.TPY = T_u, P_u, Y_u
-                    else:
-                        gas_for_node.TPX = (
-                            300.0,
-                            101325.0,
-                            self.parse_composition("N2:1"),
-                        )
+                    # else: leave gas_for_node from _get_gas_for_mech; plugin reactors
+                    # read the axial feed via _inlet_reservoir (Bloc post-build hook).
                 else:
-                    temp_f = float(temp) if temp is not None else 300.0
-                    pres_f = float(pres) if pres is not None else 101325.0
-                    compo_s = compo if compo is not None else "N2:1"
-                    gas_for_node.TPX = (
-                        temp_f,
-                        pres_f,
-                        self.parse_composition(compo_s),
-                    )
+                    node_type = node.get("type", "")
+                    if node_type == "Reservoir":
+                        if temp is None:
+                            raise ValueError(
+                                f"Reservoir '{rid}': 'temperature' is missing. "
+                                "Reservoir nodes require an explicit temperature."
+                            )
+                        if pres is None:
+                            raise ValueError(
+                                f"Reservoir '{rid}': 'pressure' is missing. "
+                                "Reservoir nodes require an explicit pressure."
+                            )
+                        if compo is None and mass_compo is None:
+                            raise ValueError(
+                                f"Reservoir '{rid}': 'composition' or "
+                                "'mass_composition' is missing."
+                            )
+                    t_use = float(temp) if temp is not None else float(gas_for_node.T)
+                    p_use = float(pres) if pres is not None else float(gas_for_node.P)
+                    if compo is not None:
+                        gas_for_node.TPX = (t_use, p_use, self.parse_composition(compo))
+                    elif mass_compo is not None:
+                        gas_for_node.TPX = (
+                            t_use,
+                            p_use,
+                            self.parse_composition(mass_compo),
+                        )
+                    else:
+                        gas_for_node.TPX = (t_use, p_use, gas_for_node.X)
 
             self.gas = gas_for_node
             self.reactor_meta[rid] = {

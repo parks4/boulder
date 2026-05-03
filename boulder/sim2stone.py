@@ -381,10 +381,11 @@ def sim_to_internal_config(
         mech_override = getattr(r, "_boulder_mechanism", None)
 
         if isinstance(r, ct.Reservoir):
-            # Reservoirs are boundary conditions; capture their T and composition
-            # so STONE v2's Reservoir validation requirements are met.
+            # Reservoirs are boundary conditions; capture T, P, and composition so
+            # STONE v2 and DualCanteraConverter agree (Reservoir requires explicit P).
             props: Dict[str, Any] = {
                 "temperature": float(r.thermo.T),
+                "pressure": float(r.thermo.P),
                 "composition": _composition_to_string(r.thermo),
             }
         else:
