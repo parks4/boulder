@@ -847,24 +847,36 @@ def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
         for n in result.get("nodes", []):
             existing = by_node_id.get(n["id"])
             if existing is None:
+                n["__synthesized"] = True
                 nodes.append(n)
                 by_node_id[n["id"]] = n
-            elif existing != n:
+            elif {k: v for k, v in existing.items() if k != "__synthesized"} != n:
                 raise ValueError(
                     f"Composite unfold collision: node id '{n['id']}' "
                     f"emitted by unfolder for '{node['id']}' conflicts "
-                    "with an existing node. Rename one of them."
+                    "with an existing node.\n"
+                    f"  Composite reactor '{node['id']}' (type '{node.get('type')}') "
+                    f"automatically generates a satellite node named '{n['id']}'.\n"
+                    "  Fix: remove or rename the explicit node whose id matches "
+                    f"'{n['id']}' in your YAML — it is managed internally and must "
+                    "not be declared by the user."
                 )
         for c in result.get("connections", []):
             existing = by_conn_id.get(c["id"])
             if existing is None:
+                c["__synthesized"] = True
                 conns.append(c)
                 by_conn_id[c["id"]] = c
-            elif existing != c:
+            elif {k: v for k, v in existing.items() if k != "__synthesized"} != c:
                 raise ValueError(
                     f"Composite unfold collision: connection id '{c['id']}' "
                     f"emitted by unfolder for '{node['id']}' conflicts "
-                    "with an existing connection."
+                    "with an existing connection.\n"
+                    f"  Composite reactor '{node['id']}' (type '{node.get('type')}') "
+                    f"automatically generates a satellite connection named '{c['id']}'.\n"
+                    "  Fix: remove or rename the explicit connection whose id matches "
+                    f"'{c['id']}' in your YAML — it is managed internally and must "
+                    "not be declared by the user."
                 )
 
 
@@ -1171,6 +1183,15 @@ def expand_port_shortcuts(config: Dict[str, Any]) -> None:
         synthesized.append(entry)
         explicit_conn_ids.add(cid)
         explicit_edges.add((nid, to_id))
+
+    # Tag every port-shortcut-derived connection as synthesized so the live
+    # YAML sync endpoint can filter them out (they are never in the user's file).
+    for entry in synthesized:
+        entry["__synthesized"] = True
+    # Also record that port shortcuts were present in this config so that the
+    # sync endpoint can reject requests for configs derived from inline-port YAML.
+    if synthesized:
+        config["__has_inline_ports"] = True
 
     connections.extend(synthesized)
 
@@ -1499,6 +1520,7 @@ def _internal_node_to_stone_v2_item(node: Dict[str, Any]) -> Dict[str, Any]:
     """Map one internal node dict to a STONE v2 stage/network list item."""
     node_type = node.get("type", "IdealGasReactor")
     props = dict(node.get("properties", {}) or {})
+    props.pop("__synthesized", None)
     mech_from_props = props.pop("mechanism", None)
 
     # For const-pressure reactor kinds, ``pressure`` is the network operating
@@ -1524,8 +1546,12 @@ def _internal_node_to_stone_v2_item(node: Dict[str, Any]) -> Dict[str, Any]:
     for fld in ("description", "label"):
         if fld in node:
             stone_node[fld] = node[fld]
-    if node.get("metadata") is not None:
-        stone_node["metadata"] = node["metadata"]
+    metadata = node.get("metadata")
+    if metadata is not None:
+        # Strip internal private key before emitting YAML
+        metadata = {k: v for k, v in metadata.items() if k != "__synthesized"}
+        if metadata:
+            stone_node["metadata"] = metadata
     return stone_node
 
 
@@ -1548,6 +1574,7 @@ def _internal_connection_to_stone_v2_item(conn: Dict[str, Any]) -> Dict[str, Any
 
     connection_type = conn.get("type", "MassFlowController")
     props = dict(conn.get("properties", {}) or {})
+    props.pop("__synthesized", None)
     stone_conn: Dict[str, Any] = {
         "id": conn["id"],
         connection_type: props,
@@ -1556,8 +1583,11 @@ def _internal_connection_to_stone_v2_item(conn: Dict[str, Any]) -> Dict[str, Any
     }
     if conn.get("mechanism_switch") is not None:
         stone_conn["mechanism_switch"] = conn["mechanism_switch"]
-    if conn.get("metadata") is not None:
-        stone_conn["metadata"] = conn["metadata"]
+    metadata = conn.get("metadata")
+    if metadata is not None:
+        metadata = {k: v for k, v in metadata.items() if k != "__synthesized"}
+        if metadata:
+            stone_conn["metadata"] = metadata
     return stone_conn
 
 
@@ -1643,178 +1673,535 @@ def load_yaml_string_with_comments(yaml_str: str):
     return yaml_obj.load(stream)
 
 
+def _yaml_has_inline_ports(ruamel_tree: Any) -> bool:
+    """Return True if any node in *ruamel_tree* declares an inline port shortcut.
+
+    Inline ports are ``inlet:`` or ``outlet:`` keys nested inside a node's
+    component-property dict in a STONE v2 YAML.
+    """
+    _PORT_KEYS = {"inlet", "outlet"}
+    _NON_KIND_TOP = {
+        "id",
+        "source",
+        "target",
+        "metadata",
+        "mechanism",
+        "description",
+        "label",
+        "mechanism_switch",
+        "group",
+        "mass_flow_rate",
+        "stages",
+    }
+
+    def _check_item(item: Any) -> bool:
+        if not isinstance(item, dict):
+            return False
+        for k, v in item.items():
+            if k not in _NON_KIND_TOP and isinstance(v, dict):
+                if _PORT_KEYS.intersection(v.keys()):
+                    return True
+        return False
+
+    if not isinstance(ruamel_tree, dict):
+        return False
+
+    # Walk all list values at the top level (network:, stage lists).
+    for val in ruamel_tree.values():
+        if isinstance(val, list):
+            for item in val:
+                if _check_item(item):
+                    return True
+    return False
+
+
+def _collect_authored_ids(ruamel_tree: Any) -> set:
+    """Return the set of ``id`` values present in the original YAML network/stage lists.
+
+    These are the IDs the user actually wrote.  Any ID produced by an expander
+    (``expand_composite_kinds``, ``expand_port_shortcuts``) will NOT be in this
+    set and should be treated as synthesized.
+    """
+    ids: set = set()
+    if not isinstance(ruamel_tree, dict):
+        return ids
+    for val in ruamel_tree.values():
+        if isinstance(val, list):
+            for item in val:
+                if isinstance(item, dict) and "id" in item:
+                    ids.add(item["id"])
+    return ids
+
+
+def _fresh_normalize_original(
+    original_yaml_str: str,
+) -> Tuple[set, Dict[str, Dict[str, Any]]]:
+    """Re-normalize *original_yaml_str* and return synthesized IDs + default properties.
+
+    Returns
+    -------
+    tuple
+        ``(synthesized_ids, default_props_by_id)``
+
+        * ``synthesized_ids`` – IDs produced by expanders (not in the original
+          YAML tree).
+        * ``default_props_by_id`` – ``{node_or_conn_id: properties_dict}`` for
+          every authored node/connection in the fresh normalize result.  These
+          are the normalization-default properties that should NOT be injected
+          back into the YAML when they weren't explicitly authored.
+    """
+    try:
+        original_data = load_yaml_string_with_comments(original_yaml_str)
+        authored_ids = _collect_authored_ids(original_data)
+        plain = _to_plain_dict(original_data)
+        normalized = normalize_config(plain)
+        all_ids: set = set()
+        default_props: Dict[str, Dict[str, Any]] = {}
+        for n in normalized.get("nodes") or []:
+            nid = n.get("id")
+            if nid:
+                all_ids.add(nid)
+                default_props[nid] = n.get("properties") or {}
+        for c in normalized.get("connections") or []:
+            cid = c.get("id")
+            if cid:
+                all_ids.add(cid)
+                default_props[cid] = c.get("properties") or {}
+        return all_ids - authored_ids, default_props
+    except Exception:
+        return set(), {}
+
+
+def _collect_synthesized_ids_from_fresh_normalize(original_yaml_str: str) -> set:
+    """Re-normalize *original_yaml_str* and return IDs added by expanders."""
+    synthesized_ids, _ = _fresh_normalize_original(original_yaml_str)
+    return synthesized_ids
+
+
+def merge_config_into_yaml(
+    config: dict,
+    original_yaml_str: str,
+) -> Tuple[str, List[str]]:
+    """Merge *config* into *original_yaml_str* while preserving comments and units.
+
+    This is the shared backend entry-point used by both the live-sync API
+    endpoint (``POST /api/configs/sync``) and
+    :func:`save_config_to_file_with_comments`.
+
+    Parameters
+    ----------
+    config:
+        Normalized (SI) internal config dict, as stored in the frontend Zustand
+        store.
+    original_yaml_str:
+        The verbatim YAML text from the user's file, as loaded by the frontend.
+
+    Returns
+    -------
+    tuple
+        ``(yaml_string, warnings)`` — the merged YAML text plus any non-fatal
+        warning messages (e.g. Pint back-conversion failures).
+
+    Raises
+    ------
+    ValueError
+        If the config cannot be safely synced into the original YAML:
+
+        * Inline port shortcuts (``inlet:`` / ``outlet:`` on nodes) were
+          detected in the original YAML — the mapping is lossy and sync cannot
+          reconstruct it.
+        * Top-level shape mismatch — original used ``network:`` but current
+          config would produce ``stages:`` (or vice versa).
+    """
+    from .yaml_unit_map import apply_unit_map_inplace, build_unit_map  # noqa: PLC0415
+
+    # 1. Parse original YAML preserving comments.
+    original_data = load_yaml_string_with_comments(original_yaml_str)
+
+    # 2. Build unit_map from original tree before any mutation.
+    unit_map = build_unit_map(original_data)
+
+    # 3. Detect inline port shortcuts in the original YAML by walking its
+    #    network/stage lists without a full normalize cycle.
+    if _yaml_has_inline_ports(original_data):
+        raise ValueError(
+            "Inline port shortcuts (inlet: / outlet: on a node) are not yet "
+            "supported by the YAML live-sync editor. Convert them to explicit "
+            "connections: entries in your file and reopen."
+        )
+
+    # 4. Build STONE representation from config, filtering synthesized items.
+    #
+    # The ``__synthesized`` flag is set by expand_composite_kinds /
+    # expand_port_shortcuts but is stripped by ``validate_config`` (Pydantic
+    # serialisation).  The frontend therefore sends back the validated config
+    # without ``__synthesized`` on satellite nodes.
+    #
+    # Two-source filter:
+    # a) Explicit ``__synthesized=True`` flag (present on fresh normalize; may
+    #    be absent on configs that passed through validate_config).
+    # b) ID is in ``fresh_synthesized_ids``: IDs produced by expanders when
+    #    we re-normalize the original YAML here, minus IDs already in the
+    #    original YAML tree.  These are always synthesized satellites.
+    #
+    # An item absent from the original YAML AND not in fresh_synthesized_ids
+    # was added by the GUI → keep it.
+    fresh_synthesized_ids, default_props_by_id = _fresh_normalize_original(
+        original_yaml_str
+    )
+
+    def _should_keep(item: dict) -> bool:
+        if item.get("__synthesized"):
+            return False
+        item_id = item.get("id")
+        if item_id and item_id in fresh_synthesized_ids:
+            return False
+        return True
+
+    config_for_stone = dict(config)
+    config_for_stone["nodes"] = [
+        n for n in (config.get("nodes") or []) if _should_keep(n)
+    ]
+    config_for_stone["connections"] = [
+        c for c in (config.get("connections") or []) if _should_keep(c)
+    ]
+    stone = convert_to_stone_format(config_for_stone)
+
+    # 5. Shape-conflict guard: original uses network: XOR stages:.
+    orig_has_network = "network" in original_data
+    orig_has_stages = "stages" in original_data
+    stone_has_network = "network" in stone
+    stone_has_stages = "stages" in stone
+
+    if orig_has_network and stone_has_stages:
+        raise ValueError(
+            "Shape conflict: the original YAML uses a flat network: list but "
+            "the current configuration has multiple stages. Stage management "
+            "via the YAML editor is not yet supported."
+        )
+    if orig_has_stages and stone_has_network:
+        raise ValueError(
+            "Shape conflict: the original YAML uses stages: but the current "
+            "configuration has no stage grouping. Removing stages via the "
+            "YAML editor is not yet supported."
+        )
+
+    # 6. Warn about anchors/aliases (limited support).
+    warnings: List[str] = []
+    if "&" in original_yaml_str or "*" in original_yaml_str:
+        warnings.append(
+            "The original YAML contains anchors (&) or aliases (*). "
+            "Comment and value preservation for anchored nodes is not "
+            "guaranteed after sync."
+        )
+
+    # 7. Strip top-level keys from stone that are absent from the original YAML.
+    #    Keys like ``settings`` and ``output`` are injected by
+    #    ``convert_to_stone_format`` from normalization artifacts; if the user
+    #    didn't write them they must not appear in the merged output.
+    stone_for_merge = {k: v for k, v in stone.items() if k in original_data}
+
+    # 8. Merge STONE dict into original ruamel tree in-place.
+    _update_yaml_preserving_comments(
+        original_data, stone_for_merge, default_props_by_id=default_props_by_id
+    )
+
+    # 9. Apply unit map: replace SI floats with original unit strings.
+    unit_warnings = apply_unit_map_inplace(original_data, unit_map, config)
+    warnings.extend(unit_warnings)
+
+    # 10. Dump to string using the same sequence indentation as the original.
+    yaml_str = _yaml_to_string_matching_indent(original_data, original_yaml_str)
+    return yaml_str, warnings
+
+
+def _detect_sequence_indent(yaml_str: str) -> Optional[int]:
+    """Return the number of spaces before the first ``-`` list item, or None."""
+    import re as _re
+
+    m = _re.search(r"^( +)-", yaml_str, _re.MULTILINE)
+    if m:
+        return len(m.group(1))
+    return None
+
+
+def _yaml_to_string_matching_indent(data: Any, original_yaml_str: str) -> str:
+    """Dump *data* to YAML string, matching the sequence indentation of *original_yaml_str*.
+
+    The original file may use ``  - `` (2-space) indentation for list items.
+    ruamel's default (sequence=2, offset=0) emits ``- `` at column 0.  We
+    detect the original indent and adjust the dump settings accordingly.
+    """
+    from io import StringIO
+
+    yaml_obj = get_yaml_with_comments()
+    orig_indent = _detect_sequence_indent(original_yaml_str)
+    if orig_indent is not None and orig_indent > 0:
+        # sequence=indent+2 (dash + space + content), offset=indent
+        yaml_obj.indent(mapping=2, sequence=orig_indent + 2, offset=orig_indent)
+    stream = StringIO()
+    yaml_obj.dump(data, stream)
+    return stream.getvalue()
+
+
+def _to_plain_dict(data: Any) -> Any:
+    """Recursively convert ruamel CommentedMap/Seq to plain Python dicts/lists.
+
+    Defined here as a module-level helper so it can be used by both the API
+    routes and :func:`merge_config_into_yaml` without an import cycle.
+    """
+    if isinstance(data, dict):
+        return {k: _to_plain_dict(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_to_plain_dict(item) for item in data]
+    return data
+
+
 def save_config_to_file_with_comments(
     config: dict, file_path: str, original_yaml_str: Optional[str] = None
 ):
     """Save configuration to file, preserving comments when possible."""
-    stone_config = convert_to_stone_format(config)
-
     if original_yaml_str:
-        # Try to preserve the original structure and comments
         try:
-            # Load the original YAML with comments
-            original_data = load_yaml_string_with_comments(original_yaml_str)
-
-            # Update the original data with new values while preserving structure
-            updated_data = _update_yaml_preserving_comments(original_data, stone_config)
-
-            # Save with comments preserved
-            yaml_obj = get_yaml_with_comments()
+            yaml_str, _warnings = merge_config_into_yaml(config, original_yaml_str)
             with open(file_path, "w", encoding="utf-8") as f:
-                yaml_obj.dump(updated_data, f)
+                f.write(yaml_str)
             return
         except Exception as e:
             print(f"Warning: Could not preserve comments, using standard format: {e}")
 
-    # Fallback: save without comment preservation
+    stone_config = convert_to_stone_format(config)
     yaml_str = yaml_to_string_with_comments(stone_config)
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(yaml_str)
 
 
-def _update_yaml_preserving_comments(original_data, new_data):
-    """Update YAML data while preserving comments and structure.
+def _update_yaml_preserving_comments(original_data, new_data, default_props_by_id=None):
+    """Merge *new_data* into *original_data* in-place, preserving ruamel comments.
 
-    This function recursively updates the original YAML structure with new values
-    while preserving all comments and formatting.
+    Mutates *original_data* directly so that ``.ca`` comment metadata attached
+    to the ``CommentedMap`` container survives (rebuilding a new container would
+    lose top-level / EOL / blank-line comments).
+
+    Rules for dict merging:
+    - Keys present in both: recurse for dicts/lists; replace scalar otherwise.
+    - Keys only in *new_data*: added to *original_data*.
+    - Keys only in *original_data*: **left unchanged** (not removed).
+      Top-level passthrough keys (``metadata``, ``phases``, ``sweeps``, …)
+      must survive across merge cycles.
+
+    *default_props_by_id* is forwarded to array merges so that normalization-
+    injected properties on existing nodes are not polluted into the YAML.
     """
-    # Import here to avoid circular imports
-    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+    from ruamel.yaml.comments import CommentedSeq  # noqa: F401
 
     if not isinstance(original_data, dict) or not isinstance(new_data, dict):
         return new_data
 
-    # Create a copy that preserves comments and structure
-    if isinstance(original_data, CommentedMap):
-        updated = CommentedMap()
-        # Copy original data to preserve comments
-        for key, value in original_data.items():
-            updated[key] = value
-    else:
-        updated = (
-            original_data.copy()
-            if hasattr(original_data, "copy")
-            else dict(original_data)
-        )
-
-    # Update with new values
     for key, new_value in new_data.items():
-        if key in updated:
-            original_value = updated[key]
-
-            # Handle dictionaries recursively
+        if key in original_data:
+            original_value = original_data[key]
             if isinstance(original_value, dict) and isinstance(new_value, dict):
-                updated[key] = _update_yaml_preserving_comments(
-                    original_value, new_value
-                )
-
-            # Handle arrays/lists - this is the key fix
+                _update_yaml_preserving_comments(original_value, new_value)
             elif isinstance(original_value, (list, CommentedSeq)) and isinstance(
                 new_value, list
             ):
-                updated[key] = _update_yaml_array_preserving_comments(
-                    original_value, new_value
+                _update_yaml_array_preserving_comments(
+                    original_data,
+                    key,
+                    new_value,
+                    default_props_by_id=default_props_by_id,
                 )
-
-            # For scalar values, just update
             else:
-                updated[key] = new_value
+                original_data[key] = new_value
         else:
-            # New key, add it
-            updated[key] = new_value
+            original_data[key] = new_value
 
-    return updated
+    return original_data
 
 
-def _update_yaml_array_preserving_comments(original_array, new_array):
-    """Update an array while preserving comments on array items.
+def _update_yaml_array_preserving_comments(
+    parent_map, array_key, new_array, default_props_by_id=None
+):
+    """Replace the list at *parent_map[array_key]* with items from *new_array*.
 
-    This function matches items in the arrays by their 'id' field and preserves
-    comments on each item while updating their values.
+    Items are matched by their ``id`` field.  For matched items, the original
+    entry is mutated in-place via :func:`_update_yaml_item_preserving_comments`.
+    Items in the original not present in *new_array* are dropped.
+    New items (GUI-added) not in the original are appended at the end.
+    Original ordering is preserved for existing items.
+
+    Mutating in-place (rather than rebuilding the ``CommentedSeq``) keeps
+    ruamel's sequence-level ``.ca`` comment metadata intact.
+
+    *default_props_by_id* is forwarded to the item merge so normalization-
+    injected properties are not written into items that didn't have them.
     """
     from ruamel.yaml.comments import CommentedSeq
 
-    # Create a new commented sequence to preserve array comments
-    if isinstance(original_array, CommentedSeq):
-        updated_array = CommentedSeq()
-        # Copy array-level comments by copying the entire original array first
-        # then updating its contents
-        for item in original_array:
-            updated_array.append(item)
+    original_array = parent_map[array_key]
 
-        # Now clear and rebuild with updated items
-        updated_array.clear()
-    else:
-        updated_array = []
-
-    # Create a mapping of original items by their ID for easy lookup
     original_by_id = {}
     for item in original_array:
         if isinstance(item, dict) and "id" in item:
             original_by_id[item["id"]] = item
 
-    # Process each new item
+    new_by_id = {}
     for new_item in new_array:
         if isinstance(new_item, dict) and "id" in new_item:
-            item_id = new_item["id"]
+            new_by_id[new_item["id"]] = new_item
 
-            # If we have an original item with the same ID, merge it
-            if item_id in original_by_id:
-                original_item = original_by_id[item_id]
-                updated_item = _update_yaml_item_preserving_comments(
-                    original_item, new_item
+    # Build the new sequence preserving original ordering for existing items,
+    # then appending new (GUI-added) items at the end.
+    new_items = []
+    for orig_item in original_array:
+        if isinstance(orig_item, dict) and "id" in orig_item:
+            item_id = orig_item["id"]
+            if item_id in new_by_id:
+                injected = (default_props_by_id or {}).get(item_id)
+                merged = _update_yaml_item_preserving_comments(
+                    orig_item, new_by_id[item_id], injected_props=injected
                 )
-                updated_array.append(updated_item)
-            else:
-                # New item, add as-is
-                updated_array.append(new_item)
+                new_items.append(merged)
+            # If item_id not in new_by_id, the item was removed — skip it.
         else:
-            # Item without ID, add as-is
-            updated_array.append(new_item)
+            new_items.append(orig_item)
+    # Append GUI-added items (those not in the original).
+    for new_item in new_array:
+        if isinstance(new_item, dict) and "id" in new_item:
+            if new_item["id"] not in original_by_id:
+                new_items.append(new_item)
+        elif new_item not in new_items:
+            new_items.append(new_item)
 
-    return updated_array
+    if isinstance(original_array, CommentedSeq):
+        # Mutate the existing CommentedSeq in-place so .ca survives.
+        original_array.clear()
+        for item in new_items:
+            original_array.append(item)
+    else:
+        parent_map[array_key] = new_items
 
 
-def _update_yaml_item_preserving_comments(original_item, new_item):
-    """Update a single YAML item while preserving its STONE format structure.
+def _update_yaml_item_preserving_comments(original_item, new_item, injected_props=None):
+    """Merge *new_item* into the original STONE network/stage list item.
 
-    This function handles the specific case of nodes and connections
-    which have a special structure in STONE format.
+    Handles STONE v2 shape where items look like::
+
+        {id: ..., <KindKey>: {prop1: v1, ...}, source: ..., target: ...}
+
+    - **Kind-key change**: if ``new_item`` has a different component-type key
+      (e.g. ``IdealGasConstPressureReactor`` instead of ``IdealGasReactor``),
+      the old kind key is removed and the new one is added.
+    - **New properties**: keys present only in ``new_item`` that are not
+      normalization-injected defaults are added to the component property dict.
+    - **Property deletion**: keys present in the original component property dict
+      but absent from the new one are deleted (propagates GUI property removal).
+    - **In-place mutation**: ``original_item`` (a ``CommentedMap``) is mutated
+      directly so ``.ca`` comment metadata survives.
+
+    *injected_props* is a ``{key: value}`` dict of properties that a fresh
+    normalize of the original YAML would inject automatically.  New properties
+    matching these are skipped to avoid polluting the YAML.
     """
-    from ruamel.yaml.comments import CommentedMap
-
     if not isinstance(original_item, dict) or not isinstance(new_item, dict):
         return new_item
 
-    # Create a copy that preserves comments and structure
-    if isinstance(original_item, CommentedMap):
-        updated_item = CommentedMap()
-        # Copy original data to preserve comments
-        for key, value in original_item.items():
-            updated_item[key] = value
-    else:
-        updated_item = original_item.copy()
+    # Identify the component-type key in each item (the key whose value is a
+    # dict of properties, i.e. not id/source/target/metadata/etc.).
+    _NON_KIND_KEYS = {
+        "id",
+        "source",
+        "target",
+        "metadata",
+        "mechanism",
+        "description",
+        "label",
+        "mechanism_switch",
+        "group",
+        "mass_flow_rate",
+    }
 
-    # For STONE format, we need to preserve the structure but update values
-    # The new_item comes in STONE format, so we can directly update
+    def _kind_key(item):
+        for k, v in item.items():
+            if k not in _NON_KIND_KEYS and isinstance(v, dict):
+                return k
+        return None
+
+    orig_kind = _kind_key(original_item)
+    new_kind = _kind_key(new_item)
+
+    # -- Handle kind-key change --
+    if orig_kind and new_kind and orig_kind != new_kind:
+        # Remove old kind key; the new one will be added below.
+        del original_item[orig_kind]
+
+    # -- Merge all keys from new_item into original_item --
     for key, new_value in new_item.items():
-        if key == "id":
-            # Always update the ID
-            updated_item[key] = new_value
-        elif key in ["source", "target"]:
-            # For connections, update source/target
-            updated_item[key] = new_value
-        elif key in updated_item:
-            # For other keys that exist in original (like component type keys)
-            if isinstance(updated_item[key], dict) and isinstance(new_value, dict):
-                # Recursively update nested dictionaries
-                updated_item[key] = _update_yaml_preserving_comments(
-                    updated_item[key], new_value
-                )
-            else:
-                updated_item[key] = new_value
+        if key == orig_kind and new_kind and orig_kind != new_kind:
+            continue  # already removed above
 
-    return updated_item
+        if key in original_item:
+            original_value = original_item[key]
+            if (
+                key == (new_kind or orig_kind)
+                and isinstance(original_value, dict)
+                and isinstance(new_value, dict)
+            ):
+                # Property dict: merge and delete removed keys.
+                _merge_property_dict_inplace(original_value, new_value, injected_props)
+            elif isinstance(original_value, dict) and isinstance(new_value, dict):
+                _update_yaml_preserving_comments(original_value, new_value)
+            else:
+                original_item[key] = new_value
+        else:
+            original_item[key] = new_value
+
+    return original_item
+
+
+def _merge_property_dict_inplace(original_props, new_props, injected_props=None):
+    """Merge *new_props* into *original_props* in-place.
+
+    Rules:
+    - Keys present in *original_props* that are absent from *new_props*:
+      deleted (propagates GUI property removal).
+    - Keys present in both: updated in-place.
+    - Keys only in *new_props* (not in original):
+      - If they also appear in *injected_props* with the same value:
+        they are normalization artifacts (e.g. ``pressure`` injected by
+        ``propagate_terminal_pressure_defaults``) → **skip**.
+      - Otherwise they were explicitly set by the user in the GUI → **add**.
+
+    *injected_props* is an optional dict of ``{prop_key: value}`` for
+    properties that a fresh normalize of the original YAML would produce
+    automatically.  Pass ``None`` to skip injection-filtering (all new
+    keys are added).
+
+    Depth is limited to the component property block (one level down from the
+    kind key), not the full document.
+    """
+    injected = injected_props or {}
+
+    # Delete keys removed by the GUI.
+    keys_to_delete = [k for k in original_props if k not in new_props]
+    for k in keys_to_delete:
+        del original_props[k]
+
+    # Add/update keys.
+    for k, v in new_props.items():
+        if k in original_props:
+            old_v = original_props[k]
+            if isinstance(old_v, dict) and isinstance(v, dict):
+                _update_yaml_preserving_comments(old_v, v)
+            else:
+                original_props[k] = v
+        elif k in injected and injected[k] == v:
+            # Normalization-injected default — do not pollute the YAML.
+            pass
+        else:
+            # Explicitly set by the user via the GUI → add it.
+            original_props[k] = v
 
 
 def load_config_file_with_py_support(

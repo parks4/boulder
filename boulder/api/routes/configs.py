@@ -17,6 +17,7 @@ from ...config import (
     convert_to_stone_format,
     get_initial_config_with_comments,
     load_yaml_string_with_comments,
+    merge_config_into_yaml,
     normalize_config,
     validate_config,
     yaml_to_string_with_comments,
@@ -40,6 +41,11 @@ class ConfigExportRequest(BaseModel):
 
 class ConfigValidateRequest(BaseModel):
     config: Dict[str, Any]
+
+
+class ConfigSyncRequest(BaseModel):
+    config: Dict[str, Any]
+    original_yaml: str
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +121,28 @@ async def export_config(body: ConfigExportRequest) -> Dict[str, Any]:
         stone = convert_to_stone_format(body.config)
         yaml_str = yaml_to_string_with_comments(stone)
         return {"yaml": yaml_str}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/sync")
+async def sync_config(body: ConfigSyncRequest) -> Dict[str, Any]:
+    """Merge an updated config back into the original YAML, preserving comments and units.
+
+    Accepts the live (normalized, SI) config from the frontend together with
+    the original YAML string that was loaded from disk.  Returns the merged
+    YAML and a list of non-fatal warnings (e.g. Pint back-conversion failures).
+
+    Returns HTTP 422 when the sync cannot be performed safely, e.g.:
+
+    * The original YAML used inline port shortcuts (``inlet:`` / ``outlet:``).
+    * Top-level shape mismatch between original YAML and current config.
+    """
+    try:
+        yaml_str, warnings = merge_config_into_yaml(body.config, body.original_yaml)
+        return {"yaml": yaml_str, "warnings": warnings}
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

@@ -30,6 +30,8 @@ export function ResultsTabs() {
   const theme = useThemeStore((s) => s.theme);
   const activeTab = useResultsTabStore((s) => s.activeTab);
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
+  /** Resolved tab for UI: explicit choice, else Sankey when results exist, else Plots. */
+  const displayTab = activeTab ?? (results ? "Sankey" : "Plots");
   const [plugins, setPlugins] = useState<PluginMeta[]>([]);
   const [pluginData, setPluginData] = useState<Record<string, PluginRenderData>>({});
   const [pluginLoading, setPluginLoading] = useState<Record<string, boolean>>({});
@@ -45,11 +47,6 @@ export function ResultsTabs() {
       .then(setPlugins)
       .catch(() => setPlugins([]));
   }, [results, progress]);
-
-  // Switch to Sankey automatically when simulation results arrive.
-  useEffect(() => {
-    if (results) setActiveTab("Sankey");
-  }, [results]);
 
   // If the error clears while viewing the Error tab, move back to a safe tab.
   useEffect(() => {
@@ -130,7 +127,7 @@ export function ResultsTabs() {
             onClick={() => setActiveTab(tab)}
             variant="tab"
             size="tab"
-            data-active={activeTab === tab}
+            data-active={displayTab === tab}
           >
             {tab}
           </Button>
@@ -138,23 +135,23 @@ export function ResultsTabs() {
       </div>
 
       <div className="p-4">
-        {activeTab === "Plots" && data && <PlotsTab data={data} />}
-        {activeTab === "Sankey" && results && (
+        {displayTab === "Plots" && data && <PlotsTab data={data} />}
+        {displayTab === "Sankey" && results && (
           <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
             <SankeyTab results={results} />
           </Suspense>
         )}
-        {activeTab === "Thermo" && results && (
+        {displayTab === "Thermo" && results && (
           <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
             <ThermoReportTab results={results} />
           </Suspense>
         )}
-        {activeTab === "Summary" && results && <SummaryTab results={results} />}
-        {activeTab === ERROR_TAB_LABEL && <ErrorTab error={error} />}
+        {displayTab === "Summary" && results && <SummaryTab results={results} />}
+        {displayTab === ERROR_TAB_LABEL && <ErrorTab error={error} />}
 
         {/* Dynamic plugin tabs */}
         {plugins.map((plugin) => {
-          if (activeTab !== plugin.label) return null;
+          if (displayTab !== plugin.label) return null;
           const pData = pluginData[plugin.id];
           const loading = pluginLoading[plugin.id];
           if (loading) {

@@ -1,6 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useConfigStore } from "@/stores/configStore";
-import { parseYaml, exportConfig } from "@/api/configs";
+import { parseYaml, syncConfig } from "@/api/configs";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
@@ -14,36 +14,45 @@ interface Props {
 export function YAMLEditorModal({ open, onClose }: Props) {
   const { config, originalYaml, setConfig } = useConfigStore();
   const [value, setValue] = useState("");
-  const [fetching, setFetching] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncWarnings, setSyncWarnings] = useState<string[]>([]);
 
-  // Fetch YAML when modal opens – depends only on `open` so edits
-  // inside the editor are never overwritten by a re-render.
+  // Sync YAML when modal opens: call /api/configs/sync to merge live config
+  // into the original YAML (preserving comments and unit strings).
   useEffect(() => {
     if (!open) return;
-    setError(null);
+    setSyncError(null);
+    setSyncWarnings([]);
 
-    if (config.nodes.length > 0) {
-      setFetching(true);
-      exportConfig(config)
-        .then((resp) => setValue(resp.yaml))
-        .catch((err) => {
-          // Fallback to the raw YAML stored at load time
-          if (originalYaml) {
-            setValue(originalYaml);
-          } else {
-            setError(
-              `Failed to load YAML: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        })
-        .finally(() => setFetching(false));
-    } else if (originalYaml) {
-      setValue(originalYaml);
-    } else {
-      setError("No configuration available to edit");
+    if (!originalYaml) {
+      setSyncError("No configuration available to edit.");
+      return;
     }
+
+    if (config.nodes.length === 0) {
+      // Empty config — just show the raw original YAML.
+      setValue(originalYaml);
+      return;
+    }
+
+    setSyncing(true);
+    syncConfig(config, originalYaml)
+      .then((resp) => {
+        setValue(resp.yaml);
+        setSyncWarnings(resp.warnings ?? []);
+      })
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        setSyncError(
+          `Failed to sync YAML with current configuration: ${msg}. ` +
+            "The displayed YAML may not match the live config — close and reopen, " +
+            "or fix the configuration first.",
+        );
+        // Do NOT fall back to stale originalYaml — saving it would overwrite GUI edits.
+      })
+      .finally(() => setSyncing(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -53,6 +62,7 @@ export function YAMLEditorModal({ open, onClose }: Props) {
     setSaving(true);
     try {
       const resp = await parseYaml(value);
+      // Update both config and originalYaml so next open stays fresh.
       setConfig(resp.config, undefined, value);
       toast.success("YAML config updated");
       onClose();
@@ -64,6 +74,8 @@ export function YAMLEditorModal({ open, onClose }: Props) {
       setSaving(false);
     }
   };
+
+  const canSave = !saving && !syncing && !syncError;
 
   return (
     <div
@@ -89,14 +101,29 @@ export function YAMLEditorModal({ open, onClose }: Props) {
           </Button>
         </div>
 
+        {syncWarnings.length > 0 && (
+          <div
+            id="sync-warnings-banner"
+            className="px-4 py-2 text-xs bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 space-y-0.5"
+          >
+            <p className="font-semibold">Sync warnings (non-blocking):</p>
+            {syncWarnings.map((w, i) => (
+              <p key={i}>{w}</p>
+            ))}
+          </div>
+        )}
+
         <div className="flex-1 overflow-hidden">
-          {fetching ? (
+          {syncing ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
-              Loading YAML...
+              Syncing YAML with current configuration…
             </div>
-          ) : error ? (
-            <div className="flex items-center justify-center h-full text-destructive p-4 text-center">
-              {error}
+          ) : syncError ? (
+            <div
+              id="sync-error-message"
+              className="flex items-center justify-center h-full text-destructive p-4 text-center text-sm"
+            >
+              {syncError}
             </div>
           ) : (
             <Suspense
@@ -132,11 +159,11 @@ export function YAMLEditorModal({ open, onClose }: Props) {
           <Button
             id="save-config-yaml-edit-btn"
             onClick={handleSave}
-            disabled={saving || fetching}
+            disabled={!canSave}
             variant="primary"
             size="sm"
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving…" : "Save"}
           </Button>
         </div>
       </div>
