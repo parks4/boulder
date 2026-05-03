@@ -533,5 +533,320 @@ nodes:
         assert loaded_data["nodes"][0]["IdealGasReactor"]["temperature"] == 1000.0
 
 
+class TestMergeConfigIntoYaml:
+    """Tests for merge_config_into_yaml: full sync pipeline semantics."""
+
+    def _make_config(self, nodes, connections=None):
+        """Build a minimal NormalizedConfig-shaped dict."""
+        return {
+            "nodes": nodes,
+            "connections": connections or [],
+        }
+
+    def _node(self, nid, kind, props):
+        return {"id": nid, "type": kind, "properties": props}
+
+    def _conn(self, cid, kind, source, target, props=None):
+        return {
+            "id": cid,
+            "type": kind,
+            "source": source,
+            "target": target,
+            "properties": props or {},
+        }
+
+    def test_merge_preserves_header_and_inline_comments(self):
+        """Asserts that header comments and EOL comments survive a no-op merge.
+
+        The original YAML has a # header comment and inline # comments on
+        temperature and pressure values. After merge_config_into_yaml with
+        the same values, those comment strings are present in the output.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "# Header comment\n"
+            "phases:\n"
+            "  gas:\n"
+            "    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0  # K\n"
+            "      pressure: 101325.0  # Pa\n"
+        )
+        config = self._make_config(
+            [
+                self._node(
+                    "inlet", "Reservoir", {"temperature": 300.0, "pressure": 101325.0}
+                ),
+            ]
+        )
+        result, warnings = merge_config_into_yaml(config, yaml)
+        assert "# Header comment" in result
+        assert "# K" in result
+        assert "# Pa" in result
+
+    def test_merge_drops_synthesized_satellites(self):
+        """Asserts that nodes/connections tagged __synthesized=True are absent from output.
+
+        Config contains two nodes: one authored (inlet) and one synthesized
+        (pfr_ambient). The merged YAML must not contain 'pfr_ambient'.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+        )
+        config = self._make_config(
+            [
+                self._node("inlet", "Reservoir", {"temperature": 300.0}),
+                {
+                    **self._node("pfr_ambient", "Reservoir", {"temperature": 298.15}),
+                    "__synthesized": True,
+                },
+            ]
+        )
+        result, _ = merge_config_into_yaml(config, yaml)
+        assert "pfr_ambient" not in result
+        assert "inlet" in result
+
+    def test_merge_appends_new_user_node(self):
+        """Asserts that a GUI-added node (not in originalYaml, no __synthesized) is appended.
+
+        Original has 'inlet'; config adds 'reactor1'. Output must contain both.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+        )
+        config = self._make_config(
+            [
+                self._node("inlet", "Reservoir", {"temperature": 300.0}),
+                self._node("reactor1", "IdealGasReactor", {"volume": 0.001}),
+            ]
+        )
+        result, _ = merge_config_into_yaml(config, yaml)
+        assert "inlet" in result
+        assert "reactor1" in result
+        assert "IdealGasReactor" in result
+
+    def test_merge_removes_deleted_node(self):
+        """Asserts that a node absent from config is removed from the merged YAML.
+
+        Original has 'inlet' and 'r2'; config omits 'r2'. Output must not contain 'r2'.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+            "  - id: r2\n"
+            "    IdealGasReactor:\n"
+            "      volume: 0.001\n"
+        )
+        config = self._make_config(
+            [
+                self._node("inlet", "Reservoir", {"temperature": 300.0}),
+            ]
+        )
+        result, _ = merge_config_into_yaml(config, yaml)
+        assert "inlet" in result
+        assert "r2" not in result
+
+    def test_merge_adds_new_property_on_existing_node(self):
+        """Asserts that a property added via the GUI appears in the merged YAML.
+
+        Original Reservoir has only temperature. Config adds composition.
+        Output must contain 'composition'.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+        )
+        config = self._make_config(
+            [
+                self._node(
+                    "inlet",
+                    "Reservoir",
+                    {
+                        "temperature": 300.0,
+                        "composition": "CH4:1",
+                    },
+                ),
+            ]
+        )
+        result, _ = merge_config_into_yaml(config, yaml)
+        assert "composition" in result
+        assert "CH4:1" in result
+
+    def test_merge_removes_deleted_property_from_component_block(self):
+        """Asserts that a property removed via the GUI is absent from the merged YAML.
+
+        Original Reservoir has temperature and composition. Config drops composition.
+        Output must not contain 'composition'.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+            '      composition: "CH4:1"\n'
+        )
+        config = self._make_config(
+            [
+                self._node("inlet", "Reservoir", {"temperature": 300.0}),
+            ]
+        )
+        result, _ = merge_config_into_yaml(config, yaml)
+        assert "temperature" in result
+        assert "composition" not in result
+
+    def test_merge_handles_type_change(self):
+        """Asserts that changing a node's type removes the old kind key and adds the new one.
+
+        Original has IdealGasReactor; config has same id with
+        IdealGasConstPressureReactor. Output must contain only the new kind key.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: r1\n"
+            "    IdealGasReactor:\n"
+            "      volume: 0.001\n"
+        )
+        config = self._make_config(
+            [
+                self._node("r1", "IdealGasConstPressureReactor", {"volume": 0.001}),
+            ]
+        )
+        result, _ = merge_config_into_yaml(config, yaml)
+        assert "IdealGasConstPressureReactor" in result
+        assert "IdealGasReactor:" not in result
+
+    def test_merge_multi_stage_preserves_stages_shape(self):
+        """Asserts that a staged original YAML keeps its stages: shape after merge.
+
+        Original YAML uses stages: + a per-stage list. Merged output must still
+        contain 'stages:' and NOT introduce a top-level 'network:' key.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "stages:\n"
+            "  s1:\n"
+            "    mechanism: gri30.yaml\n"
+            "    solve: equilibrate\n"
+            "s1:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+        )
+        # Build a config that produces a staged STONE output.
+        config = {
+            "nodes": [
+                {
+                    **self._node("inlet", "Reservoir", {"temperature": 300.0}),
+                    "group": "s1",
+                },
+            ],
+            "connections": [],
+            "groups": {
+                "s1": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "equilibrate",
+                    "stage_order": 0,
+                },
+            },
+        }
+        result, _ = merge_config_into_yaml(config, yaml)
+        assert "stages:" in result
+        assert "network:" not in result
+
+    def test_merge_raises_on_inline_ports(self):
+        """Asserts that a YAML with inline port shortcuts raises ValueError.
+
+        Inline ports (inlet: on a node) are not supported by live sync.
+        merge_config_into_yaml must raise ValueError with an explanatory message.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: tube\n"
+            "    DesignPFR:\n"
+            "      length: 1.0\n"
+            "      inlet:\n"
+            "        from: feed\n"
+            "        mass_flow_rate: 0.001\n"
+        )
+        config = self._make_config(
+            [
+                self._node("feed", "Reservoir", {"temperature": 300.0}),
+                self._node("tube", "DesignPFR", {"length": 1.0}),
+            ]
+        )
+        with pytest.raises(ValueError, match="[Ii]nline port"):
+            merge_config_into_yaml(config, yaml)
+
+    def test_merge_raises_on_shape_conflict(self):
+        """Asserts that switching from network: to stages: raises ValueError.
+
+        Original YAML uses network:; the config has a non-default group
+        implying stages:. merge_config_into_yaml must raise ValueError.
+        """
+        from boulder.config import merge_config_into_yaml
+
+        yaml = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+        )
+        config = {
+            "nodes": [
+                {
+                    **self._node("inlet", "Reservoir", {"temperature": 300.0}),
+                    "group": "s1",
+                },
+            ],
+            "connections": [],
+            "groups": {
+                "s1": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "equilibrate",
+                    "stage_order": 0,
+                },
+            },
+        }
+        with pytest.raises(ValueError, match="[Ss]hape conflict"):
+            merge_config_into_yaml(config, yaml)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

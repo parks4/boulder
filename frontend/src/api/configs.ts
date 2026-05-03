@@ -32,6 +32,11 @@ interface UploadResponse {
   filename: string;
 }
 
+interface SyncResponse {
+  yaml: string;
+  warnings: string[];
+}
+
 export function fetchDefaultConfig() {
   return apiFetch<DefaultConfigResponse>("/configs/default");
 }
@@ -58,6 +63,13 @@ export function exportConfig(config: NormalizedConfig) {
   return apiFetch<ExportResponse>("/configs/export", {
     method: "POST",
     body: JSON.stringify({ config }),
+  });
+}
+
+export function syncConfig(config: NormalizedConfig, originalYaml: string) {
+  return apiFetch<SyncResponse>("/configs/sync", {
+    method: "POST",
+    body: JSON.stringify({ config, original_yaml: originalYaml }),
   });
 }
 

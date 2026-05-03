@@ -399,3 +399,301 @@ class TestSimulationRoutes:
         assert resp.json()["detail"] == "time_step must be > 0"
         assert worker_called is False
         simulation_routes._simulations.clear()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/configs/sync
+# ---------------------------------------------------------------------------
+
+_SYNC_YAML = (
+    "phases:\n"
+    "  gas:\n"
+    "    mechanism: gri30.yaml\n"
+    "network:\n"
+    "  - id: inlet\n"
+    "    Reservoir:\n"
+    "      temperature: 298.15 K\n"
+    "      pressure: 1 atm\n"
+    "      composition: CH4:1\n"
+    "  - id: pfr\n"
+    "    IdealGasReactor:\n"
+    "      volume: 0.001\n"
+    "  - id: feed\n"
+    "    MassFlowController:\n"
+    "      mass_flow_rate: 10 kg/h\n"
+    "    source: inlet\n"
+    "    target: pfr\n"
+)
+
+_SYNC_CONFIG = {
+    "nodes": [
+        {
+            "id": "inlet",
+            "type": "Reservoir",
+            "properties": {
+                "temperature": 298.15,
+                "pressure": 101325.0,
+                "composition": "CH4:1",
+            },
+        },
+        {"id": "pfr", "type": "IdealGasReactor", "properties": {"volume": 0.001}},
+    ],
+    "connections": [
+        {
+            "id": "feed",
+            "type": "MassFlowController",
+            "source": "inlet",
+            "target": "pfr",
+            "properties": {"mass_flow_rate": 10 / 3600},
+        },
+    ],
+}
+
+
+class TestSyncConfigRoute:
+    @pytest.mark.asyncio
+    async def test_sync_returns_merged_yaml_with_units_preserved(self):
+        """Assert /api/configs/sync returns 200 with original unit strings.
+
+        Checks that 'yaml' contains '1 atm', '298.15 K', 'kg/h' verbatim
+        and that 'warnings' is an empty list when no values changed.
+        """
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": _SYNC_CONFIG, "original_yaml": _SYNC_YAML},
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "yaml" in body
+        assert body["warnings"] == []
+        # Original unit strings preserved
+        assert "1 atm" in body["yaml"]
+        assert "298.15 K" in body["yaml"]
+        assert "kg/h" in body["yaml"]
+
+    @pytest.mark.asyncio
+    async def test_sync_updates_changed_pressure_in_original_unit(self):
+        """Assert doubled pressure appears as '2 atm', not as a bare SI float.
+
+        Original has 'pressure: 1 atm'; config sets pressure to 202650 Pa.
+        Merged YAML must contain '2 atm' and not '202650'.
+        """
+        config = {
+            "nodes": [
+                {
+                    "id": "inlet",
+                    "type": "Reservoir",
+                    "properties": {
+                        "temperature": 298.15,
+                        "pressure": 202650.0,
+                        "composition": "CH4:1",
+                    },
+                },
+                {
+                    "id": "pfr",
+                    "type": "IdealGasReactor",
+                    "properties": {"volume": 0.001},
+                },
+            ],
+            "connections": [
+                {
+                    "id": "feed",
+                    "type": "MassFlowController",
+                    "source": "inlet",
+                    "target": "pfr",
+                    "properties": {"mass_flow_rate": 10 / 3600},
+                },
+            ],
+        }
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": config, "original_yaml": _SYNC_YAML},
+            )
+        assert resp.status_code == 200
+        yaml_out = resp.json()["yaml"]
+        assert "2 atm" in yaml_out
+        assert "202650" not in yaml_out
+
+    @pytest.mark.asyncio
+    async def test_sync_filters_synthesized_nodes(self):
+        """Assert synthesized nodes are absent from the merged YAML.
+
+        Config contains pfr_ambient with __synthesized=True.
+        Response YAML must not contain 'pfr_ambient'.
+        """
+        config = {
+            "nodes": [
+                {
+                    "id": "inlet",
+                    "type": "Reservoir",
+                    "properties": {
+                        "temperature": 298.15,
+                        "pressure": 101325.0,
+                        "composition": "CH4:1",
+                    },
+                },
+                {
+                    "id": "pfr",
+                    "type": "IdealGasReactor",
+                    "properties": {"volume": 0.001},
+                },
+                {
+                    "id": "pfr_ambient",
+                    "type": "Reservoir",
+                    "properties": {"temperature": 298.15},
+                    "__synthesized": True,
+                },
+            ],
+            "connections": [
+                {
+                    "id": "feed",
+                    "type": "MassFlowController",
+                    "source": "inlet",
+                    "target": "pfr",
+                    "properties": {"mass_flow_rate": 10 / 3600},
+                },
+            ],
+        }
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": config, "original_yaml": _SYNC_YAML},
+            )
+        assert resp.status_code == 200
+        assert "pfr_ambient" not in resp.json()["yaml"]
+
+    @pytest.mark.asyncio
+    async def test_sync_keeps_gui_added_node(self):
+        """Assert GUI-added node (no __synthesized flag) appears in merged YAML.
+
+        Config adds 'new_gui_node' which is absent from original_yaml.
+        Response YAML must contain 'new_gui_node'.
+        """
+        config = {
+            "nodes": [
+                {
+                    "id": "inlet",
+                    "type": "Reservoir",
+                    "properties": {
+                        "temperature": 298.15,
+                        "pressure": 101325.0,
+                        "composition": "CH4:1",
+                    },
+                },
+                {
+                    "id": "pfr",
+                    "type": "IdealGasReactor",
+                    "properties": {"volume": 0.001},
+                },
+                {
+                    "id": "new_gui_node",
+                    "type": "IdealGasReactor",
+                    "properties": {"volume": 0.002},
+                },
+            ],
+            "connections": [
+                {
+                    "id": "feed",
+                    "type": "MassFlowController",
+                    "source": "inlet",
+                    "target": "pfr",
+                    "properties": {"mass_flow_rate": 10 / 3600},
+                },
+            ],
+        }
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": config, "original_yaml": _SYNC_YAML},
+            )
+        assert resp.status_code == 200
+        assert "new_gui_node" in resp.json()["yaml"]
+
+    @pytest.mark.asyncio
+    async def test_sync_returns_422_on_inline_ports(self):
+        """Assert inline port shortcuts in original_yaml return HTTP 422.
+
+        YAML with 'inlet:' on a node triggers the inline-port guard.
+        Response detail must mention 'inline'.
+        """
+        yaml_with_ports = (
+            "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+            "network:\n"
+            "  - id: tube\n"
+            "    DesignPFR:\n"
+            "      length: 1.0\n"
+            "      inlet:\n"
+            "        from: feed\n"
+            "        mass_flow_rate: 0.001\n"
+        )
+        config = {
+            "nodes": [
+                {"id": "tube", "type": "DesignPFR", "properties": {"length": 1.0}}
+            ],
+            "connections": [],
+        }
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": config, "original_yaml": yaml_with_ports},
+            )
+        assert resp.status_code == 422
+        assert "inline" in resp.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_sync_returns_422_on_shape_conflict(self):
+        """Assert network: -> stages: shape change returns HTTP 422.
+
+        Original uses network:; config has a non-default group implying stages:.
+        Response detail must mention 'shape'.
+        """
+        config_with_stages = {
+            "nodes": [
+                {
+                    **{
+                        "id": "inlet",
+                        "type": "Reservoir",
+                        "properties": {
+                            "temperature": 298.15,
+                            "pressure": 101325.0,
+                            "composition": "CH4:1",
+                        },
+                    },
+                    "group": "s1",
+                },
+            ],
+            "connections": [],
+            "groups": {
+                "s1": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "equilibrate",
+                    "stage_order": 0,
+                },
+            },
+        }
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": config_with_stages, "original_yaml": _SYNC_YAML},
+            )
+        assert resp.status_code == 422
+        assert "shape" in resp.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_sync_returns_422_on_invalid_original_yaml(self):
+        """Assert malformed original_yaml returns a non-200 status.
+
+        An unclosed bracket causes a YAML parse error.
+        Response status must be 422 or 500.
+        """
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={
+                    "config": _SYNC_CONFIG,
+                    "original_yaml": "invalid: yaml: [unclosed bracket",
+                },
+            )
+        assert resp.status_code in (422, 500)
