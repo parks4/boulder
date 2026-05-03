@@ -208,7 +208,7 @@ def introspect_func1(func1_obj: Any) -> Optional[DetectedSignal]:
         # We cannot extract the coefficients from a live ct.Func1 Gaussian
         # reliably; record what we know and annotate.
         try:
-            peak_guess = float(func1_obj(0.0))
+            _ = float(func1_obj(0.0))  # probe: Gaussian evaluable at t=0
             params = {
                 "_note": (
                     "Gaussian parameters not extractable from live object; "
@@ -258,7 +258,7 @@ def _collect_scalar_assignments(tree: ast.AST) -> Dict[str, float]:
 
 
 def _eval_const_extended(node: ast.expr, env: Dict[str, float]) -> Optional[Any]:
-    """Extended constant evaluator that resolves names from *env*."""
+    """Evaluate constant expressions and resolve names from *env*."""
     if isinstance(node, ast.Name) and node.id in env:
         return env[node.id]
     if isinstance(node, ast.Constant):

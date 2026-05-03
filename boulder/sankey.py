@@ -213,7 +213,10 @@ def plot_sankey_diagram_from_links_and_nodes(
     from .utils import get_sankey_theme_config
 
     sankey_theme = get_sankey_theme_config(theme)
-    link_color_map = {**sankey_theme["link_colors"], **_species_sankey_hex_colors(plugins=plugins)}
+    link_color_map = {
+        **sankey_theme["link_colors"],
+        **_species_sankey_hex_colors(plugins=plugins),
+    }
 
     def _resolve_plot_link_color(raw: Any) -> str:
         c = str(raw).strip() if raw is not None else ""

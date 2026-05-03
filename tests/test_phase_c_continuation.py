@@ -373,7 +373,7 @@ class TestCombustorExtinctionSweep:
             return combustor.mass / residence_time
 
         inlet_mfc = ct.MassFlowController(inlet, combustor, mdot=mdot)
-        outlet_mfc = ct.PressureController(
+        _outlet_mfc = ct.PressureController(
             combustor, exhaust, primary=inlet_mfc, K=0.01
         )
         sim = ct.ReactorNet([combustor])

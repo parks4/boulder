@@ -728,12 +728,14 @@ class TestSyncConfigRoute:
             "    Reservoir:\n"
             "      temperature: 300.0\n"
             "      pressure: 101325.0\n"
-            "      composition: \"N2:1\"\n"
+            '      composition: "N2:1"\n'
         )
         plain = _to_plain_dict(load_yaml_string_with_comments(staged_yaml))
         cfg = validate_config(normalize_config(plain))
         # Confirm the fix is needed: normalized groups must have "solver", not "solve"
-        assert "solver" in cfg["groups"]["s1"], "normalize_config must store solver block"
+        assert "solver" in cfg["groups"]["s1"], (
+            "normalize_config must store solver block"
+        )
         assert "solve" not in cfg["groups"]["s1"]
 
         async with _make_client() as client:

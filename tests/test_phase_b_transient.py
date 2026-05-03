@@ -265,8 +265,8 @@ class TestAdvanceGridIntegration:
         r1 = ct.IdealGasReactor(ar, name="r1")
         r2 = ct.IdealGasReactor(gas, name="r2")
         env = ct.Reservoir(ct.Solution(_AIR_MECH))
-        w1 = ct.Wall(r2, r1, A=1.0, K=0.5e-4, U=100.0)
-        w2 = ct.Wall(r2, env, A=1.0, U=500.0)
+        _w1 = ct.Wall(r2, r1, A=1.0, K=0.5e-4, U=100.0)
+        _w2 = ct.Wall(r2, env, A=1.0, U=500.0)
 
         net = ct.ReactorNet([r1, r2])
 

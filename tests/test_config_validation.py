@@ -149,7 +149,10 @@ def test_power_unit_coercion() -> None:
 
 @pytest.mark.unit
 def test_invalid_unit_error_message() -> None:
-    """Invalid unit strings raise ValueError at normalize_config time with the value and property in the message."""
+    """Invalid unit strings raise ValueError from normalize_config.
+
+    The error message includes the bad value and property name.
+    """
     data = {
         "nodes": [
             {

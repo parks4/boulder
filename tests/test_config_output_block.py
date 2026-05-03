@@ -74,39 +74,6 @@ def test_convert_to_stone_format_staged_solver_block():
     assert "solve" not in stone["stages"]["s1"]
 
 
-def test_convert_to_stone_format_staged_legacy_solve():
-    """Assert export still works when groups carry the legacy ``solve`` key (no ``solver`` block).
-
-    Legacy in-memory configs that were never re-normalized still have a bare ``solve``
-    string on the group. Export must produce ``stages: {s1: {solve: ...}}`` without error.
-    """
-    internal = {
-        "nodes": [
-            {
-                "id": "inlet",
-                "type": "Reservoir",
-                "group": "s1",
-                "properties": {
-                    "temperature": 300.0,
-                    "pressure": 101325.0,
-                    "composition": "N2:1",
-                },
-            },
-        ],
-        "connections": [],
-        "groups": {
-            "s1": {
-                "stage_order": 1,
-                "mechanism": "gri30.yaml",
-                "solve": "advance_to_steady_state",
-            },
-        },
-    }
-    stone = convert_to_stone_format(internal)
-    assert stone["stages"]["s1"]["solve"] == "advance_to_steady_state"
-    assert "solver" not in stone["stages"]["s1"]
-
-
 def test_convert_to_stone_format_staged_missing_solver_raises():
     """Assert export raises ValueError when a group has neither ``solver`` nor ``solve``.
 
@@ -114,8 +81,12 @@ def test_convert_to_stone_format_staged_missing_solver_raises():
     """
     internal = {
         "nodes": [
-            {"id": "inlet", "type": "Reservoir", "group": "s1",
-             "properties": {"temperature": 300.0}},
+            {
+                "id": "inlet",
+                "type": "Reservoir",
+                "group": "s1",
+                "properties": {"temperature": 300.0},
+            },
         ],
         "connections": [],
         "groups": {

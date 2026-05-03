@@ -301,11 +301,9 @@ def test_spatial_series_inferred_from_custom_stage_network_states():
     - The one-point fallback snapshot is fully replaced (len > 1).
     """
     import cantera as ct
-    import numpy as np
 
     from boulder.cantera_converter import DualCanteraConverter
     from boulder.config import normalize_config
-    from boulder.stage_network import CustomStageNetwork
 
     N = 5  # synthetic spatial resolution
 
