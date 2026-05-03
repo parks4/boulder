@@ -136,9 +136,12 @@ Numeric values may carry explicit units:
 | `grouped_nodes.yaml` | Grouped reactors in one stage |
 | `staged_psr_pfr.yaml` | Two-stage PSR → PFR chain |
 
-## Cantera Python examples (`cantera_examples/`)
+## Cantera Python examples (in `docs/cantera_examples/`)
 
-Boulder can also run Cantera `.py` files, as the ones downloaded
-from the Cantera official documentation. They can be run either
-via `sim2stone` to generate a Boulder YAML file, or directly as
-`boulder example_file.py` which will generate the YAML file in the process.
+Vendored Cantera sample scripts used for tests and documentation live under
+[`docs/cantera_examples/`](../docs/cantera_examples/). See
+[`docs/cantera_upstream_examples.rst`](../docs/cantera_upstream_examples.rst)
+for how to run them with Boulder and links to the official Cantera docs.
+
+The directory `configs/cantera_examples/` only keeps a short
+[`README.md`](cantera_examples/README.md) pointing to that location.

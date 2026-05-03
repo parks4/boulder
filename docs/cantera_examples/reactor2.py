@@ -21,6 +21,25 @@ wave propagation. It is somewhat artificial, but nevertheless instructive.
 Requires: cantera >= 3.2.0, matplotlib >= 2.0, pandas
 
 .. tags:: combustion, reactor network, plotting
+
+Boulder (this repository)
+-------------------------
+
+This file is a **vendored copy** of a `Cantera`_ Python example, kept under
+``docs/cantera_examples/`` for documentation and CI. Upstream samples live in
+the `Cantera source tree`_.
+
+From the repository root, with the ``boulder`` environment active::
+
+    boulder docs/cantera_examples/reactor2.py
+
+Headless conversion to STONE YAML::
+
+    python -m boulder.cli docs/cantera_examples/reactor2.py --headless \\
+        --output-yaml /path/to/out.yaml
+
+.. _Cantera: https://cantera.org/stable/index.html
+.. _Cantera source tree: https://github.com/Cantera/cantera/tree/main/samples/python
 """
 
 import pandas as pd

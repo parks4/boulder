@@ -1,4 +1,4 @@
-"""sim2stone + headless --download for ``configs/cantera_examples`` (unchanged upstream scripts)."""
+"""sim2stone + headless --download for ``docs/cantera_examples`` (vendored Cantera scripts)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_EXAMPLES_DIR = _REPO_ROOT / "configs" / "cantera_examples"
+_EXAMPLES_DIR = _REPO_ROOT / "docs" / "cantera_examples"
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -64,7 +64,7 @@ def test_sim2stone_cantera_examples_yaml_valid(
     """Each bundled Cantera example runs through sim2stone and yields valid STONE YAML."""
     script = _EXAMPLES_DIR / script_name
     if not script.is_file():
-        pytest.skip(f"{script_name} not found under configs/cantera_examples")
+        pytest.skip(f"{script_name} not found under docs/cantera_examples")
 
     if script_name == "nanosecond_pulse_discharge.py":
         import cantera as ct
@@ -121,7 +121,7 @@ def test_cantera_examples_headless_download_script_runs(
     """
     script = _EXAMPLES_DIR / script_name
     if not script.is_file():
-        pytest.skip(f"{script_name} not found under configs/cantera_examples")
+        pytest.skip(f"{script_name} not found under docs/cantera_examples")
 
     if script_name == "nanosecond_pulse_discharge.py":
         import cantera as ct
@@ -186,6 +186,160 @@ def test_cantera_examples_headless_download_script_runs(
         timeout=180,
         cwd=str(_REPO_ROOT),
         env=_subprocess_env(),
+    )
+    assert run.returncode == 0, (run.stderr or "") + (run.stdout or "")
+    out = (run.stdout or "") + (run.stderr or "")
+    assert "Simulation completed" in out or "Reactor" in out
+
+
+def _agg_env() -> dict[str, str]:
+    """Match Boulder CLI needs on Windows (emoji logs, Agg, Cantera data paths)."""
+    return {
+        **_subprocess_env(),
+        "MPLBACKEND": "Agg",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+    }
+
+
+@pytest.mark.parametrize("script_name,mechanism", _FIXTURES)
+def test_boulder_headless_py_writes_valid_stone_yaml(
+    tmp_path: Path, script_name: str, mechanism: str
+) -> None:
+    """``boulder <example.py> --headless --output-yaml`` writes YAML that ``boulder validate`` accepts."""
+    script = _EXAMPLES_DIR / script_name
+    if not script.is_file():
+        pytest.skip(f"{script_name} not found under docs/cantera_examples")
+
+    if script_name == "nanosecond_pulse_discharge.py":
+        import cantera as ct
+
+        try:
+            ct.Solution(mechanism)
+        except (OSError, ValueError, RuntimeError) as exc:
+            pytest.skip(f"Plasma mechanism not available ({mechanism}): {exc}")
+
+    stone_yaml = (tmp_path / f"{Path(script_name).stem}_boulder.yaml").resolve()
+    conv = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "boulder.cli",
+            str(script),
+            "--headless",
+            "--output-yaml",
+            str(stone_yaml),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+        cwd=str(_REPO_ROOT),
+        env=_agg_env(),
+    )
+    assert conv.returncode == 0, (conv.stderr or "") + (conv.stdout or "")
+    assert stone_yaml.is_file()
+
+    val = subprocess.run(
+        [sys.executable, "-m", "boulder.cli", "validate", str(stone_yaml)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=str(_REPO_ROOT),
+        env=_agg_env(),
+    )
+    assert val.returncode == 0, (val.stderr or "") + (val.stdout or "")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("script_name,mechanism", _DOWNLOAD_PARAMS)
+def test_boulder_headless_py_yaml_validate_download_run_roundtrip(
+    tmp_path: Path, script_name: str, mechanism: str
+) -> None:
+    """After native .py→YAML, ``--headless --download`` then ``python`` completes (xfail where upstream fails)."""
+    script = _EXAMPLES_DIR / script_name
+    if not script.is_file():
+        pytest.skip(f"{script_name} not found under docs/cantera_examples")
+
+    if script_name == "nanosecond_pulse_discharge.py":
+        import cantera as ct
+
+        try:
+            ct.Solution(mechanism)
+        except (OSError, ValueError, RuntimeError) as exc:
+            pytest.skip(f"Plasma mechanism not available ({mechanism}): {exc}")
+
+    stone_yaml = (tmp_path / f"{Path(script_name).stem}_boulder.yaml").resolve()
+    download_py = (tmp_path / f"{Path(script_name).stem}_downloaded.py").resolve()
+
+    assert (
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "boulder.cli",
+                str(script),
+                "--headless",
+                "--output-yaml",
+                str(stone_yaml),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            cwd=str(_REPO_ROOT),
+            env=_agg_env(),
+        ).returncode
+        == 0
+    )
+
+    assert (
+        subprocess.run(
+            [sys.executable, "-m", "boulder.cli", "validate", str(stone_yaml)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=str(_REPO_ROOT),
+            env=_agg_env(),
+        ).returncode
+        == 0
+    )
+
+    gen = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "boulder.cli",
+            str(stone_yaml),
+            "--headless",
+            "--download",
+            str(download_py),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+        cwd=str(_REPO_ROOT),
+        env=_agg_env(),
+    )
+    assert gen.returncode == 0, (gen.stderr or "") + (gen.stdout or "")
+    assert "Python code generated:" in (gen.stdout or "")
+    assert download_py.is_file()
+
+    run = subprocess.run(
+        [sys.executable, str(download_py)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+        cwd=str(_REPO_ROOT),
+        env=_agg_env(),
     )
     assert run.returncode == 0, (run.stderr or "") + (run.stdout or "")
     out = (run.stdout or "") + (run.stderr or "")

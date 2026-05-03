@@ -24,6 +24,25 @@ and Astronautics, Jan. 2023, pp. 1-15. DOI: 10.2514/6.2023-2056.
 Requires: cantera >= 3.2, matplotlib >= 2.0
 
 .. tags:: Python, plasma, reactor network
+
+Boulder (this repository)
+-------------------------
+
+This file is a **vendored copy** of a `Cantera`_ Python example, kept under
+``docs/cantera_examples/`` for documentation and CI. Upstream samples live in
+the `Cantera source tree`_.
+
+From the repository root, with the ``boulder`` environment active::
+
+    boulder docs/cantera_examples/nanosecond_pulse_discharge.py
+
+Headless conversion to STONE YAML::
+
+    python -m boulder.cli docs/cantera_examples/nanosecond_pulse_discharge.py \\
+        --headless --output-yaml /path/to/out.yaml
+
+.. _Cantera: https://cantera.org/stable/index.html
+.. _Cantera source tree: https://github.com/Cantera/cantera/tree/main/samples/python
 """
 
 import cantera as ct

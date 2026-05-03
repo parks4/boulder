@@ -17,6 +17,25 @@ pressure reactor with a fixed volume.
 Requires: cantera >= 3.2, matplotlib >= 2.0
 
 .. tags:: Python, combustion, reactor network, well-stirred reactor, plotting
+
+Boulder (this repository)
+-------------------------
+
+This file is a **vendored copy** of a `Cantera`_ Python example, kept under
+``docs/cantera_examples/`` for documentation and CI. Upstream samples live in
+the `Cantera source tree`_.
+
+From the repository root, with the ``boulder`` environment active::
+
+    boulder docs/cantera_examples/combustor.py
+
+That launches Boulder and converts the script to STONE YAML. Headless conversion::
+
+    python -m boulder.cli docs/cantera_examples/combustor.py --headless \\
+        --output-yaml /path/to/out.yaml
+
+.. _Cantera: https://cantera.org/stable/index.html
+.. _Cantera source tree: https://github.com/Cantera/cantera/tree/main/samples/python
 """
 
 import matplotlib.pyplot as plt

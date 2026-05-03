@@ -11,6 +11,7 @@ This file is for human contributors and AI coding agents working on **Boulder** 
 | CLI | `boulder/cli.py` |
 | Frontend | `frontend/src/` |
 | STONE YAML examples | `configs/` — see `configs/README.md` |
+| Vendored Cantera `.py` samples | `docs/cantera_examples/` — see `docs/cantera_upstream_examples.rst` |
 | Tests | `tests/` — see `tests/README.md` |
 | Sphinx docs | `docs/` |
 | Examples | `examples/` (including `plugin_example.py`) |
