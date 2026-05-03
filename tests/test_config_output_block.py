@@ -32,4 +32,5 @@ def test_output_block_is_preserved_through_validation_and_conversion():
     assert "reactor_id1" in validated["output"]
 
     roundtrip = convert_to_stone_format(validated)
+    assert "network" in roundtrip
     assert "output" in roundtrip and roundtrip["output"] == config["output"]

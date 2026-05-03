@@ -251,8 +251,11 @@ network:
         # Convert back to STONE format
         stone_config = convert_to_stone_format(internal_config)
 
-        # Verify STONE format (convert_to_stone_format returns nodes/connections keys)
-        stone_nodes_by_id = {n["id"]: n for n in stone_config.get("nodes", [])}
+        # Verify STONE v2 shape (network: list, not legacy nodes:/connections:)
+        assert "network" in stone_config
+        stone_nodes_by_id = {
+            item["id"]: item for item in stone_config["network"] if "source" not in item
+        }
         assert "test_reactor" in stone_nodes_by_id
         assert "IdealGasReactor" in stone_nodes_by_id["test_reactor"]
 
@@ -316,19 +319,17 @@ network:
         final_yaml = yaml_to_string_with_comments(updated_data)
         final_data = load_yaml_string_with_comments(final_yaml)
 
-        # After round-trip, convert_to_stone_format emits nodes/connections keys
-        # so final_data["nodes"] should exist (internal-style from convert_to_stone_format)
-        assert "nodes" in final_data, "Final data should have nodes section"
-        assert len(final_data["nodes"]) > 0, "Should have at least one node"
+        # Export uses STONE v2 ``network:`` so merged YAML keeps that shape
+        assert "network" in final_data, "Final data should have network section"
+        assert len(final_data["network"]) > 0, "Should have at least one item"
 
-        nodes_by_id = {n["id"]: n for n in final_data["nodes"]}
+        nodes_by_id = {
+            item["id"]: item for item in final_data["network"] if "source" not in item
+        }
         assert "test_reactor" in nodes_by_id, "test_reactor node should be present"
 
         node = nodes_by_id["test_reactor"]
-        # convert_to_stone_format produces internal-style nodes with type/properties
-        assert node.get("type") == "IdealGasReactor" or "IdealGasReactor" in node, (
-            "Node type should be IdealGasReactor"
-        )
+        assert "IdealGasReactor" in node, "Node kind key should be IdealGasReactor"
 
 
 class TestYAMLCommentIntegration:
@@ -343,7 +344,7 @@ class TestYAMLCommentIntegration:
             assert len(original_yaml) > 0
 
             # Verify the original YAML contains expected sections
-            if "nodes:" in original_yaml:
+            if "network:" in original_yaml or "nodes:" in original_yaml:
                 assert "metadata:" in original_yaml
 
         except FileNotFoundError:
