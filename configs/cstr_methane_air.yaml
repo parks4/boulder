@@ -1,4 +1,4 @@
-﻿metadata:
+metadata:
   title: Lean methane/air CSTR — residence-time sweep template
   description: >-
     Well-stirred reactor (CSTR) for lean methane/air combustion at
@@ -27,12 +27,12 @@ phases:
 
 network:
   # ── Inlet (lean CH4/air, phi = 0.5) ────────────────────────────────────
-  - id: feed
-    Reservoir:
-      temperature: 300 K
-      pressure: 101325 Pa
+- id: feed
+  Reservoir:
+    temperature: 300 K
+    pressure: 101325 Pa
       # phi = 0.5: CH4:0.5 : O2:1.0 : N2:3.76 (mole ratios)
-      composition: "CH4:0.5,O2:1.0,N2:3.76"
+    composition: "CH4:0.5,O2:1.0,N2:3.76"
 
   # ── CSTR combustor ──────────────────────────────────────────────────────
   # Residence time  tres = combustor.mass / mass_flow_rate
@@ -40,35 +40,35 @@ network:
   # At atmospheric pressure, rho_products ~ 0.24 kg/m3 (1475 K, 1 atm).
   # tres ~ 0.24 * 1e-3 / 1e-4 ~ 2.4 s  (very stable; reduce mdot or volume
   # to approach the blowout limit near tres = 1.5 ms).
-  - id: combustor
-    IdealGasConstPressureMoleReactor:
-      volume: 1.0e-3 m**3   # [m^3]  — tune this for different geometries
-      initial:
+- id: combustor
+  IdealGasConstPressureMoleReactor:
+    volume: 1.0e-3 m**3     # [m^3]  — tune this for different geometries
+    initial:
         # Seed at HP-equilibrium products to start on the reacting branch.
-        temperature: 1475 K
-        pressure: 101325 Pa
-        composition: "CO2:0.04476,H2O:0.08951,N2:0.86573"
+      temperature: 1475 K
+      pressure: 101325 Pa
+      composition: "CO2:0.04476,H2O:0.08951,N2:0.86573"
 
   # ── Exhaust sink ────────────────────────────────────────────────────────
-  - id: exhaust
-    OutletSink: {}
+- id: exhaust
+  OutletSink: {}
 
   # ── Flow devices ────────────────────────────────────────────────────────
   # Tune mass_flow_rate to change residence time.
-  - id: feed_to_combustor
-    MassFlowController:
-      mass_flow_rate: 1.0e-4 kg/s   # [kg/s] — key sweep parameter
-    source: feed
-    target: combustor
+- id: feed_to_combustor
+  MassFlowController:
+    mass_flow_rate: 1.0e-4 kg/s     # [kg/s] — key sweep parameter
+  source: feed
+  target: combustor
 
   # PressureController keeps the system isobaric; its mass flow mirrors the
   # upstream MFC so no extra accumulation occurs.
-  - id: combustor_to_exhaust
-    PressureController:
-      pressure_coeff: 0.0
-      master: feed_to_combustor
-    source: combustor
-    target: exhaust
+- id: combustor_to_exhaust
+  PressureController:
+    pressure_coeff: 0.0
+    master: feed_to_combustor
+  source: combustor
+  target: exhaust
 
 settings:
   end_time: 0.5   # [s] — long enough to reach steady state at tres ~ 10 ms
@@ -76,5 +76,5 @@ settings:
 
 output:
   combustor:
-    - "temperature, K"
-    - "pressure, Pa"
+  - "temperature, K"
+  - "pressure, Pa"

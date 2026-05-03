@@ -121,6 +121,7 @@ _ISOTHERMAL_KINDS: frozenset = frozenset(
 _CONST_PRESSURE_KINDS: frozenset = frozenset(
     {
         "IdealGasConstPressureReactor",
+        "IdealGasConstPressureMoleReactor",
         "ConstPressureReactor",
         "DesignPSR",
         "DesignTorchInstantaneousHeating",
@@ -1499,15 +1500,32 @@ def _internal_node_to_stone_v2_item(node: Dict[str, Any]) -> Dict[str, Any]:
     node_type = node.get("type", "IdealGasReactor")
     props = dict(node.get("properties", {}) or {})
     mech_from_props = props.pop("mechanism", None)
+
+    # For const-pressure reactor kinds, ``pressure`` is the network operating
+    # pressure and lives inside the ``initial:`` block (seeding state).
+    # ``propagate_terminal_pressure_defaults`` also writes it to the top-level
+    # properties dict, which causes a duplicate when the YAML is re-emitted.
+    # Strip the outer ``pressure`` when ``initial.pressure`` already carries it.
+    initial = props.get("initial")
+    if (
+        node_type in _CONST_PRESSURE_KINDS
+        and isinstance(initial, dict)
+        and "pressure" in initial
+        and "pressure" in props
+    ):
+        props.pop("pressure")
+
     stone_node: Dict[str, Any] = {"id": node["id"], node_type: props}
     top_mech = node.get("mechanism")
     if top_mech is not None:
         stone_node["mechanism"] = top_mech
     elif mech_from_props is not None:
         stone_node["mechanism"] = mech_from_props
-    for fld in ("metadata", "description", "label"):
+    for fld in ("description", "label"):
         if fld in node:
             stone_node[fld] = node[fld]
+    if node.get("metadata") is not None:
+        stone_node["metadata"] = node["metadata"]
     return stone_node
 
 
@@ -1522,9 +1540,9 @@ def _internal_connection_to_stone_v2_item(conn: Dict[str, Any]) -> Dict[str, Any
         props = conn.get("properties") or {}
         if isinstance(props, dict) and props.get("mass_flow_rate") is not None:
             item["mass_flow_rate"] = props["mass_flow_rate"]
-        if "mechanism_switch" in conn:
+        if conn.get("mechanism_switch") is not None:
             item["mechanism_switch"] = conn["mechanism_switch"]
-        if "metadata" in conn:
+        if conn.get("metadata") is not None:
             item["metadata"] = conn["metadata"]
         return item
 
@@ -1536,9 +1554,9 @@ def _internal_connection_to_stone_v2_item(conn: Dict[str, Any]) -> Dict[str, Any
         "source": conn["source"],
         "target": conn["target"],
     }
-    if "mechanism_switch" in conn:
+    if conn.get("mechanism_switch") is not None:
         stone_conn["mechanism_switch"] = conn["mechanism_switch"]
-    if "metadata" in conn:
+    if conn.get("metadata") is not None:
         stone_conn["metadata"] = conn["metadata"]
     return stone_conn
 

@@ -143,7 +143,7 @@ def register_plugins(plugins: BoulderPlugins) -> None:
     ...
 ```
 
-The registrar mutates the shared ``BoulderPlugins`` container by registering
+The registrar mutates the shared `BoulderPlugins` container by registering
 reactor builders, connection builders, post-build hooks, unfolders, and/or
 output-pane extensions.
 
@@ -164,9 +164,9 @@ Two mechanisms both **add** to the same `BoulderPlugins` container:
    BOULDER_PLUGINS=my_local_pkg.boulder_plugins
    ```
 
-**Import resolution:** module names from ``BOULDER_PLUGINS`` are imported via
-``importlib.import_module(...)`` and therefore resolve using normal Python
-``sys.path`` rules (active environment site-packages, editable installs,
+**Import resolution:** module names from `BOULDER_PLUGINS` are imported via
+`importlib.import_module(...)` and therefore resolve using normal Python
+`sys.path` rules (active environment site-packages, editable installs,
 working directory, etc.).
 
 ### Inspecting what loaded

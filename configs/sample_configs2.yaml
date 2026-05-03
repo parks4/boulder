@@ -1,6 +1,8 @@
 metadata:
-  name: "Extended Reactor Configuration"
-  description: "Multi-component reactor system"
+  title: Two-stream reactor
+  description: >-
+    Two inlet streams (air and methane) feeding a single stirred reactor with
+    a Valve outlet. A simple two-MFC topology for testing network construction.
   version: "2.0"
 
 phases:
@@ -11,12 +13,13 @@ network:
 - id: res1
   Reservoir:
     temperature: 300 K
+    pressure: 101325 Pa
     composition: "O2:1,N2:3.76"
 
 - id: res2
   Reservoir:
     temperature: 350 K
-    pressure: 202650 Pa
+    pressure: 101325 Pa
     composition: "CH4:1"
 
 - id: reactor1
@@ -26,6 +29,9 @@ network:
       temperature: 1200 K
       pressure: 101325 Pa
       composition: "CH4:1,O2:2,N2:7.52"
+
+- id: exhaust
+  OutletSink: {}
 
 - id: mfc1
   MassFlowController:
@@ -38,3 +44,18 @@ network:
     mass_flow_rate: 0.02 kg/s
   source: res2
   target: reactor1
+
+- id: reactor1_to_exhaust
+  Valve:
+    valve_coeff: 1.0
+  source: reactor1
+  target: exhaust
+
+settings:
+  end_time: 1.0
+  dt: 0.01
+
+output:
+  reactor1:
+  - "temperature, K"
+  - "pressure, Pa"
