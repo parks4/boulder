@@ -42,6 +42,7 @@ ______________________________________________________________________
 ### `metadata:`
 
 A mapping for documentation and provenance fields. Key fields: `title`, `description`,
+`gui_app_title` (optional short label for the web UI header; defaults to `Boulder`),
 `scenario_id`, `author`, `date`, `project`. See `boulder/validation.py:MetadataModel` for the
 full vocabulary.
 

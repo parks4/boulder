@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useThemeStore } from "@/stores/themeStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
@@ -65,12 +65,25 @@ export function AppShell() {
 
   useKeyboardShortcuts(handleRunSimulation);
 
+  const headerTitle = useMemo(() => {
+    const raw = config.metadata?.gui_app_title;
+    if (typeof raw === "string") {
+      const t = raw.trim();
+      if (t) return t;
+    }
+    return "Boulder";
+  }, [config.metadata]);
+
+  useEffect(() => {
+    document.title = headerTitle;
+  }, [headerTitle]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
       <header className="border-b border-border px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold">Boulder</h1>
+          <h1 className="text-xl font-bold">{headerTitle}</h1>
           <Button
             id="config-file-name-span"
             onClick={() => setShowYamlEditor(true)}

@@ -115,6 +115,7 @@ METADATA_OPTIONAL_KEYS: frozenset = frozenset(
     {
         "scenario_id",
         "title",
+        "gui_app_title",
         "name",
         "scenario_name",
         "architecture",
@@ -177,6 +178,8 @@ class MetadataModel(BaseModel):
 
     scenario_id: Optional[str] = None
     title: Optional[str] = None
+    #: Short label for the web UI header (e.g. ``Bloc``); omitted defaults to "Boulder".
+    gui_app_title: Optional[str] = None
     name: Optional[str] = None
     scenario_name: Optional[str] = None
     architecture: Optional[str] = None
@@ -473,6 +476,31 @@ def warn_flow_device_conventions(config: Dict[str, Any]) -> List[str]:
             f"outlet, use a reactor `outlet:` port (PressureController) or omit "
             f"mass_flow_rate; 0.0 is OK for a deliberately closed side feed."
         )
+    return messages
+
+
+def warn_simulation_quality(config: Dict[str, Any]) -> List[str]:
+    """Return non-fatal notes for configurations that are valid but uninformative.
+
+    These checks intentionally do not fail validation: they guide authors toward
+    practical defaults without blocking intentionally minimal/diagnostic cases.
+    """
+    messages: List[str] = []
+    output_block = config.get("output")
+
+    if output_block is None:
+        messages.append(
+            "No top-level 'output:' block configured. The simulation can run, but there may be "
+            "no structured results selected for reporting/export."
+        )
+        return messages
+
+    if output_block == {} or output_block == []:
+        messages.append(
+            "Top-level 'output:' block is empty. Configure at least one output target "
+            "(temperature, pressure, composition, custom summary, etc.)."
+        )
+
     return messages
 
 

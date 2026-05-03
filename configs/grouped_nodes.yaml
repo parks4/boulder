@@ -1,21 +1,22 @@
 metadata:
   name: "Grouped Reactors"
-  description: "Two reactors in the same stage"
+  description: "Two reactors in series in a single advance_to_steady_state stage."
   version: "1.0"
 
 phases:
   gas:
-    mechanism: "gri30.yaml"
+    mechanism: gri30.yaml
 
 stages:
   train_a:
-    mechanism: "gri30.yaml"
+    mechanism: gri30.yaml
     solve: advance_to_steady_state
 
 train_a:
 - id: res_in
   Reservoir:
     temperature: 300 K
+    pressure: 101325 Pa
     composition: "CH4:1,O2:2,N2:7.52"
 
 - id: r1
@@ -54,3 +55,9 @@ train_a:
     mass_flow_rate: 0.05 kg/s
   source: r2
   target: res_out
+
+output:
+  r1:
+  - "temperature, K"
+  r2:
+  - "temperature, K"
