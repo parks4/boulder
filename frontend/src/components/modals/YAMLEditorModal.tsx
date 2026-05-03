@@ -45,6 +45,7 @@ export function YAMLEditorModal({ open, onClose }: Props) {
       })
       .catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
+        console.error("[YAMLEditorModal] syncConfig failed", { message: msg, error: err });
         setSyncError(
           `Failed to sync YAML with current configuration: ${msg}. ` +
             "The displayed YAML may not match the live config — close and reopen, " +

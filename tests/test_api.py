@@ -697,3 +697,50 @@ class TestSyncConfigRoute:
                 },
             )
         assert resp.status_code in (422, 500)
+
+    @pytest.mark.asyncio
+    async def test_sync_staged_yaml_with_solver_block_returns_200(self):
+        """Assert /api/configs/sync returns 200 for a staged YAML with normalized ``solver`` groups.
+
+        Groups carry ``solver`` (not legacy ``solve``).
+
+        Regression: convert_to_stone_format raised KeyError 'solve' on normalized
+        multi-stage configs, causing HTTP 500 'solve' in the YAML editor.
+        """
+        from boulder.config import (
+            _to_plain_dict,
+            load_yaml_string_with_comments,
+            normalize_config,
+            validate_config,
+        )
+
+        staged_yaml = (
+            "phases:\n"
+            "  gas:\n"
+            "    mechanism: gri30.yaml\n"
+            "stages:\n"
+            "  s1:\n"
+            "    mechanism: gri30.yaml\n"
+            "    solver:\n"
+            "      kind: advance_to_steady_state\n"
+            "s1:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+            "      pressure: 101325.0\n"
+            "      composition: \"N2:1\"\n"
+        )
+        plain = _to_plain_dict(load_yaml_string_with_comments(staged_yaml))
+        cfg = validate_config(normalize_config(plain))
+        # Confirm the fix is needed: normalized groups must have "solver", not "solve"
+        assert "solver" in cfg["groups"]["s1"], "normalize_config must store solver block"
+        assert "solve" not in cfg["groups"]["s1"]
+
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": cfg, "original_yaml": staged_yaml},
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert "advance_to_steady_state" in body["yaml"]

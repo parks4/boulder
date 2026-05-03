@@ -6,7 +6,10 @@ interface Props {
   results: SimulationResults;
 }
 
-/** Matches the boulder link colors from ``get_sankey_theme_config`` in ``boulder/utils.py`` */
+/**
+ * Theme-only link colors (mass / enthalpy / heat). Species bands are resolved
+ * to hex on the server via ``sankey_links_for_api`` (Bloc ``plot.py`` when installed).
+ */
 const LIGHT_LINK_COLORS: Record<string, string> = {
   mass: "pink",
   enthalpy: "purple",
@@ -19,13 +22,21 @@ const DARK_LINK_COLORS: Record<string, string> = {
   heat: "#D3D3D3",
 };
 
+function isLiteralCssColor(s: string): boolean {
+  return s.startsWith("#") || s.startsWith("rgb");
+}
+
 function mapSankeyLinkColors(
   semantic: unknown[] | undefined,
   theme: "light" | "dark",
 ): string[] | undefined {
   if (!semantic?.length) return undefined;
   const table = theme === "dark" ? DARK_LINK_COLORS : LIGHT_LINK_COLORS;
-  return semantic.map((c) => (typeof c === "string" ? table[c] ?? "grey" : "grey"));
+  return semantic.map((c) => {
+    if (typeof c !== "string") return "grey";
+    if (isLiteralCssColor(c)) return c;
+    return table[c] ?? "grey";
+  });
 }
 
 export function SankeyTab({ results }: Props) {

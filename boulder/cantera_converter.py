@@ -23,7 +23,7 @@ import numpy as np
 
 from .config import CANTERA_MECHANISM
 from .output_summary import evaluate_output_items, parse_output_block
-from .sankey import generate_sankey_input_from_sim
+from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
 from .verbose_utils import get_verbose_logger, is_verbose_mode
 
@@ -105,6 +105,11 @@ class BoulderPlugins:
         default_factory=dict
     )  # Summary builder plugins
     sankey_generator: Optional[Callable] = None  # Custom Sankey generation function
+    #: Hex color mapping for species bands in the Sankey diagram.
+    #: Keys: ``"H2"``, ``"CH4"``, ``"Cs"`` (and any others the plugin wants to add).
+    #: Registered by an external plugin (e.g. Bloc) via the ``boulder.plugins`` entry
+    #: point.  When ``None``, Boulder falls back to its own light-theme defaults.
+    sankey_link_colors: Optional[Dict[str, str]] = None
     #: ``(gas, new_mechanism, htol, Xtol) -> ct.Solution``
     #: Called when an inter-stage connection carries a ``mechanism_switch`` block.
     #: Registered by an external plugin package via its plugin entry point.
@@ -1983,7 +1988,7 @@ class DualCanteraConverter:
             if nodes:
                 logger.info(f"Nodes has {len(nodes)} entries")
 
-            results["sankey_links"] = links
+            results["sankey_links"] = sankey_links_for_api(links, plugins=self.plugins)
             results["sankey_nodes"] = nodes
         except Exception as e:
             logger.error(f"Error generating Sankey diagram: {e}")

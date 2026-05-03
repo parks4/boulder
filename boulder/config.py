@@ -1828,12 +1828,20 @@ def convert_to_stone_format(config: dict) -> dict:
         g = groups[sid]
         if not isinstance(g, dict):
             continue
-        meta: Dict[str, Any] = {
-            "mechanism": g.get("mechanism", "gri30.yaml"),
-            "solve": g["solve"],
-        }
-        if "advance_time" in g:
-            meta["advance_time"] = g["advance_time"]
+        meta: Dict[str, Any] = {"mechanism": g.get("mechanism", "gri30.yaml")}
+        # Normalized groups use "solver" (STONE solver: block); legacy in-memory
+        # groups may only carry "solve" / "advance_time". Support both.
+        if isinstance(g.get("solver"), dict) and g["solver"]:
+            meta["solver"] = dict(g["solver"])
+        elif "solve" in g:
+            meta["solve"] = g["solve"]
+            if "advance_time" in g:
+                meta["advance_time"] = g["advance_time"]
+        else:
+            raise ValueError(
+                f"Cannot export stage '{sid}' to STONE YAML: group metadata has no "
+                "'solver' block and no legacy 'solve' key."
+            )
         stages_meta[sid] = meta
 
     stone_config["stages"] = stages_meta
