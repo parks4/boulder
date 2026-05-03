@@ -12,6 +12,35 @@ from .verbose_utils import get_verbose_logger
 logger = get_verbose_logger(__name__)
 
 
+def _copy_reactors_series(
+    series: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Deep-copy reactors_series while preserving all extra flags and arrays.
+
+    Copies ``T``, ``P``, ``X``, ``Y`` lists and passes through any additional
+    keys (``is_spatial``, ``is_psr``, ``x``, ``t``, ``fbs_convergence``, …)
+    by shallow-copying their values so the thread-safe snapshot remains
+    independent of the worker's live state.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    for rid, v in series.items():
+        entry: Dict[str, Any] = {}
+        for key, val in v.items():
+            if key in ("T", "P") and isinstance(val, list):
+                entry[key] = val.copy()
+            elif key in ("X", "Y") and isinstance(val, dict):
+                entry[key] = {
+                    s: arr.copy() if isinstance(arr, list) else arr
+                    for s, arr in val.items()
+                }
+            elif isinstance(val, list):
+                entry[key] = val.copy()
+            else:
+                entry[key] = val
+        out[rid] = entry
+    return out
+
+
 @dataclass
 class SimulationProgress:
     """Thread-safe container for simulation progress data."""
@@ -121,19 +150,7 @@ class SimulationWorker:
                 reactors_dict=self.progress.reactors_dict.copy(),
                 mechanism=self.progress.mechanism,
                 times=self.progress.times.copy(),
-                reactors_series={
-                    k: {
-                        "T": v["T"].copy(),
-                        "P": v["P"].copy(),
-                        "X": {s: v["X"][s].copy() for s in v["X"]},
-                        **(
-                            {"Y": {s: v["Y"][s].copy() for s in v["Y"]}}
-                            if "Y" in v
-                            else {}
-                        ),
-                    }
-                    for k, v in self.progress.reactors_series.items()
-                },
+                reactors_series=_copy_reactors_series(self.progress.reactors_series),
                 code_str=self.progress.code_str,
                 reactor_reports=self.progress.reactor_reports.copy(),
                 connection_reports=self.progress.connection_reports.copy(),

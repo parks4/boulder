@@ -116,20 +116,35 @@ _ISOTHERMAL_KINDS: frozenset = frozenset(
     {"IdealGasConstPressureReactor", "ConstPressureReactor"}
 )
 
-# Const-pressure kinds that allow a top-level ``pressure:`` as an operating
-# constraint.
+# Built-in Cantera (non-extensible) const-pressure kind strings.
 _CONST_PRESSURE_KINDS: frozenset = frozenset(
     {
         "IdealGasConstPressureReactor",
         "IdealGasConstPressureMoleReactor",
         "ConstPressureReactor",
-        "DesignPSR",
-        "DesignTorchInstantaneousHeating",
-        "DesignPFR",
-        "DesignPFRThinShell",
-        "DesignTubeFurnace",
+        "ConstPressureMoleReactor",
     }
 )
+
+
+def _is_const_pressure_kind(kind: str) -> bool:
+    """Return True when *kind* operates at constant pressure.
+
+    Detection order:
+    1. Explicit built-in Cantera set (``_CONST_PRESSURE_KINDS``).
+    2. Cantera naming convention: ``"ConstPressure"`` substring in the kind
+       string itself (covers ``Extensible*`` variant kind names when used
+       directly as YAML kind strings).
+    3. Plugin registry: ``issubclass`` check against all Cantera const-pressure
+       base classes (both standard and ``Extensible*`` roots).  Plugin reactors
+       like those in Bloc inherit from ``ct.ExtensibleIdealGasConstPressureMoleReactor``
+       and are caught here automatically via the registered ``reactor_class``.
+    """
+    if kind in _CONST_PRESSURE_KINDS or "ConstPressure" in kind:
+        return True
+    from boulder.schema_registry import is_const_pressure_kind as _reg_check
+
+    return _reg_check(kind)
 
 
 # ---------------------------------------------------------------------------
@@ -1017,8 +1032,8 @@ def expand_port_shortcuts(config: Dict[str, Any]) -> None:
     boilerplate of single-inlet, single-outlet pipelines::
 
         nodes:
-          - id: tube_furnace
-            DesignTubeFurnace:
+          - id: reactor
+            IdealGasConstPressureMoleReactor:
               inlet:  {from: feed, mass_flow_rate: 3.33e-4}
               outlet: {to: outlet}     # default device: PressureController(K=0)
 
@@ -1329,20 +1344,13 @@ def propagate_terminal_pressure_defaults(config: Dict[str, Any]) -> None:
     _FLOW_TYPES = frozenset({"MassFlowController", "PressureController", "Valve"})
 
     # Node types that should receive a defaulted pressure when missing.
-    _PRESSURE_BEARING_TYPES = frozenset(
-        {
-            "Reservoir",
-            "OutletSink",
-            "IdealGasConstPressureReactor",
-            "IdealGasConstPressureMoleReactor",
-            "DesignPSR",
-            "DesignTorchInstantaneousHeating",
-            "DesignTorch",
-            "DesignPFR",
-            "DesignPFRThinShell",
-            "DesignTubeFurnace",
-        }
-    )
+    # Reservoirs and sinks are always pressure-bearing; any const-pressure
+    # reactor kind (detected by the ``"ConstPressure"`` naming convention) is
+    # also pressure-bearing.
+    _PRESSURE_BEARING_SINKS = frozenset({"Reservoir", "OutletSink"})
+
+    def _is_pressure_bearing(kind: str) -> bool:
+        return kind in _PRESSURE_BEARING_SINKS or _is_const_pressure_kind(kind)
 
     node_ids = [n["id"] for n in nodes]
     id_to_node = {n["id"]: n for n in nodes}
@@ -1405,7 +1413,7 @@ def propagate_terminal_pressure_defaults(config: Dict[str, Any]) -> None:
             for nid in component:
                 node = id_to_node[nid]
                 ntype = node.get("type", "")
-                if ntype not in _PRESSURE_BEARING_TYPES:
+                if not _is_pressure_bearing(ntype):
                     continue
                 props = node.setdefault("properties", {})
                 if props.get("pressure") is None:
@@ -1530,7 +1538,7 @@ def _internal_node_to_stone_v2_item(node: Dict[str, Any]) -> Dict[str, Any]:
     # Strip the outer ``pressure`` when ``initial.pressure`` already carries it.
     initial = props.get("initial")
     if (
-        node_type in _CONST_PRESSURE_KINDS
+        _is_const_pressure_kind(node_type)
         and isinstance(initial, dict)
         and "pressure" in initial
         and "pressure" in props

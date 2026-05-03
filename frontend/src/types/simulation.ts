@@ -5,6 +5,19 @@ export interface ReactorSeries {
   X: Record<string, number[]>;
   /** Mass fractions per species (optional for backward compatibility). */
   Y?: Record<string, number[]>;
+  /**
+   * True when the series represents a spatial (axial) profile (e.g. a plug-flow reactor).
+   * In this case `x` holds axial position [m] and `t` holds residence time [s].
+   */
+  is_spatial?: boolean;
+  /** Axial position array [m] — only present when is_spatial is true. */
+  x?: number[];
+  /** Residence-time array [s] — only present when is_spatial is true. */
+  t?: number[];
+  /** Per-FBS-iteration heat-loss [kW] — only present when is_spatial is true. */
+  fbs_convergence?: number[];
+  /** True when the reactor is a Perfectly Stirred Reactor (PSR/CSTR). */
+  is_psr?: boolean;
 }
 
 /** Connection (e.g. MFC) report from backend: mass and volumetric flow rates. */

@@ -622,7 +622,7 @@ class TestSyncConfigRoute:
             "phases:\n  gas:\n    mechanism: gri30.yaml\n"
             "network:\n"
             "  - id: tube\n"
-            "    DesignPFR:\n"
+            "    CustomReactor:\n"
             "      length: 1.0\n"
             "      inlet:\n"
             "        from: feed\n"
@@ -630,7 +630,7 @@ class TestSyncConfigRoute:
         )
         config = {
             "nodes": [
-                {"id": "tube", "type": "DesignPFR", "properties": {"length": 1.0}}
+                {"id": "tube", "type": "CustomReactor", "properties": {"length": 1.0}}
             ],
             "connections": [],
         }

@@ -51,6 +51,7 @@ UnitMap = Dict[Tuple[Optional[str], tuple], UnitEntry]
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _scalar_cls(val: Any) -> type:
     """Return the ruamel scalar subclass (or str) for *val*."""
     try:
@@ -60,7 +61,11 @@ def _scalar_cls(val: Any) -> type:
             SingleQuotedScalarString,
         )
 
-        for cls in (SingleQuotedScalarString, DoubleQuotedScalarString, PlainScalarString):
+        for cls in (
+            SingleQuotedScalarString,
+            DoubleQuotedScalarString,
+            PlainScalarString,
+        ):
             if isinstance(val, cls):
                 return cls
     except ImportError:
@@ -98,6 +103,7 @@ def _parse_unit_entry(text: str, property_name: str) -> Optional[UnitEntry]:
 # ---------------------------------------------------------------------------
 # build_unit_map
 # ---------------------------------------------------------------------------
+
 
 def build_unit_map(ruamel_tree: Any) -> UnitMap:
     """Walk a ruamel YAML tree and record every unit-bearing scalar.
@@ -155,6 +161,7 @@ def build_unit_map(ruamel_tree: Any) -> UnitMap:
 # ---------------------------------------------------------------------------
 # apply_unit_map_inplace
 # ---------------------------------------------------------------------------
+
 
 def apply_unit_map_inplace(
     merged_tree: Any,
@@ -232,8 +239,13 @@ def apply_unit_map_inplace(
         val = props.get(prop_key)
         return val if isinstance(val, (int, float)) else None
 
-    def _make_replacement(orig_text: str, orig_unit_str: str, new_si_val: float,
-                          scalar_cls: type, path_label: str) -> Optional[str]:
+    def _make_replacement(
+        orig_text: str,
+        orig_unit_str: str,
+        new_si_val: float,
+        scalar_cls: type,
+        path_label: str,
+    ) -> Optional[str]:
         """Convert *new_si_val* back to *orig_unit_str* and format as string."""
         from .utils import _PROPERTY_UNIT_HINTS  # noqa: PLC0415
 
@@ -282,7 +294,9 @@ def apply_unit_map_inplace(
                         # Unchanged — restore verbatim original.
                         node[k] = orig_text
                     else:
-                        path_label = ".".join(str(p) for p in (item_id,) + child_path if p)
+                        path_label = ".".join(
+                            str(p) for p in (item_id,) + child_path if p
+                        )
                         replacement = _make_replacement(
                             orig_text, orig_unit_str, current_si, scalar_cls, path_label
                         )
