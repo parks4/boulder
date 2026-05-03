@@ -853,7 +853,12 @@ def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
                 raise ValueError(
                     f"Composite unfold collision: node id '{n['id']}' "
                     f"emitted by unfolder for '{node['id']}' conflicts "
-                    "with an existing node. Rename one of them."
+                    "with an existing node.\n"
+                    f"  Composite reactor '{node['id']}' (type '{node.get('type')}') "
+                    f"automatically generates a satellite node named '{n['id']}'.\n"
+                    "  Fix: remove or rename the explicit node whose id matches "
+                    f"'{n['id']}' in your YAML — it is managed internally and must "
+                    "not be declared by the user."
                 )
         for c in result.get("connections", []):
             existing = by_conn_id.get(c["id"])
@@ -864,7 +869,12 @@ def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
                 raise ValueError(
                     f"Composite unfold collision: connection id '{c['id']}' "
                     f"emitted by unfolder for '{node['id']}' conflicts "
-                    "with an existing connection."
+                    "with an existing connection.\n"
+                    f"  Composite reactor '{node['id']}' (type '{node.get('type')}') "
+                    f"automatically generates a satellite connection named '{c['id']}'.\n"
+                    "  Fix: remove or rename the explicit connection whose id matches "
+                    f"'{c['id']}' in your YAML — it is managed internally and must "
+                    "not be declared by the user."
                 )
 
 

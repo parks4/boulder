@@ -1,6 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { useConfigStore } from "@/stores/configStore";
-import { parseYaml, exportConfig } from "@/api/configs";
+import { parseYaml } from "@/api/configs";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
@@ -12,34 +12,17 @@ interface Props {
 }
 
 export function YAMLEditorModal({ open, onClose }: Props) {
-  const { config, originalYaml, setConfig } = useConfigStore();
+  const { originalYaml, setConfig } = useConfigStore();
   const [value, setValue] = useState("");
-  const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch YAML when modal opens – depends only on `open` so edits
-  // inside the editor are never overwritten by a re-render.
+  // Show the raw YAML from disk when the modal opens.
   useEffect(() => {
     if (!open) return;
     setError(null);
 
-    if (config.nodes.length > 0) {
-      setFetching(true);
-      exportConfig(config)
-        .then((resp) => setValue(resp.yaml))
-        .catch((err) => {
-          // Fallback to the raw YAML stored at load time
-          if (originalYaml) {
-            setValue(originalYaml);
-          } else {
-            setError(
-              `Failed to load YAML: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        })
-        .finally(() => setFetching(false));
-    } else if (originalYaml) {
+    if (originalYaml) {
       setValue(originalYaml);
     } else {
       setError("No configuration available to edit");
@@ -90,11 +73,7 @@ export function YAMLEditorModal({ open, onClose }: Props) {
         </div>
 
         <div className="flex-1 overflow-hidden">
-          {fetching ? (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              Loading YAML...
-            </div>
-          ) : error ? (
+          {error ? (
             <div className="flex items-center justify-center h-full text-destructive p-4 text-center">
               {error}
             </div>
@@ -132,7 +111,7 @@ export function YAMLEditorModal({ open, onClose }: Props) {
           <Button
             id="save-config-yaml-edit-btn"
             onClick={handleSave}
-            disabled={saving || fetching}
+            disabled={saving}
             variant="primary"
             size="sm"
           >
