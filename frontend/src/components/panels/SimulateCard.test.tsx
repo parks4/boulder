@@ -2,10 +2,9 @@
  * Vitest unit tests for SimulateCard (Phase 0).
  *
  * Asserts:
- * - Default render shows Steady mode selected and steady-specific fields (rtol, atol, max_steps).
- * - Clicking Transient toggle switches to transient mode, hiding steady fields and showing
- *   transient time/step fields.
- * - Selecting a kind that implies transient also updates the visible fields.
+ * - Default render shows Steady mode; steady-specific fields appear after opening Solver details.
+ * - Clicking Transient toggle switches mode; transient fields appear in the modal after opening it.
+ * - Kind dropdown in the modal respects steady vs transient mode.
  * - When config.settings.solver.kind is "advance_grid", the component initialises in transient mode.
  * - When config.settings.solver.mode is "transient", the component initialises in transient mode.
  */
@@ -27,7 +26,6 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-// We'll set up configStore state per test using a simple mock
 const mockSetConfig = vi.fn();
 let mockConfig: Record<string, unknown> = { nodes: [], connections: [] };
 
@@ -53,6 +51,10 @@ vi.mock("@/stores/simulationStore", () => ({
   }),
 }));
 
+function openSolverDetails() {
+  fireEvent.click(screen.getByTestId("open-solver-details"));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -65,33 +67,30 @@ describe("SimulateCard", () => {
 
   it("renders in steady mode by default (no solver config)", () => {
     render(<SimulateCard />);
-    const steadyBtn = screen.getByTestId("mode-steady");
-    const transientBtn = screen.getByTestId("mode-transient");
-    expect(steadyBtn).toBeInTheDocument();
-    expect(transientBtn).toBeInTheDocument();
-    // Steady fields present
+    expect(screen.getByTestId("mode-steady")).toBeInTheDocument();
+    expect(screen.getByTestId("mode-transient")).toBeInTheDocument();
+    openSolverDetails();
     expect(screen.getByTestId("steady-rtol")).toBeInTheDocument();
     expect(screen.getByTestId("steady-atol")).toBeInTheDocument();
     expect(screen.getByTestId("steady-max-steps")).toBeInTheDocument();
-    // Transient fields absent
     expect(screen.queryByTestId("transient-time")).not.toBeInTheDocument();
     expect(screen.queryByTestId("transient-step")).not.toBeInTheDocument();
   });
 
-  it("clicking Transient toggle shows transient fields and hides steady fields", () => {
+  it("clicking Transient toggle shows transient fields in modal and hides steady fields", () => {
     render(<SimulateCard />);
     fireEvent.click(screen.getByTestId("mode-transient"));
-    // Transient fields appear
+    openSolverDetails();
     expect(screen.getByTestId("transient-time")).toBeInTheDocument();
     expect(screen.getByTestId("transient-step")).toBeInTheDocument();
-    // Steady fields disappear
     expect(screen.queryByTestId("steady-rtol")).not.toBeInTheDocument();
   });
 
-  it("toggling back to Steady re-shows steady fields", () => {
+  it("toggling back to Steady re-shows steady fields in modal", () => {
     render(<SimulateCard />);
     fireEvent.click(screen.getByTestId("mode-transient"));
     fireEvent.click(screen.getByTestId("mode-steady"));
+    openSolverDetails();
     expect(screen.getByTestId("steady-rtol")).toBeInTheDocument();
     expect(screen.queryByTestId("transient-time")).not.toBeInTheDocument();
   });
@@ -108,6 +107,7 @@ describe("SimulateCard", () => {
 
   it("kind dropdown only shows steady kinds in steady mode", () => {
     render(<SimulateCard />);
+    openSolverDetails();
     const select = screen.getByTestId("solver-kind-select") as HTMLSelectElement;
     const options = Array.from(select.options).map((o) => o.value);
     expect(options).toContain("advance_to_steady_state");
@@ -119,6 +119,7 @@ describe("SimulateCard", () => {
   it("kind dropdown only shows transient kinds in transient mode", () => {
     render(<SimulateCard />);
     fireEvent.click(screen.getByTestId("mode-transient"));
+    openSolverDetails();
     const select = screen.getByTestId("solver-kind-select") as HTMLSelectElement;
     const options = Array.from(select.options).map((o) => o.value);
     expect(options).toContain("advance");
@@ -134,6 +135,7 @@ describe("SimulateCard", () => {
       settings: { solver: { kind: "advance_grid" } },
     };
     render(<SimulateCard />);
+    openSolverDetails();
     expect(screen.getByTestId("transient-time")).toBeInTheDocument();
     expect(screen.queryByTestId("steady-rtol")).not.toBeInTheDocument();
   });
@@ -145,11 +147,13 @@ describe("SimulateCard", () => {
       settings: { solver: { mode: "transient", kind: "micro_step" } },
     };
     render(<SimulateCard />);
+    openSolverDetails();
     expect(screen.getByTestId("transient-time")).toBeInTheDocument();
   });
 
   it("changing kind in dropdown calls setConfig with updated kind", () => {
     render(<SimulateCard />);
+    openSolverDetails();
     const select = screen.getByTestId("solver-kind-select");
     fireEvent.change(select, { target: { value: "solve_steady" } });
     expect(mockSetConfig).toHaveBeenCalledOnce();

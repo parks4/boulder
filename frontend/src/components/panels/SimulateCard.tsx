@@ -4,36 +4,16 @@ import { useSimulationStore } from "@/stores/simulationStore";
 import { startSimulation } from "@/api/simulations";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
-
-type SolverMode = "steady" | "transient";
-
-type SteadyKind = "advance_to_steady_state" | "solve_steady";
-type TransientKind = "advance" | "advance_grid" | "micro_step";
-type SolverKind = SteadyKind | TransientKind;
-
-const STEADY_KINDS: SteadyKind[] = ["advance_to_steady_state", "solve_steady"];
-const TRANSIENT_KINDS: TransientKind[] = ["advance", "advance_grid", "micro_step"];
-
-const KIND_LABELS: Record<SolverKind, string> = {
-  advance_to_steady_state: "advance_to_steady_state",
-  solve_steady: "solve_steady",
-  advance: "advance",
-  advance_grid: "advance_grid",
-  micro_step: "micro_step",
-};
-
-const KIND_TO_MODE: Record<SolverKind, SolverMode> = {
-  advance_to_steady_state: "steady",
-  solve_steady: "steady",
-  advance: "transient",
-  advance_grid: "transient",
-  micro_step: "transient",
-};
-
-function deriveMode(kind: string | undefined): SolverMode {
-  if (!kind) return "steady";
-  return KIND_TO_MODE[kind as SolverKind] ?? "steady";
-}
+import { SolverDetailsModal } from "./SolverDetailsModal";
+import {
+  deriveMode,
+  KIND_LABELS,
+  KIND_TO_MODE,
+  STEADY_KINDS,
+  TRANSIENT_KINDS,
+  type SolverKind,
+  type SolverMode,
+} from "./solverShared";
 
 export function SimulateCard() {
   const config = useConfigStore((s) => s.config);
@@ -48,7 +28,6 @@ export function SimulateCard() {
     setError,
   } = useSimulationStore();
 
-  // Derive initial mode/kind from config.settings.solver
   const configSolver = (config.settings as Record<string, unknown> | null | undefined)?.solver as
     | Record<string, unknown>
     | undefined;
@@ -63,16 +42,15 @@ export function SimulateCard() {
     return "advance_to_steady_state";
   });
 
-  // Transient fields
+  const [solverDetailsOpen, setSolverDetailsOpen] = useState(false);
+
   const [simTime, setSimTime] = useState("10");
   const [timeStep, setTimeStep] = useState("1");
 
-  // Steady fields
   const [rtol, setRtol] = useState("1e-9");
   const [atol, setAtol] = useState("1e-15");
   const [maxSteps, setMaxSteps] = useState("10000");
 
-  // Sync local state when the loaded config changes (auto-load)
   useEffect(() => {
     const solver = (config.settings as Record<string, unknown> | null | undefined)?.solver as
       | Record<string, unknown>
@@ -87,13 +65,11 @@ export function SimulateCard() {
     if (solver?.max_steps != null) setMaxSteps(String(solver.max_steps));
   }, [config.settings]);
 
-  // When mode is toggled, reset kind to the first option for the new mode
   const handleModeChange = useCallback(
     (newMode: SolverMode) => {
       setMode(newMode);
       const newKind = newMode === "steady" ? STEADY_KINDS[0] : TRANSIENT_KINDS[0];
       setKind(newKind);
-      // Persist into configStore so YAML editor reflects change
       const currentSettings = (config.settings as Record<string, unknown>) ?? {};
       const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
       setConfig(
@@ -169,13 +145,13 @@ export function SimulateCard() {
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
       <h3 className="font-semibold text-sm text-foreground">Simulate</h3>
 
-      {/* Mode toggle */}
       <div
         data-testid="solver-mode-toggle"
         className="flex rounded-md overflow-hidden border border-border text-xs font-medium"
       >
         <button
           data-testid="mode-steady"
+          type="button"
           onClick={() => handleModeChange("steady")}
           className={`flex-1 py-1.5 transition-colors ${
             mode === "steady"
@@ -187,6 +163,7 @@ export function SimulateCard() {
         </button>
         <button
           data-testid="mode-transient"
+          type="button"
           onClick={() => handleModeChange("transient")}
           className={`flex-1 py-1.5 transition-colors ${
             mode === "transient"
@@ -198,93 +175,43 @@ export function SimulateCard() {
         </button>
       </div>
 
-      {/* Kind dropdown */}
-      <label className="block text-xs text-muted-foreground">
-        Kind
-        <select
-          data-testid="solver-kind-select"
-          value={kind}
-          onChange={(e) => handleKindChange(e.target.value as SolverKind)}
-          className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
+      <div className="flex items-center gap-2">
+        <p
+          className="text-xs text-muted-foreground truncate flex-1 min-w-0"
+          title={KIND_LABELS[kind]}
         >
-          {kinds.map((k) => (
-            <option key={k} value={k}>
-              {KIND_LABELS[k]}
-            </option>
-          ))}
-        </select>
-      </label>
+          {KIND_LABELS[kind]}
+        </p>
+        <Button
+          data-testid="open-solver-details"
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="shrink-0"
+          onClick={() => setSolverDetailsOpen(true)}
+        >
+          Solver details...
+        </Button>
+      </div>
 
-      {/* Steady-state fields */}
-      {mode === "steady" && (
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block text-xs text-muted-foreground">
-              rtol
-              <input
-                data-testid="steady-rtol"
-                type="text"
-                value={rtol}
-                onChange={(e) => setRtol(e.target.value)}
-                className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
-              />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              atol
-              <input
-                data-testid="steady-atol"
-                type="text"
-                value={atol}
-                onChange={(e) => setAtol(e.target.value)}
-                className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
-              />
-            </label>
-          </div>
-          <label className="block text-xs text-muted-foreground">
-            max_steps
-            <input
-              data-testid="steady-max-steps"
-              type="number"
-              value={maxSteps}
-              onChange={(e) => setMaxSteps(e.target.value)}
-              className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
-              min="1"
-            />
-          </label>
-        </div>
-      )}
-
-      {/* Transient fields */}
-      {mode === "transient" && (
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block text-xs text-muted-foreground">
-              Time (s)
-              <input
-                data-testid="transient-time"
-                type="number"
-                value={simTime}
-                onChange={(e) => setSimTime(e.target.value)}
-                className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
-                min="0.1"
-                step="0.1"
-              />
-            </label>
-            <label className="block text-xs text-muted-foreground">
-              Step (s)
-              <input
-                data-testid="transient-step"
-                type="number"
-                value={timeStep}
-                onChange={(e) => setTimeStep(e.target.value)}
-                className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
-                min="0.001"
-                step="0.001"
-              />
-            </label>
-          </div>
-        </div>
-      )}
+      <SolverDetailsModal
+        open={solverDetailsOpen}
+        onClose={() => setSolverDetailsOpen(false)}
+        mode={mode}
+        kind={kind}
+        kinds={kinds}
+        onKindChange={handleKindChange}
+        rtol={rtol}
+        onRtolChange={setRtol}
+        atol={atol}
+        onAtolChange={setAtol}
+        maxSteps={maxSteps}
+        onMaxStepsChange={setMaxSteps}
+        simTime={simTime}
+        onSimTimeChange={setSimTime}
+        timeStep={timeStep}
+        onTimeStepChange={setTimeStep}
+      />
 
       <Button
         id="run-simulation"
