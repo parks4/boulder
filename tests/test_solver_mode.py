@@ -18,6 +18,7 @@ def _parse(yaml_str: str):
     """Parse a YAML string into a dict for normalize_config."""
     return yaml.safe_load(yaml_str)
 
+
 # ---------------------------------------------------------------------------
 # Unit tests for the helper directly
 # ---------------------------------------------------------------------------
@@ -67,7 +68,9 @@ def test_contradicting_mode_raises(kind, wrong_mode):
 def test_invalid_mode_string_raises():
     """A mode value that is not 'steady' or 'transient' raises ValueError."""
     with pytest.raises(ValueError, match="not valid"):
-        _resolve_and_validate_solver_mode({"kind": "advance_grid", "mode": "unknown"}, "ctx")
+        _resolve_and_validate_solver_mode(
+            {"kind": "advance_grid", "mode": "unknown"}, "ctx"
+        )
 
 
 def test_missing_kind_defaults_to_steady():

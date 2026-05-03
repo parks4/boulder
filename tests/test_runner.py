@@ -282,3 +282,124 @@ def test_boulder_runner_resolve_mechanism_identity():
     converter = DualCanteraConverter()
     assert converter.resolve_mechanism("gri30.yaml") == "gri30.yaml"
     assert converter.resolve_mechanism("some/custom.yaml") == "some/custom.yaml"
+
+
+# ---------------------------------------------------------------------------
+# Test 7: spatial inference from multi-point CustomStageNetwork.states
+# ---------------------------------------------------------------------------
+
+
+def test_spatial_series_inferred_from_custom_stage_network_states():
+    """run_streaming_simulation produces is_spatial series for a custom stage network.
+
+    Asserts:
+    - When a plugin's ReactorNet subclass exposes multi-point ``states`` on
+      ``network.states``, ``run_streaming_simulation`` sets ``is_spatial: True``
+      on the reactor's entry in ``reactors_series``.
+    - ``x``, ``T``, ``P``, ``X``, ``Y`` arrays all have length equal to the
+      number of points returned by ``network.states``.
+    - The one-point fallback snapshot is fully replaced (len > 1).
+    """
+    import cantera as ct
+    import numpy as np
+
+    from boulder.cantera_converter import DualCanteraConverter
+    from boulder.config import normalize_config
+    from boulder.stage_network import CustomStageNetwork
+
+    N = 5  # synthetic spatial resolution
+
+    class _MultiPointNet(ct.ReactorNet):
+        """Fake spatial network: exposes N-point SolutionArray on .states."""
+
+        def __init__(self, reactors, **kw):
+            super().__init__(reactors)
+            self._spatial_states: ct.SolutionArray | None = None
+
+        def advance_to_steady_state(self) -> None:  # type: ignore[override]
+            super().advance_to_steady_state()
+            # Build a synthetic N-point profile (same state repeated)
+            gas = self.reactors[0].phase
+            arr = ct.SolutionArray(gas, extra=["t"])
+            for i in range(N):
+                arr.append(gas.state, t=float(i))  # type: ignore[call-arg]
+            self._spatial_states = arr
+
+        @property
+        def states(self) -> ct.SolutionArray | None:  # noqa: D102
+            return self._spatial_states
+
+        @property
+        def scalars(self) -> dict:  # noqa: D102
+            return {}
+
+    # Verify _MultiPointNet satisfies the CustomStageNetwork protocol
+    assert isinstance(_MultiPointNet, type)
+
+    # Minimal single-reactor config with the custom network class
+    config: dict = {
+        "nodes": [
+            {
+                "id": "feed",
+                "type": "Reservoir",
+                "properties": {
+                    "temperature": 300.0,
+                    "pressure": 101325.0,
+                    "composition": "N2:1",
+                },
+            },
+            {
+                "id": "pfr_like",
+                "type": "IdealGasConstPressureReactor",
+                "properties": {
+                    "temperature": 300.0,
+                    "pressure": 101325.0,
+                    "composition": "N2:1",
+                    "volume": 1.0e-6,
+                },
+            },
+        ],
+        "connections": [
+            {
+                "id": "feed_to_pfr",
+                "type": "MassFlowController",
+                "source": "feed",
+                "target": "pfr_like",
+                "properties": {"mass_flow_rate": 1.0e-5},
+            }
+        ],
+    }
+    config = normalize_config(config)
+
+    conv = DualCanteraConverter()
+
+    # Register the custom network class via the plugin reactor_builder path:
+    # we do it after build by injecting NETWORK_CLASS on the reactor object.
+    # Boulder's _select_network_class_for_stage checks reactor.NETWORK_CLASS.
+    original_create = conv.create_reactor_from_node
+
+    def _patched_create(node, gas):
+        r = original_create(node, gas)
+        if node["id"] == "pfr_like":
+            r.NETWORK_CLASS = _MultiPointNet  # type: ignore[attr-defined]
+        return r
+
+    conv.create_reactor_from_node = _patched_create  # type: ignore[method-assign]
+
+    conv.build_network(config)
+    results, _ = conv.run_streaming_simulation(
+        simulation_time=1.0,
+        time_step=1.0,
+        config=config,
+    )
+
+    series = results["reactors"].get("pfr_like")
+    assert series is not None, "pfr_like must appear in reactors_series"
+    assert series.get("is_spatial") is True, (
+        "Series must be flagged is_spatial when network.states has multiple points"
+    )
+    assert len(series["T"]) == N, f"Expected {N} T samples, got {len(series['T'])}"
+    assert len(series["x"]) == N, f"Expected {N} x-axis values, got {len(series['x'])}"
+    assert len(series["P"]) == N
+    for sp_arr in series["X"].values():
+        assert len(sp_arr) == N

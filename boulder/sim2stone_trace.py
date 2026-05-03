@@ -11,7 +11,7 @@ silently handled and the caller falls back to an empty signal list.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from .sim2stone_ast import DetectedSignal
 
@@ -138,7 +138,9 @@ def trace_func1_to_signal(
         except Exception:
             t_end = 1.0
 
-    times, values = sample_callable(func1_obj, t_start=t_start, t_end=t_end, n_points=n_points)
+    times, values = sample_callable(
+        func1_obj, t_start=t_start, t_end=t_end, n_points=n_points
+    )
     if not times:
         return None
 

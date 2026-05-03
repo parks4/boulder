@@ -24,6 +24,7 @@ import numpy as np
 from .config import CANTERA_MECHANISM
 from .output_summary import evaluate_output_items, parse_output_block
 from .sankey import generate_sankey_input_from_sim
+from .spatial_inference import try_infer_spatial_reactor_series
 from .verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
@@ -1783,10 +1784,13 @@ class DualCanteraConverter:
                 _spatial_fn = self.reactor_meta.get(reactor_id, {}).get(
                     "spatial_series_fn"
                 )
+                _series: Optional[Dict[str, Any]] = None
                 if _spatial_fn is not None:
                     _series = _spatial_fn()
-                    if _series is not None:
-                        reactors_series[reactor_id] = _series
+                if _series is None:
+                    _series = try_infer_spatial_reactor_series(self, reactor_id)
+                if _series is not None:
+                    reactors_series[reactor_id] = _series
 
                 # PSR reactors: if the plugin flagged this reactor as a PSR,
                 # propagate the flag so the frontend can adapt its visualisation.

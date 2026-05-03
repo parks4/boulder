@@ -17,7 +17,6 @@ from typing import Any, Dict
 import cantera as ct
 import pytest
 
-
 _GRI_MECH = "gri30.yaml"
 
 
@@ -106,9 +105,7 @@ class TestRunContinuation:
         runner.run_continuation(continuation=continuation)
 
         rows = runner._continuation_rows
-        assert len(rows) == max_iters, (
-            f"Expected {max_iters} rows, got {len(rows)}"
-        )
+        assert len(rows) == max_iters, f"Expected {max_iters} rows, got {len(rows)}"
 
     def test_run_continuation_parameter_decreases(self):
         """Each iteration the multiplied parameter value decreases monotonically."""
@@ -154,7 +151,7 @@ class TestRunContinuation:
             runner.run_continuation()
 
     def test_run_continuation_list_update(self):
-        """list update mode iterates through explicit values."""
+        """List update mode iterates through explicit values."""
         from boulder.runner import BoulderRunner
 
         config = _inert_continuation_config()
@@ -376,7 +373,9 @@ class TestCombustorExtinctionSweep:
             return combustor.mass / residence_time
 
         inlet_mfc = ct.MassFlowController(inlet, combustor, mdot=mdot)
-        outlet_mfc = ct.PressureController(combustor, exhaust, primary=inlet_mfc, K=0.01)
+        outlet_mfc = ct.PressureController(
+            combustor, exhaust, primary=inlet_mfc, K=0.01
+        )
         sim = ct.ReactorNet([combustor])
 
         temps = []

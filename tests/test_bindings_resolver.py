@@ -11,7 +11,7 @@ Asserts:
 - apply_bindings_block applies all bindings from a list, including signal resolution.
 """
 
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 
 import cantera as ct
 import pytest
@@ -26,7 +26,6 @@ from boulder.bindings import (
     parse_binding_path,
 )
 from boulder.signals import build_signal
-
 
 # ---------------------------------------------------------------------------
 # parse_binding_path
@@ -108,14 +107,20 @@ class TestApplyBindingMassFlowRate:
         conv, mfc = self._make_converter()
         sig = build_signal({"Constant": {"value": 0.05}})
         # Should not raise; verifies the setter accepts the signal
-        apply_binding(conv, {"source": "c", "target": "connections.mfc1.mass_flow_rate"}, sig)
+        apply_binding(
+            conv, {"source": "c", "target": "connections.mfc1.mass_flow_rate"}, sig
+        )
 
     def test_missing_connection_raises(self):
         """apply_binding raises ValueError when connection ID is not found."""
         conv, _ = self._make_converter()
         sig = build_signal({"Constant": {"value": 0.1}})
         with pytest.raises(ValueError, match="connection 'nonexistent' not found"):
-            apply_binding(conv, {"source": "c", "target": "connections.nonexistent.mass_flow_rate"}, sig)
+            apply_binding(
+                conv,
+                {"source": "c", "target": "connections.nonexistent.mass_flow_rate"},
+                sig,
+            )
 
     def test_non_mfc_device_raises(self):
         """apply_binding raises ValueError when the connection is not an MFC."""
@@ -128,7 +133,11 @@ class TestApplyBindingMassFlowRate:
         conv.connections = {"valve1": valve}
         sig = build_signal({"Constant": {"value": 0.1}})
         with pytest.raises(ValueError, match="not a MassFlowController"):
-            apply_binding(conv, {"source": "c", "target": "connections.valve1.mass_flow_rate"}, sig)
+            apply_binding(
+                conv,
+                {"source": "c", "target": "connections.valve1.mass_flow_rate"},
+                sig,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +160,9 @@ class TestApplyBindingReducedElectricField:
     def test_appends_schedule_callback(self):
         """apply_binding appends a schedule callback to _schedule_callbacks."""
         conv, _ = self._make_plasma_converter()
-        sig = build_signal({"Gaussian": {"peak": 1.9e-19, "center": 24e-9, "fwhm": 7.06e-9}})
+        sig = build_signal(
+            {"Gaussian": {"peak": 1.9e-19, "center": 24e-9, "fwhm": 7.06e-9}}
+        )
         apply_binding(
             conv,
             {"source": "pulse", "target": "nodes.r1.reduced_electric_field"},
@@ -164,7 +175,11 @@ class TestApplyBindingReducedElectricField:
         conv, _ = self._make_plasma_converter()
         sig = build_signal({"Constant": {"value": 1.0}})
         with pytest.raises(ValueError, match="node 'missing' not found"):
-            apply_binding(conv, {"source": "s", "target": "nodes.missing.reduced_electric_field"}, sig)
+            apply_binding(
+                conv,
+                {"source": "s", "target": "nodes.missing.reduced_electric_field"},
+                sig,
+            )
 
     def test_missing_target_key_raises(self):
         """apply_binding raises ValueError when target key is missing."""

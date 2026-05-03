@@ -12,11 +12,10 @@ Verifies that:
 from __future__ import annotations
 
 from typing import Any, Dict
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call
 
 import cantera as ct
 import pytest
-
 
 _GRI_MECH = "gri30.yaml"
 _AIR_MECH = "air.yaml"
@@ -74,6 +73,7 @@ class TestRunTransientSolver:
         """MagicMock ReactorNet with a .time counter."""
         net = MagicMock()
         net.time = start_time
+
         # advance() increments time by the amount advanced
         def _advance(t_target, _container=[start_time]):
             _container[0] = t_target
@@ -255,8 +255,6 @@ class TestAdvanceGridIntegration:
 
         This is a physics-level sanity check, not an exact numerical match.
         """
-        import cantera as ct
-
         ar = ct.Solution(_AIR_MECH)
         ar.TPX = 1000.0, 20.0 * ct.one_atm, "AR:1"
 

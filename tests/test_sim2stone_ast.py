@@ -16,18 +16,13 @@ Asserts:
 
 from __future__ import annotations
 
+import ast
 import textwrap
 from pathlib import Path
-from typing import List
 
 import pytest
 
 from boulder.sim2stone_ast import (
-    ASTExtractionResult,
-    DetectedClosure,
-    DetectedContinuation,
-    DetectedSignal,
-    DetectedSolver,
     _collect_scalar_assignments,
     _detect_advance_timing,
     _detect_continuation,
@@ -36,9 +31,6 @@ from boulder.sim2stone_ast import (
     _detect_solver_hint,
     extract_from_source,
 )
-
-import ast
-
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _EXAMPLES_DIR = _REPO_ROOT / "docs" / "cantera_examples"
@@ -210,7 +202,7 @@ class TestDetectResidenceTimeClosure:
 
 class TestDetectContinuation:
     def test_combustor_while_loop(self) -> None:
-        """while reactor.T > 500: sim.solve_steady(); tau *= 0.9 → continuation."""
+        """While reactor.T > 500: sim.solve_steady(); tau *= 0.9 → continuation."""
         src = """
         while combustor.T > 500:
             sim.initial_time = 0.0
@@ -248,7 +240,7 @@ class TestDetectContinuation:
 
 class TestDetectSolverHint:
     def test_for_loop_advance_grid(self) -> None:
-        """for n in range(N): sim.advance(t) → advance_grid."""
+        """For n in range(N): sim.advance(t) → advance_grid."""
         src = """
         for n in range(300):
             time += 4e-4
@@ -260,7 +252,7 @@ class TestDetectSolverHint:
         assert solver.kind == "advance_grid"
 
     def test_while_advance_grid(self) -> None:
-        """while t < total: sim.advance(t) → advance_grid (no reinitialize)."""
+        """While t < total: sim.advance(t) → advance_grid (no reinitialize)."""
         src = """
         while t < t_total:
             sim.advance(t + dt)
@@ -271,7 +263,7 @@ class TestDetectSolverHint:
         assert solver.kind == "advance_grid"
 
     def test_while_micro_step(self) -> None:
-        """while t < t_total: sim.advance(...) + sim.reinitialize() → micro_step."""
+        """While t < t_total: sim.advance(...) + sim.reinitialize() → micro_step."""
         src = """
         while t < t_total:
             sim.advance(t + dt)

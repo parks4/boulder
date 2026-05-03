@@ -8,11 +8,9 @@ Asserts:
 """
 
 import yaml
-import pytest
 
-from boulder.config import normalize_config
 from boulder.cantera_converter import DualCanteraConverter
-
+from boulder.config import normalize_config
 
 _YAML_MFC_SIGNAL = """
 metadata:

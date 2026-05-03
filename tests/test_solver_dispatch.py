@@ -11,14 +11,13 @@ Verifies that each ``solver.kind`` value:
 from __future__ import annotations
 
 from typing import Any, Dict
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import cantera as ct
 import pytest
 
 from boulder.config import normalize_config
 from boulder.staged_solver import Stage, build_stage_graph
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -70,7 +69,10 @@ class TestStageGraphSolverMerge:
     def test_kind_defaults_to_advance_to_steady_state(self):
         """If no solver block is given, kind defaults to advance_to_steady_state."""
         stage = _build_stage({})
-        assert stage.solver.get("kind", "advance_to_steady_state") == "advance_to_steady_state"
+        assert (
+            stage.solver.get("kind", "advance_to_steady_state")
+            == "advance_to_steady_state"
+        )
 
     def test_kind_advance_populated(self):
         """solver.kind=advance and advance_time are preserved in the Stage."""
@@ -100,7 +102,11 @@ class TestStageGraphSolverMerge:
                     "id": "r1",
                     "type": "IdealGasConstPressureMoleReactor",
                     "group": "default",
-                    "properties": {"temperature": 1200.0, "pressure": 101325.0, "composition": "N2:1"},
+                    "properties": {
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
                 }
             ],
             "connections": [],
@@ -127,7 +133,11 @@ class TestStageGraphSolverMerge:
                     "id": "r1",
                     "type": "IdealGasConstPressureMoleReactor",
                     "group": "default",
-                    "properties": {"temperature": 1200.0, "pressure": 101325.0, "composition": "N2:1"},
+                    "properties": {
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
                 }
             ],
             "connections": [],
@@ -152,7 +162,11 @@ class TestStageGraphSolverMerge:
                     "id": "r1",
                     "type": "IdealGasConstPressureMoleReactor",
                     "group": "default",
-                    "properties": {"temperature": 1200.0, "pressure": 101325.0, "composition": "N2:1"},
+                    "properties": {
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
                 }
             ],
             "connections": [],
@@ -182,7 +196,11 @@ class TestStageGraphSolverMerge:
                     "id": "r1",
                     "type": "IdealGasConstPressureMoleReactor",
                     "group": "default",
-                    "properties": {"temperature": 1200.0, "pressure": 101325.0, "composition": "N2:1"},
+                    "properties": {
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
                 }
             ],
             "connections": [],
@@ -317,8 +335,6 @@ def _run_dispatcher(solver: Dict[str, Any], monkeypatch) -> MagicMock:
     conv._schedule_callbacks = []
 
     with patch.object(DualCanteraConverter, "_run_transient_solver") as mock_transient:
-        from boulder.cantera_converter import DualCanteraConverter as DC
-
         # Call the dispatch code directly, bypassing the full build
         _dispatch_solver(conv, mock_net, solver, stage, "s1")
 
@@ -360,7 +376,9 @@ class TestDispatcher:
 
         conv = DualCanteraConverter.__new__(DualCanteraConverter)
         conv._schedule_callbacks = []
-        stage = Stage(id="s1", mechanism=_GRI_MECH, solver={"kind": "advance_to_steady_state"})
+        stage = Stage(
+            id="s1", mechanism=_GRI_MECH, solver={"kind": "advance_to_steady_state"}
+        )
         _dispatch_solver(conv, net, stage.solver, stage, "s1")
         net.advance_to_steady_state.assert_called_once()
         net.solve_steady.assert_not_called()
@@ -385,7 +403,11 @@ class TestDispatcher:
 
         conv = DualCanteraConverter.__new__(DualCanteraConverter)
         conv._schedule_callbacks = []
-        stage = Stage(id="s1", mechanism=_GRI_MECH, solver={"kind": "advance", "advance_time": 0.25})
+        stage = Stage(
+            id="s1",
+            mechanism=_GRI_MECH,
+            solver={"kind": "advance", "advance_time": 0.25},
+        )
         _dispatch_solver(conv, net, stage.solver, stage, "s1")
         net.advance.assert_called_once_with(pytest.approx(0.25))
 
@@ -434,9 +456,14 @@ class TestDispatcher:
         conv._schedule_callbacks = []
 
         calls = []
-        monkeypatch.setattr(conv, "_run_transient_solver", lambda net, k, s, sid: calls.append(k))
+        monkeypatch.setattr(
+            conv, "_run_transient_solver", lambda net, k, s, sid: calls.append(k)
+        )
         net = _make_stub_network()
-        solver = {"kind": "advance_grid", "grid": {"start": 0.0, "stop": 0.1, "dt": 0.01}}
+        solver = {
+            "kind": "advance_grid",
+            "grid": {"start": 0.0, "stop": 0.1, "dt": 0.01},
+        }
         stage = Stage(id="s1", mechanism=_GRI_MECH, solver=solver)
         _dispatch_solver(conv, net, solver, stage, "s1")
         assert calls == ["advance_grid"]
@@ -449,9 +476,16 @@ class TestDispatcher:
         conv._schedule_callbacks = []
 
         calls = []
-        monkeypatch.setattr(conv, "_run_transient_solver", lambda net, k, s, sid: calls.append(k))
+        monkeypatch.setattr(
+            conv, "_run_transient_solver", lambda net, k, s, sid: calls.append(k)
+        )
         net = _make_stub_network()
-        solver = {"kind": "micro_step", "t_total": 1e-6, "chunk_dt": 1e-7, "max_dt": 1e-8}
+        solver = {
+            "kind": "micro_step",
+            "t_total": 1e-6,
+            "chunk_dt": 1e-7,
+            "max_dt": 1e-8,
+        }
         stage = Stage(id="s1", mechanism=_GRI_MECH, solver=solver)
         _dispatch_solver(conv, net, solver, stage, "s1")
         assert calls == ["micro_step"]

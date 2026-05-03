@@ -24,6 +24,7 @@ from boulder.scopes import ScopeRecorder, resolve_scope_variable
 # Fixtures: a simple single-reactor converter
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def simple_converter():
     """Build a minimal DualCanteraConverter with one IdealGasReactor."""
@@ -234,7 +235,9 @@ class TestScopesIntegration:
         is returned by BoulderRunner.exposed_inputs — this is the FMU input
         variable contract (Phase E / FMI_FMU_EXPORT.md Path A).
         """
-        raw = _YAML_ADVANCE_GRID_WITH_SCOPES + """
+        raw = (
+            _YAML_ADVANCE_GRID_WITH_SCOPES
+            + """
 signals:
   - id: external_pulse
     kind: Gaussian
@@ -242,6 +245,7 @@ signals:
     t0: 0.005
     sigma: 0.001
 """
+        )
         cfg = normalize_config(yaml.safe_load(raw))
         runner = BoulderRunner(cfg)
         runner.build()
@@ -257,7 +261,9 @@ signals:
         Asserts that binding a signal to an internal network target removes it
         from the FMU-facing exposed_inputs dict.
         """
-        raw = _YAML_ADVANCE_GRID_WITH_SCOPES + """
+        raw = (
+            _YAML_ADVANCE_GRID_WITH_SCOPES
+            + """
 signals:
   - id: internal_signal
     kind: Constant
@@ -266,6 +272,7 @@ bindings:
   - source: internal_signal
     target: nodes.r1.T
 """
+        )
         cfg = normalize_config(yaml.safe_load(raw))
         runner = BoulderRunner(cfg)
         runner.build()
@@ -280,7 +287,9 @@ bindings:
         Asserts that when both bound and unbound signals are declared, only the
         unbound ones appear in exposed_inputs.
         """
-        raw = _YAML_ADVANCE_GRID_WITH_SCOPES + """
+        raw = (
+            _YAML_ADVANCE_GRID_WITH_SCOPES
+            + """
 signals:
   - id: bound_sig
     kind: Constant
@@ -294,6 +303,7 @@ bindings:
   - source: bound_sig
     target: nodes.r1.T
 """
+        )
         cfg = normalize_config(yaml.safe_load(raw))
         runner = BoulderRunner(cfg)
         runner.build()

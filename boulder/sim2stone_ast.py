@@ -21,8 +21,7 @@ from __future__ import annotations
 import ast
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
+from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Result datatypes
@@ -277,14 +276,19 @@ def _eval_const_extended(node: ast.expr, env: Dict[str, float]) -> Optional[Any]
             if isinstance(node.op, ast.Div):
                 return left / right
             if isinstance(node.op, ast.Pow):
-                return left ** right
+                return left**right
     if isinstance(node, ast.Attribute):
         if isinstance(node.value, ast.Name) and node.value.id in ("ct", "cantera"):
             if node.attr == "one_atm":
                 return 101325.0
         # np.log(2), np.pi, etc.
-        if isinstance(node.value, ast.Name) and node.value.id in ("np", "numpy", "math"):
+        if isinstance(node.value, ast.Name) and node.value.id in (
+            "np",
+            "numpy",
+            "math",
+        ):
             import math as _math
+
             attr = getattr(_math, node.attr, None)
             if isinstance(attr, float):
                 return attr
@@ -297,6 +301,7 @@ def _eval_const_extended(node: ast.expr, env: Dict[str, float]) -> Optional[Any]
             and func.value.id in ("np", "numpy", "math")
         ):
             import math as _math
+
             fn = getattr(_math, func.attr, None)
             if callable(fn) and len(node.args) == 1:
                 arg = _eval_const_extended(node.args[0], env)
@@ -458,10 +463,7 @@ def _detect_residence_time_closures(
             continue
         # Match: return X.mass / tau_var
         val = ret.value
-        if not (
-            isinstance(val, ast.BinOp)
-            and isinstance(val.op, ast.Div)
-        ):
+        if not (isinstance(val, ast.BinOp) and isinstance(val.op, ast.Div)):
             continue
         left = val.left
         right = val.right
@@ -481,10 +483,7 @@ def _detect_residence_time_closures(
         if not isinstance(node, ast.Assign):
             continue
         assign: ast.Assign = node
-        if not (
-            len(assign.targets) == 1
-            and isinstance(assign.targets[0], ast.Name)
-        ):
+        if not (len(assign.targets) == 1 and isinstance(assign.targets[0], ast.Name)):
             continue
         mfc_var = assign.targets[0].id
         call = assign.value
@@ -493,8 +492,7 @@ def _detect_residence_time_closures(
         # Check for MassFlowController
         callee = call.func
         is_mfc = (
-            isinstance(callee, ast.Attribute)
-            and callee.attr == "MassFlowController"
+            isinstance(callee, ast.Attribute) and callee.attr == "MassFlowController"
         ) or (isinstance(callee, ast.Name) and callee.id == "MassFlowController")
         if not is_mfc:
             continue
@@ -504,11 +502,7 @@ def _detect_residence_time_closures(
         )
         if mdot_kw is None:
             continue
-        func_name = (
-            mdot_kw.value.id
-            if isinstance(mdot_kw.value, ast.Name)
-            else None
-        )
+        func_name = mdot_kw.value.id if isinstance(mdot_kw.value, ast.Name) else None
         if func_name is None or func_name not in closure_funcs:
             continue
         reactor_var, tau_var = closure_funcs[func_name]
@@ -653,7 +647,9 @@ def _detect_solver_hint(tree: ast.AST) -> Optional[DetectedSolver]:
             for s in ast.walk(node)
         )
         if has_advance:
-            return DetectedSolver(kind="advance_grid", params={}, derived_via="ast_match")
+            return DetectedSolver(
+                kind="advance_grid", params={}, derived_via="ast_match"
+            )
 
     # Top-level advance_to_steady_state
     for node in ast.walk(tree):

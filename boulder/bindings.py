@@ -23,7 +23,7 @@ rule "Better raise a clear error message than hide the problems").
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import cantera as ct
@@ -40,27 +40,32 @@ SignalObj = Union[ct.Func1, Callable[[float], float]]
 # Binding target types
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ConnectionMassFlowRateTarget:
     """Set the mass_flow_rate on the named MassFlowController."""
+
     connection_id: str
 
 
 @dataclass
 class ConnectionTauSTarget:
     """Update the residence_time closure parameter on the named MFC."""
+
     connection_id: str
 
 
 @dataclass
 class NodeReducedElectricFieldTarget:
     """Register a micro_step chunk callback to set reduced_electric_field."""
+
     node_id: str
 
 
 @dataclass
 class ContinuationParameterTarget:
     """Expose the signal as a continuation update source (future)."""
+
     parameter_name: str
 
 
@@ -82,6 +87,7 @@ _SUPPORTED_TARGETS = (
 # ---------------------------------------------------------------------------
 # Path parser
 # ---------------------------------------------------------------------------
+
 
 def parse_binding_path(target: str) -> BindingTarget:
     """Parse a dotted binding target path into a :class:`BindingTarget`.
@@ -139,6 +145,7 @@ def parse_binding_path(target: str) -> BindingTarget:
 # Target writers
 # ---------------------------------------------------------------------------
 
+
 def apply_binding(
     converter: "DualCanteraConverter",
     binding: Dict[str, Any],
@@ -172,8 +179,7 @@ def apply_binding(
     target_path: str = binding.get("target", "")
     if not target_path:
         raise ValueError(
-            "Binding entry is missing a 'target' key. "
-            f"Entry: {binding!r}."
+            f"Binding entry is missing a 'target' key. Entry: {binding!r}."
         )
 
     btype = parse_binding_path(target_path)

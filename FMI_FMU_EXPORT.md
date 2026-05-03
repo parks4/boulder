@@ -41,7 +41,7 @@ adds proper unit metadata, clocks/events, and array variables. ([Spec](https://f
 | Mode | Who owns the integrator | Cantera fit |
 |---|---|---|
 | Model Exchange (ME) | The importer (e.g. Simulink) | Bad — would require re-exporting Cantera's RHS in C++ |
-| Co-Simulation (CS)  | The FMU itself (CVODES inside)  | Native — Cantera already owns the integrator |
+| Co-Simulation (CS) | The FMU itself (CVODES inside) | Native — Cantera already owns the integrator |
 
 **Recommendation: Co-Simulation.** Each `doStep(t, dt)` call from the importer
 forwards into `network.advance(t + dt)`.
@@ -68,10 +68,10 @@ FMI 3.0 Co-Simulation is inherently transient: the importer drives the FMU
 forward in time via `doStep(t, dt)`. STONE's `solver.mode: steady`
 configurations therefore export with a slightly different convention:
 
-| `solver.mode` | FMU behaviour                                                                 |
+| `solver.mode` | FMU behaviour |
 |---------------|-------------------------------------------------------------------------------|
-| `transient`   | `doStep` calls `network.advance(t + dt)` directly                             |
-| `steady`      | the FMU exposes a `solve_steady_now` boolean input; flipping it to true triggers `solve_steady()` and the next `doStep` returns the converged state |
+| `transient` | `doStep` calls `network.advance(t + dt)` directly |
+| `steady` | the FMU exposes a `solve_steady_now` boolean input; flipping it to true triggers `solve_steady()` and the next `doStep` returns the converged state |
 
 This keeps the export honest: a steady-state model loaded into Simulink is
 not pretending to be a 10-line ODE.
@@ -80,15 +80,15 @@ not pretending to be a 10-line ODE.
 
 The Direction 2 causal layer maps directly to FMI variable kinds:
 
-| STONE concept                       | FMI 3.0 kind   | Example                                           |
+| STONE concept | FMI 3.0 kind | Example |
 |-------------------------------------|----------------|---------------------------------------------------|
-| `signals: <id>` exposed externally  | `input`        | `inlet_mdot` (kg/s)                               |
-| Bound to `connections.<id>.mdot`    | `input`        | `connections.inlet_mfc.mass_flow_rate`            |
-| Bound to `nodes.<id>.E_reduced`     | `input`        | `nodes.r1.reduced_electric_field`                 |
-| `scopes: <variable>`                | `output`       | `nodes.combustor.T`                               |
-| Continuation parameter              | `parameter`    | `tau_s`                                           |
-| `phases.gas.mechanism`              | `parameter`    | `mechanism` (string, fixed at instantiation)      |
-| Solver `rtol`/`atol`                | `parameter`    | `tolerance.rtol`, `tolerance.atol`                |
+| `signals: <id>` exposed externally | `input` | `inlet_mdot` (kg/s) |
+| Bound to `connections.<id>.mdot` | `input` | `connections.inlet_mfc.mass_flow_rate` |
+| Bound to `nodes.<id>.E_reduced` | `input` | `nodes.r1.reduced_electric_field` |
+| `scopes: <variable>` | `output` | `nodes.combustor.T` |
+| Continuation parameter | `parameter` | `tau_s` |
+| `phases.gas.mechanism` | `parameter` | `mechanism` (string, fixed at instantiation) |
+| Solver `rtol`/`atol` | `parameter` | `tolerance.rtol`, `tolerance.atol` |
 
 Units come from STONE's existing unit handling
 ([`boulder/utils.coerce_unit_string`](boulder/utils.py)) and are written to
@@ -136,7 +136,8 @@ Pros: ships in ~2 weeks; full Cantera available via the embedded interpreter.
 Cons: the resulting FMU requires either (a) the importer to provide a Python
 runtime with Boulder installed, or (b) shipping a self-contained interpreter
 (`pythonfmu3` does this for you, but the `.fmu` grows to ~150 MB once Cantera
-+ NumPy + SciPy + Boulder + ruamel.yaml are bundled).
+
+- NumPy + SciPy + Boulder + ruamel.yaml are bundled).
 
 ### Path B — Native C++ FMU (long-term)
 

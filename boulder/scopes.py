@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Variable path resolver
 # ---------------------------------------------------------------------------
 
+
 def resolve_scope_variable(
     variable: str,
     converter: Any,
@@ -153,6 +154,7 @@ def resolve_scope_variable(
 # Scope recorder
 # ---------------------------------------------------------------------------
 
+
 class ScopeRecorder:
     """Records time-series data for a list of scope definitions.
 
@@ -234,9 +236,7 @@ class ScopeRecorder:
         try:
             import pandas as pd
         except ImportError as exc:
-            raise ImportError(
-                "ScopeRecorder.flush_csv requires pandas."
-            ) from exc
+            raise ImportError("ScopeRecorder.flush_csv requires pandas.") from exc
         for var, rows in self._data.items():
             path = self._file.get(var)
             if path is None:

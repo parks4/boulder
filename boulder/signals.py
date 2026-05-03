@@ -38,6 +38,7 @@ SignalObj = Union[ct.Func1, Callable[[float], float]]
 # Primitive source factories
 # ---------------------------------------------------------------------------
 
+
 def _make_constant(spec: Dict[str, Any]) -> Callable[[float], float]:
     """Constant source: returns ``value`` regardless of time.
 
@@ -127,8 +128,7 @@ def _make_piecewise_linear(spec: Dict[str, Any]) -> ct.Func1:
     points: List[List[float]] = spec["points"]
     if len(points) < 2:
         raise ValueError(
-            "PiecewiseLinear signal: need at least 2 points; "
-            f"got {len(points)}."
+            f"PiecewiseLinear signal: need at least 2 points; got {len(points)}."
         )
     times = [float(p[0]) for p in points]
     values = [float(p[1]) for p in points]
@@ -170,7 +170,10 @@ def _make_from_csv(spec: Dict[str, Any]) -> ct.Func1:
 # Combinator factories (need registry to resolve prior signal IDs)
 # ---------------------------------------------------------------------------
 
-def _make_sum(spec: Dict[str, Any], registry: Dict[str, SignalObj]) -> Callable[[float], float]:
+
+def _make_sum(
+    spec: Dict[str, Any], registry: Dict[str, SignalObj]
+) -> Callable[[float], float]:
     """Sum of two or more prior signals.
 
     Args
@@ -197,7 +200,9 @@ def _make_sum(spec: Dict[str, Any], registry: Dict[str, SignalObj]) -> Callable[
     return _sum
 
 
-def _make_gain(spec: Dict[str, Any], registry: Dict[str, SignalObj]) -> Callable[[float], float]:
+def _make_gain(
+    spec: Dict[str, Any], registry: Dict[str, SignalObj]
+) -> Callable[[float], float]:
     """Scale a prior signal by a constant factor ``k``.
 
     Args
@@ -281,7 +286,10 @@ _COMBINATOR_KINDS = frozenset({"Sum", "Gain", "Integrator"})
 # Public API
 # ---------------------------------------------------------------------------
 
-def build_signal(spec: Dict[str, Any], registry: Optional[Dict[str, SignalObj]] = None) -> SignalObj:
+
+def build_signal(
+    spec: Dict[str, Any], registry: Optional[Dict[str, SignalObj]] = None
+) -> SignalObj:
     """Build a single signal object from a STONE source-block spec dict.
 
     Parameters
@@ -349,12 +357,9 @@ def build_signal_registry(signals_block: List[Dict[str, Any]]) -> Dict[str, Sign
         sid = str(entry.get("id", ""))
         if not sid:
             raise ValueError(
-                "Each signal entry must have an 'id' key. "
-                f"Offending entry: {entry!r}."
+                f"Each signal entry must have an 'id' key. Offending entry: {entry!r}."
             )
         if sid in registry:
-            raise ValueError(
-                f"Duplicate signal id '{sid}'. Signal IDs must be unique."
-            )
+            raise ValueError(f"Duplicate signal id '{sid}'. Signal IDs must be unique.")
         registry[sid] = build_signal(entry, registry)
     return registry

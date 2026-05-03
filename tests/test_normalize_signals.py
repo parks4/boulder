@@ -8,8 +8,9 @@ Asserts:
 - YAML without these keys normalises without error.
 """
 
-import yaml
 import pytest
+import yaml
+
 from boulder.config import normalize_config
 
 

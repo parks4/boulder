@@ -10,15 +10,10 @@ Asserts:
   signals block.
 """
 
-import math
-import os
-import tempfile
-
 import cantera as ct
 import pytest
 
 from boulder.signals import build_signal, build_signal_registry
-
 
 # ---------------------------------------------------------------------------
 # Primitive sources
@@ -51,7 +46,9 @@ class TestSine:
 
     def test_sine_with_offset(self):
         """Sine signal offset shifts the value at all times."""
-        sig = build_signal({"Sine": {"amplitude": 0.0, "frequency": 1.0, "offset": 7.5}})
+        sig = build_signal(
+            {"Sine": {"amplitude": 0.0, "frequency": 1.0, "offset": 7.5}}
+        )
         assert sig(0.0) == pytest.approx(7.5)
         assert sig(0.25) == pytest.approx(7.5)
 
@@ -59,7 +56,9 @@ class TestSine:
 class TestGaussian:
     def test_gaussian_returns_func1(self):
         """Gaussian signal returns a ct.Func1 object."""
-        sig = build_signal({"Gaussian": {"peak": 1.9e-19, "center": 24e-9, "fwhm": 7.06e-9}})
+        sig = build_signal(
+            {"Gaussian": {"peak": 1.9e-19, "center": 24e-9, "fwhm": 7.06e-9}}
+        )
         assert isinstance(sig, ct.Func1)
 
     def test_gaussian_peak_at_center(self):
@@ -79,46 +78,90 @@ class TestGaussian:
 class TestStep:
     def test_step_before_transition(self):
         """Step signal returns value_before for t < t_step."""
-        sig = build_signal({"Step": {"t_step": 1.0, "value_before": 0.0, "value_after": 5.0}})
+        sig = build_signal(
+            {"Step": {"t_step": 1.0, "value_before": 0.0, "value_after": 5.0}}
+        )
         assert sig(0.5) == pytest.approx(0.0)
 
     def test_step_at_transition(self):
         """Step signal returns value_after at t == t_step."""
-        sig = build_signal({"Step": {"t_step": 1.0, "value_before": 0.0, "value_after": 5.0}})
+        sig = build_signal(
+            {"Step": {"t_step": 1.0, "value_before": 0.0, "value_after": 5.0}}
+        )
         assert sig(1.0) == pytest.approx(5.0)
 
     def test_step_after_transition(self):
         """Step signal returns value_after for t > t_step."""
-        sig = build_signal({"Step": {"t_step": 1.0, "value_before": 0.0, "value_after": 5.0}})
+        sig = build_signal(
+            {"Step": {"t_step": 1.0, "value_before": 0.0, "value_after": 5.0}}
+        )
         assert sig(2.0) == pytest.approx(5.0)
 
 
 class TestRamp:
     def test_ramp_before_start(self):
         """Ramp signal returns value_start before t_start."""
-        sig = build_signal({"Ramp": {"t_start": 1.0, "t_end": 3.0, "value_start": 0.0, "value_end": 10.0}})
+        sig = build_signal(
+            {
+                "Ramp": {
+                    "t_start": 1.0,
+                    "t_end": 3.0,
+                    "value_start": 0.0,
+                    "value_end": 10.0,
+                }
+            }
+        )
         assert sig(0.0) == pytest.approx(0.0)
 
     def test_ramp_midpoint(self):
         """Ramp signal returns midpoint value at midpoint time."""
-        sig = build_signal({"Ramp": {"t_start": 0.0, "t_end": 2.0, "value_start": 0.0, "value_end": 10.0}})
+        sig = build_signal(
+            {
+                "Ramp": {
+                    "t_start": 0.0,
+                    "t_end": 2.0,
+                    "value_start": 0.0,
+                    "value_end": 10.0,
+                }
+            }
+        )
         assert sig(1.0) == pytest.approx(5.0)
 
     def test_ramp_after_end(self):
         """Ramp signal returns value_end after t_end."""
-        sig = build_signal({"Ramp": {"t_start": 1.0, "t_end": 3.0, "value_start": 0.0, "value_end": 10.0}})
+        sig = build_signal(
+            {
+                "Ramp": {
+                    "t_start": 1.0,
+                    "t_end": 3.0,
+                    "value_start": 0.0,
+                    "value_end": 10.0,
+                }
+            }
+        )
         assert sig(5.0) == pytest.approx(10.0)
 
     def test_ramp_invalid_times_raises(self):
         """Ramp signal raises ValueError when t_end <= t_start."""
         with pytest.raises(ValueError, match="t_end"):
-            build_signal({"Ramp": {"t_start": 3.0, "t_end": 1.0, "value_start": 0.0, "value_end": 1.0}})
+            build_signal(
+                {
+                    "Ramp": {
+                        "t_start": 3.0,
+                        "t_end": 1.0,
+                        "value_start": 0.0,
+                        "value_end": 1.0,
+                    }
+                }
+            )
 
 
 class TestPiecewiseLinear:
     def test_piecewise_linear_returns_func1(self):
         """PiecewiseLinear signal returns a ct.Func1 object."""
-        sig = build_signal({"PiecewiseLinear": {"points": [[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]]}})
+        sig = build_signal(
+            {"PiecewiseLinear": {"points": [[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]]}}
+        )
         assert isinstance(sig, ct.Func1)
 
     def test_piecewise_linear_at_known_point(self):
@@ -210,7 +253,10 @@ class TestBuildSignalRegistry:
     def test_registry_builds_all_signals(self):
         """build_signal_registry creates entries for all declared signals."""
         block = [
-            {"id": "pulse", "Gaussian": {"peak": 1.9e-19, "center": 24e-9, "fwhm": 7.06e-9}},
+            {
+                "id": "pulse",
+                "Gaussian": {"peak": 1.9e-19, "center": 24e-9, "fwhm": 7.06e-9},
+            },
             {"id": "tau", "Constant": {"value": 0.1}},
             {"id": "double", "Sum": {"inputs": ["pulse", "pulse"]}},
         ]
