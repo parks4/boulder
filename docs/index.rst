@@ -31,6 +31,7 @@ From the CLI::
    installation
    usage
    stone
+   cantera_upstream_examples
    auto_examples/index
    api
 

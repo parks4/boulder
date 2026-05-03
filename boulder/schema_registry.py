@@ -42,7 +42,7 @@ class ReactorSchemaEntry:
     Parameters
     ----------
     kind:
-        YAML reactor key (e.g. ``"DesignTubeFurnace"``).
+        YAML reactor key, e.g. ``"MyReactor"``.
     builder:
         Callable ``(converter, node_dict) -> ct.Reactor``.
     network_class:
@@ -63,6 +63,12 @@ class ReactorSchemaEntry:
         — human-readable mapping used when the Calculation Note renders
         variable columns.  Using tuples keeps this trivially JSON-serialisable
         and matches the legacy ``TF_*_VARIABLE_MAP`` shape one-for-one.
+    reactor_class:
+        Optional Python class that the builder instantiates.  When provided,
+        :func:`is_const_pressure_kind` uses ``issubclass`` against Cantera's
+        const-pressure base classes (both standard and ``Extensible*`` roots),
+        so no explicit flag is needed for reactors that inherit from any
+        Cantera const-pressure base.
     """
 
     kind: str
@@ -72,6 +78,7 @@ class ReactorSchemaEntry:
     categories: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
     default_constraints: List[Dict[str, Any]] = field(default_factory=list)
     variable_maps: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    reactor_class: Optional[Type[Any]] = None
 
 
 _SCHEMA_REGISTRY: Dict[str, ReactorSchemaEntry] = {}
@@ -87,6 +94,7 @@ def register_reactor_builder(
     categories: Optional[Dict[str, Dict[str, List[str]]]] = None,
     default_constraints: Optional[List[Dict[str, Any]]] = None,
     variable_maps: Optional[Dict[str, Dict[str, Any]]] = None,
+    reactor_class: Optional[Type[Any]] = None,
 ) -> None:
     """Register a reactor builder together with its declarative metadata.
 
@@ -94,6 +102,15 @@ def register_reactor_builder(
     additionally records a :class:`ReactorSchemaEntry` in the global
     registry so the CLI (``boulder validate`` / ``boulder describe``) and
     UI can introspect the plugin.
+
+    Parameters
+    ----------
+    reactor_class:
+        The Python class that the builder instantiates.  When provided,
+        :func:`is_const_pressure_kind` walks the class MRO and returns
+        ``True`` automatically if any ancestor name contains
+        ``"ConstPressure"``.  This avoids the need for an explicit flag
+        and stays correct as the class hierarchy evolves.
     """
     plugins.reactor_builders[kind] = builder
     entry = ReactorSchemaEntry(
@@ -104,8 +121,35 @@ def register_reactor_builder(
         categories=dict(categories or {}),
         default_constraints=list(default_constraints or []),
         variable_maps=dict(variable_maps or {}),
+        reactor_class=reactor_class,
     )
     _SCHEMA_REGISTRY[kind] = entry
+
+
+def is_const_pressure_kind(kind: str) -> bool:
+    """Return True when *kind* is a constant-pressure reactor.
+
+    Uses ``issubclass`` against Cantera's const-pressure base classes.
+    Both the standard (non-extensible) and ``Extensible*`` Cantera bases are
+    checked, because ``Extensible*`` classes do **not** inherit from their
+    non-extensible counterparts — they are separate roots in Python.
+    """
+    import cantera as ct
+
+    entry = _SCHEMA_REGISTRY.get(kind)
+    if entry is None or entry.reactor_class is None:
+        return False
+    _CANTERA_CP_BASES = (
+        ct.ConstPressureReactor,
+        ct.ConstPressureMoleReactor,
+        ct.IdealGasConstPressureReactor,
+        ct.IdealGasConstPressureMoleReactor,
+        ct.ExtensibleConstPressureReactor,
+        ct.ExtensibleConstPressureMoleReactor,
+        ct.ExtensibleIdealGasConstPressureReactor,
+        ct.ExtensibleIdealGasConstPressureMoleReactor,
+    )
+    return issubclass(entry.reactor_class, _CANTERA_CP_BASES)
 
 
 def register_reactor_unfolder(plugins: Any, kind: str, unfolder: Any) -> None:
@@ -122,7 +166,7 @@ def register_reactor_unfolder(plugins: Any, kind: str, unfolder: Any) -> None:
         :class:`~boulder.cantera_converter.BoulderPlugins` instance to register
         into.
     kind :
-        STONE reactor kind (e.g. ``"DesignPFR"``).
+        STONE reactor kind string, e.g. ``"MyReactor"``.
     unfolder :
         Callable matching the :data:`~boulder.cantera_converter.ReactorUnfolder`
         signature.

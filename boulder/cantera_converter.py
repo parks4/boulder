@@ -9,6 +9,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -668,6 +669,11 @@ class DualCanteraConverter:
         elif typ == "IdealGasReactor":
             reactor = ct.IdealGasReactor(gas_for_node, clone=True)
             reactor.name = rid
+        elif typ == "ConstPressureReactor":
+            energy_raw = str(props.get("energy", "on"))
+            energy: Literal["on", "off"] = "off" if energy_raw == "off" else "on"
+            reactor = ct.ConstPressureReactor(gas_for_node, energy=energy, clone=True)
+            reactor.name = rid
         elif typ == "IdealGasConstPressureReactor":
             reactor = ct.IdealGasConstPressureReactor(gas_for_node, clone=True)
             reactor.name = rid
@@ -1019,7 +1025,7 @@ class DualCanteraConverter:
 
         # Select ReactorNet class with precedence:
         #   1. Per-node YAML ``network_class`` dotted-path override.
-        #   2. ``reactor.NETWORK_CLASS`` class attribute (e.g. DesignPFRNet).
+        #   2. ``reactor.NETWORK_CLASS`` class attribute set by the plugin.
         #   3. ``ct.ReactorNet`` default.
         #
         # If two reactors in the same stage resolve to different non-default
@@ -1377,19 +1383,28 @@ class DualCanteraConverter:
                     reactors_series[reactor_id]["Y"][species_name].append(
                         float(y_value)
                     )
+
+                # Spatial reactors: if the plugin registered a spatial_series_fn
+                # on reactor_meta, call it to replace the single-point snapshot
+                # with the full converged spatial profile.
+                _spatial_fn = self.reactor_meta.get(reactor_id, {}).get(
+                    "spatial_series_fn"
+                )
+                if _spatial_fn is not None:
+                    _series = _spatial_fn()
+                    if _series is not None:
+                        reactors_series[reactor_id] = _series
+
+                # PSR reactors: if the plugin flagged this reactor as a PSR,
+                # propagate the flag so the frontend can adapt its visualisation.
+                elif self.reactor_meta.get(reactor_id, {}).get("is_psr"):
+                    reactors_series[reactor_id]["is_psr"] = True
+
             if progress_callback:
                 progress_callback(
                     {
                         "time": times.copy(),
-                        "reactors": {
-                            k: {
-                                "T": v["T"].copy(),
-                                "P": v["P"].copy(),
-                                "X": {s: v["X"][s].copy() for s in v["X"]},
-                                "Y": {s: v["Y"][s].copy() for s in v["Y"]},
-                            }
-                            for k, v in reactors_series.items()
-                        },
+                        "reactors": reactors_series,
                     },
                     simulation_time,
                     simulation_time,

@@ -798,7 +798,7 @@ class TestMergeConfigIntoYaml:
             "phases:\n  gas:\n    mechanism: gri30.yaml\n"
             "network:\n"
             "  - id: tube\n"
-            "    DesignPFR:\n"
+            "    CustomReactor:\n"
             "      length: 1.0\n"
             "      inlet:\n"
             "        from: feed\n"
@@ -807,7 +807,7 @@ class TestMergeConfigIntoYaml:
         config = self._make_config(
             [
                 self._node("feed", "Reservoir", {"temperature": 300.0}),
-                self._node("tube", "DesignPFR", {"length": 1.0}),
+                self._node("tube", "CustomReactor", {"length": 1.0}),
             ]
         )
         with pytest.raises(ValueError, match="[Ii]nline port"):

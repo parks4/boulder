@@ -551,3 +551,7 @@ __pycache__/
 alembic/versions/*.pyc
 *.png
 /configs/.boulder-cache
+piston.csv
+configs/cantera_examples/nanosecond_pulse_discharge_stone.yaml
+configs/cantera_examples/combustor_stone.yaml
+configs/cantera_examples/reactor2_stone.yaml

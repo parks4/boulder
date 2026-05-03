@@ -7,6 +7,7 @@ import { useResultsTabStore } from "@/stores/resultsTabStore";
 import { fetchPlugins, renderPlugin } from "@/api/plugins";
 import { Button } from "@/components/ui/Button";
 import { PlotsTab } from "./PlotsTab";
+import { ConvergenceTab } from "./ConvergenceTab";
 import { SummaryTab } from "./SummaryTab";
 import { ErrorTab } from "./ErrorTab";
 import { PluginTab } from "./PluginTab";
@@ -17,7 +18,7 @@ const ThermoReportTab = lazy(() =>
   import("./ThermoReportTab").then((m) => ({ default: m.ThermoReportTab })),
 );
 
-const BASE_TABS = ["Plots", "Sankey", "Thermo", "Summary"] as const;
+const BASE_TABS = ["Plots", "Sankey", "Thermo", "Summary", "Convergence"] as const;
 const ERROR_TAB_LABEL = "⚠️Error" as const;
 type Tab = (typeof BASE_TABS)[number] | typeof ERROR_TAB_LABEL | string;
 
@@ -136,6 +137,7 @@ export function ResultsTabs() {
 
       <div className="p-4">
         {displayTab === "Plots" && data && <PlotsTab data={data} />}
+        {displayTab === "Convergence" && data && <ConvergenceTab data={data} />}
         {displayTab === "Sankey" && results && (
           <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
             <SankeyTab results={results} />

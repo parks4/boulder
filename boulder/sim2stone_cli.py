@@ -66,16 +66,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Exclude comment parsing from Python source code",
     )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help=(
+            "Allow interactive matplotlib (GUI backend, blocking plt.show). "
+            "By default sim2stone forces a headless backend and non-blocking show "
+            "so conversion does not hang on plot windows."
+        ),
+    )
     return parser.parse_args(argv)
 
 
 def _execute_and_find_network(
-    script_path: str, var_name: Optional[str] = None
+    script_path: str,
+    var_name: Optional[str] = None,
+    *,
+    headless_matplotlib: bool = True,
 ) -> ct.ReactorNet:
     """Execute a Python script and return the single ReactorNet it defines.
 
     Adds the script directory to sys.path to resolve relative imports.
-    Suppresses visualizations by temporarily hiding visualization dependencies.
+    Unless ``headless_matplotlib`` is False, forces a non-GUI matplotlib backend
+    and makes ``plt.show()`` a no-op for the duration of the script so
+    ``plt.show()`` does not open windows or block.
     """
     import runpy
 
@@ -91,6 +105,29 @@ def _execute_and_find_network(
     original_boulder_no_gui = os.environ.get("BOULDER_NO_GUI")
     os.environ["BOULDER_NO_GUI"] = "true"
 
+    original_mpl_backend = os.environ.get("MPLBACKEND")
+    plt_show_real = None
+    if headless_matplotlib:
+        os.environ["MPLBACKEND"] = "Agg"
+        try:
+            import matplotlib
+
+            matplotlib.use("Agg", force=True)
+        except Exception:
+            pass
+        try:
+            import matplotlib.pyplot as plt
+
+            plt.ioff()
+            plt_show_real = plt.show
+
+            def _plt_show_noop(*_a: object, **_k: object) -> None:
+                return None
+
+            plt.show = _plt_show_noop  # type: ignore[method-assign]
+        except Exception:
+            plt_show_real = None
+
     try:
         # Execute script in its own globals namespace
         globals_dict = runpy.run_path(script_abspath, run_name="__main__")
@@ -100,6 +137,15 @@ def _execute_and_find_network(
             os.environ.pop("BOULDER_NO_GUI", None)
         else:
             os.environ["BOULDER_NO_GUI"] = original_boulder_no_gui
+        if headless_matplotlib:
+            if plt_show_real is not None:
+                import matplotlib.pyplot as plt
+
+                plt.show = plt_show_real  # type: ignore[method-assign]
+            if original_mpl_backend is None:
+                os.environ.pop("MPLBACKEND", None)
+            else:
+                os.environ["MPLBACKEND"] = original_mpl_backend
 
     # If a specific variable name is provided, use it
     if var_name:
@@ -138,7 +184,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.verbose:
         print(f"[sim2stone] Executing: {args.input}")
 
-    network = _execute_and_find_network(args.input, var_name=args.var)
+    network = _execute_and_find_network(
+        args.input,
+        var_name=args.var,
+        headless_matplotlib=not args.interactive,
+    )
 
     # Determine output path
     if args.output:
