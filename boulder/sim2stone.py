@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import cantera as ct  # type: ignore
@@ -223,16 +224,31 @@ def _smart_extract_object_comments(
 
 
 def _mechanism_from_thermo(thermo: ct.ThermoPhase) -> Optional[str]:
-    """Try to read the mechanism file name from the ThermoPhase.
+    """Read mechanism path from the ThermoPhase for STONE ``mechanism:`` fields.
 
-    Prefer attributes exposed by Cantera (e.g., `source`, `input_name`). Returns
-    a basename like 'gri30.yaml' when possible.
+    Cantera resolves mechanisms under its ``data`` directory; paths like
+    ``example_data/methane-plasma-pavan-2023.yaml`` must be preserved. We only
+    reduce to a bare filename when *val* is already a single path component or
+    when an absolute install path is trimmed to the relative tail after the
+    ``data`` directory (matching how ``ct.Solution('gri30.yaml')`` is stored).
     """
     for attr in ("source", "input_name"):
         val = getattr(thermo, attr, None)
-        if isinstance(val, str) and val:
-            base = os.path.basename(val)
-            return base or val
+        if not isinstance(val, str) or not val:
+            continue
+        p = Path(val)
+        parts = p.parts
+        parts_lower = tuple(x.lower() for x in parts)
+        if p.is_absolute():
+            try:
+                idx = parts_lower.index("data")
+            except ValueError:
+                return p.name
+            tail = Path(*parts[idx + 1 :])
+            return tail.as_posix()
+        if len(parts) > 1:
+            return p.as_posix()
+        return p.name
     return None
 
 
@@ -270,6 +286,8 @@ def _infer_node_type(reactor: ct.Reactor) -> str:
     # Explicit checks for common types we support out-of-the-box
     if isinstance(reactor, ct.Reservoir):
         return "Reservoir"
+    if isinstance(reactor, ct.ConstPressureReactor):
+        return "ConstPressureReactor"
     if isinstance(reactor, ct.IdealGasReactor):
         return "IdealGasReactor"
     # Fallback to class name for supported custom/reactor variants
@@ -280,9 +298,27 @@ def _infer_connection_type(device: ct.FlowDevice) -> str:
     """Map a Cantera flow device to a Boulder connection type string."""
     if isinstance(device, ct.MassFlowController):
         return "MassFlowController"
+    if isinstance(device, ct.PressureController):
+        return "PressureController"
     if isinstance(device, ct.Valve):
         return "Valve"
     return type(device).__name__
+
+
+def _stone_flow_connection_ids(dev: ct.FlowDevice) -> Tuple[str, str, str, str]:
+    """Return ``(cid, conn_type, source_node_id, target_node_id)`` for a flow device."""
+    src = dev.upstream
+    tgt = dev.downstream
+    src_id = getattr(src, "name", None) or f"reactor_{id(src)}"
+    tgt_id = getattr(tgt, "name", None) or f"reactor_{id(tgt)}"
+    conn_type = _infer_connection_type(dev)
+    name_attr = getattr(dev, "name", None)
+    cid = (
+        name_attr
+        if isinstance(name_attr, str) and name_attr
+        else f"{conn_type}_{src_id}_to_{tgt_id}"
+    )
+    return cid, conn_type, src_id, tgt_id
 
 
 def _unique_flow_devices(all_reactors: Set[ct.Reactor]) -> Set[ct.FlowDevice]:
@@ -366,6 +402,12 @@ def sim_to_internal_config(
             except (AttributeError, ValueError, TypeError):
                 pass
 
+            if isinstance(r, ct.ConstPressureReactor):
+                try:
+                    props["energy"] = "on" if r.energy_enabled else "off"
+                except Exception:
+                    props["energy"] = "on"
+
             # Mechanism: node-level override first, then infer from thermo
             if isinstance(mech_override, str) and mech_override:
                 props["mechanism"] = mech_override
@@ -399,16 +441,22 @@ def sim_to_internal_config(
 
         nodes.append(node_dict)
 
-    # Flow devices (MassFlowController, Valve, etc.)
+    # Flow devices (MassFlowController, Valve, PressureController, etc.)
     devices = _unique_flow_devices(set(all_reactors))
-    connections: List[Dict[str, Any]] = []
-    for dev in sorted(list(devices), key=lambda d: (_infer_connection_type(d), id(d))):
-        src = dev.upstream
-        tgt = dev.downstream
-        src_id = getattr(src, "name", None) or f"reactor_{id(src)}"
-        tgt_id = getattr(tgt, "name", None) or f"reactor_{id(tgt)}"
+    devices_sorted = sorted(
+        list(devices), key=lambda d: (_infer_connection_type(d), id(d))
+    )
+    # Map Python object id -> STONE connection id so PressureController can reference
+    # its master MassFlowController by id.
+    flow_dev_id_to_cid: Dict[int, str] = {}
+    for dev in devices_sorted:
+        cid, _, _, _ = _stone_flow_connection_ids(dev)
+        flow_dev_id_to_cid[id(dev)] = cid
 
-        conn_type = _infer_connection_type(dev)
+    connections: List[Dict[str, Any]] = []
+    for dev in devices_sorted:
+        cid, conn_type, src_id, tgt_id = _stone_flow_connection_ids(dev)
+
         conn_props: Dict[str, Any] = {}
         if isinstance(dev, ct.MassFlowController):
             # Prefer attribute if available; Cantera exposes mass_flow_rate as a property
@@ -442,14 +490,44 @@ def sim_to_internal_config(
                     conn_props["valve_coeff"] = float(coeff)
                 except Exception:
                     pass
-
-        # Create a stable identifier
-        name_attr = getattr(dev, "name", None)
-        cid = (
-            name_attr
-            if isinstance(name_attr, str) and name_attr
-            else f"{conn_type}_{src_id}_to_{tgt_id}"
-        )
+        elif isinstance(dev, ct.PressureController):
+            # Cantera often does not expose ``PressureController.primary`` to Python
+            # (getter raises NotImplementedError). Infer the master MFC from topology:
+            # the primary is the MassFlowController feeding ``dev.upstream``.
+            primary_mfc: Optional[ct.MassFlowController] = None
+            cand: Any = None
+            try:
+                cand = dev.primary
+            except (NotImplementedError, AttributeError, RuntimeError):
+                cand = None
+            if isinstance(cand, ct.MassFlowController):
+                primary_mfc = cand
+            if primary_mfc is None:
+                pc_src = dev.upstream
+                inlet_mfcs = [
+                    d
+                    for d in devices_sorted
+                    if isinstance(d, ct.MassFlowController) and d.downstream is pc_src
+                ]
+                if len(inlet_mfcs) == 1:
+                    primary_mfc = inlet_mfcs[0]
+                elif len(inlet_mfcs) == 0:
+                    raise RuntimeError(
+                        f"PressureController '{cid}': no MassFlowController found "
+                        f"feeding upstream reactor '{getattr(pc_src, 'name', id(pc_src))}'."
+                    )
+                else:
+                    raise RuntimeError(
+                        f"PressureController '{cid}': multiple MassFlowControllers "
+                        f"feed the upstream reactor; name the intended master MFC in "
+                        f"Python or use a single inlet MFC per reactor for sim2stone."
+                    )
+            master_cid = flow_dev_id_to_cid[id(primary_mfc)]
+            conn_props["master"] = master_cid
+            try:
+                conn_props["pressure_coeff"] = float(dev.pressure_coeff)
+            except Exception:
+                conn_props["pressure_coeff"] = 0.0
 
         # Create connection dictionary
         conn_dict = {

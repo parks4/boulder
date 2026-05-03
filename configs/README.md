@@ -135,3 +135,10 @@ Numeric values may carry explicit units:
 | `mix_react_streams.yaml` | Mixer with two inlet streams and valve outlet |
 | `grouped_nodes.yaml` | Grouped reactors in one stage |
 | `staged_psr_pfr.yaml` | Two-stage PSR → PFR chain |
+
+## Cantera Python examples (`cantera_examples/`)
+
+Boulder can also run Cantera `.py` files, as the ones downloaded
+from the Cantera official documentation. They can be run either
+via `sim2stone` to generate a Boulder YAML file, or directly as
+`boulder example_file.py` which will generate the YAML file in the process.
