@@ -262,7 +262,10 @@ def test_boulder_headless_py_writes_valid_stone_yaml(
 def test_boulder_headless_py_yaml_validate_download_run_roundtrip(
     tmp_path: Path, script_name: str, mechanism: str
 ) -> None:
-    """After native .py→YAML, ``--headless --download`` then ``python`` completes (xfail where upstream fails)."""
+    """After native .py→YAML, headless download then ``python`` completes.
+
+    Uses ``--headless --download``; xfail where upstream fails.
+    """
     script = _EXAMPLES_DIR / script_name
     if not script.is_file():
         pytest.skip(f"{script_name} not found under docs/cantera_examples")

@@ -1,4 +1,6 @@
 r"""
+Reactors with walls and heat transfer.
+
 Reactors with walls and heat transfer
 =====================================
 
@@ -42,12 +44,11 @@ Headless conversion to STONE YAML::
 .. _Cantera source tree: https://github.com/Cantera/cantera/tree/main/samples/python
 """
 
+import cantera as ct
 import matplotlib.pyplot as plt
 import pandas as pd
 
 plt.rcParams["figure.constrained_layout.use"] = True
-
-import cantera as ct
 
 # %%
 # Set up the simulation

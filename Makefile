@@ -12,7 +12,7 @@ unit-tests:
 	python -m pytest -vv --cov=. --cov-report=$(COV_REPORT) --doctest-glob="*.md" --doctest-glob="*.rst"
 
 type-check:
-	python -m mypy .
+	python -m mypy . --exclude docs/cantera_examples
 
 conda-env-update:
 	$(CONDA) install -y -c conda-forge conda-merge

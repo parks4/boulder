@@ -1,4 +1,6 @@
-"""
+r"""
+Steady-state combustor solutions for varying residence time.
+
 Combustor residence time
 ========================
 

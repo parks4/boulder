@@ -1,4 +1,6 @@
-"""
+r"""
+Nanosecond-scale pulse discharge in a plasma-coupled reactor.
+
 Nanosecond Pulse Plasma Simulation
 ==================================
 

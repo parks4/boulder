@@ -32,8 +32,10 @@ def _dump(tree) -> str:
 
 class TestBuildUnitMap:
     def test_records_temperature_pressure_flow(self):
-        """Asserts that temperature, pressure, and mass_flow_rate with unit strings
-        are all recorded in the unit_map with correct original text and SI value.
+        """Asserts that temperature, pressure, and mass_flow_rate with unit strings.
+
+        Temperature, pressure, and mass_flow_rate with unit strings are all recorded
+        in the unit_map with correct original text and SI value.
 
         Checks:
         - ("inlet", ("Reservoir", "temperature")) -> text "298.15 K", si ~298.15
@@ -101,8 +103,10 @@ class TestBuildUnitMap:
 
 class TestApplyUnitMapInplace:
     def test_preserves_unchanged_value_verbatim(self):
-        """Asserts that when the SI value matches the original, the original text
-        is restored verbatim (no reformatting of scientific notation etc.).
+        """Asserts verbatim restoration when SI value matches the original.
+
+        When the SI value matches the original, the original text is restored
+        verbatim (no reformatting of scientific notation etc.).
 
         Original: pressure: 1 atm (SI = 101325 Pa). Config pressure = 101325.
         Output YAML must contain '1 atm'.
@@ -126,8 +130,10 @@ class TestApplyUnitMapInplace:
         assert warnings == []
 
     def test_converts_changed_pressure_to_original_unit(self):
-        """Asserts that pressure doubled from 1 atm to 2 atm (202650 Pa in config)
-        is written as '2 atm' in the merged YAML, not as a bare SI float.
+        """Asserts doubled pressure is written in original units.
+
+        Pressure doubled from 1 atm to 2 atm (202650 Pa in config) is written as
+        '2 atm' in the merged YAML, not as a bare SI float.
         """
         yaml = "network:\n  - id: inlet\n    Reservoir:\n      pressure: 1 atm\n"
         tree = _load(yaml)
@@ -148,8 +154,9 @@ class TestApplyUnitMapInplace:
         assert "202650" not in out
 
     def test_handles_kg_per_hour(self):
-        """Asserts that mass_flow_rate with original unit kg/h is correctly
-        round-tripped. Original 10 kg/h changed to 5 kg/h (half the SI value).
+        """Asserts mass_flow_rate with unit kg/h round-trips correctly.
+
+        Original 10 kg/h changed to 5 kg/h (half the SI value).
 
         Output must contain '5 kg/h' (or equivalent with :g formatting).
         """
@@ -182,7 +189,9 @@ class TestApplyUnitMapInplace:
         assert "5" in out
 
     def test_handles_celsius_without_offset_error(self):
-        """Asserts that temperature in degC round-trips correctly without raising
+        """Asserts degC temperatures round-trip without Pint offset errors.
+
+        Temperature in degC round-trips correctly without raising
         Pint's OffsetUnitCalculusError.
 
         Original: 500 degC (773.15 K). Config changed to 673.15 K (400 degC).
@@ -204,8 +213,10 @@ class TestApplyUnitMapInplace:
         assert warnings == []
 
     def test_emits_warning_on_pint_failure_and_leaves_si(self):
-        """Asserts that when Pint cannot back-convert (malformed unit 'xyzzy'),
-        a warning string is returned and the scalar is left as a bare SI float.
+        """Asserts malformed units yield a warning and leave SI scalars.
+
+        When Pint cannot back-convert (malformed unit 'xyzzy'), a warning string is
+        returned and the scalar is left as a bare SI float.
         """
         from boulder.yaml_unit_map import UnitMap
 
