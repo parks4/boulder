@@ -86,7 +86,8 @@ async def start_simulation(
         if config_path is not None:
             converter._download_config_path = config_path
 
-        # Extract simulation parameters
+        # Extract simulation parameters.  Request-body overrides write into
+        # settings.solver so the normaliser / staged solver see them directly.
         settings = config.get("settings", {}) or {}
         settings_simulation_time = float(
             settings.get("end_time", settings.get("max_time", 10.0))
@@ -99,6 +100,20 @@ async def start_simulation(
         )
         time_step = body.time_step if body.time_step is not None else settings_time_step
         _require_positive(time_step, "time_step")
+
+        # When the caller passes explicit time/step overrides, propagate them
+        # into settings.solver.grid so the new kind-dispatcher picks them up.
+        if body.simulation_time is not None or body.time_step is not None:
+            if not isinstance(config.get("settings"), dict):
+                config["settings"] = {}
+            solver_block = config["settings"].setdefault("solver", {})
+            # Only inject grid defaults when no transient kind already specified.
+            existing_kind = solver_block.get("kind", "")
+            if existing_kind not in ("advance_grid", "micro_step", "advance"):
+                solver_block.setdefault("kind", "advance_grid")
+            grid = solver_block.setdefault("grid", {})
+            grid["stop"] = simulation_time
+            grid["dt"] = time_step
 
         # Create a fresh worker for this simulation
         worker = SimulationWorker()

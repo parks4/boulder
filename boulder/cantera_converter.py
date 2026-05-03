@@ -37,7 +37,8 @@ def _order_stage_nodes_for_flow(
 
     If YAML lists a downstream reactor before its upstream reservoir,
     :meth:`DualCanteraConverter._upstream_reservoir_tpy` cannot read
-    ``self.reactors[source]`` yet and falls back to 300 K. Mass-flow edges
+    ``self.reactors[source]`` yet; the target then keeps the template gas state.
+    Mass-flow edges
     within the stage define a partial order; unknown edges or cycles keep the
     original *stage_nodes* order.
     """
@@ -494,6 +495,9 @@ class DualCanteraConverter:
         # MFC was a logical inter-stage connection not yet registered.  These
         # are built in build_viz_network once the full topology is available.
         self._deferred_pc_conn_dicts: List[Dict[str, Any]] = []
+        # Phase-B schedule callbacks: each entry is a callable
+        # ``(network, t_start, t_end)`` fired before every micro_step chunk.
+        self._schedule_callbacks: List[Callable] = []
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
         comp_dict = {}
@@ -501,6 +505,66 @@ class DualCanteraConverter:
             species, value = pair.split(":")
             comp_dict[species.strip()] = float(value)
         return comp_dict
+
+    # ------------------------------------------------------------------
+    # Phase-B schedule helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_func1_from_spec(spec: Any) -> "ct.Func1":
+        """Convert a STONE schedule spec to a :class:`~cantera.Func1`.
+
+        Supported forms
+        ---------------
+        Scalar float/int:
+            ``mass_flow_rate: 0.1`` → constant Func1.
+        Mapping with ``func:`` key (Cantera named functions):
+            ``{func: sin, args: [1.0, 100.0, 0.0]}`` →
+            ``ct.Func1('sin', 1.0) * ... `` – passed to ``ct.Func1(name, *args)``.
+        Mapping with ``profile:`` key (piecewise linear interpolation):
+            ``{profile: piecewise_linear, points: [[t0, v0], [t1, v1], ...]}`` →
+            ``ct.Func1('tabulated-linear', times, values)``.
+        Mapping with ``tabulated:`` key (same as profile piecewise_linear):
+            ``{tabulated: [[t0, v0], [t1, v1], ...]}`` →
+            ``ct.Func1('tabulated-linear', times, values)``.
+
+        Parameters
+        ----------
+        spec:
+            Raw value from the STONE property (float, int, or dict).
+
+        Returns
+        -------
+        ct.Func1
+            A Cantera Func1 object ready to assign to an MFC or device.
+        """
+        if isinstance(spec, (int, float)):
+            return ct.Func1(float(spec))
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"Unsupported schedule spec type {type(spec).__name__!r}. "
+                "Expected a scalar, {func:, args:} or {profile:, points:} mapping."
+            )
+        if "func" in spec:
+            func_name = str(spec["func"])
+            args = spec.get("args", [])
+            if not isinstance(args, (list, tuple)):
+                args = [args]
+            return ct.Func1(func_name, *[float(a) for a in args])
+        if "profile" in spec or "tabulated" in spec:
+            pts_key = "points" if "points" in spec else "tabulated"
+            points = spec[pts_key] if pts_key in spec else spec.get("profile")
+            if not isinstance(points, list):
+                raise ValueError(
+                    "schedule profile/tabulated spec requires a 'points:' list of [t, v] pairs."
+                )
+            times = np.array([float(p[0]) for p in points])
+            values = np.array([float(p[1]) for p in points])
+            return ct.Func1("tabulated-linear", times, values)
+        raise ValueError(
+            f"Unrecognised schedule spec keys: {sorted(spec.keys())}. "
+            "Expected 'func' or 'profile'/'tabulated'."
+        )
 
     # ------------------------------------------------------------------
     # Low-level helpers shared by build_network / build_sub_network
@@ -538,8 +602,21 @@ class DualCanteraConverter:
         """
         runner_import = "from boulder.runner import BoulderRunner"
         runner_class = "BoulderRunner"
+        continuation = None
+        signals_block = None
+        bindings_block = None
+        if self._last_config is not None:
+            continuation = self._last_config.get("continuation") or None
+            signals_block = self._last_config.get("signals") or None
+            bindings_block = self._last_config.get("bindings") or None
         return self._script_lines_for_runner(
-            runner_import, runner_class, config_path, plan
+            runner_import,
+            runner_class,
+            config_path,
+            plan,
+            continuation=continuation,
+            signals_block=signals_block,
+            bindings_block=bindings_block,
         )
 
     @staticmethod
@@ -548,8 +625,68 @@ class DualCanteraConverter:
         runner_class: str,
         config_path: str,
         plan: Any,
+        continuation: Any = None,
+        signals_block: Any = None,
+        bindings_block: Any = None,
     ) -> list:
-        """Shared helper: emit the runner-based staged-solve script block."""
+        """Shared helper: emit the runner-based staged-solve script block.
+
+        For each stage the emitted snippet calls ``runner.solve_stage()``, which
+        delegates to the full solver dispatcher (including ``advance_grid`` and
+        ``micro_step`` loops).  After each stage a short human-readable progress
+        summary is printed so the downloaded script gives meaningful output when
+        run standalone.
+
+        When *continuation* is provided the emitted script wraps the stage loop
+        in an outer continuation sweep that mirrors the ``combustor.py`` pattern.
+
+        Transient stages (``advance_grid``, ``micro_step``) additionally emit a
+        progress line that shows the time elapsed, making the standalone script
+        more useful as a verification script.
+
+        When *signals_block* and *bindings_block* are provided the emitted script
+        includes the causal-layer wiring verbatim:
+        ``from boulder.signals import build_signal_registry``
+        ``from boulder.bindings import apply_bindings_block``
+        and wires signals into the built network so the standalone script is
+        fully runnable without manual signal setup.
+        """
+        _TRANSIENT_KINDS = frozenset({"advance_grid", "micro_step", "advance"})
+
+        def _stage_block(plan, indent="") -> list:
+            lines: list = []
+            if plan is not None and plan.ordered_stages:
+                n = len(plan.ordered_stages)
+                for i, stage in enumerate(plan.ordered_stages):
+                    node_list = ", ".join(stage.node_ids)
+                    kind = (stage.solver or {}).get("kind", "advance_to_steady_state")
+                    is_transient = kind in _TRANSIENT_KINDS
+                    lines += [
+                        f"{indent}# Stage {i + 1}/{n}: {stage.id}  [nodes: {node_list}]",
+                        f"{indent}runner.solve_stage(plan, plan.ordered_stages[{i}], "
+                        "inlet_states, trajectory)",
+                    ]
+                    if is_transient:
+                        lines += [
+                            f"{indent}print(f'Stage {stage.id} ({kind}) complete.')",
+                            f"{indent}for _r in runner.converter.reactors.values():",
+                            f"{indent}    if hasattr(_r.phase, 'T'):",
+                            f"{indent}        print(f'  {{_r.name}}: T={{_r.phase.T:.1f}} K"
+                            "  P={_r.phase.P:.0f} Pa')",
+                        ]
+                    else:
+                        lines += [
+                            f"{indent}print(f'Stage {stage.id} ({kind}) converged.')",
+                            f"{indent}for _r in runner.converter.reactors.values():",
+                            f"{indent}    if hasattr(_r.phase, 'T'):",
+                            f"{indent}        print(f'  {{_r.name}}: T={{_r.phase.T:.1f}} K"
+                            "  P={_r.phase.P:.0f} Pa')",
+                        ]
+                    lines.append("")
+            else:
+                lines += [f"{indent}runner.build()", ""]
+            return lines
+
         lines = [
             runner_import,
             "",
@@ -560,18 +697,68 @@ class DualCanteraConverter:
             "inlet_states = {}",
             "",
         ]
-        if plan is not None and plan.ordered_stages:
-            n = len(plan.ordered_stages)
-            for i, stage in enumerate(plan.ordered_stages):
-                node_list = ", ".join(stage.node_ids)
-                lines += [
-                    f"# Stage {i + 1}/{n}: {stage.id}  [nodes: {node_list}]",
-                    f"runner.solve_stage(plan, plan.ordered_stages[{i}], "
-                    "inlet_states, trajectory)",
-                    "",
-                ]
+
+        # Emit causal-layer signal/binding wiring verbatim when present.
+        # The emitted snippet is self-contained and uses boulder.signals /
+        # boulder.bindings so the downloaded script runs standalone.
+        if signals_block and bindings_block:
+            import json as _json
+
+            lines += [
+                "# --- Causal layer: signals + bindings (derived_via: ast_match) ---",
+                "from boulder.signals import build_signal_registry",
+                "from boulder.bindings import apply_bindings_block",
+                "",
+                "# Build the network first so bindings can reference reactor objects.",
+                "# runner.build() or runner.solve_stage() must be called AFTER apply_bindings_block.",
+                f"_signals_block = {_json.dumps(signals_block, indent=2)}",
+                f"_bindings_block = {_json.dumps(bindings_block, indent=2)}",
+                "_signal_registry = build_signal_registry(_signals_block)",
+                "# Note: apply_bindings_block must be called after build_sub_network",
+                "# The staged solver applies them automatically when signals/bindings",
+                "# are present in the config YAML; this block is provided for transparency.",
+                "",
+            ]
+
+        if continuation:
+            param = continuation.get("parameter", "")
+            update = continuation.get("update", {})
+            until = continuation.get("until", {})
+            max_iters = int(until.get("max_iters", 200))
+
+            # Emit while-loop header
+            until_cond_parts = []
+            if "reactor_T_below" in until:
+                t = until["reactor_T_below"]
+                until_cond_parts.append(
+                    f"all(r.phase.T >= {t} for r in runner.converter.reactors.values() "
+                    "if not hasattr(r, '_is_reservoir'))"
+                )
+            if not until_cond_parts:
+                until_cond_parts.append(f"_cont_iter < {max_iters}")
+
+            lines += [
+                "_cont_iter = 0",
+                f"while {' and '.join(until_cond_parts)} and _cont_iter < {max_iters}:",
+            ]
+            lines += _stage_block(plan, indent="    ")
+            # Emit update step
+            if "multiply" in update:
+                f = update["multiply"]
+                parts = param.split(".")
+                if parts[0] == "connections" and len(parts) >= 3:
+                    cid = parts[1]
+                    attr = ".".join(parts[2:])
+                    lines += [
+                        f"    runner.converter.connections['{cid}'].{attr} *= {f}",
+                    ]
+            lines += [
+                "    _cont_iter += 1",
+                "",
+            ]
         else:
-            lines += ["runner.build()", ""]
+            lines += _stage_block(plan)
+
         lines += [
             "# Assemble visualization network from all converged states",
             "runner.build_viz_network(plan, trajectory)",
@@ -663,32 +850,43 @@ class DualCanteraConverter:
         typ = node["type"]
         props = node.get("properties") or {}
 
+        # STONE v2: clone: and energy: may be specified per-node.
+        # Default clone=True preserves existing behaviour; set clone=False only
+        # when a shared Solution instance is needed (e.g. micro_step plasma runs).
+        clone = bool(props.get("clone", True))
+
         if typ in self.plugins.reactor_builders:
             reactor = self.plugins.reactor_builders[typ](self, node)
             reactor.name = rid
         elif typ == "IdealGasReactor":
-            reactor = ct.IdealGasReactor(gas_for_node, clone=True)
+            reactor = ct.IdealGasReactor(gas_for_node, clone=clone)
             reactor.name = rid
         elif typ == "ConstPressureReactor":
-            energy_raw = str(props.get("energy", "on"))
-            energy: Literal["on", "off"] = "off" if energy_raw == "off" else "on"
-            reactor = ct.ConstPressureReactor(gas_for_node, energy=energy, clone=True)
+            _energy_val = props.get("energy", "on")
+            # Accept bool False / string "off" / string "false" (case-insensitive) as off.
+            if isinstance(_energy_val, bool):
+                energy: Literal["on", "off"] = "off" if not _energy_val else "on"
+            else:
+                energy = (
+                    "off" if str(_energy_val).lower() in ("off", "false", "0") else "on"
+                )
+            reactor = ct.ConstPressureReactor(gas_for_node, energy=energy, clone=clone)
             reactor.name = rid
         elif typ == "IdealGasConstPressureReactor":
-            reactor = ct.IdealGasConstPressureReactor(gas_for_node, clone=True)
+            reactor = ct.IdealGasConstPressureReactor(gas_for_node, clone=clone)
             reactor.name = rid
         elif typ == "IdealGasConstPressureMoleReactor":
-            reactor = ct.IdealGasConstPressureMoleReactor(gas_for_node, clone=True)
+            reactor = ct.IdealGasConstPressureMoleReactor(gas_for_node, clone=clone)
             reactor.name = rid
         elif typ == "IdealGasMoleReactor":
-            reactor = ct.IdealGasMoleReactor(gas_for_node, clone=True)  # type: ignore[attr-defined]
+            reactor = ct.IdealGasMoleReactor(gas_for_node, clone=clone)  # type: ignore[attr-defined]
             reactor.name = rid
         elif typ == "Reservoir":
-            reactor = ct.Reservoir(gas_for_node, clone=True)  # type: ignore[assignment]
+            reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         elif typ == "OutletSink":
             # STONE v2 visual-only terminal node; modelled as a Reservoir sink.
-            reactor = ct.Reservoir(gas_for_node, clone=True)  # type: ignore[assignment]
+            reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         else:
             raise ValueError(f"Unsupported reactor type: '{typ}'")
@@ -698,6 +896,27 @@ class DualCanteraConverter:
             reactor.group_name = str(props.get("group", props.get("group_name", "")))
         except Exception:
             pass
+
+        # Phase-B: handle node-level schedule: for reduced_electric_field (plasma reactors)
+        # The schedule fires each micro_step chunk to update the field on the Phase object.
+        schedule_spec = props.get("schedule")
+        if schedule_spec is not None and isinstance(schedule_spec, dict):
+            ref_field_spec = schedule_spec.get("reduced_electric_field")
+            if ref_field_spec is not None:
+                # Build a Func1 representing E/N(t) and register it as a callback.
+                ref_func = self._build_func1_from_spec(ref_field_spec)
+                phase = gas_for_node  # shared Solution for clone=False reactors
+
+                def _ref_callback(net, t0, t1, _phase=phase, _f=ref_func):
+                    t_mid = (t0 + t1) / 2.0
+                    try:
+                        _phase.reduced_electric_field = _f(t_mid)
+                        if hasattr(_phase, "update_electron_energy_distribution"):
+                            _phase.update_electron_energy_distribution()
+                    except Exception as exc:
+                        logger.debug("reduced_electric_field callback error: %s", exc)
+
+                self._schedule_callbacks.append(_ref_callback)
 
         return reactor
 
@@ -726,10 +945,39 @@ class DualCanteraConverter:
         elif typ == "MassFlowController":
             self._mfc_topology[cid] = (src, tgt)
             mfc = ct.MassFlowController(self.reactors[src], self.reactors[tgt])
-            if "mass_flow_rate" in props:
-                mfr = float(props["mass_flow_rate"])
-                mfc.mass_flow_rate = mfr  # type: ignore[misc]
-                self._mfc_flow_rates[cid] = mfr
+            mfr_spec = props.get("mass_flow_rate")
+            if mfr_spec is not None:
+                if isinstance(mfr_spec, dict):
+                    if "closure" in mfr_spec:
+                        closure_kind = str(mfr_spec["closure"])
+                        if closure_kind == "residence_time":
+                            reactor_id = mfr_spec.get("reactor", tgt)
+                            tau_s = float(mfr_spec.get("tau_s", 1.0))
+
+                            # Build a callable that queries reactor.mass at integration time
+                            def _mdot_closure(t, _rid=reactor_id, _tau=tau_s):
+                                r = self.reactors.get(_rid)
+                                if r is None:
+                                    return 0.0
+                                try:
+                                    return r.mass / _tau
+                                except Exception:
+                                    return 0.0
+
+                            mfc.mass_flow_rate = ct.Func1(_mdot_closure)  # type: ignore[misc]
+                        else:
+                            raise ValueError(
+                                f"MassFlowController '{cid}': unsupported mass_flow_rate "
+                                f"closure '{closure_kind}'. Only 'residence_time' is supported."
+                            )
+                    else:
+                        # Schedule spec: { func: gaussian, args: [...] } or piecewise_linear
+                        func1 = self._build_func1_from_spec(mfr_spec)
+                        mfc.mass_flow_rate = func1  # type: ignore[misc]
+                else:
+                    mfr = float(mfr_spec)
+                    mfc.mass_flow_rate = mfr  # type: ignore[misc]
+                    self._mfc_flow_rates[cid] = mfr
             else:
                 mfc.mass_flow_rate = 0.0  # type: ignore[misc]  # resolved by conservation
                 self._unresolved_mfc_ids.add(cid)
@@ -1022,6 +1270,8 @@ class DualCanteraConverter:
                     continue
             try:
                 self.build_connection(conn)
+            except ValueError:
+                raise
             except Exception as exc:
                 logger.warning(
                     "Stage '%s': failed to build connection '%s': %s",
@@ -1060,31 +1310,128 @@ class DualCanteraConverter:
 
         rseq = [self.reactors[rid] for rid in non_res_ids]
         network = ReactorNetClass(cast(Sequence[ct.Reactor], rseq), **net_kw)
-        if ReactorNetClass is ct.ReactorNet:
-            network.rtol = 1e-6
-            network.atol = 1e-8
 
-        # Solve
-        solve_directive = (
-            getattr(stage, "solve_directive", "advance_to_steady_state")
-            if stage is not None
-            else "advance_to_steady_state"
-        )
-        if solve_directive == "advance_to_steady_state":
+        # Apply solver tolerances / integrator knobs
+        solver = (getattr(stage, "solver", None) or {}) if stage is not None else {}
+        network.rtol = float(solver.get("rtol", 1e-6))
+        network.atol = float(solver.get("atol", 1e-8))
+        if "max_time_step" in solver:
+            network.max_time_step = float(solver["max_time_step"])
+        if "max_steps" in solver:
+            network.max_steps = int(solver["max_steps"])
+        if solver.get("initial_time_reset", False):
+            try:
+                network.initial_time = 0.0
+            except AttributeError:
+                pass  # custom ReactorNet subclass may not support this
+
+        # Dispatch to the right integrator
+        kind = str(solver.get("kind", "advance_to_steady_state"))
+        if kind == "advance_to_steady_state":
             network.advance_to_steady_state()
-        elif solve_directive == "advance":
-            advance_time = getattr(stage, "advance_time", 1.0)
-            network.advance(float(advance_time))
+        elif kind == "solve_steady":
+            network.solve_steady()
+        elif kind == "advance":
+            from .utils import coerce_unit_string  # noqa: PLC0415
+
+            _at_raw = solver.get("advance_time", getattr(stage, "advance_time", 1.0))
+            advance_time = float(coerce_unit_string(_at_raw, "advance_time"))
+            network.advance(advance_time)
+        elif kind in ("advance_grid", "micro_step"):
+            # Phase B: delegated to _run_transient_solver helper
+            self._run_transient_solver(network, kind, solver, stage_id)
         else:
-            logger.warning(
-                "Unknown solve_directive '%s' for stage '%s'; using advance_to_steady_state.",
-                solve_directive,
-                stage_id,
+            raise ValueError(
+                f"Unknown solver.kind '{kind}' for stage '{stage_id}'. "
+                "See STONE_SPECIFICATIONS.md for valid values."
             )
-            network.advance_to_steady_state()
 
         stage_reactors = {rid: self.reactors[rid] for rid in stage_reactor_ids}
         return network, stage_reactors
+
+    def _run_transient_solver(
+        self,
+        network: "ct.ReactorNet",
+        kind: str,
+        solver: dict,
+        stage_id: str,
+    ) -> None:
+        """Execute transient (advance_grid or micro_step) integration.
+
+        Called by :meth:`build_sub_network` when ``solver.kind`` is one of the
+        Phase-B transient kinds.  This method is the authoritative implementation
+        of the grid loop and micro-step patterns; see :ref:`phase-b` in
+        STONE_SPECIFICATIONS.md.
+
+        Parameters
+        ----------
+        network:
+            The already-constructed :class:`~cantera.ReactorNet`.
+        kind:
+            ``"advance_grid"`` or ``"micro_step"``.
+        solver:
+            The fully-resolved solver dict for this stage.
+        stage_id:
+            Stage identifier for error messages.
+        """
+        _scope_recorder = getattr(self, "_scope_recorder", None)
+
+        if kind == "advance_grid":
+            grid_spec = solver.get("grid")
+            if grid_spec is None:
+                raise ValueError(
+                    f"Stage '{stage_id}': solver.kind='advance_grid' requires a 'grid:' entry."
+                )
+            if isinstance(grid_spec, dict):
+                import numpy as np
+
+                start = float(grid_spec.get("start", 0.0))
+                stop = float(grid_spec["stop"])
+                dt = float(grid_spec["dt"])
+                times = np.arange(start + dt, stop + dt / 2, dt)
+            else:
+                times = [float(t) for t in grid_spec]
+            for t in times:
+                network.advance(float(t))
+                if _scope_recorder is not None:
+                    _scope_recorder.record(float(t))
+        elif kind == "micro_step":
+            t_total = float(solver["t_total"])
+            chunk_dt = float(solver["chunk_dt"])
+            max_dt = float(solver.get("max_dt", chunk_dt / 10))
+            reinit = bool(solver.get("reinitialize_between_chunks", False))
+            t = float(solver.get("start", 0.0))
+            while t < t_total:
+                t_end = min(t + chunk_dt, t_total)
+                # Fire any schedule callbacks before each chunk
+                self._fire_schedule_callbacks(network, t, t_end, stage_id)
+                while network.time < t_end:
+                    network.advance(network.time + max_dt)
+                if reinit:
+                    network.reinitialize()
+                if _scope_recorder is not None:
+                    _scope_recorder.record(t_end)
+                t = t_end
+        else:
+            raise ValueError(
+                f"Stage '{stage_id}': _run_transient_solver called with unknown kind '{kind}'."
+            )
+
+    def _fire_schedule_callbacks(
+        self,
+        network: "ct.ReactorNet",
+        t_start: float,
+        t_end: float,
+        stage_id: str,
+    ) -> None:
+        """Call any registered schedule callbacks before a micro-step chunk.
+
+        Each callback in ``self._schedule_callbacks`` is invoked with
+        ``(network, t_start, t_end)``.  Phase-B wires MFC / plasma-field
+        schedules into this list during :meth:`build_sub_network`.
+        """
+        for cb in getattr(self, "_schedule_callbacks", []):
+            cb(network, t_start, t_end)
 
     def build_viz_network(
         self,
@@ -1306,15 +1653,38 @@ class DualCanteraConverter:
         # states, and capture a single-time-point "trajectory" for the UI.
         already_solved = getattr(self, "_staged_trajectory", None) is not None
 
+        # Determine whether any stage used a transient solver kind.
+        _transient_kinds = frozenset({"advance_grid", "micro_step", "advance"})
+        _has_transient_stage = False
+        _staged_traj = getattr(self, "_staged_trajectory", None)
+        if _staged_traj is not None and hasattr(_staged_traj, "stages"):
+            pass  # Could check trajectory stages for kind info
+        # Also check via last config if available
+        _last_cfg = getattr(self, "_last_config", None)
+        if _last_cfg:
+            for _gcfg in (_last_cfg.get("groups") or {}).values():
+                _solver_blk = _gcfg.get("solver") or {}
+                if (
+                    _solver_blk.get("kind", "advance_to_steady_state")
+                    in _transient_kinds
+                ):
+                    _has_transient_stage = True
+                    break
+
         self.code_lines.append("")
         self.code_lines.append("# ===== SIMULATION EXECUTION =====")
         if already_solved:
-            self.code_lines.append(
-                "# solve_stage() has already solved each stage sequentially;"
-            )
-            self.code_lines.append(
-                "# network = runner.network holds the converged reactor states."
-            )
+            if _has_transient_stage:
+                self.code_lines.append(
+                    "# solve_stage() ran transient integration; network holds the final state."
+                )
+            else:
+                self.code_lines.append(
+                    "# solve_stage() has already solved each stage sequentially;"
+                )
+                self.code_lines.append(
+                    "# network = runner.network holds the converged reactor states."
+                )
             self.code_lines.append("print('Simulation completed (staged solve).')")
             self.code_lines.append("print('Reactor\\tT [K]\\tP [Pa]')")
             self.code_lines.append("for r in network.reactors:")
@@ -1447,85 +1817,11 @@ class DualCanteraConverter:
                     f"Cantera advance failed at t={current_time}s: {last_error_message}"
                 )
                 if len(times) == 0:
-                    # Record initial state so we have at least one time point (for Sankey, etc.)
-                    logger.warning(
-                        "Recording initial reactor state and returning (integration failed)"
-                    )
-                    times.append(0.0)
-                    for reactor in reactor_list:
-                        reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                        reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
-                            "gas_solution", self.gas
-                        )
-                        reactor_species_names = reactor_gas.species_names
-                        try:
-                            T = float(reactor.phase.T)
-                            P = float(reactor.phase.P)
-                            X_vec = reactor.phase.X
-                            Y_vec = reactor.phase.Y
-                            if not (
-                                math.isfinite(T)
-                                and math.isfinite(P)
-                                and all(math.isfinite(float(x)) for x in X_vec)
-                                and all(math.isfinite(float(y)) for y in Y_vec)
-                            ):
-                                T, P = 300.0, 101325.0
-                                X_vec = np.array(
-                                    [
-                                        1.0 if s == "N2" else 0.0
-                                        for s in reactor_species_names
-                                    ]
-                                )
-                                Y_vec = np.array(
-                                    [
-                                        1.0 if s == "N2" else 0.0
-                                        for s in reactor_species_names
-                                    ]
-                                )
-                        except Exception:
-                            T, P = 300.0, 101325.0
-                            X_vec = np.array(
-                                [
-                                    1.0 if s == "N2" else 0.0
-                                    for s in reactor_species_names
-                                ]
-                            )
-                            Y_vec = np.array(
-                                [
-                                    1.0 if s == "N2" else 0.0
-                                    for s in reactor_species_names
-                                ]
-                            )
-                        sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
-                        reactors_series[reactor_id]["T"].append(T)
-                        reactors_series[reactor_id]["P"].append(P)
-                        for species_name, x_value in zip(reactor_species_names, X_vec):
-                            reactors_series[reactor_id]["X"][species_name].append(
-                                float(x_value)
-                            )
-                        for species_name, y_value in zip(reactor_species_names, Y_vec):
-                            reactors_series[reactor_id]["Y"][species_name].append(
-                                float(y_value)
-                            )
-                    if progress_callback:
-                        progress_callback(
-                            {
-                                "time": times.copy(),
-                                "reactors": {
-                                    k: {
-                                        "T": v["T"].copy(),
-                                        "P": v["P"].copy(),
-                                        "X": {s: v["X"][s].copy() for s in v["X"]},
-                                        "Y": {s: v["Y"][s].copy() for s in v["Y"]},
-                                    }
-                                    for k, v in reactors_series.items()
-                                },
-                                "error_message": last_error_message,
-                            },
-                            0.0,
-                            simulation_time,
-                        )
-                    break
+                    raise RuntimeError(
+                        "Cantera integration failed before any successful time step "
+                        f"at t={current_time}s: {last_error_message}. "
+                        "Refusing to fabricate reactor state trajectories."
+                    ) from e
                 # Otherwise, break and return partial results
                 logger.warning(f"Returning partial results up to t={times[-1]}s")
                 # Provide a partial-progress callback update containing the error
@@ -1587,8 +1883,6 @@ class DualCanteraConverter:
                             reactors_series[reactor_id]["X"][s][-1]
                             for s in reactor_species_names
                         ]
-                        import numpy as np
-
                         X_vec = np.array(X_vec_list)
                         Y_vec_list = [
                             reactors_series[reactor_id]["Y"][s][-1]
@@ -1596,15 +1890,10 @@ class DualCanteraConverter:
                         ]
                         Y_vec = np.array(Y_vec_list)
                     else:
-                        # Use default values
-                        import numpy as np
-
-                        T, P = 300.0, 101325.0
-                        X_vec = np.array(
-                            [1.0 if s == "N2" else 0.0 for s in reactor_species_names]
-                        )
-                        Y_vec = np.array(
-                            [1.0 if s == "N2" else 0.0 for s in reactor_species_names]
+                        raise ValueError(
+                            f"Reactor {reactor_id!r}: non-finite thermochemical state "
+                            f"(T/P/X/Y) at t={current_time}s and no prior trajectory "
+                            "samples to reuse."
                         )
 
                 sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)

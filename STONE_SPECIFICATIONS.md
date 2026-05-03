@@ -28,12 +28,17 @@ ______________________________________________________________________
 
 ```
 metadata   phases   settings   stages   network   export   sweeps   scenarios
+continuation   signals   bindings   scopes
 ```
 
 Dynamic stage block names (declared under `stages:`) are also allowed at the top level.
 
 **Reserved names that cannot be used as stage ids:** `metadata`, `phases`, `settings`, `stages`,
-`network`, `nodes`, `connections`.
+`network`, `nodes`, `connections`, `signals`, `bindings`, `scopes`, `continuation`.
+
+The `signals:`, `bindings:`, and `scopes:` blocks form Boulder's **causal layer** — a declarative
+way to express time-varying drivers, state-coupled forcing, and trajectory observers in the YAML.
+They are documented in full in Section 8 (Causal Layer).
 
 ______________________________________________________________________
 
@@ -67,6 +72,84 @@ Boulder default.
 Simulation-level settings passed to the solver and post-processing. Schema is open; see individual
 plugin documentation for recognized keys.
 
+#### `settings.solver:` — global integrator defaults
+
+An optional `solver:` sub-block under `settings:` sets default integrator knobs applied to every
+stage unless the stage overrides them with its own `solver:` block (see Stage metadata below).
+
+```yaml
+settings:
+  solver:
+    mode: steady                    # "steady" | "transient" — explicit label (optional; auto-derived)
+    kind: advance_to_steady_state   # integrator kind (see table below)
+    rtol: 1.0e-9                    # relative tolerance (default 1e-6)
+    atol: 1.0e-15                   # absolute tolerance (default 1e-8)
+    max_time_step: 1.0e-5           # optional: maximum integrator time step (s)
+    max_steps: 10000                # optional: maximum integrator steps per advance
+    initial_time_reset: false       # optional: reset integrator clock to 0 before solve
+```
+
+##### `solver.mode` — steady vs transient label
+
+`solver.mode` is an optional, human-readable label (`steady` or `transient`) that summarises which
+class of solver is active. It is surfaced in the Boulder GUI (as a badge and as a toggle that
+adapts the visible control fields) and in generated scripts.
+
+**When `mode:` is absent**, Boulder auto-derives it from `kind:`:
+
+| `solver.kind` | Implied `solver.mode` | Relevant extra keys |
+|-----------------------------|-----------------------|----------------------------------------------|
+| `advance_to_steady_state` | `steady` | `rtol`, `atol`, `max_steps` |
+| `solve_steady` | `steady` | `rtol`, `atol`, `max_steps` |
+| `advance` | `transient` | `advance_time` |
+| `advance_grid` | `transient` | `grid: { start, stop, dt }` |
+| `micro_step` | `transient` | `t_total`, `chunk_dt`, `max_dt` |
+
+**When `mode:` is present** and contradicts `kind:`, a `ValueError` is raised at config-load time.
+Contradiction examples: `mode: steady` with `kind: micro_step`, or `mode: transient` with
+`kind: solve_steady`.
+
+The resolved `mode` is always present in the normalised config dict (auto-filled if absent) so
+downstream consumers (GUI, FMU export, generated scripts) can read it without re-deriving.
+
+`solver.kind` controls which Cantera integrator call is used per stage:
+
+| `kind` | Cantera call | Extra required keys |
+|---|---|---|
+| `advance_to_steady_state` | `network.advance_to_steady_state()` | — |
+| `solve_steady` | `network.solve_steady()` | — |
+| `advance` | `network.advance(advance_time)` | `advance_time` |
+| `advance_grid` | loop `network.advance(t)` over a time grid | `grid` |
+| `micro_step` | chunked micro-step loop + optional `reinitialize` | `t_total`, `chunk_dt`, `max_dt` |
+
+`advance_to_steady_state` is the default when no `solver:` block is present.
+
+`solve_steady` uses Cantera's built-in steady-state solver (more robust near extinction than
+`advance_to_steady_state` for well-stirred reactor sweeps).
+
+`advance_grid` accepts either a shorthand or an explicit time list:
+
+```yaml
+solver:
+  kind: advance_grid
+  grid:
+    start: 0.0
+    stop: 0.12         # seconds
+    dt: 4.0e-4         # output time step
+```
+
+`micro_step` drives the network in small chunks and optionally reinitializes the integrator between
+chunks (required when source terms change discontinuously, e.g. plasma discharge pulses):
+
+```yaml
+solver:
+  kind: micro_step
+  t_total: 90e-9       # total integration time (s)
+  chunk_dt: 1e-9       # chunk size (s)
+  max_dt: 1e-10        # maximum integrator sub-step (s)
+  reinitialize_between_chunks: true   # call network.reinitialize() after each chunk
+```
+
 ### `export:`
 
 KPI functions, figure generators, calc-note targets. Consumed by `bloc.yaml_utils` and
@@ -84,9 +167,30 @@ Use `stages:` when the reactor network is solved in sequential steps (e.g. torch
 stages:
   torch_stage:
     mechanism: gri30.yaml       # required
-    solve: advance              # required: "advance" or "advance_to_steady_state"
-    advance_time: 1.0e-3        # required iff solve == advance; forbidden otherwise
+    solver:                     # optional; overrides settings.solver for this stage
+      mode: transient           # optional: "steady" | "transient" (auto-derived from kind)
+      kind: advance             # "advance_to_steady_state" | "solve_steady" | "advance"
+                                #   | "advance_grid" | "micro_step"
+      advance_time: 1.0e-3     # required iff kind == advance; forbidden otherwise
+      rtol: 1.0e-9             # optional per-stage tolerance overrides
+      atol: 1.0e-15
+      max_time_step: 1.0e-5
+      max_steps: 20000
+      initial_time_reset: false # reset integrator clock before this stage's solve
 ```
+
+**Legacy form** (deprecated, still accepted with a warning):
+
+```yaml
+stages:
+  torch_stage:
+    mechanism: gri30.yaml
+    solve: advance              # mapped to solver.kind
+    advance_time: 1.0e-3        # mapped to solver.advance_time
+```
+
+The legacy `solve:` / `advance_time:` keys at the stage level are silently promoted to
+`solver: { kind: ..., advance_time: ... }` at config-load time. New files should use `solver:`.
 
 ### Stage content blocks
 
@@ -234,6 +338,33 @@ Each reactor kind defines one sizing basis. Authoring multiple sizing fields on 
 (e.g., both `volume:` and `t_res_s:`) is invalid unless the kind schema explicitly allows the
 combination.
 
+### `clone:` — phase sharing between reactors
+
+By default Boulder creates an independent copy of the Cantera `Solution` object for each reactor
+(`clone: true`). Set `clone: false` only when two reactors must share the same `Solution` instance
+(e.g. a `ConstPressureReactor` feeding directly from a mutated `PlasmaPhase`):
+
+```yaml
+- id: plasma_reactor
+  ConstPressureReactor:
+    energy: "off"
+    clone: false
+```
+
+`clone: false` is only meaningful when the `Solution` carrying plasma state or custom source terms
+is mutated externally between integrator steps (e.g. `micro_step` with `schedule:` callbacks).
+For all other cases use the default `clone: true`.
+
+### `energy:` — enable/disable energy equation
+
+Applicable to `ConstPressureReactor` and `IdealGasConstPressureReactor`:
+
+```yaml
+- id: isothermal
+  ConstPressureReactor:
+    energy: "off"   # "on" (default) or "off"
+```
+
 ### `Reservoir`
 
 Requires physical boundary state:
@@ -272,6 +403,85 @@ rate cannot be uniquely determined, build fails with a conservation error.
     mass_flow_rate: 0.1 kg/s
   source: feed
   target: reactor
+```
+
+`mass_flow_rate:` may also be a **schedule spec** (time-varying via `Func1`), a **closure** (a
+Python callable bound to a reactor), or omitted entirely (mass-conservation auto-resolve). All
+forms are described below.
+
+#### `mass_flow_rate:` — schedule spec (time-varying)
+
+The spec is converted to a Cantera `Func1` and passed to `mfc.mass_flow_rate`. The schedule fires
+automatically during `micro_step` integration (no special config needed):
+
+```yaml
+- id: inlet_mfc
+  MassFlowController:
+    mass_flow_rate:
+      func: sin              # Cantera named function
+      args: [0.05, 100.0, 0.0]   # amplitude, frequency, phase
+  source: inlet
+  target: reactor
+```
+
+```yaml
+- id: inlet_mfc
+  MassFlowController:
+    mass_flow_rate:
+      profile: piecewise_linear
+      points:             # [time_s, value_kg/s]
+        - [0.0, 0.0]
+        - [1e-9, 0.01]
+        - [5e-9, 0.05]
+        - [9e-9, 0.0]
+  source: inlet
+  target: reactor
+```
+
+#### `mass_flow_rate:` — closure (residence-time style)
+
+A `closure:` spec binds the mass flow rate to a live reactor property, evaluated each integrator
+step. Currently supported:
+
+- `residence_time` — sets `mdot(t) = reactor.mass / tau_s` where `tau_s` is the target residence
+  time in seconds. This is the standard PSR closure.
+
+```yaml
+- id: inlet_to_psr
+  MassFlowController:
+    mass_flow_rate:
+      closure: residence_time
+      reactor: psr          # id of the reactor whose mass is used
+      tau_s: 1.0e-3         # target residence time (seconds)
+  source: inlet
+  target: psr
+```
+
+The `closure:` form uses a Python callable wrapper (not a `Func1`) and is compatible with all
+solver kinds including `solve_steady` and `advance_to_steady_state`.
+
+### Node `schedule:` block
+
+Reactor nodes may carry a `schedule:` block to register time-varying source terms that are
+evaluated before each `micro_step` chunk. Currently supported:
+
+- `reduced_electric_field:` — updates `gas.reduced_electric_field` and calls
+  `gas.update_electron_energy_distribution()` (required for `nanosecond_pulse_discharge`-style
+  plasma simulations).
+
+```yaml
+- id: plasma_reactor
+  ConstPressureReactor:
+    energy: "off"
+    clone: false
+    schedule:
+      reduced_electric_field:
+        profile: piecewise_linear
+        points:
+          - [0.0e-9, 500.0]    # Td
+          - [10.0e-9, 500.0]
+          - [10.001e-9, 0.0]
+          - [90.0e-9, 0.0]
 ```
 
 ### `Valve`
@@ -346,7 +556,42 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 10. Valid Examples
+## 10. Continuation Sweeps — `continuation:` block
+
+The optional top-level `continuation:` block drives an outer loop that mutates one
+parameter across sequential steady-state (or transient) solves, collecting a trajectory of results.
+This is the STONE equivalent of the combustor extinction sweep in `combustor.py`.
+
+```yaml
+continuation:
+  parameter: connections.inlet_mfc.mass_flow_rate   # dotted path to target attribute
+  update:
+    multiply: 0.9     # scale factor per iteration  (alternatively: set: <value>, list: [...])
+  until:
+    reactor_T_below: 500.0   # stop when any reactor T drops below this (K)
+    max_iters: 200            # hard cap; at least one of until/max_iters required
+```
+
+`parameter` dotted path resolution:
+
+- `connections.<id>.mass_flow_rate` → `converter.connections[<id>].mass_flow_rate`
+- `nodes.<id>.volume` → `converter.reactors[<id>].volume`
+
+`update` modes:
+
+- `multiply: <factor>` — current value × factor each iteration
+- `set: <value>` — set to a fixed value
+- `list: [v1, v2, ...]` — iterate through explicit values
+
+`until` predicate (all optional; first matched stops the loop):
+
+- `reactor_T_below: <K>` — any non-Reservoir reactor T < value
+- `reactor_T_above: <K>` — any non-Reservoir reactor T > value
+- `max_iters: <N>` — maximum iteration count (always required as safety cap)
+
+______________________________________________________________________
+
+## 11. Valid Examples
 
 ### Single-stage network
 
@@ -564,6 +809,297 @@ network:
 
 *Error: Inline `inlet:` / `outlet:` ports are not valid in STONE v2. Author the edge as an
 explicit connection item in the same block. See STONE_SPECIFICATIONS.md.*
+
+______________________________________________________________________
+
+## 8. Causal Layer — `signals:`, `bindings:`, `scopes:`
+
+Boulder's causal layer lets you express time-varying drivers, state-coupled forcing and trajectory
+observers declaratively in the YAML, without embedding Python code. It is analogous to a minimal
+Simulink block diagram: signals are *source blocks*, bindings are *wires*, and scopes are
+*output probes*.
+
+All three keys are optional. If absent, the existing inline forms (`schedule:`, `closure:`) still
+work unchanged.
+
+______________________________________________________________________
+
+### `signals:` — driver source blocks
+
+A top-level list of named signal definitions. Each entry has an `id:` and exactly one **source-kind
+key**:
+
+```yaml
+signals:
+  - id: pulse
+    Gaussian: { peak: 1.9e-19, center: 24e-9, fwhm: 7.06e-9 }
+
+  - id: tau_sweep
+    PiecewiseLinear:
+      points: [[0.0, 0.1], [5.0, 0.05], [10.0, 0.001]]
+
+  - id: inlet_temp
+    Sine: { amplitude: 50.0, frequency: 1.0, phase: 0.0, offset: 600.0 }
+
+  - id: double_pulse
+    Sum: { inputs: [pulse, pulse] }
+```
+
+#### Source-block reference
+
+| Kind | Required args | Description |
+|-------------------|--------------------------------------------------------|------------------------------------------------------|
+| `Constant` | `value` | Fixed scalar (cf. YAML scalar `mass_flow_rate: 0.1`) |
+| `Sine` | `amplitude`, `frequency` (Hz), `phase` (rad), `offset`| `A·sin(2π·f·t + φ) + offset` |
+| `Gaussian` | `peak`, `center` (s), `fwhm` (s) | Wraps `ct.Func1("Gaussian", [peak, center, fwhm])` |
+| `Step` | `t_step`, `value_before`, `value_after` | Heaviside step at `t_step` |
+| `Ramp` | `t_start`, `t_end`, `value_start`, `value_end` | Linear ramp; constant outside the interval |
+| `PiecewiseLinear` | `points: [[t0, v0], [t1, v1], ...]` | Wraps `ct.Func1("tabulated", ...)` |
+| `FromCSV` | `path`, `time_col`, `value_col`, `interp: linear` | Read from CSV file at build time |
+| `Sum` | `inputs: [signal_id, ...]` | Element-wise sum of prior signals |
+| `Gain` | `input: signal_id`, `k` | `k * signal` |
+| `Integrator` | `input: signal_id`, `x0: 0.0` | `∫ signal dt + x0` (state held by the solver loop) |
+
+**Evaluation order**: sources are built first (in declaration order), then combinators
+(`Sum`, `Gain`, `Integrator`) which may reference prior signal ids. Forward references are an
+error.
+
+______________________________________________________________________
+
+### `bindings:` — wires from signals to network targets
+
+A top-level list of binding rules. Each entry has `source:` (a signal id) and `target:` (a dotted
+path into the network):
+
+```yaml
+bindings:
+  - source: pulse
+    target: nodes.r1.reduced_electric_field
+
+  - source: tau_sweep
+    target: connections.inlet_mfc.tau_s
+
+  - source: inlet_temp
+    target: nodes.r1.temperature     # future: not yet implemented
+```
+
+#### Binding target grammar
+
+| Target path | Effect |
+|------------------------------------------|---------------------------------------------------------------|
+| `connections.<id>.mass_flow_rate` | Sets `MassFlowController.mass_flow_rate = Func1` |
+| `connections.<id>.tau_s` | Updates the `residence_time` closure denominator each step |
+| `nodes.<id>.reduced_electric_field` | Fires a micro_step chunk callback calling `phase.reduced_electric_field = signal(t)` |
+| `continuation.parameters.<name>` | Exposes the signal as a continuation update source |
+
+Unknown or unsupported target paths raise a `ValueError` at build time (no silent fallback).
+
+**Update cadence**: bindings to `nodes.<id>.reduced_electric_field` fire at micro_step chunk
+boundaries (matching the upstream `sim.reinitialize()` pattern). Bindings to MFC `mass_flow_rate`
+are applied as a persistent `ct.Func1` and evaluated by Cantera's integrator at each internal step.
+
+______________________________________________________________________
+
+### `scopes:` — trajectory observers
+
+A top-level list of observer definitions. Each entry captures the time evolution of one variable:
+
+```yaml
+scopes:
+  - variable: nodes.combustor.T
+    output: true          # expose as a result column in BoulderRunner.scopes
+
+  - variable: nodes.r1.X[e]
+    every: 10             # sample every 10 solver steps
+
+  - variable: connections.inlet_mfc.mass_flow_rate
+    file: mdot_history.csv   # flush to CSV at end of stage
+```
+
+#### Scope fields
+
+| Field | Type | Default | Description |
+|------------|---------|---------|-------------------------------------------------------------|
+| `variable` | string | — | Dotted path (same grammar as bindings, read side) |
+| `output` | bool | `false` | Include this variable in `BoulderRunner.scopes` DataFrame |
+| `every` | int | 1 | Sampling stride (1 = every step, 10 = every 10th step) |
+| `file` | string | none | CSV path; written at end of the stage's solve |
+
+`BoulderRunner.scopes` returns a `dict[str, pandas.DataFrame]` keyed by scope `variable`.
+Each DataFrame has columns `t` and `value`.
+
+______________________________________________________________________
+
+### Relationship to inline forms
+
+The existing inline driver syntax continues to work. The causal layer is additive:
+
+| Inline form (still valid) | Causal-layer equivalent |
+|--------------------------------------------------------|------------------------------------------------------------------|
+| `mass_flow_rate: { schedule: { func: gaussian, ... } }` | `signals: [Gaussian ...]` + `bindings: [...mass_flow_rate]` |
+| `mass_flow_rate: { closure: residence_time, tau_s: 0.1 }` | `bindings: [... tau_s]` with a `Constant` signal |
+| `schedule: { reduced_electric_field: { ... } }` on node | `signals: [...]` + `bindings: [... reduced_electric_field]` |
+
+No deprecation warnings at this time; consolidation is a future option.
+
+______________________________________________________________________
+
+### Worked examples — vendored Cantera scripts
+
+These three examples correspond to the scripts in `docs/cantera_examples/` and show how each
+upstream Cantera pattern maps to the causal layer.
+
+#### `nanosecond_pulse_discharge.py` → `micro_step` + `Gaussian` signal
+
+The upstream script applies a Gaussian-shaped electric field pulse (`gaussian_EN`) to a
+`ConstPressureReactor` with `energy: "off"` (plasma mode), advancing in 1 ns chunks with
+`sim.reinitialize()` between chunks.
+
+```yaml
+# derived_via: ast_match
+settings:
+  solver:
+    kind: micro_step
+    t_total: 90e-9       # total pulse window
+    chunk_dt: 1e-9       # 1 ns chunks
+    max_dt: 1e-10        # internal sub-step
+    reinitialize_between_chunks: true
+
+# derived_via: ast_match
+signals:
+  - id: gaussian_EN
+    kind: Gaussian
+    peak: 1.9e-19      # 190 Td peak E/N
+    center: 24e-9      # pulse centre at 24 ns
+    fwhm: 7.06e-9      # full-width at half maximum
+
+# derived_via: ast_match
+bindings:
+  - source: gaussian_EN
+    target: nodes.ConstPressureReactor_0.reduced_electric_field
+
+network:
+  - id: ConstPressureReactor_0
+    ConstPressureReactor:
+      energy: "off"
+      # clone: false — gas phase shared with reservoir
+```
+
+The binding fires at each micro_step chunk boundary, calling
+`phase.reduced_electric_field = gaussian_EN(t)` and `phase.update_electron_energy_distribution()`.
+
+______________________________________________________________________
+
+#### `combustor.py` → `solve_steady` + `closure` + `continuation:`
+
+The upstream script uses a residence-time closure (`def mdot(t): return reactor.mass / tau`) on
+the `MassFlowController` and sweeps `residence_time` down while the reactor temperature stays above
+500 K.
+
+```yaml
+settings:
+  solver:
+    kind: solve_steady
+
+# derived_via: ast_match
+continuation:
+  parameter: residence_time
+  factor: 0.9
+  stop_when:
+    attribute: T
+    less_than: 500.0
+
+network:
+  - id: IdealGasReactor_0
+    IdealGasReactor:
+      volume: 1.0
+      # ...
+
+  - id: MassFlowController_0
+    MassFlowController:
+      closure: residence_time   # derived_via: ast_match
+      tau_s: "{{residence_time}}"
+    source: Reservoir_0
+    target: IdealGasReactor_0
+```
+
+The `continuation:` block mirrors the `while combustor.T > 500: sim.solve_steady(); tau *= 0.9` loop.
+
+______________________________________________________________________
+
+#### `reactor2.py` → `advance_grid`
+
+The upstream script advances two coupled reactors (`r1`: argon, `r2`: methane/air) over 300 equal
+time steps of `4e-4 s` with a `for n in range(300): sim.advance(time)` loop.
+
+```yaml
+# derived_via: ast_match
+settings:
+  solver:
+    kind: advance_grid
+    grid:
+      start: 0.0
+      stop: 0.12       # 300 steps × 4e-4 s
+      dt: 4.0e-4
+
+network:
+  - id: Argon partition
+    IdealGasReactor: { ... }
+    mechanism: air.yaml
+
+  - id: Reacting partition
+    IdealGasReactor: { ... }
+
+  # Piston wall between the two reactors
+  - id: Piston
+    Wall:
+      A: 1.0
+      K: 5.0e-5
+      U: 100.0
+    source: Reacting partition
+    target: Argon partition
+```
+
+No `signals:` or `bindings:` are needed: `reactor2` has no time-varying drivers.
+
+______________________________________________________________________
+
+### `BoulderRunner` public surface (FMU data-shape contract)
+
+After calling `runner.build()` or `runner.solve()`, two properties expose the causal layer
+to downstream consumers such as the GUI, co-simulation masters, and the FMU Path A skeleton
+described in `FMI_FMU_EXPORT.md`:
+
+| Property | Type | Description |
+|-------------------------------|-----------------------------------|-----------------------------------------------------------------|
+| `runner.exposed_inputs` | `dict[str, dict]` | Signals **not** referenced as `source` in any `bindings:` entry |
+| `runner.scopes` | `dict[str, pandas.DataFrame]` | Recorded scope variables; each DataFrame has columns `t`, `value` |
+
+**`exposed_inputs`** is the FMI-3.0 input variable list: each key is the signal `id`, each value
+is the raw spec dict from `signals:`. A signal whose `id` appears as `source` in *any* `bindings:`
+entry is considered wired to an internal network target and is therefore absent from this dict.
+
+```python
+runner = BoulderRunner.from_yaml("nanosecond.yaml").build()
+
+# Signals that an FMU master could override at each doStep:
+for sig_id, spec in runner.exposed_inputs.items():
+    print(sig_id, spec["kind"])   # e.g. "gaussian_EN Gaussian"
+
+# Recorded trajectories per scope variable:
+df = runner.scopes["nodes.r1.T"]   # columns: t, value
+df.plot(x="t", y="value")
+```
+
+No FMU code is generated in this release; these properties define the data shape that
+`boulder.fmi.BoulderFMU` (Path A) will consume. See `FMI_FMU_EXPORT.md` for the full roadmap.
+
+______________________________________________________________________
+
+## 9. Top-level `continuation:` block
+
+See the Continuation section in Section 3 and the worked examples in
+`docs/cantera_upstream_examples.rst`.
 
 ______________________________________________________________________
 

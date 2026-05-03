@@ -104,10 +104,10 @@ def coerce_unit_string(val: Any, property_name: str = "") -> Any:
 
     num_str, unit_str = m.group(1), m.group(2)
     target_unit_name: Optional[str] = _PROPERTY_UNIT_HINTS.get(property_name)
+    ureg = _get_pint_ureg()
+    # Construct Quantity(number, unit) explicitly to avoid Pint's
+    # OffsetUnitCalculusError for offset units like degC / degF.
     try:
-        ureg = _get_pint_ureg()
-        # Construct Quantity(number, unit) explicitly to avoid Pint's
-        # OffsetUnitCalculusError for offset units like degC / degF.
         qty = ureg.Quantity(float(num_str), unit_str)
         if target_unit_name is not None:
             return float(qty.to(target_unit_name).magnitude)

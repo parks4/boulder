@@ -149,14 +149,14 @@ def test_power_unit_coercion() -> None:
 
 @pytest.mark.unit
 def test_invalid_unit_error_message() -> None:
-    """Invalid units should provide helpful error messages with suggestions."""
+    """Invalid unit strings raise ValueError at normalize_config time with the value and property in the message."""
     data = {
         "nodes": [
             {
                 "id": "r1",
                 "type": "IdealGasReactor",
                 "properties": {
-                    "temperature": "500 invalid_unit",  # This should fail with helpful message
+                    "temperature": "500 invalid_unit",
                 },
             }
         ],

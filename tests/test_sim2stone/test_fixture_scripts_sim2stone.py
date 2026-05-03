@@ -62,7 +62,16 @@ for _n, _m in _FIXTURES:
 def test_sim2stone_cantera_examples_yaml_valid(
     tmp_path: Path, script_name: str, mechanism: str
 ) -> None:
-    """Each bundled Cantera example runs through sim2stone and yields valid STONE YAML."""
+    """Each bundled Cantera example runs through sim2stone and yields valid STONE YAML.
+
+    Phase D assertions:
+    - combustor → YAML contains ``continuation:`` block and ``closure: residence_time``
+      on the MFC connection.
+    - reactor2 → YAML contains ``solver.kind: advance_grid`` with a ``grid:`` sub-block.
+    - nanosecond_pulse_discharge → YAML contains ``signals:`` (Gaussian) + ``bindings:``
+      targeting ``reduced_electric_field``, and ``solver.kind: micro_step``.
+    All blocks carry ``derived_via:`` annotations.
+    """
     script = _EXAMPLES_DIR / script_name
     if not script.is_file():
         pytest.skip(f"{script_name} not found under docs/cantera_examples")
@@ -96,10 +105,35 @@ def test_sim2stone_cantera_examples_yaml_valid(
     assert rc == 0
     assert out_yaml.is_file()
 
+    yaml_text = out_yaml.read_text(encoding="utf-8")
+
     if script_name == "nanosecond_pulse_discharge.py":
-        assert "example_data/methane-plasma-pavan-2023.yaml" in out_yaml.read_text(
-            encoding="utf-8"
+        assert "example_data/methane-plasma-pavan-2023.yaml" in yaml_text
+        # Phase D: signals/bindings + micro_step
+        assert "signals:" in yaml_text, "nanosecond: missing signals: block"
+        assert "Gaussian" in yaml_text, "nanosecond: missing Gaussian signal kind"
+        assert "bindings:" in yaml_text, "nanosecond: missing bindings: block"
+        assert "reduced_electric_field" in yaml_text, (
+            "nanosecond: missing reduced_electric_field binding"
         )
+        assert "micro_step" in yaml_text, "nanosecond: solver.kind should be micro_step"
+        assert "derived_via" in yaml_text, "nanosecond: missing derived_via annotations"
+
+    elif script_name == "combustor.py":
+        # Phase D: continuation + closure
+        assert "continuation:" in yaml_text, "combustor: missing continuation: block"
+        assert "closure: residence_time" in yaml_text, (
+            "combustor: missing closure: residence_time"
+        )
+        assert "derived_via" in yaml_text, "combustor: missing derived_via annotations"
+
+    elif script_name == "reactor2.py":
+        # Phase D: advance_grid with grid: sub-block
+        assert "advance_grid" in yaml_text, (
+            "reactor2: solver.kind should be advance_grid"
+        )
+        assert "grid:" in yaml_text, "reactor2: missing grid: sub-block"
+        assert "derived_via" in yaml_text, "reactor2: missing derived_via annotations"
 
     cfg = load_config_file(str(out_yaml))
     normalized = normalize_config(cfg)

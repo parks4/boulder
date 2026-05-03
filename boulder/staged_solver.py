@@ -80,9 +80,17 @@ class Stage:
 
     id: str
     mechanism: str
-    #: ``"advance_to_steady_state"`` or ``"advance"``.
+    #: Resolved solver configuration dict merged from ``settings.solver`` (global
+    #: defaults) and ``groups.<id>.solver`` (stage overrides).  Always present after
+    #: :func:`build_stage_graph`; keys mirror the STONE ``solver:`` block.
+    solver: Dict[str, Any] = field(default_factory=dict)
+
+    # ---------------------------------------------------------------------------
+    # Deprecated: kept for backward-compat; mapped into solver at parse time.
+    # ---------------------------------------------------------------------------
+    #: Legacy ``"advance_to_steady_state"`` or ``"advance"`` directive.
     solve_directive: str = "advance_to_steady_state"
-    #: Used only when *solve_directive* is ``"advance"``.
+    #: Legacy advance horizon in seconds; only used when *solve_directive* is ``"advance"``.
     advance_time: float = 1.0
 
     node_ids: List[str] = field(default_factory=list)
@@ -136,15 +144,47 @@ def build_stage_graph(config: Dict[str, Any]) -> StageExecutionPlan:
         if isinstance(gas_phase, dict):
             default_mechanism = gas_phase.get("mechanism", default_mechanism)
 
+    # Global solver defaults from settings.solver (if any)
+    global_solver_defaults: Dict[str, Any] = {}
+    settings = config.get("settings") or {}
+    if isinstance(settings, dict):
+        raw_global = settings.get("solver")
+        if isinstance(raw_global, dict):
+            global_solver_defaults = dict(raw_global)
+
     # Build Stage objects from groups config
     stages: Dict[str, Stage] = {}
     for gid, gcfg in groups_cfg.items():
         gcfg = gcfg or {}
+
+        # ---------- legacy shim: promote solve:/advance_time: into solver block ----------
+        legacy_solve = gcfg.get("solve")
+        legacy_advance_time = gcfg.get("advance_time")
+        per_stage_solver: Dict[str, Any] = {}
+        if isinstance(gcfg.get("solver"), dict):
+            per_stage_solver = dict(gcfg["solver"])
+        elif legacy_solve is not None:
+            # Legacy form: translate to solver.kind (with deprecation handled in config.py)
+            per_stage_solver["kind"] = str(legacy_solve)
+            if legacy_advance_time is not None:
+                from .utils import coerce_unit_string  # noqa: PLC0415
+
+                at_si = coerce_unit_string(legacy_advance_time, "advance_time")
+                per_stage_solver["advance_time"] = float(at_si)
+
+        # Merge: global defaults → per-stage overrides
+        resolved_solver: Dict[str, Any] = {**global_solver_defaults, **per_stage_solver}
+
+        # Derive legacy fields from resolved solver for backward-compat consumers
+        solve_directive = str(resolved_solver.get("kind", "advance_to_steady_state"))
+        advance_time_val = float(resolved_solver.get("advance_time", 1.0))
+
         stages[gid] = Stage(
             id=gid,
             mechanism=str(gcfg.get("mechanism", default_mechanism)),
-            solve_directive=str(gcfg.get("solve", "advance_to_steady_state")),
-            advance_time=float(gcfg.get("advance_time", 1.0)),
+            solver=resolved_solver,
+            solve_directive=solve_directive,
+            advance_time=advance_time_val,
         )
 
     # Map each node to its stage via node.properties.group
@@ -321,6 +361,16 @@ def solve_staged(
             stage=stage,
         )
         trajectory.networks[stage.id] = network
+
+        # Apply causal-layer bindings (Phase B): wire signals to MFCs / reactors.
+        _signals_block = config.get("signals")
+        _bindings_block = config.get("bindings")
+        if _signals_block and _bindings_block:
+            from boulder.bindings import apply_bindings_block
+            from boulder.signals import build_signal_registry
+
+            _signal_registry = build_signal_registry(_signals_block)
+            apply_bindings_block(converter, _bindings_block, _signal_registry)
 
         # Collect SolutionArray in flow order through the stage
         flow_order = _flow_order_within_stage(stage)

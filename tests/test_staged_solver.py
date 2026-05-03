@@ -117,7 +117,7 @@ class TestStagedConfig:
         assert len(validated["nodes"]) == 6  # feed + psr + 4 pfr cells
 
     def test_groups_section_structure(self):
-        """After normalization, groups has psr_stage and pfr_stage with mechanism and solve."""
+        """After normalization, groups has psr_stage and pfr_stage with mechanism and solver block."""
         cfg = load_config_file(str(STAGED_CONFIG))
         norm = normalize_config(cfg)
         groups = norm["groups"]
@@ -125,7 +125,9 @@ class TestStagedConfig:
         assert "pfr_stage" in groups
         for gid, gcfg in groups.items():
             assert "mechanism" in gcfg, f"groups.{gid} missing mechanism"
-            assert "solve" in gcfg, f"groups.{gid} missing solve"
+            # New-style solver block replaces the legacy 'solve' key
+            assert "solver" in gcfg, f"groups.{gid} missing solver block"
+            assert "kind" in gcfg["solver"], f"groups.{gid}.solver missing kind"
 
     def test_inter_stage_connection_present(self):
         """psr_to_pfr logical connection must cross stage boundaries (different group tags)."""

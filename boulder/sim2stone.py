@@ -10,6 +10,7 @@ equivalent topology (same nodes and connections) when reconstructed by
 from __future__ import annotations
 
 import ast
+import math
 import os
 import re
 from pathlib import Path
@@ -281,6 +282,65 @@ def _composition_to_string(thermo: ct.ThermoPhase, min_fraction: float = 1e-12) 
     return ",".join([f"{name}:{value:g}" for name, value in items])
 
 
+def _stone_scalar_with_default_si_unit(property_name: str, value: Any) -> Any:
+    """Format a numeric physics scalar for STONE YAML with an SI unit suffix.
+
+    Examples: ``300.0 K``, ``101325.0 Pa``, ``1.0 kg/s`` as a single YAML scalar
+    string. Used only in :func:`sim_to_stone_yaml`; internal configs stay plain
+    floats. Loading via :func:`~boulder.config.normalize_config` runs
+    :func:`~boulder.utils.coerce_config_units`, which converts these back to SI
+    magnitudes.
+    """
+    if isinstance(value, bool):
+        return value
+    if not isinstance(value, (int, float)):
+        return value
+    x = float(value)
+    num = repr(x) if math.isfinite(x) else repr(value)
+    if property_name == "temperature":
+        return f"{num} K"
+    if property_name == "pressure":
+        return f"{num} Pa"
+    if property_name == "mass_flow_rate":
+        return f"{num} kg/s"
+    return value
+
+
+def _apply_default_si_units_to_stone_node_props(
+    node_type: str, props: Dict[str, Any]
+) -> None:
+    """Mutate *props* in place: default SI units on temperature / pressure fields."""
+    if node_type in ("Reservoir", "OutletSink"):
+        if "temperature" in props:
+            props["temperature"] = _stone_scalar_with_default_si_unit(
+                "temperature", props["temperature"]
+            )
+        if "pressure" in props:
+            props["pressure"] = _stone_scalar_with_default_si_unit(
+                "pressure", props["pressure"]
+            )
+        return
+    initial = props.get("initial")
+    if not isinstance(initial, dict):
+        return
+    for key in ("temperature", "pressure"):
+        if key in initial:
+            initial[key] = _stone_scalar_with_default_si_unit(key, initial[key])
+
+
+def _apply_default_si_units_to_stone_connection_props(
+    conn_type: str, props: Dict[str, Any]
+) -> None:
+    """Mutate *props* in place: default SI unit on ``mass_flow_rate`` for MFC YAML."""
+    if conn_type != "MassFlowController":
+        return
+    if "mass_flow_rate" not in props:
+        return
+    props["mass_flow_rate"] = _stone_scalar_with_default_si_unit(
+        "mass_flow_rate", props["mass_flow_rate"]
+    )
+
+
 def _infer_node_type(reactor: ct.Reactor) -> str:
     """Map a Cantera reactor instance to a Boulder component type string."""
     # Explicit checks for common types we support out-of-the-box
@@ -404,10 +464,17 @@ def sim_to_internal_config(
                 pass
 
             if isinstance(r, ct.ConstPressureReactor):
+                # Use quoted strings so YAML parsers can't coerce "on"/"off" to booleans.
+                from ruamel.yaml.scalarstring import (
+                    DoubleQuotedScalarString,  # noqa: PLC0415
+                )
+
                 try:
-                    props["energy"] = "on" if r.energy_enabled else "off"
+                    props["energy"] = DoubleQuotedScalarString(
+                        "on" if r.energy_enabled else "off"
+                    )
                 except Exception:
-                    props["energy"] = "on"
+                    props["energy"] = DoubleQuotedScalarString("on")
 
             # Mechanism: node-level override first, then infer from thermo
             if isinstance(mech_override, str) and mech_override:
@@ -460,19 +527,35 @@ def sim_to_internal_config(
 
         conn_props: Dict[str, Any] = {}
         if isinstance(dev, ct.MassFlowController):
-            # Prefer attribute if available; Cantera exposes mass_flow_rate as a property
-            try:
-                conn_props["mass_flow_rate"] = float(dev.mass_flow_rate)
-            except Exception:
-                # Fallbacks: some backends require initialized networks; try alternate attributes
-                mdot_attr = getattr(dev, "mdot", None)
+            # Prefer attribute if available; Cantera exposes mass_flow_rate as a property.
+            # When it is a Func1 (time-varying or closure), float() may fail — skip it
+            # and leave mass_flow_rate unset so conservation inference takes over.
+            mfr_raw = getattr(dev, "mass_flow_rate", None)
+            _is_func1 = mfr_raw is not None and isinstance(mfr_raw, ct.Func1)
+            if not _is_func1:
                 try:
-                    mdot_value = mdot_attr() if callable(mdot_attr) else mdot_attr
+                    conn_props["mass_flow_rate"] = float(dev.mass_flow_rate)
                 except Exception:
-                    mdot_value = None
-                if isinstance(mdot_value, (int, float)):
-                    conn_props["mass_flow_rate"] = float(mdot_value)
-                # Else: omit property; conservation will infer it if possible
+                    # Fallbacks: some backends require initialized networks; try alternate attributes
+                    mdot_attr = getattr(dev, "mdot", None)
+                    try:
+                        mdot_value = mdot_attr() if callable(mdot_attr) else mdot_attr
+                    except Exception:
+                        mdot_value = None
+                    if isinstance(mdot_value, (int, float)):
+                        conn_props["mass_flow_rate"] = float(mdot_value)
+                    # Else: omit property; conservation will infer it if possible
+            else:
+                # Func1-backed MFC: emit a snapshot value at t=0 as the scalar seed.
+                # A comment in the YAML will note this is a dynamic rate.
+                try:
+                    _t0_val = float(mfr_raw(0.0))
+                    conn_props["mass_flow_rate"] = abs(_t0_val)
+                except Exception:
+                    pass  # omit; conservation will handle it
+                conn_props.setdefault(
+                    "_comment", "mass_flow_rate is time-varying (Func1)"
+                )
             # If mass flow is negative, re-orient the connection and take absolute value
             mfr = conn_props.get("mass_flow_rate")
             if isinstance(mfr, (int, float)) and mfr < 0:
@@ -614,6 +697,132 @@ def sim_to_internal_config(
     return internal
 
 
+def _build_signals_bindings_blocks(
+    ast_result: Any,
+    internal: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Build ``signals:`` and ``bindings:`` lists from an ``ASTExtractionResult``.
+
+    Uses the node IDs in *internal* to resolve ``nodes.<reactor>.`` targets to
+    real IDs when there is only one non-Reservoir reactor.
+
+    Returns
+    -------
+    (signals_list, bindings_list)
+    """
+    if ast_result is None:
+        return [], []
+
+    signals: List[Dict[str, Any]] = []
+    bindings: List[Dict[str, Any]] = []
+
+    # Resolve the "real" reactor node id (first non-Reservoir, non-OutletSink)
+    reactor_nodes = [
+        n["id"]
+        for n in internal.get("nodes", [])
+        if n.get("type") not in ("Reservoir", "OutletSink")
+    ]
+    default_reactor_id = reactor_nodes[0] if reactor_nodes else "reactor"
+
+    # --- signals from AST-detected Func1 assignments ---
+    for det_sig in ast_result.signals:
+        block: Dict[str, Any] = {"id": det_sig.signal_id, "kind": det_sig.kind}
+        for k, v in det_sig.params.items():
+            if not k.startswith("_"):
+                block[k] = v
+        block["_derived_via"] = det_sig.derived_via
+        signals.append(block)
+
+    # --- bindings from AST-detected reduced_electric_field assignments ---
+    for det_bind in ast_result.bindings:
+        target = det_bind.target
+        if "<reactor>" in target:
+            target = target.replace("<reactor>", default_reactor_id)
+        bind_block: Dict[str, Any] = {
+            "source": det_bind.signal_id,
+            "target": target,
+            "_derived_via": det_bind.derived_via,
+        }
+        bindings.append(bind_block)
+
+    return signals, bindings
+
+
+def _build_continuation_block(
+    ast_result: Any,
+) -> Optional[Dict[str, Any]]:
+    """Build a ``continuation:`` block from an ``ASTExtractionResult``."""
+    if ast_result is None or not ast_result.continuations:
+        return None
+
+    cont = ast_result.continuations[0]
+    block: Dict[str, Any] = {}
+
+    if cont.tau_var:
+        block["parameter"] = cont.tau_var
+        if cont.tau_factor:
+            block["factor"] = cont.tau_factor
+    block["stop_when"] = {
+        "attribute": cont.condition_attr,
+        "less_than": cont.condition_threshold,
+    }
+    block["_derived_via"] = cont.derived_via
+    return block
+
+
+def _solver_kind_from_ast(
+    ast_result: Any,
+    has_plasma: bool,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """Derive (solver_kind, extra_params) from AST result and topology.
+
+    Translates raw timing params from the AST to STONE-canonical field names:
+
+    ``advance_grid``:
+      - ``n_steps`` + ``step_size`` → ``grid: { start: 0, stop: n_steps*step_size, dt: step_size }``
+    ``micro_step``:
+      - ``t_total`` → ``t_total`` (kept)
+      - ``dt_chunk`` → ``chunk_dt``
+      - ``dt_max``   → ``max_dt``
+    """
+    if ast_result is None or ast_result.solver is None:
+        return None, {}
+
+    det = ast_result.solver
+    kind = det.kind
+    params = dict(det.params)
+
+    # Plasma micro-step override: force micro_step when plasma + advance pattern
+    if has_plasma and kind in ("advance_grid", "micro_step"):
+        kind = "micro_step"
+
+    if kind == "micro_step":
+        translated: Dict[str, Any] = {}
+        if "t_total" in params:
+            translated["t_total"] = params["t_total"]
+        if "dt_chunk" in params:
+            translated["chunk_dt"] = params["dt_chunk"]
+        if "dt_max" in params:
+            translated["max_dt"] = params["dt_max"]
+        if params.get("reinitialize_between_chunks"):
+            translated["reinitialize_between_chunks"] = True
+        return kind, translated
+
+    if kind == "advance_grid":
+        n_steps = params.get("n_steps")
+        step_size = params.get("step_size")
+        if n_steps is not None and step_size is not None:
+            stop = float(n_steps) * float(step_size)
+            return kind, {"grid": {"start": 0.0, "stop": stop, "dt": float(step_size)}}
+        if step_size is not None:
+            # No n_steps but we have step_size; emit partial grid
+            return kind, {"grid": {"start": 0.0, "dt": float(step_size)}}
+        # Cannot build a valid grid; skip emitting advance_grid to avoid validation error
+        return None, {}
+
+    return kind, params
+
+
 def sim_to_stone_yaml(
     sim: ct.ReactorNet,
     default_mechanism: Optional[str] = None,
@@ -625,6 +834,12 @@ def sim_to_stone_yaml(
     Emits STONE v2 format with a top-level ``network:`` key containing all
     nodes and connections as typed items. Each node is ``{id, KindName: {props}}``
     and each connection is ``{id, KindName: {props}, source, target}``.
+
+    When *source_file* is provided the function also runs an AST scan via
+    ``boulder.sim2stone_ast.extract_from_source`` to detect Func1 signals,
+    residence-time closures, continuation loops, and solver patterns.  The
+    resulting ``signals:``, ``bindings:``, and ``continuation:`` blocks are
+    emitted with ``# derived_via:`` annotations.
     """
     internal = sim_to_internal_config(
         sim,
@@ -632,6 +847,16 @@ def sim_to_stone_yaml(
         source_file=source_file,
         include_comments=include_comments,
     )
+
+    # Run AST extraction when a source file is available
+    ast_result: Any = None
+    if source_file and os.path.isfile(source_file):
+        try:
+            from .sim2stone_ast import extract_from_source
+
+            ast_result = extract_from_source(source_file)
+        except Exception:
+            ast_result = None
 
     # Determine mechanism from phases.gas.mechanism (STONE standard)
     phases = internal.get("phases", {})
@@ -661,11 +886,137 @@ def sim_to_stone_yaml(
     phases_cm["gas"] = gas_cm
     stone_cm["phases"] = phases_cm
 
-    # settings (explicit section even if empty)
-    stone_cm["settings"] = CommentedMap()
+    # settings — infer a solver.kind hint from reactor topology and AST.
+    settings_cm = CommentedMap()
+    _has_plasma = any(
+        n.get("type") == "ConstPressureReactor"
+        and str(n.get("properties", {}).get("energy", "on")).lower()
+        in ("off", "false", "0")
+        for n in internal.get("nodes", [])
+    )
+
+    ast_solver_kind, ast_solver_params = _solver_kind_from_ast(ast_result, _has_plasma)
+
+    if ast_solver_kind is not None:
+        _solver_cm = CommentedMap()
+        _solver_cm["kind"] = ast_solver_kind
+        for k, v in ast_solver_params.items():
+            _solver_cm[k] = v
+        settings_cm["solver"] = _solver_cm
+        try:
+            settings_cm.yaml_set_comment_before_after_key(
+                "solver",
+                before="derived_via: ast_match",
+            )
+        except Exception:
+            pass
+    elif _has_plasma:
+        _solver_cm = CommentedMap()
+        _solver_cm["kind"] = "advance"
+        _solver_cm["advance_time"] = 9e-8  # 90 ns — full nanosecond pulse window
+        settings_cm["solver"] = _solver_cm
+        try:
+            settings_cm.yaml_set_comment_before_after_key(
+                "solver",
+                before=(
+                    "Plasma reactor detected (ConstPressureReactor with energy: off).\n"
+                    "advance_to_steady_state is unsafe for PlasmaPhase (cp_mole not\n"
+                    "implemented). Using advance with a conservative time. Replace with\n"
+                    "solver.kind: micro_step for a faithful nanosecond pulse simulation."
+                ),
+            )
+        except Exception:
+            pass
+    stone_cm["settings"] = settings_cm
+
+    # --- causal layer: signals / bindings ---
+    signals_list, bindings_list = _build_signals_bindings_blocks(ast_result, internal)
+
+    if signals_list:
+        sig_seq = CommentedSeq()
+        for sig in signals_list:
+            sig_cm = CommentedMap()
+            derived = sig.pop("_derived_via", "ast_match")
+            for k, v in sig.items():
+                if k == "points" and isinstance(v, list):
+                    # Emit a compact inline sequence for PiecewiseLinear points
+                    points_seq = CommentedSeq()
+                    for pt in v:
+                        pt_seq = CommentedSeq(pt)
+                        pt_seq.fa.set_flow_style()
+                        points_seq.append(pt_seq)
+                    sig_cm[k] = points_seq
+                else:
+                    sig_cm[k] = v
+            try:
+                sig_cm.yaml_set_comment_before_after_key(
+                    "id",
+                    before=f"derived_via: {derived}",
+                )
+            except Exception:
+                pass
+            sig_seq.append(sig_cm)
+        stone_cm["signals"] = sig_seq
+        try:
+            stone_cm.yaml_set_comment_before_after_key("signals", before="\n")
+        except Exception:
+            pass
+
+    if bindings_list:
+        bind_seq = CommentedSeq()
+        for bind in bindings_list:
+            bind_cm = CommentedMap()
+            derived = bind.pop("_derived_via", "ast_match")
+            for k, v in bind.items():
+                bind_cm[k] = v
+            try:
+                bind_cm.yaml_set_comment_before_after_key(
+                    "source",
+                    before=f"derived_via: {derived}",
+                )
+            except Exception:
+                pass
+            bind_seq.append(bind_cm)
+        stone_cm["bindings"] = bind_seq
+        try:
+            stone_cm.yaml_set_comment_before_after_key("bindings", before="\n")
+        except Exception:
+            pass
+
+    # --- causal layer: continuation ---
+    cont_block = _build_continuation_block(ast_result)
+    if cont_block is not None:
+        cont_cm = CommentedMap()
+        cont_derived = cont_block.pop("_derived_via", "ast_match")
+        for k, v in cont_block.items():
+            if isinstance(v, dict):
+                sub_cm = CommentedMap()
+                for sk, sv in v.items():
+                    sub_cm[sk] = sv
+                cont_cm[k] = sub_cm
+            else:
+                cont_cm[k] = v
+        try:
+            cont_cm.yaml_set_comment_before_after_key(
+                list(cont_cm.keys())[0],
+                before=f"derived_via: {cont_derived}",
+            )
+        except Exception:
+            pass
+        stone_cm["continuation"] = cont_cm
+        try:
+            stone_cm.yaml_set_comment_before_after_key("continuation", before="\n")
+        except Exception:
+            pass
 
     # network: list of node and connection items in STONE v2 format
     network_seq = CommentedSeq()
+
+    # Build closure map: mfc_var -> DetectedClosure (for annotating connections)
+    closure_map: Dict[str, Any] = {}
+    if ast_result is not None:
+        for cl in ast_result.closures:
+            closure_map[cl.mfc_var] = cl
 
     for node in internal.get("nodes", []):
         node_cm = CommentedMap()
@@ -689,6 +1040,7 @@ def sim_to_stone_yaml(
                     initial[state_key] = props.pop(state_key)
             if initial:
                 props["initial"] = initial
+        _apply_default_si_units_to_stone_node_props(node_type, props)
         # Emit null (bare key) when props are empty
         node_cm[node_type] = props if props else None
         if node_mech is not None:
@@ -707,6 +1059,38 @@ def sim_to_stone_yaml(
         conn_cm = CommentedMap()
         conn_cm["id"] = conn["id"]
         conn_props = dict(conn.get("properties", {}) or {})
+        _apply_default_si_units_to_stone_connection_props(conn["type"], conn_props)
+
+        # Annotate MFC connections that are driven by a residence-time closure.
+        # Strategy: if there is exactly one closure and one MFC in the network,
+        # apply the closure unconditionally.  With multiple MFCs, fall back to a
+        # target-id substring heuristic so we don't annotate the wrong MFC.
+        conn_is_mfc = conn.get("type") == "MassFlowController"
+        if conn_is_mfc and closure_map:
+            mfc_connections = [
+                c
+                for c in internal.get("connections", [])
+                if c.get("type") == "MassFlowController"
+            ]
+            closures_list = list(closure_map.values())
+            apply_closure: Any = None
+            if len(mfc_connections) == 1 and len(closures_list) == 1:
+                # Single MFC + single closure → unconditional match
+                apply_closure = closures_list[0]
+            else:
+                for cl in closures_list:
+                    if (
+                        cl.reactor_var == conn.get("target")
+                        or cl.reactor_var.lower() in (conn.get("target") or "").lower()
+                    ):
+                        apply_closure = cl
+                        break
+            if apply_closure is not None:
+                conn_props["closure"] = "residence_time"
+                conn_props["tau_s"] = f"{{{{{apply_closure.tau_var}}}}}"
+                conn_props.pop("mass_flow_rate", None)
+                conn_props.pop("_comment", None)
+
         conn_cm[conn["type"]] = conn_props if conn_props else None
         conn_cm["source"] = conn["source"]
         conn_cm["target"] = conn["target"]

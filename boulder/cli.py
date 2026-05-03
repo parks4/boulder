@@ -252,12 +252,19 @@ def run_headless_mode(
         if verbose:
             print("Running simulation to generate complete Python code...")
 
-        # Extract simulation parameters from config
+        # Extract simulation parameters from config.
+        # settings.solver.grid takes precedence; legacy end_time/dt are fallbacks.
         settings = validated_config.get("settings", {})
-        simulation_time = float(
-            settings.get("end_time", settings.get("max_time", 10.0))
-        )
-        time_step = float(settings.get("dt", settings.get("time_step", 1.0)))
+        solver_block = settings.get("solver") if isinstance(settings, dict) else None
+        if isinstance(solver_block, dict) and "grid" in solver_block:
+            _grid = solver_block["grid"]
+            simulation_time = float(_grid.get("stop", _grid.get("end", 10.0)))
+            time_step = float(_grid.get("dt", 1.0))
+        else:
+            simulation_time = float(
+                settings.get("end_time", settings.get("max_time", 10.0))
+            )
+            time_step = float(settings.get("dt", settings.get("time_step", 1.0)))
 
         if verbose:
             print(f"Simulation parameters: time={simulation_time}s, step={time_step}s")
