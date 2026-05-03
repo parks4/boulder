@@ -1,6 +1,7 @@
 import importlib
 import math
 import os
+from collections import deque
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import (
@@ -25,6 +26,53 @@ from .sankey import generate_sankey_input_from_sim
 from .verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
+
+
+def _order_stage_nodes_for_flow(
+    stage_nodes: List[Dict[str, Any]],
+    stage_connections: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return stage nodes ordered so MFC sources are built before targets.
+
+    If YAML lists a downstream reactor before its upstream reservoir,
+    :meth:`DualCanteraConverter._upstream_reservoir_tpy` cannot read
+    ``self.reactors[source]`` yet and falls back to 300 K. Mass-flow edges
+    within the stage define a partial order; unknown edges or cycles keep the
+    original *stage_nodes* order.
+    """
+    ids = [n["id"] for n in stage_nodes]
+    id_set = set(ids)
+    if len(ids) <= 1:
+        return stage_nodes
+
+    incoming: Dict[str, int] = {nid: 0 for nid in ids}
+    adj: Dict[str, List[str]] = {nid: [] for nid in ids}
+
+    for conn in stage_connections:
+        if conn.get("type") != "MassFlowController":
+            continue
+        src, tgt = conn["source"], conn["target"]
+        assert isinstance(src, str) and isinstance(tgt, str)
+        if src not in id_set or tgt not in id_set:
+            continue
+        incoming[tgt] += 1
+        adj[src].append(tgt)
+
+    queue = deque(nid for nid in ids if incoming[nid] == 0)
+    ordered_ids: List[str] = []
+    while queue:
+        u = queue.popleft()
+        ordered_ids.append(u)
+        for v in adj[u]:
+            incoming[v] -= 1
+            if incoming[v] == 0:
+                queue.append(v)
+
+    if len(ordered_ids) != len(ids):
+        return stage_nodes
+
+    id_to_node = {n["id"]: n for n in stage_nodes}
+    return [id_to_node[i] for i in ordered_ids]
 
 
 # Custom builder/hook types
@@ -544,6 +592,33 @@ class DualCanteraConverter:
         self._gases_by_mech[resolved] = gas_obj
         return gas_obj
 
+    def _upstream_reservoir_tpy(
+        self,
+        stage_connections: List[Dict[str, Any]],
+        target_id: str,
+    ) -> Optional[Tuple[float, float, np.ndarray]]:
+        """Return ``(T, P, Y)`` from a Reservoir that feeds *target_id* via an MFC.
+
+        When a reactor omits ``temperature`` / ``composition`` in YAML but is
+        connected from an upstream boundary reservoir (built earlier in the
+        same stage), inherit its thermochemical state instead of defaulting to
+        300 K — required for shared-phase reactors (e.g. ``clone=False``).
+        """
+        for conn in stage_connections:
+            if conn.get("type") != "MassFlowController":
+                continue
+            if conn.get("target") != target_id:
+                continue
+            src_id = conn.get("source")
+            if not src_id or src_id not in self.reactors:
+                continue
+            src_r = self.reactors[src_id]
+            if not isinstance(src_r, ct.Reservoir):
+                continue
+            sol = src_r.thermo
+            return float(sol.T), float(sol.P), sol.Y.copy()
+        return None
+
     def set_reactor_volume(
         self, reactor: ct.Reactor, props: Dict[str, Any], reactor_id: str
     ) -> None:
@@ -809,6 +884,7 @@ class DualCanteraConverter:
             ``stage_reactors`` is a ``{node_id: ct.ReactorBase}`` dict for
             this stage (a subset of ``self.reactors``).
         """
+        stage_nodes = _order_stage_nodes_for_flow(stage_nodes, stage_connections)
         stage_reactor_ids: List[str] = []
 
         for node in stage_nodes:
@@ -830,10 +906,29 @@ class DualCanteraConverter:
                 # non-Reservoir nodes; fall back to props directly for Reservoir
                 # boundary nodes and legacy internal format.
                 initial = props.get("initial") or {}
-                temp = initial.get("temperature") or props.get("temperature", 300)
-                pres = initial.get("pressure") or props.get("pressure", 101325)
-                compo = initial.get("composition") or props.get("composition", "N2:1")
-                gas_for_node.TPX = (temp, pres, self.parse_composition(compo))
+                temp = initial.get("temperature") or props.get("temperature")
+                pres = initial.get("pressure") or props.get("pressure")
+                compo = initial.get("composition") or props.get("composition")
+                if temp is None and pres is None and compo is None:
+                    upstream_tpy = self._upstream_reservoir_tpy(stage_connections, rid)
+                    if upstream_tpy is not None:
+                        T_u, P_u, Y_u = upstream_tpy
+                        gas_for_node.TPY = T_u, P_u, Y_u
+                    else:
+                        gas_for_node.TPX = (
+                            300.0,
+                            101325.0,
+                            self.parse_composition("N2:1"),
+                        )
+                else:
+                    temp_f = float(temp) if temp is not None else 300.0
+                    pres_f = float(pres) if pres is not None else 101325.0
+                    compo_s = compo if compo is not None else "N2:1"
+                    gas_for_node.TPX = (
+                        temp_f,
+                        pres_f,
+                        self.parse_composition(compo_s),
+                    )
 
             self.gas = gas_for_node
             self.reactor_meta[rid] = {

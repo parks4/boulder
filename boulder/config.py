@@ -1493,51 +1493,114 @@ def get_config_from_path_with_comments(config_path: str) -> tuple[Dict[str, Any]
     return validate_config(normalized), original_yaml  # validate inputs
 
 
-def convert_to_stone_format(config: dict) -> dict:
-    """Convert internal format back to new STONE schema for file saving."""
-    stone_config = {}
+def _internal_node_to_stone_v2_item(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Map one internal node dict to a STONE v2 stage/network list item."""
+    node_type = node.get("type", "IdealGasReactor")
+    props = dict(node.get("properties", {}) or {})
+    mech_from_props = props.pop("mechanism", None)
+    stone_node: Dict[str, Any] = {"id": node["id"], node_type: props}
+    top_mech = node.get("mechanism")
+    if top_mech is not None:
+        stone_node["mechanism"] = top_mech
+    elif mech_from_props is not None:
+        stone_node["mechanism"] = mech_from_props
+    for fld in ("metadata", "description", "label"):
+        if fld in node:
+            stone_node[fld] = node[fld]
+    return stone_node
 
-    # Copy metadata section as-is
+
+def _internal_connection_to_stone_v2_item(conn: Dict[str, Any]) -> Dict[str, Any]:
+    """Map one internal connection dict to a STONE v2 stage/network list item."""
+    if conn.get("logical"):
+        item: Dict[str, Any] = {
+            "id": conn["id"],
+            "source": conn["source"],
+            "target": conn["target"],
+        }
+        props = conn.get("properties") or {}
+        if isinstance(props, dict) and props.get("mass_flow_rate") is not None:
+            item["mass_flow_rate"] = props["mass_flow_rate"]
+        if "mechanism_switch" in conn:
+            item["mechanism_switch"] = conn["mechanism_switch"]
+        if "metadata" in conn:
+            item["metadata"] = conn["metadata"]
+        return item
+
+    connection_type = conn.get("type", "MassFlowController")
+    props = dict(conn.get("properties", {}) or {})
+    stone_conn: Dict[str, Any] = {
+        "id": conn["id"],
+        connection_type: props,
+        "source": conn["source"],
+        "target": conn["target"],
+    }
+    if "mechanism_switch" in conn:
+        stone_conn["mechanism_switch"] = conn["mechanism_switch"]
+    if "metadata" in conn:
+        stone_conn["metadata"] = conn["metadata"]
+    return stone_conn
+
+
+def convert_to_stone_format(config: dict) -> dict:
+    """Convert internal (normalized) format to STONE v2 authoring dict for YAML export.
+
+    Single-stage configs become a top-level ``network:`` list. Multi-stage configs
+    become ``stages:`` metadata plus one top-level list per stage id. Legacy
+    top-level ``nodes:`` / ``connections:`` are not emitted (those imply STONE v1).
+    """
+    stone_config: Dict[str, Any] = {}
+
     if "metadata" in config:
         stone_config["metadata"] = config["metadata"]
 
-    # Copy phases and settings sections directly (STONE standard)
     if "phases" in config:
         stone_config["phases"] = config["phases"]
 
     if "settings" in config:
         stone_config["settings"] = config["settings"]
 
-    # Convert nodes to STONE format
-    if "nodes" in config:
-        stone_config["nodes"] = []
-        for node in config["nodes"]:
-            # Build node with id first, then type as key containing properties
-            node_type = node.get("type", "IdealGasReactor")
-            props = dict(node.get("properties", {}) or {})
-            mech_override = props.pop("mechanism", None)
-            stone_node = {"id": node["id"], node_type: props}
-            if mech_override is not None:
-                stone_node["mechanism"] = mech_override
-            stone_config["nodes"].append(stone_node)
+    for passthrough in ("output", "export", "sweeps", "scenarios"):
+        if passthrough in config:
+            stone_config[passthrough] = config[passthrough]
 
-    # Convert connections (same structure in new format)
-    if "connections" in config:
-        stone_config["connections"] = []
-        for connection in config["connections"]:
-            # Build connection with id first, then type as key, then source/target
-            connection_type = connection.get("type", "MassFlowController")
-            stone_connection = {
-                "id": connection["id"],
-                connection_type: connection.get("properties", {}),
-                "source": connection["source"],
-                "target": connection["target"],
-            }
-            stone_config["connections"].append(stone_connection)
+    nodes: List[Dict[str, Any]] = list(config.get("nodes") or [])
+    connections: List[Dict[str, Any]] = list(config.get("connections") or [])
+    groups: Dict[str, Any] = dict(config.get("groups") or {})
 
-    # Carry-through `output` section (STONE standard extension)
-    if "output" in config:
-        stone_config["output"] = config["output"]
+    use_network_key = (not groups) or (len(groups) == 1 and "default" in groups)
+
+    if use_network_key:
+        stone_config["network"] = [
+            _internal_node_to_stone_v2_item(n) for n in nodes
+        ] + [_internal_connection_to_stone_v2_item(c) for c in connections]
+        return stone_config
+
+    stage_ids_ordered = sorted(
+        groups.keys(),
+        key=lambda sid: (groups[sid].get("stage_order", 0), sid),
+    )
+    stages_meta: Dict[str, Any] = {}
+    for sid in stage_ids_ordered:
+        g = groups[sid]
+        if not isinstance(g, dict):
+            continue
+        meta: Dict[str, Any] = {
+            "mechanism": g.get("mechanism", "gri30.yaml"),
+            "solve": g["solve"],
+        }
+        if "advance_time" in g:
+            meta["advance_time"] = g["advance_time"]
+        stages_meta[sid] = meta
+
+    stone_config["stages"] = stages_meta
+
+    for sid in stage_ids_ordered:
+        stage_nodes = [n for n in nodes if n.get("group") == sid]
+        stage_conns = [c for c in connections if c.get("group") == sid]
+        stone_config[sid] = [
+            _internal_node_to_stone_v2_item(n) for n in stage_nodes
+        ] + [_internal_connection_to_stone_v2_item(c) for c in stage_conns]
 
     return stone_config
 

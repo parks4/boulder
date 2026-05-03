@@ -180,6 +180,7 @@ class TestConfigRoutes:
             assert resp.status_code == 200
             data = resp.json()
             assert "yaml" in data
+            assert "network:" in data["yaml"]
             assert "r1" in data["yaml"]
             assert "IdealGasReactor" in data["yaml"]
 
