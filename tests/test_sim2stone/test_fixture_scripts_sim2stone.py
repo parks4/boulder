@@ -32,6 +32,7 @@ def _subprocess_env() -> dict[str, str]:
         parts.append(prev)
     return {**os.environ, "CANTERA_DATA": os.pathsep.join(parts)}
 
+
 # (script filename, default ``--mechanism`` for sim2stone phases.gas)
 _FIXTURES: tuple[tuple[str, str], ...] = (
     ("combustor.py", "gri30.yaml"),
@@ -138,16 +139,19 @@ def test_cantera_examples_headless_download_script_runs(
 
     from boulder.sim2stone_cli import main as sim2stone_main
 
-    assert sim2stone_main(
-        [
-            str(script),
-            "-o",
-            str(stone_yaml),
-            "--no-comments",
-            "--mechanism",
-            mechanism,
-        ]
-    ) == 0
+    assert (
+        sim2stone_main(
+            [
+                str(script),
+                "-o",
+                str(stone_yaml),
+                "--no-comments",
+                "--mechanism",
+                mechanism,
+            ]
+        )
+        == 0
+    )
 
     cmd_gen = [
         sys.executable,

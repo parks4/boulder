@@ -42,9 +42,10 @@ Headless conversion to STONE YAML::
 .. _Cantera source tree: https://github.com/Cantera/cantera/tree/main/samples/python
 """
 
-import pandas as pd
 import matplotlib.pyplot as plt
-plt.rcParams['figure.constrained_layout.use'] = True
+import pandas as pd
+
+plt.rcParams["figure.constrained_layout.use"] = True
 
 import cantera as ct
 
@@ -55,19 +56,19 @@ import cantera as ct
 # First create each gas needed, and a reactor or reservoir for each one.
 
 # create an argon gas object and set its state
-ar = ct.Solution('air.yaml')
+ar = ct.Solution("air.yaml")
 ar.TPX = 1000.0, 20.0 * ct.one_atm, "AR:1"
 
 # create a reactor to represent the side of the cylinder filled with argon
 r1 = ct.IdealGasReactor(ar, name="Argon partition")
 
 # create a reservoir for the environment, and fill it with air.
-env = ct.Reservoir(ct.Solution('air.yaml'), name="Environment")
+env = ct.Reservoir(ct.Solution("air.yaml"), name="Environment")
 
 # use GRI-Mech 3.0 for the methane/air mixture, and set its initial state
-gas = ct.Solution('gri30.yaml')
+gas = ct.Solution("gri30.yaml")
 gas.TP = 500.0, 0.2 * ct.one_atm
-gas.set_equivalence_ratio(1.1, 'CH4:1.0', 'O2:1, N2:3.76')
+gas.set_equivalence_ratio(1.1, "CH4:1.0", "O2:1, N2:3.76")
 
 # create a reactor for the methane/air side
 r2 = ct.IdealGasReactor(gas, name="Reacting partition")
@@ -95,44 +96,46 @@ sim.draw(print_state=True, species="X")
 
 time = 0.0
 n_steps = 300
-states1 = ct.SolutionArray(ar, extra=['t', 'V'])
-states2 = ct.SolutionArray(gas, extra=['t', 'V'])
+states1 = ct.SolutionArray(ar, extra=["t", "V"])
+states2 = ct.SolutionArray(gas, extra=["t", "V"])
 
 for n in range(n_steps):
-    time += 4.e-4
+    time += 4.0e-4
     sim.advance(time)
     states1.append(r1.phase.state, t=time, V=r1.volume)
     states2.append(r2.phase.state, t=time, V=r2.volume)
 
 # %%
 # Combine the results and save for later processing or plotting
-df = pd.DataFrame.from_dict({
-    'time (s)': states1.t,
-    'T1 (K)': states1.T,
-    'P1 (bar)': states1.P / 1e5,
-    'V1 (m3)': states1.V,
-    'T2 (K)': states2.T,
-    'P2 (bar)': states2.P / 1e5,
-    'V2 (m3)': states2.V,
-})
+df = pd.DataFrame.from_dict(
+    {
+        "time (s)": states1.t,
+        "T1 (K)": states1.T,
+        "P1 (bar)": states1.P / 1e5,
+        "V1 (m3)": states1.V,
+        "T2 (K)": states2.T,
+        "P2 (bar)": states2.P / 1e5,
+        "V2 (m3)": states2.V,
+    }
+)
 df.to_csv("piston.csv")
 df
 
 # %%
 # Plot results
 # ------------
-fig, ax = plt.subplots(3, 1, figsize=(5,8))
+fig, ax = plt.subplots(3, 1, figsize=(5, 8))
 
-ax[0].plot(states1.t, states1.T, 'g-', label='Argon partition')
-ax[0].plot(states2.t, states2.T, 'b-', label='Reacting partition')
-ax[0].set(xlabel='Time (s)', ylabel='Temperature (K)')
+ax[0].plot(states1.t, states1.T, "g-", label="Argon partition")
+ax[0].plot(states2.t, states2.T, "b-", label="Reacting partition")
+ax[0].set(xlabel="Time (s)", ylabel="Temperature (K)")
 ax[0].legend()
 
-ax[1].plot(states1.t, states1.P / 1e5, 'g-', states2.t, states2.P / 1e5, 'b-')
-ax[1].set(xlabel='Time (s)', ylabel='Pressure (Bar)')
+ax[1].plot(states1.t, states1.P / 1e5, "g-", states2.t, states2.P / 1e5, "b-")
+ax[1].set(xlabel="Time (s)", ylabel="Pressure (Bar)")
 
-ax[2].plot(states1.t, states1.V, 'g-', states2.t, states2.V, 'b-')
-_ = ax[2].set(xlabel='Time (s)', ylabel='Volume (m$^3$)')
+ax[2].plot(states1.t, states1.V, "g-", states2.t, states2.V, "b-")
+_ = ax[2].set(xlabel="Time (s)", ylabel="Volume (m$^3$)")
 
 # %%
 # Show the final state
