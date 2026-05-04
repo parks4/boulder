@@ -7,10 +7,15 @@
  * - Kind dropdown in the modal respects steady vs transient mode.
  * - When config.settings.solver.kind is "advance_grid", the component initialises in transient mode.
  * - When config.settings.solver.mode is "transient", the component initialises in transient mode.
+ * - Closing the modal via Done persists rtol/atol/max_steps into config.settings.solver (Fix C).
+ * - In transient mode, Done also persists grid.stop and grid.dt (Fix D).
+ * - Stage-override banner appears when config.groups contains per-stage solver blocks (Fix A).
+ * - startSimulation is called without simulation_time/time_step in steady mode (Fix B).
+ * - startSimulation is called with simulation_time/time_step in transient mode (Fix B).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { SimulateCard } from "./SimulateCard";
 
@@ -18,9 +23,13 @@ import { SimulateCard } from "./SimulateCard";
 // Mock dependencies that reach out to the network or zustand stores
 // ---------------------------------------------------------------------------
 
+import { startSimulation } from "@/api/simulations";
+
 vi.mock("@/api/simulations", () => ({
   startSimulation: vi.fn().mockResolvedValue({ simulation_id: "test-123" }),
 }));
+
+const mockStartSimulation = startSimulation as ReturnType<typeof vi.fn>;
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -53,6 +62,10 @@ vi.mock("@/stores/simulationStore", () => ({
 
 function openSolverDetails() {
   fireEvent.click(screen.getByTestId("open-solver-details"));
+}
+
+function closeSolverDetailsDone() {
+  fireEvent.click(screen.getByRole("button", { name: /done/i }));
 }
 
 // ---------------------------------------------------------------------------
@@ -161,5 +174,83 @@ describe("SimulateCard", () => {
     const solver = (updatedConfig.settings as Record<string, unknown>)
       .solver as Record<string, unknown>;
     expect(solver.kind).toBe("solve_steady");
+  });
+
+  it("Done button persists rtol/atol/max_steps into config.settings.solver (Fix C)", () => {
+    render(<SimulateCard />);
+    openSolverDetails();
+    fireEvent.change(screen.getByTestId("steady-rtol"), { target: { value: "1e-10" } });
+    fireEvent.change(screen.getByTestId("steady-atol"), { target: { value: "1e-16" } });
+    fireEvent.change(screen.getByTestId("steady-max-steps"), { target: { value: "5000" } });
+    mockSetConfig.mockClear();
+    closeSolverDetailsDone();
+    expect(mockSetConfig).toHaveBeenCalledOnce();
+    const [updatedConfig] = mockSetConfig.mock.calls[0];
+    const solver = (updatedConfig.settings as Record<string, unknown>)
+      .solver as Record<string, unknown>;
+    expect(solver.rtol).toBeCloseTo(1e-10);
+    expect(solver.atol).toBeCloseTo(1e-16);
+    expect(solver.max_steps).toBe(5000);
+  });
+
+  it("Done button in transient mode persists grid.stop and grid.dt (Fix D)", () => {
+    render(<SimulateCard />);
+    fireEvent.click(screen.getByTestId("mode-transient"));
+    openSolverDetails();
+    fireEvent.change(screen.getByTestId("transient-time"), { target: { value: "20" } });
+    fireEvent.change(screen.getByTestId("transient-step"), { target: { value: "0.5" } });
+    mockSetConfig.mockClear();
+    closeSolverDetailsDone();
+    expect(mockSetConfig).toHaveBeenCalledOnce();
+    const [updatedConfig] = mockSetConfig.mock.calls[0];
+    const solver = (updatedConfig.settings as Record<string, unknown>)
+      .solver as Record<string, unknown>;
+    const grid = solver.grid as Record<string, unknown>;
+    expect(grid.stop).toBeCloseTo(20);
+    expect(grid.dt).toBeCloseTo(0.5);
+  });
+
+  it("stage-override banner appears when config.groups has per-stage solver blocks (Fix A)", () => {
+    mockConfig = {
+      nodes: [],
+      connections: [],
+      groups: {
+        stage1: { stage_order: 1, mechanism: "gri30.yaml", solver: { kind: "solve_steady" } },
+      },
+    };
+    render(<SimulateCard />);
+    openSolverDetails();
+    expect(screen.getByTestId("stage-override-banner")).toBeInTheDocument();
+  });
+
+  it("stage-override banner is absent when config has no groups (Fix A)", () => {
+    render(<SimulateCard />);
+    openSolverDetails();
+    expect(screen.queryByTestId("stage-override-banner")).not.toBeInTheDocument();
+  });
+
+  it("Run button calls startSimulation without time/step in steady mode (Fix B)", async () => {
+    mockConfig = { nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }], connections: [] };
+    render(<SimulateCard />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
+    });
+    expect(mockStartSimulation).toHaveBeenCalledOnce();
+    const [, simTime, timeStep] = mockStartSimulation.mock.calls[0];
+    expect(simTime).toBeUndefined();
+    expect(timeStep).toBeUndefined();
+  });
+
+  it("Run button calls startSimulation with time/step in transient mode (Fix B)", async () => {
+    mockConfig = { nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }], connections: [] };
+    render(<SimulateCard />);
+    fireEvent.click(screen.getByTestId("mode-transient"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
+    });
+    expect(mockStartSimulation).toHaveBeenCalledOnce();
+    const [, simTime, timeStep] = mockStartSimulation.mock.calls[0];
+    expect(typeof simTime).toBe("number");
+    expect(typeof timeStep).toBe("number");
   });
 });

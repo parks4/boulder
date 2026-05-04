@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from "react";
+import { useCallback, useState, useEffect, useMemo } from "react";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { startSimulation } from "@/api/simulations";
@@ -105,6 +105,50 @@ export function SimulateCard() {
     [config, fileName, setConfig],
   );
 
+  // Persists tolerance and transient-grid values from the modal into
+  // config.settings.solver so the backend (and Ctrl+Enter) always see them.
+  const handleSolverDetailsDone = useCallback(() => {
+    const currentSettings = (config.settings as Record<string, unknown>) ?? {};
+    const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
+    const rtolNum = parseFloat(rtol);
+    const atolNum = parseFloat(atol);
+    const maxStepsNum = parseInt(maxSteps, 10);
+    const updatedSolver: Record<string, unknown> = {
+      ...currentSolver,
+      ...(Number.isFinite(rtolNum) ? { rtol: rtolNum } : {}),
+      ...(Number.isFinite(atolNum) ? { atol: atolNum } : {}),
+      ...(Number.isFinite(maxStepsNum) ? { max_steps: maxStepsNum } : {}),
+      ...(mode === "transient"
+        ? {
+            grid: {
+              stop: parseFloat(simTime),
+              dt: parseFloat(timeStep),
+            },
+          }
+        : {}),
+    };
+    setConfig(
+      {
+        ...config,
+        settings: { ...currentSettings, solver: updatedSolver },
+      },
+      fileName,
+    );
+    setSolverDetailsOpen(false);
+  }, [config, fileName, rtol, atol, maxSteps, mode, simTime, timeStep, setConfig]);
+
+  // True when the loaded config has per-stage solver blocks that override the
+  // global settings.solver the UI edits.
+  const hasStageOverride = useMemo(() => {
+    const groups = (config as unknown as Record<string, unknown>).groups as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    if (!groups) return false;
+    return Object.values(groups).some(
+      (g) => typeof g?.solver === "object" && g?.solver !== null,
+    );
+  }, [config]);
+
   const handleRun = useCallback(async () => {
     if (config.nodes.length === 0) {
       toast.error("Add at least one reactor before simulating");
@@ -196,11 +240,12 @@ export function SimulateCard() {
 
       <SolverDetailsModal
         open={solverDetailsOpen}
-        onClose={() => setSolverDetailsOpen(false)}
+        onClose={handleSolverDetailsDone}
         mode={mode}
         kind={kind}
         kinds={kinds}
         onKindChange={handleKindChange}
+        hasStageOverride={hasStageOverride}
         rtol={rtol}
         onRtolChange={setRtol}
         atol={atol}

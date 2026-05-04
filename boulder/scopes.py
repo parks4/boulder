@@ -18,7 +18,7 @@ Usage::
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +114,13 @@ def resolve_scope_variable(
             "mass": lambda r: float(r.mass) if hasattr(r, "mass") else float("nan"),
         }
         if attr in _REACTOR_ATTRS:
-            getter = _REACTOR_ATTRS[attr]
-            return lambda _r=reactor, _g=getter: _g(_r)
+            getter: Callable[[Any], float] = _REACTOR_ATTRS[attr]
+            _r_bound = reactor
+
+            def _read_reactor_attr() -> float:
+                return getter(_r_bound)
+
+            return _read_reactor_attr
 
         raise ValueError(
             f"Scope variable '{variable}': unsupported node attribute '{attr}'. "
@@ -225,7 +230,9 @@ class ScopeRecorder:
         result: Dict[str, Any] = {}
         for var, rows in self._data.items():
             if rows:
-                ts, vals = zip(*rows)
+                ts_list, vals_list = zip(*rows)
+                ts: Sequence[float] = list(ts_list)
+                vals = list(vals_list)
             else:
                 ts, vals = [], []
             result[var] = pd.DataFrame({"t": list(ts), "value": list(vals)})
@@ -242,10 +249,12 @@ class ScopeRecorder:
             if path is None:
                 continue
             if rows:
-                ts, vals = zip(*rows)
+                ts_list, vals_list = zip(*rows)
+                ts = list(ts_list)
+                vals = list(vals_list)
             else:
                 ts, vals = [], []
-            df = pd.DataFrame({"t": list(ts), "value": list(vals)})
+            df = pd.DataFrame({"t": ts, "value": vals})
             df.to_csv(path, index=False)
             logger.info("Scope '%s' flushed to '%s' (%d rows).", var, path, len(df))
 

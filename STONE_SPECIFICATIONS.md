@@ -167,30 +167,42 @@ Use `stages:` when the reactor network is solved in sequential steps (e.g. torch
 stages:
   torch_stage:
     mechanism: gri30.yaml       # required
-    solver:                     # optional; overrides settings.solver for this stage
-      mode: transient           # optional: "steady" | "transient" (auto-derived from kind)
-      kind: advance             # "advance_to_steady_state" | "solve_steady" | "advance"
-                                #   | "advance_grid" | "micro_step"
-      advance_time: 1.0e-3     # required iff kind == advance; forbidden otherwise
-      rtol: 1.0e-9             # optional per-stage tolerance overrides
-      atol: 1.0e-15
-      max_time_step: 1.0e-5
-      max_steps: 20000
-      initial_time_reset: false # reset integrator clock before this stage's solve
+    solver: advance             # solver kind — one of the values in the table below
+    advance_time: 1.0e-3        # required iff solver == advance; forbidden otherwise
 ```
 
-**Legacy form** (deprecated, still accepted with a warning):
+`solver:` is a scalar string naming the integrator kind. Valid values mirror `solver.kind` in
+`settings.solver:` (see table above): `advance_to_steady_state`, `solve_steady`, `advance`,
+`advance_grid`, `micro_step`.
+
+When `solver: advance` is used, `advance_time:` must appear at the same level as `solver:`.
+
+For per-stage tolerance overrides or `advance_grid` / `micro_step` parameters, use the block form
+under `settings.solver:` or pass them in the extended block form:
 
 ```yaml
 stages:
   torch_stage:
     mechanism: gri30.yaml
-    solve: advance              # mapped to solver.kind
-    advance_time: 1.0e-3        # mapped to solver.advance_time
+    solver:                     # block form — all solver.* keys accepted here
+      kind: advance
+      advance_time: 1.0e-3
+      rtol: 1.0e-9
+      atol: 1.0e-15
+      max_time_step: 1.0e-5
+      max_steps: 20000
+      initial_time_reset: false
 ```
 
-The legacy `solve:` / `advance_time:` keys at the stage level are silently promoted to
-`solver: { kind: ..., advance_time: ... }` at config-load time. New files should use `solver:`.
+**Deprecated key** (still accepted with a warning, rename to `solver:`):
+
+```yaml
+stages:
+  torch_stage:
+    mechanism: gri30.yaml
+    solve: advance              # deprecated — rename to solver:
+    advance_time: 1.0e-3
+```
 
 ### Stage content blocks
 
@@ -620,11 +632,11 @@ network:
 stages:
   torch_stage:
     mechanism: gri30.yaml
-    solve: advance
+    solver: advance
     advance_time: 1 ms
   psr_stage:
     mechanism: gri30.yaml
-    solve: advance_to_steady_state
+    solver: advance_to_steady_state
 
 torch_stage:
 - id: inlet
@@ -717,7 +729,7 @@ connections: []
 ```yaml
 stages:
   stage_a:
-    solve: advance
+    solver: advance
     advance_time: 1 ms
 
 network: []
@@ -732,7 +744,7 @@ stage_a: []
 ```yaml
 stages:
   stage_a:
-    solve: advance
+    solver: advance
     advance_time: 1 ms
 ```
 
@@ -743,7 +755,7 @@ stages:
 ```yaml
 stages:
   stage_a:
-    solve: advance
+    solver: advance
     advance_time: 1 ms
 
 stage_a: []
@@ -769,10 +781,10 @@ network:
 ```yaml
 stages:
   stage_a:
-    solve: advance
+    solver: advance
     advance_time: 1 ms
   stage_b:
-    solve: advance
+    solver: advance
     advance_time: 1 ms
 
 stage_a:

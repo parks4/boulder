@@ -23,7 +23,15 @@ export const KIND_TO_MODE: Record<SolverKind, SolverMode> = {
   micro_step: "transient",
 };
 
-export function deriveMode(kind: string | undefined): SolverMode {
+/**
+ * Derive the solver mode from an explicit mode string (takes precedence) or
+ * fall back to the kind-based lookup.  Returns "steady" when neither is set.
+ */
+export function deriveMode(
+  kind: string | undefined,
+  explicitMode?: string | undefined,
+): SolverMode {
+  if (explicitMode === "steady" || explicitMode === "transient") return explicitMode;
   if (!kind) return "steady";
   return KIND_TO_MODE[kind as SolverKind] ?? "steady";
 }

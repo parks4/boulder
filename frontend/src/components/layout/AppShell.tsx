@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { deriveMode } from "@/components/panels/solverShared";
 import { useThemeStore } from "@/stores/themeStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
@@ -16,23 +17,18 @@ import { YAMLEditorModal } from "@/components/modals/YAMLEditorModal";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
-type SolverMode = "steady" | "transient";
-
-function useSolverMode(config: { settings?: Record<string, unknown> | null }): SolverMode {
-  const solver = config.settings?.solver as Record<string, unknown> | undefined;
-  const mode = solver?.mode as string | undefined;
-  if (mode === "steady" || mode === "transient") return mode;
-  const kind = solver?.kind as string | undefined;
-  const transientKinds = new Set(["advance", "advance_grid", "micro_step"]);
-  if (kind && transientKinds.has(kind)) return "transient";
-  return "steady";
-}
-
 export function AppShell() {
   const { theme, toggleTheme } = useThemeStore();
   const { config, fileName, setConfig } = useConfigStore();
   const { isRunning, beginSimulationRun, startSimulation: setStarted, setError } = useSimulationStore();
-  const solverMode = useSolverMode(config as { settings?: Record<string, unknown> | null });
+  const solverMode = useMemo(() => {
+    const solver = (config.settings as Record<string, unknown> | null | undefined)
+      ?.solver as Record<string, unknown> | undefined;
+    return deriveMode(
+      solver?.kind as string | undefined,
+      solver?.mode as string | undefined,
+    );
+  }, [config.settings]);
   const [showYamlEditor, setShowYamlEditor] = useState(false);
 
   // Connect SSE stream

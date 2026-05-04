@@ -21,7 +21,7 @@ from typing import (
 import cantera as ct  # type: ignore
 import numpy as np
 
-from .config import CANTERA_MECHANISM
+from .config import CANTERA_MECHANISM, TRANSIENT_SOLVER_KINDS
 from .output_summary import evaluate_output_items, parse_output_block
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
@@ -657,7 +657,6 @@ class DualCanteraConverter:
         and wires signals into the built network so the standalone script is
         fully runnable without manual signal setup.
         """
-        _TRANSIENT_KINDS = frozenset({"advance_grid", "micro_step", "advance"})
 
         def _stage_block(plan, indent="") -> list:
             lines: list = []
@@ -666,7 +665,7 @@ class DualCanteraConverter:
                 for i, stage in enumerate(plan.ordered_stages):
                     node_list = ", ".join(stage.node_ids)
                     kind = (stage.solver or {}).get("kind", "advance_to_steady_state")
-                    is_transient = kind in _TRANSIENT_KINDS
+                    is_transient = kind in TRANSIENT_SOLVER_KINDS
                     lines += [
                         f"{indent}# Stage {i + 1}/{n}: {stage.id}  [nodes: {node_list}]",
                         f"{indent}runner.solve_stage(plan, plan.ordered_stages[{i}], "
@@ -1394,7 +1393,7 @@ class DualCanteraConverter:
                 start = float(grid_spec.get("start", 0.0))
                 stop = float(grid_spec["stop"])
                 dt = float(grid_spec["dt"])
-                times = np.arange(start + dt, stop + dt / 2, dt)
+                times = list(np.arange(start + dt, stop + dt / 2, dt))
             else:
                 times = [float(t) for t in grid_spec]
             for t in times:
@@ -1660,19 +1659,14 @@ class DualCanteraConverter:
         already_solved = getattr(self, "_staged_trajectory", None) is not None
 
         # Determine whether any stage used a transient solver kind.
-        _transient_kinds = frozenset({"advance_grid", "micro_step", "advance"})
         _has_transient_stage = False
-        _staged_traj = getattr(self, "_staged_trajectory", None)
-        if _staged_traj is not None and hasattr(_staged_traj, "stages"):
-            pass  # Could check trajectory stages for kind info
-        # Also check via last config if available
         _last_cfg = getattr(self, "_last_config", None)
         if _last_cfg:
             for _gcfg in (_last_cfg.get("groups") or {}).values():
                 _solver_blk = _gcfg.get("solver") or {}
                 if (
                     _solver_blk.get("kind", "advance_to_steady_state")
-                    in _transient_kinds
+                    in TRANSIENT_SOLVER_KINDS
                 ):
                     _has_transient_stage = True
                     break
@@ -1775,13 +1769,13 @@ class DualCanteraConverter:
                 reactors_series[reactor_id]["T"].append(T)
                 reactors_series[reactor_id]["P"].append(P)
                 for species_name, x_value in zip(reactor_species_names, X_vec):
-                    reactors_series[reactor_id]["X"][species_name].append(
-                        float(x_value)
-                    )
+                    cast(
+                        List[float], reactors_series[reactor_id]["X"][species_name]
+                    ).append(float(x_value))
                 for species_name, y_value in zip(reactor_species_names, Y_vec):
-                    reactors_series[reactor_id]["Y"][species_name].append(
-                        float(y_value)
-                    )
+                    cast(
+                        List[float], reactors_series[reactor_id]["Y"][species_name]
+                    ).append(float(y_value))
 
                 # Spatial reactors: if the plugin registered a spatial_series_fn
                 # on reactor_meta, call it to replace the single-point snapshot
@@ -1909,13 +1903,13 @@ class DualCanteraConverter:
                 reactors_series[reactor_id]["T"].append(T)
                 reactors_series[reactor_id]["P"].append(P)
                 for species_name, x_value in zip(reactor_species_names, X_vec):
-                    reactors_series[reactor_id]["X"][species_name].append(
-                        float(x_value)
-                    )
+                    cast(
+                        List[float], reactors_series[reactor_id]["X"][species_name]
+                    ).append(float(x_value))
                 for species_name, y_value in zip(reactor_species_names, Y_vec):
-                    reactors_series[reactor_id]["Y"][species_name].append(
-                        float(y_value)
-                    )
+                    cast(
+                        List[float], reactors_series[reactor_id]["Y"][species_name]
+                    ).append(float(y_value))
 
             # Call progress callback if provided (for streaming updates)
             if progress_callback:

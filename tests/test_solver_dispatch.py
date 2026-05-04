@@ -10,7 +10,7 @@ Verifies that each ``solver.kind`` value:
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Tuple, cast
 from unittest.mock import MagicMock, patch
 
 import cantera as ct
@@ -319,7 +319,7 @@ def _make_stub_network() -> MagicMock:
     return net
 
 
-def _run_dispatcher(solver: Dict[str, Any], monkeypatch) -> MagicMock:
+def _run_dispatcher(solver: Dict[str, Any], monkeypatch) -> Tuple[MagicMock, MagicMock]:
     """Build a minimal network and patch build_sub_network to capture calls.
 
     Returns the mock ReactorNet that was passed to the dispatcher.
@@ -338,7 +338,7 @@ def _run_dispatcher(solver: Dict[str, Any], monkeypatch) -> MagicMock:
         # Call the dispatch code directly, bypassing the full build
         _dispatch_solver(conv, mock_net, solver, stage, "s1")
 
-    return mock_net, mock_transient
+    return mock_net, cast(MagicMock, mock_transient)
 
 
 def _dispatch_solver(conv, network, solver, stage, stage_id):
@@ -584,3 +584,61 @@ class TestClonePerNode:
             conv.create_reactor_from_node(node, gas)
 
         assert captured.get("clone") is False
+
+
+# ---------------------------------------------------------------------------
+# Solver-kind constants (Fix E)
+# ---------------------------------------------------------------------------
+
+
+class TestSolverKindConstants:
+    """Check solver-kind constants in ``boulder.config``.
+
+    Module-level constants must be internally consistent and serve as the
+    single source of truth for all kind-based checks across the codebase.
+    """
+
+    def test_solver_kind_to_mode_covers_all_kinds(self):
+        """SOLVER_KIND_TO_MODE must map every known kind to 'steady' or 'transient'."""
+        from boulder.config import SOLVER_KIND_TO_MODE
+
+        for kind, mode in SOLVER_KIND_TO_MODE.items():
+            assert mode in ("steady", "transient"), (
+                f"kind {kind!r} mapped to unexpected mode {mode!r}"
+            )
+
+    def test_all_solver_kinds_equals_mapping_keys(self):
+        """ALL_SOLVER_KINDS must equal the key set of SOLVER_KIND_TO_MODE."""
+        from boulder.config import ALL_SOLVER_KINDS, SOLVER_KIND_TO_MODE
+
+        assert ALL_SOLVER_KINDS == frozenset(SOLVER_KIND_TO_MODE)
+
+    def test_transient_solver_kinds_subset_of_all(self):
+        """TRANSIENT_SOLVER_KINDS must be a strict subset of ALL_SOLVER_KINDS."""
+        from boulder.config import ALL_SOLVER_KINDS, TRANSIENT_SOLVER_KINDS
+
+        assert TRANSIENT_SOLVER_KINDS < ALL_SOLVER_KINDS
+
+    def test_transient_kinds_are_correct(self):
+        """The expected three transient kinds are present in TRANSIENT_SOLVER_KINDS."""
+        from boulder.config import TRANSIENT_SOLVER_KINDS
+
+        assert {"advance", "advance_grid", "micro_step"} == TRANSIENT_SOLVER_KINDS
+
+    def test_steady_kinds_not_in_transient_set(self):
+        """Steady kinds must not appear in TRANSIENT_SOLVER_KINDS."""
+        from boulder.config import TRANSIENT_SOLVER_KINDS
+
+        for steady in ("advance_to_steady_state", "solve_steady"):
+            assert steady not in TRANSIENT_SOLVER_KINDS
+
+    def test_cantera_converter_uses_same_transient_set(self):
+        """``cantera_converter`` must reuse ``TRANSIENT_SOLVER_KINDS`` from config.
+
+        The module must not define its own copy of the transient-kinds set.
+        """
+        import boulder.cantera_converter as cc_mod
+        from boulder.config import TRANSIENT_SOLVER_KINDS
+
+        # The module-level attribute should be identical (same object)
+        assert cc_mod.TRANSIENT_SOLVER_KINDS is TRANSIENT_SOLVER_KINDS

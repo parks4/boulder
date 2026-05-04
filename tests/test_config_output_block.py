@@ -38,13 +38,12 @@ def test_output_block_is_preserved_through_validation_and_conversion():
     assert "output" in roundtrip and roundtrip["output"] == config["output"]
 
 
-def test_convert_to_stone_format_staged_solver_block():
-    """Assert multi-stage export writes ``stages:`` with ``solver:`` from normalized groups.
+def test_convert_to_stone_format_staged_emits_solver_scalar():
+    """Assert multi-stage export writes ``solver: <kind>`` as a scalar string in ``stages:``.
 
-    Groups use the normalized ``solver`` dict (not legacy ``solve``).
-
-    Regression: convert_to_stone_format used g["solve"] which raised KeyError 'solve'
-    for configs normalized from STONE files that use ``solver:`` blocks.
+    Normalized groups have ``solver: {kind: ..., mode: ...}``. Export must emit the
+    compact scalar form ``solver: advance_to_steady_state`` (not a nested block).
+    Regression: previously raised KeyError 'solve'; now must not emit ``kind:`` at all.
     """
     internal = {
         "nodes": [
@@ -70,8 +69,43 @@ def test_convert_to_stone_format_staged_solver_block():
     }
     stone = convert_to_stone_format(internal)
     assert "stages" in stone
-    assert stone["stages"]["s1"]["solver"]["kind"] == "advance_to_steady_state"
+    assert stone["stages"]["s1"]["solver"] == "advance_to_steady_state"
     assert "solve" not in stone["stages"]["s1"]
+    assert "kind" not in stone["stages"]["s1"]
+
+
+def test_convert_to_stone_format_staged_advance_emits_advance_time_sibling():
+    """Assert ``advance`` kind exports ``solver: advance`` + ``advance_time:`` as siblings.
+
+    advance_time must appear at the same level as ``solver:``, not nested inside it.
+    """
+    internal = {
+        "nodes": [
+            {
+                "id": "inlet",
+                "type": "Reservoir",
+                "group": "s1",
+                "properties": {"temperature": 300.0},
+            },
+        ],
+        "connections": [],
+        "groups": {
+            "s1": {
+                "stage_order": 1,
+                "mechanism": "gri30.yaml",
+                "solver": {
+                    "kind": "advance",
+                    "advance_time": 1e-3,
+                    "mode": "transient",
+                },
+            },
+        },
+    }
+    stone = convert_to_stone_format(internal)
+    stage = stone["stages"]["s1"]
+    assert stage["solver"] == "advance"
+    assert stage["advance_time"] == 1e-3
+    assert "kind" not in stage
 
 
 def test_convert_to_stone_format_staged_missing_solver_raises():

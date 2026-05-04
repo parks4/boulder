@@ -14,7 +14,7 @@ import math
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 import cantera as ct  # type: ignore
 
@@ -548,8 +548,9 @@ def sim_to_internal_config(
             else:
                 # Func1-backed MFC: emit a snapshot value at t=0 as the scalar seed.
                 # A comment in the YAML will note this is a dynamic rate.
+                func1_mfr = cast(ct.Func1, mfr_raw)
                 try:
-                    _t0_val = float(mfr_raw(0.0))
+                    _t0_val = float(func1_mfr(0.0))
                     conn_props["mass_flow_rate"] = abs(_t0_val)
                 except Exception:
                     pass  # omit; conservation will handle it

@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ...cantera_converter import DualCanteraConverter
+from ...config import TRANSIENT_SOLVER_KINDS, synthesize_default_group
 from ...simulation_worker import SimulationWorker
 from ..sse import simulation_event_stream
 
@@ -60,9 +61,19 @@ async def start_simulation(
     """
     sim_id = str(uuid.uuid4())
 
+    # The frontend always sends an already-normalized config (expanded composite
+    # satellites, flat groups/nodes/connections form).  We must NOT call
+    # normalize_config here — expand_composite_kinds is not idempotent and
+    # would raise a collision error for any composite reactor whose satellite
+    # nodes are already present in the node list.
+    #
+    # synthesize_default_group IS idempotent: it only adds a "default" group
+    # when none exists, which build_network requires.
+    config: Dict[str, Any] = dict(body.config)
+    synthesize_default_group(config)
+
     # Determine mechanism
     mechanism = body.mechanism
-    config = body.config
     if not mechanism:
         phases = config.get("phases", {})
         if isinstance(phases, dict):
@@ -109,7 +120,7 @@ async def start_simulation(
             solver_block = config["settings"].setdefault("solver", {})
             # Only inject grid defaults when no transient kind already specified.
             existing_kind = solver_block.get("kind", "")
-            if existing_kind not in ("advance_grid", "micro_step", "advance"):
+            if existing_kind not in TRANSIENT_SOLVER_KINDS:
                 solver_block.setdefault("kind", "advance_grid")
             grid = solver_block.setdefault("grid", {})
             grid["stop"] = simulation_time
