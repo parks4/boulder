@@ -104,6 +104,28 @@ Plus flow maps (`connection_mass_flows_kg_s`, per-node aggregates) and `per_reac
 
 `SimulationWorker` runs Cantera integration in a thread, streams progress (including staged build progress where applicable).
 
+### Reactor series metadata for plots
+
+Simulation plot data is carried as `reactors_series`, keyed by reactor id. The baseline payload for each
+reactor is `{T, P, X, Y}` arrays plus the global `times` array. Staged steady solves usually produce a
+single sample at `t = 0.0`; this is still valid plot data and should be rendered as a steady snapshot.
+
+Spatial/PFR-like visualization is opt-in metadata, not inferred from a reactor name or type in the UI:
+
+- A reactor builder or custom stage network can attach `spatial_series_fn` to
+  `DualCanteraConverter.reactor_meta[reactor_id]`.
+- During `run_streaming_simulation`, that function replaces the single-point snapshot with its returned
+  series.
+- A spatial series sets `is_spatial: true` and provides spatial axes such as `x` (position) and optional
+  `t` (residence time). It may also include `fbs_convergence` for the Convergence tab.
+- PSR/CSTR-style metadata uses `is_psr: true`, inherited from `reactor_meta[reactor_id]["is_psr"]`.
+
+These flags are part of the public backend-to-frontend data contract. `SimulationWorker` preserves extra
+series keys when copying progress snapshots, the SSE/results API forwards them unchanged, and
+`frontend/src/types/simulation.ts` models them on `ReactorSeries`. Frontend result tabs choose their
+plot mode from the inherited series metadata (`is_spatial`, `is_psr`, etc.); they should not re-classify
+reactors by kind string.
+
 ### Frontend (`frontend/src/`)
 
 - **API** — `api/client.ts`, `configs.ts`, `simulations.ts`, `mechanisms.ts`, `plugins.ts`

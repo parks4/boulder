@@ -58,12 +58,70 @@ class BoulderRunner:
         self.results: Optional[Dict[str, Any]] = None
         self.code: Optional[str] = None
         self.result: Optional["SimulationResult"] = None
+        self._scope_recorder: Optional[Any] = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if "converter_class" not in cls.__dict__:
             # Inherit from parent; no default assignment needed.
             pass
+
+    # ------------------------------------------------------------------
+    # Causal-layer public surface (Phase C / Phase E FMU prep)
+    # ------------------------------------------------------------------
+
+    @property
+    def scopes(self) -> "Dict[str, Any]":
+        """Return scope data as a ``dict[str, pandas.DataFrame]``.
+
+        Each key is a scope variable path (e.g. ``nodes.r1.T``); each value
+        is a DataFrame with columns ``t`` (seconds) and ``value``.
+
+        Returns an empty dict if no scopes were declared or if
+        :meth:`build` has not been called yet.
+        """
+        if self._scope_recorder is None:
+            return {}
+        return self._scope_recorder.to_dataframes()
+
+    @property
+    def exposed_inputs(self) -> "Dict[str, Any]":
+        """Return signals that are not bound to any internal network target.
+
+        These are the FMI-friendly *input variables* — signals that a co-
+        simulation master (FMU) could override at each ``doStep``.
+
+        A signal is considered *exposed* (unbound) if its ``id`` does not
+        appear as a ``source`` in any entry of the ``bindings:`` block.
+
+        Returns a ``dict[signal_id, signal_spec]`` where each value is the
+        raw spec dict from the ``signals:`` block.  Returns an empty dict if no
+        signals are declared or if :meth:`build` has not been called yet.
+
+        .. note::
+            This is the Phase E FMU data-shape contract.  No FMU code is
+            generated here; this property just exposes the data structure that
+            :mod:`boulder.fmi` would use.  See ``FMI_FMU_EXPORT.md``.
+        """
+        cfg = getattr(self, "config", None)
+        if cfg is None:
+            return {}
+        signals_block = cfg.get("signals") or []
+        bindings_block = cfg.get("bindings") or []
+
+        # Set of signal IDs that are already wired to internal targets
+        bound_ids: set[str] = {
+            b.get("source", "") for b in bindings_block if isinstance(b, dict)
+        }
+
+        exposed: Dict[str, Any] = {}
+        for sig in signals_block:
+            if not isinstance(sig, dict):
+                continue
+            sid = sig.get("id", "")
+            if sid and sid not in bound_ids:
+                exposed[sid] = sig
+        return exposed
 
     @classmethod
     def from_yaml(cls, path: str) -> "BoulderRunner":
@@ -267,6 +325,216 @@ class BoulderRunner:
         trajectory.viz_network = viz_net
         self.network = viz_net
 
+    def run_continuation(
+        self,
+        continuation: Optional[Dict[str, Any]] = None,
+    ) -> "BoulderRunner":
+        """Execute a parameter continuation sweep as defined in ``continuation:`` STONE block.
+
+        Wraps :meth:`solve_stage` in an outer loop, mutating the target parameter
+        between solves and collecting the trajectory.  Equivalent to the manual
+        loop in ``combustor.py``::
+
+            while combustor.T > 500:
+                sim.solve_steady()
+                inlet.mass_flow_rate *= 0.9
+
+        Parameters
+        ----------
+        continuation :
+            Parsed ``continuation:`` dict from the STONE YAML.  When ``None``
+            the method reads ``self.config.get("continuation")``.  Structure::
+
+                parameter: connections.<id>.mass_flow_rate
+                update:
+                  multiply: 0.9          # or set: <val> or list: [...]
+                until:
+                  reactor_T_below: 500   # or reactor_T_above: <K>
+                  max_iters: 200
+
+        Returns
+        -------
+        self
+            For chaining.  After this call ``self.network`` is the visualization
+            network built from the last converged iteration.
+
+        Raises
+        ------
+        ValueError
+            If *continuation* is missing required keys or *parameter* path cannot
+            be resolved.
+        """
+        if continuation is None:
+            continuation = self.config.get("continuation") or {}
+        if not continuation:
+            raise ValueError(
+                "run_continuation: no 'continuation:' block found in config or argument."
+            )
+
+        parameter_path = continuation.get("parameter")
+        if not parameter_path:
+            raise ValueError(
+                "run_continuation: 'parameter:' is required in the continuation block."
+            )
+
+        update_spec = continuation.get("update") or {}
+        until_spec = continuation.get("until") or {}
+        max_iters = int(until_spec.get("max_iters", 200))
+        t_below = until_spec.get("reactor_T_below")
+        t_above = until_spec.get("reactor_T_above")
+
+        # Build the network for the first iteration
+        if self.network is None:
+            self.build()
+
+        converter = self._ensure_converter()
+
+        def _get_param(path: str) -> float:
+            """Resolve dotted parameter path to current float value."""
+            parts = path.split(".")
+            if parts[0] == "connections" and len(parts) >= 3:
+                conn_id = parts[1]
+                attr = ".".join(parts[2:])
+                device = converter.connections.get(conn_id)
+                if device is None:
+                    raise ValueError(
+                        f"run_continuation: connection '{conn_id}' not found."
+                    )
+                return float(getattr(device, attr))
+            if parts[0] == "nodes" and len(parts) >= 3:
+                node_id = parts[1]
+                attr = ".".join(parts[2:])
+                reactor = converter.reactors.get(node_id)
+                if reactor is None:
+                    raise ValueError(f"run_continuation: node '{node_id}' not found.")
+                return float(getattr(reactor, attr))
+            raise ValueError(
+                f"run_continuation: unsupported parameter path '{path}'. "
+                "Supported: connections.<id>.<attr> or nodes.<id>.<attr>."
+            )
+
+        def _set_param(path: str, value: float) -> None:
+            """Set parameter at dotted path to *value*."""
+            parts = path.split(".")
+            if parts[0] == "connections" and len(parts) >= 3:
+                conn_id = parts[1]
+                attr = ".".join(parts[2:])
+                device = converter.connections.get(conn_id)
+                if device is None:
+                    raise ValueError(
+                        f"run_continuation: connection '{conn_id}' not found."
+                    )
+                setattr(device, attr, value)
+                return
+            if parts[0] == "nodes" and len(parts) >= 3:
+                node_id = parts[1]
+                attr = ".".join(parts[2:])
+                reactor = converter.reactors.get(node_id)
+                if reactor is None:
+                    raise ValueError(f"run_continuation: node '{node_id}' not found.")
+                setattr(reactor, attr, value)
+                return
+            raise ValueError(f"run_continuation: unsupported parameter path '{path}'.")
+
+        def _check_until() -> bool:
+            """Return True if the stopping predicate is satisfied."""
+            if t_below is not None:
+                import cantera as ct  # noqa: PLC0415
+
+                for r in converter.reactors.values():
+                    if isinstance(r, ct.Reservoir):
+                        continue
+                    try:
+                        if r.phase.T < float(t_below):
+                            return True
+                    except Exception:
+                        pass
+            if t_above is not None:
+                import cantera as ct  # noqa: PLC0415
+
+                for r in converter.reactors.values():
+                    if isinstance(r, ct.Reservoir):
+                        continue
+                    try:
+                        if r.phase.T > float(t_above):
+                            return True
+                    except Exception:
+                        pass
+            return False
+
+        def _next_value(current: float, step_idx: int) -> Optional[float]:
+            """Compute next parameter value from the update spec.
+
+            Returns ``None`` when the list is exhausted.
+            """
+            if "multiply" in update_spec:
+                return current * float(update_spec["multiply"])
+            if "set" in update_spec:
+                return float(update_spec["set"])
+            if "list" in update_spec:
+                values_list = update_spec["list"]
+                if step_idx < len(values_list):
+                    return float(values_list[step_idx])
+                return None
+            raise ValueError(
+                f"run_continuation: 'update:' must have 'multiply', 'set', or 'list' key. "
+                f"Got: {sorted(update_spec.keys())}"
+            )
+
+        # Collect sweep trajectory rows
+        continuation_rows: list = []
+
+        plan = self.build_stage_graph()
+        trajectory = self.new_trajectory()
+        inlet_states: Dict[str, Any] = {}
+
+        for step_idx in range(max_iters):
+            # Re-solve all stages with the current parameter value
+            inlet_states = {}
+            trajectory = self.new_trajectory()
+            for stage in plan.ordered_stages:
+                self.solve_stage(plan, stage, inlet_states, trajectory)
+
+            # Record current parameter value + reactor temperatures
+            try:
+                param_val = _get_param(parameter_path)
+            except Exception:
+                param_val = float("nan")
+
+            row: Dict[str, Any] = {"step": step_idx, "parameter": param_val}
+            import cantera as ct  # noqa: PLC0415
+
+            for rid, r in converter.reactors.items():
+                if not isinstance(r, ct.Reservoir):
+                    try:
+                        row[f"{rid}.T"] = r.phase.T
+                    except Exception:
+                        pass
+            continuation_rows.append(row)
+
+            # Check stopping condition
+            if _check_until():
+                logger.info(
+                    "run_continuation: stopped at step %d (until predicate satisfied).",
+                    step_idx,
+                )
+                break
+
+            # Compute next parameter value
+            next_val = _next_value(param_val, step_idx + 1)
+            if next_val is None:
+                logger.info(
+                    "run_continuation: stopped at step %d (list exhausted).", step_idx
+                )
+                break
+
+            _set_param(parameter_path, next_val)
+
+        self.build_viz_network(plan, trajectory)
+        converter._staged_trajectory = trajectory
+        self._continuation_rows = continuation_rows
+        return self
+
     # ------------------------------------------------------------------
     # High-level convenience methods
     # ------------------------------------------------------------------
@@ -310,6 +578,29 @@ class BoulderRunner:
         ]
         converter.code_lines = script_lines
         self.code = "\n".join(script_lines)
+
+        # Initialize the scope recorder after the network is built so the
+        # reactors/connections are populated.  The recorder captures state
+        # at the end of the build (steady-state snapshot or final transient step).
+        scopes_block = self.config.get("scopes")
+        if scopes_block:
+            from .scopes import ScopeRecorder
+
+            self._scope_recorder = ScopeRecorder(scopes_block, converter)
+            # Record one snapshot at the end of the steady-state build so that
+            # BoulderRunner.scopes is non-empty even for steady-state cases.
+            # Transient step-by-step recording is handled by _run_transient_solver
+            # via converter._scope_recorder when set.
+            converter._scope_recorder = self._scope_recorder  # type: ignore[attr-defined]
+            # Take an initial snapshot at t=0 (or the final time if a trajectory is available)
+            last_t = 0.0
+            for _stage_traj in trajectory.networks.values():
+                try:
+                    last_t = float(_stage_traj.time)
+                except Exception:
+                    pass
+            self._scope_recorder.record(last_t)
+
         return self
 
     def solve(self) -> "BoulderRunner":

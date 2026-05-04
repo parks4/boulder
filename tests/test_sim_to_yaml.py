@@ -52,6 +52,26 @@ def _build_test_network():
     return sim, {"mfc1": mfc1, "mfc2": mfc2, "valve": valve}
 
 
+def test_sim2stone_yaml_emits_default_si_units():
+    """Assert sim2stone YAML suffixes temperature (K), pressure (Pa), mass flow (kg/s).
+
+    Also asserts normalize_config coerces those strings back to floats so the
+    DualCanteraConverter round-trip still succeeds.
+    """
+    sim, _ = _build_test_network()
+    yaml_str = sim_to_stone_yaml(sim, default_mechanism="gri30.yaml")
+    assert " K" in yaml_str
+    assert " Pa" in yaml_str
+    assert " kg/s" in yaml_str
+    normalized = normalize_config(load_yaml_string_with_comments(yaml_str))
+    validate_config(normalized)
+    mechanism = (
+        (normalized.get("phases") or {}).get("gas", {}).get("mechanism", "gri30.yaml")
+    )
+    converter = DualCanteraConverter(mechanism=mechanism)
+    converter.build_network(normalized)
+
+
 def test_roundtrip_sim_to_yaml_and_back():
     sim, _ = _build_test_network()
 

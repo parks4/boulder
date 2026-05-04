@@ -8,6 +8,10 @@ interface Props {
   data: SimulationProgress;
 }
 
+function traceModeForSamples(sampleCount: number): "lines" | "lines+markers" {
+  return sampleCount > 1 ? "lines" : "lines+markers";
+}
+
 export function PlotsTab({ data }: Props) {
   const selectedElement = useSelectionStore((s) => s.selectedElement);
   const theme = useThemeStore((s) => s.theme);
@@ -85,12 +89,13 @@ export function PlotsTab({ data }: Props) {
   if (reactorSeries?.is_spatial) {
     const xAxis = reactorSeries.x ?? [];
     const xLabel = "Position (m)";
+    const spatialTraceMode = traceModeForSamples(xAxis.length);
 
     const moleFractionTraces = mainSpeciesMole.map((species) => ({
       x: xAxis,
       y: reactorSeries.X?.[species] ?? [],
       type: "scatter" as const,
-      mode: "lines" as const,
+      mode: spatialTraceMode,
       name: species,
       line: { width: 2 },
     }));
@@ -99,7 +104,7 @@ export function PlotsTab({ data }: Props) {
       x: xAxis,
       y: reactorSeries.Y?.[species] ?? [],
       type: "scatter" as const,
-      mode: "lines" as const,
+      mode: spatialTraceMode,
       name: species,
       line: { width: 2 },
     }));
@@ -114,7 +119,7 @@ export function PlotsTab({ data }: Props) {
                 x: xAxis,
                 y: reactorSeries.T?.map((t) => t - 273.15) ?? [],
                 type: "scatter",
-                mode: "lines",
+                mode: spatialTraceMode,
                 name: selectedReactorId,
                 line: { width: 2 },
               },
@@ -139,7 +144,7 @@ export function PlotsTab({ data }: Props) {
                 x: xAxis,
                 y: reactorSeries.P ?? [],
                 type: "scatter",
-                mode: "lines",
+                mode: spatialTraceMode,
                 name: selectedReactorId,
                 line: { width: 2 },
               },
@@ -307,12 +312,13 @@ export function PlotsTab({ data }: Props) {
 
   // --- Default: standard time-series plots ---
   const times = data.times;
+  const timeTraceMode = traceModeForSamples(times.length);
 
   const moleFractionTraces = mainSpeciesMole.map((species) => ({
     x: times,
     y: reactorSeries?.X?.[species] ?? [],
     type: "scatter" as const,
-    mode: "lines" as const,
+    mode: timeTraceMode,
     name: species,
     line: { width: 2 },
   }));
@@ -321,7 +327,7 @@ export function PlotsTab({ data }: Props) {
     x: times,
     y: reactorSeries?.Y?.[species] ?? [],
     type: "scatter" as const,
-    mode: "lines" as const,
+    mode: timeTraceMode,
     name: species,
     line: { width: 2 },
   }));
@@ -339,7 +345,7 @@ export function PlotsTab({ data }: Props) {
                   (t: number) => t - 273.15,
                 ) ?? [],
               type: "scatter" as const,
-              mode: "lines" as const,
+              mode: timeTraceMode,
               name: selectedReactorId,
               line: { width: 2 },
             },
@@ -370,7 +376,7 @@ export function PlotsTab({ data }: Props) {
               x: data.times,
               y: data.reactors_series[selectedReactorId]?.P ?? [],
               type: "scatter" as const,
-              mode: "lines" as const,
+              mode: timeTraceMode,
               name: selectedReactorId,
               line: { width: 2 },
             },

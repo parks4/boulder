@@ -62,8 +62,69 @@ STONE_V2_BASE_KEYS: frozenset = frozenset(
         "export",
         "sweeps",
         "scenarios",
+        "continuation",
+        "signals",
+        "bindings",
+        "scopes",
     }
 )
+
+# Mapping from solver.kind → implied solver.mode.
+# Exported so other modules can import instead of re-defining.
+SOLVER_KIND_TO_MODE: Dict[str, str] = {
+    "advance_to_steady_state": "steady",
+    "solve_steady": "steady",
+    "advance": "transient",
+    "advance_grid": "transient",
+    "micro_step": "transient",
+}
+
+# Derived constant sets — single source of truth for all kind-based checks.
+ALL_SOLVER_KINDS: frozenset = frozenset(SOLVER_KIND_TO_MODE)
+TRANSIENT_SOLVER_KINDS: frozenset = frozenset(
+    k for k, m in SOLVER_KIND_TO_MODE.items() if m == "transient"
+)
+
+# Private alias kept for internal usages below that already use the old name.
+_SOLVER_KIND_TO_MODE = SOLVER_KIND_TO_MODE
+
+
+def _resolve_and_validate_solver_mode(
+    solver: Dict[str, Any], context: str
+) -> Dict[str, Any]:
+    """Return a copy of *solver* with ``mode`` filled in and validated.
+
+    Rules:
+
+    - If ``mode`` is absent, derive it from ``kind`` (default
+      ``advance_to_steady_state`` → ``steady``).
+    - If ``mode`` is present and contradicts ``kind``, raise ``ValueError``.
+    - The returned dict always has a ``mode`` key.
+
+    Parameters
+    ----------
+    solver:
+        The resolved solver dict (already merged global + per-stage).
+    context:
+        A short descriptive string for error messages (e.g. ``"stage 'psr'"``.
+    """
+    kind = solver.get("kind", "advance_to_steady_state")
+    implied_mode = _SOLVER_KIND_TO_MODE.get(kind, "steady")
+    explicit_mode = solver.get("mode")
+    if explicit_mode is not None:
+        if explicit_mode not in ("steady", "transient"):
+            raise ValueError(
+                f"STONE v2 error: {context} solver.mode '{explicit_mode}' is not valid. "
+                "Allowed values: 'steady', 'transient'. See STONE_SPECIFICATIONS.md."
+            )
+        if explicit_mode != implied_mode:
+            raise ValueError(
+                f"STONE v2 error: {context} solver.mode: {explicit_mode} is incompatible "
+                f"with solver.kind: {kind} (which implies mode: {implied_mode}). "
+                "See STONE_SPECIFICATIONS.md."
+            )
+    return {**solver, "mode": implied_mode}
+
 
 # Names that may not be used as stage ids.
 STONE_V2_RESERVED_STAGE_NAMES: frozenset = frozenset(
@@ -174,13 +235,18 @@ def _detect_stone_dialect(raw: Dict[str, Any]) -> str:
     has_stages = "stages" in raw
     has_network = "network" in raw
 
-    # Internal format: has nodes + (already has type/properties on first node).
-    # This happens when tests or plugins pass a pre-normalized dict directly.
+    # Internal format: has nodes + (already has type/properties on first node,
+    # or nodes list is empty — an empty nodes list with no stage keys is also
+    # the internal format produced by normalize_config for trivial configs).
     if has_nodes and not has_stages and not has_network:
         nodes = raw.get("nodes") or []
-        if nodes and isinstance(nodes[0], dict) and "type" in nodes[0]:
+        if not nodes:
+            # Empty nodes list — treat as already-internal (normalised by a
+            # previous call or constructed directly by tests/plugins).
             return "internal"
-        # Has nodes but first node doesn't have `type` → v1 YAML shape.
+        if isinstance(nodes[0], dict) and "type" in nodes[0]:
+            return "internal"
+        # Has non-empty nodes but first node doesn't have `type` → v1 YAML shape.
         raise ValueError(
             "STONE v1 format detected (top-level 'nodes:', 'connections:', or 'groups:'). "
             "Migrate to STONE v2. See STONE_SPECIFICATIONS.md."
@@ -472,17 +538,35 @@ def _normalize_v2_network(raw: Dict[str, Any]) -> Dict[str, Any]:
 
     # Build internal format
     result = {k: raw[k] for k in ("metadata", "phases", "settings") if k in raw}
-    for k in ("output", "export", "sweeps", "scenarios"):
+    for k in (
+        "output",
+        "export",
+        "sweeps",
+        "scenarios",
+        "continuation",
+        "signals",
+        "bindings",
+        "scopes",
+    ):
         if k in raw:
             result[k] = raw[k]
 
     result["nodes"] = nodes
     result["connections"] = connections
+    # Propagate any settings.solver defaults into the synthesized default group
+    _settings = raw.get("settings") or {}
+    _settings_solver = _settings.get("solver") if isinstance(_settings, dict) else None
+    _default_group_solver: Dict[str, Any] = {"kind": "advance_to_steady_state"}
+    if isinstance(_settings_solver, dict):
+        _default_group_solver = {**_default_group_solver, **_settings_solver}
+    _default_group_solver = _resolve_and_validate_solver_mode(
+        _default_group_solver, "default stage"
+    )
     result["groups"] = {
         "default": {
             "stage_order": 1,
             "mechanism": default_mech,
-            "solve": "advance_to_steady_state",
+            "solver": _default_group_solver,
         }
     }
     for n in result["nodes"]:
@@ -538,30 +622,117 @@ def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
                 "See STONE_SPECIFICATIONS.md."
             )
 
-    # Validate stage metadata (solve, advance_time)
+    # Valid solver kind values — use module-level ALL_SOLVER_KINDS as source of truth.
+    _VALID_SOLVER_KINDS = ALL_SOLVER_KINDS
+    # Kinds that require a top-level legacy advance_time (legacy path only)
+    _ADVANCE_TIME_REQUIRED_LEGACY = frozenset({"advance"})
+
+    # Validate stage metadata (solve/solver, advance_time)
     for sid, smeta in stages_meta.items():
         if not isinstance(smeta, dict):
             raise ValueError(
                 f"STONE v2 error: stage '{sid}' metadata must be a mapping."
             )
-        solve = smeta.get("solve")
-        if solve not in ("advance", "advance_to_steady_state"):
-            raise ValueError(
-                f"STONE v2 error: stage '{sid}' has invalid 'solve:' value '{solve}'. "
-                "Allowed values: 'advance', 'advance_to_steady_state'. "
-                "See STONE_SPECIFICATIONS.md."
-            )
-        has_at = "advance_time" in smeta
-        if solve == "advance" and not has_at:
-            raise ValueError(
-                f"STONE v2 error: stage '{sid}' uses solve: advance but is missing "
-                "'advance_time:'. See STONE_SPECIFICATIONS.md."
-            )
-        if solve == "advance_to_steady_state" and has_at:
-            raise ValueError(
-                f"STONE v2 error: stage '{sid}' uses solve: advance_to_steady_state "
-                "but declares 'advance_time:' which is forbidden for this mode. "
-                "See STONE_SPECIFICATIONS.md."
+
+        # ----- solver: <string> form (canonical scalar) -----
+        # e.g.  solver: advance  +  advance_time: 1.0
+        if "solver" in smeta and not isinstance(smeta["solver"], dict):
+            solver_str = smeta["solver"]
+            if not isinstance(solver_str, str):
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' has 'solver:' that is neither a "
+                    "string nor a mapping. See STONE_SPECIFICATIONS.md."
+                )
+            if solver_str not in _VALID_SOLVER_KINDS:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' has invalid 'solver:' value "
+                    f"'{solver_str}'. Allowed: {sorted(_VALID_SOLVER_KINDS)}. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+            has_at = "advance_time" in smeta
+            if solver_str in _ADVANCE_TIME_REQUIRED_LEGACY and not has_at:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' uses solver: {solver_str} but is "
+                    "missing 'advance_time:'. See STONE_SPECIFICATIONS.md."
+                )
+            if solver_str not in _ADVANCE_TIME_REQUIRED_LEGACY and has_at:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' uses solver: {solver_str} "
+                    "but declares 'advance_time:' which is only valid for 'advance'. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+
+        # ----- solver: {kind: ...} block form -----
+        elif "solver" in smeta:
+            solver_block = smeta["solver"]
+            kind = solver_block.get("kind", "advance_to_steady_state")
+            if kind not in _VALID_SOLVER_KINDS:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' solver.kind '{kind}' is not valid. "
+                    f"Allowed: {sorted(_VALID_SOLVER_KINDS)}. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+            if kind == "advance" and "advance_time" not in solver_block:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' uses solver.kind: advance but is "
+                    "missing 'advance_time:' in the solver block. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+            if kind == "advance_grid" and "grid" not in solver_block:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' uses solver.kind: advance_grid but "
+                    "is missing 'grid:' in the solver block. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+            if kind == "micro_step":
+                for req in ("t_total", "chunk_dt", "max_dt"):
+                    if req not in solver_block:
+                        raise ValueError(
+                            f"STONE v2 error: stage '{sid}' uses solver.kind: micro_step "
+                            f"but is missing '{req}:' in the solver block. "
+                            "See STONE_SPECIFICATIONS.md."
+                        )
+            if "solve" in smeta:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' declares both 'solver:' and legacy "
+                    "'solve:'. Use only 'solver:'. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+
+        else:
+            # ----- Legacy solve:/advance_time: form (deprecated) -----
+            solve = smeta.get("solve")
+            if solve is None:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' has neither 'solver:' nor legacy "
+                    "'solve:'. One is required. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+            if solve not in _VALID_SOLVER_KINDS:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' has invalid 'solve:' value '{solve}'. "
+                    f"Allowed values: {sorted(_VALID_SOLVER_KINDS)}. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+            has_at = "advance_time" in smeta
+            if solve in _ADVANCE_TIME_REQUIRED_LEGACY and not has_at:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' uses solve: {solve} but is missing "
+                    "'advance_time:'. See STONE_SPECIFICATIONS.md."
+                )
+            if solve not in _ADVANCE_TIME_REQUIRED_LEGACY and has_at:
+                raise ValueError(
+                    f"STONE v2 error: stage '{sid}' uses solve: {solve} "
+                    "but declares 'advance_time:' which is only valid for 'advance'. "
+                    "See STONE_SPECIFICATIONS.md."
+                )
+            import warnings  # noqa: PLC0415
+
+            warnings.warn(
+                f"Stage '{sid}': legacy 'solve:' key is deprecated. "
+                "Rename it to 'solver:'. See STONE_SPECIFICATIONS.md.",
+                DeprecationWarning,
+                stacklevel=8,
             )
 
     # Process items for each stage to get node/connection lists
@@ -622,21 +793,62 @@ def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
         all_nodes.extend(stage_nodes)
         all_connections.extend(stage_conns)
 
+    # Global settings.solver defaults
+    _settings_g = raw.get("settings") or {}
+    _global_solver_defaults: Dict[str, Any] = {}
+    if isinstance(_settings_g, dict):
+        _sv = _settings_g.get("solver")
+        if isinstance(_sv, dict):
+            _global_solver_defaults = dict(_sv)
+
     # Build groups section from stage metadata (topological order)
     groups: Dict[str, Any] = {}
     for order_idx, sid in enumerate(ordered_stages):
         smeta = stages_meta[sid]
+        # Resolve solver: promote all forms to an internal dict.
+        from .utils import coerce_unit_string  # noqa: PLC0415
+
+        per_stage_solver: Dict[str, Any]
+        if "solver" in smeta and isinstance(smeta["solver"], str):
+            # Canonical scalar form: solver: advance  +  advance_time: 1.0
+            per_stage_solver = {"kind": smeta["solver"]}
+            if "advance_time" in smeta:
+                per_stage_solver["advance_time"] = float(
+                    coerce_unit_string(smeta["advance_time"], "advance_time")
+                )
+        elif "solver" in smeta:
+            # Block form: solver: {kind: advance, advance_time: 1.0}
+            per_stage_solver = dict(smeta["solver"])
+        else:
+            # Legacy solve:/advance_time: (deprecated, warning already issued)
+            per_stage_solver = {"kind": str(smeta["solve"])}
+            if "advance_time" in smeta:
+                per_stage_solver["advance_time"] = float(
+                    coerce_unit_string(smeta["advance_time"], "advance_time")
+                )
+        resolved_solver = {**_global_solver_defaults, **per_stage_solver}
+        resolved_solver = _resolve_and_validate_solver_mode(
+            resolved_solver, f"stage '{sid}'"
+        )
+
         group_entry: Dict[str, Any] = {
             "stage_order": order_idx + 1,
             "mechanism": smeta.get("mechanism", "gri30.yaml"),
-            "solve": smeta["solve"],
+            "solver": resolved_solver,
         }
-        if "advance_time" in smeta:
-            group_entry["advance_time"] = smeta["advance_time"]
         groups[sid] = group_entry
 
     result = {k: raw[k] for k in ("metadata", "phases", "settings") if k in raw}
-    for k in ("output", "export", "sweeps", "scenarios"):
+    for k in (
+        "output",
+        "export",
+        "sweeps",
+        "scenarios",
+        "continuation",
+        "signals",
+        "bindings",
+        "scopes",
+    ):
         if k in raw:
             result[k] = raw[k]
 
@@ -1293,11 +1505,22 @@ def synthesize_default_group(config: Dict[str, Any]) -> None:
         if isinstance(gas_phase, dict):
             default_mech = gas_phase.get("mechanism") or default_mech
 
+    _settings_solver = None
+    _settings = config.get("settings")
+    if isinstance(_settings, dict):
+        _settings_solver = _settings.get("solver")
+    _default_group_solver: Dict[str, Any] = {"kind": "advance_to_steady_state"}
+    if isinstance(_settings_solver, dict):
+        _default_group_solver = {**_default_group_solver, **_settings_solver}
+    _default_group_solver = _resolve_and_validate_solver_mode(
+        _default_group_solver, "default stage"
+    )
+
     config["groups"] = {
         "default": {
             "stage_order": 1,
             "mechanism": default_mech,
-            "solve": "advance_to_steady_state",
+            "solver": _default_group_solver,
         }
     }
 
@@ -1642,12 +1865,30 @@ def convert_to_stone_format(config: dict) -> dict:
         g = groups[sid]
         if not isinstance(g, dict):
             continue
-        meta: Dict[str, Any] = {
-            "mechanism": g.get("mechanism", "gri30.yaml"),
-            "solve": g["solve"],
-        }
-        if "advance_time" in g:
-            meta["advance_time"] = g["advance_time"]
+        solver = g.get("solver")
+        if isinstance(solver, dict) and solver:
+            # Normalized form: solver: {kind: ...}
+            kind = solver.get("kind", "advance_to_steady_state")
+            meta: Dict[str, Any] = {
+                "mechanism": g.get("mechanism", "gri30.yaml"),
+                "solver": kind,
+            }
+            if "advance_time" in solver:
+                meta["advance_time"] = solver["advance_time"]
+        elif "solve" in g:
+            # Legacy in-memory form: groups carry solve: / advance_time: directly.
+            meta = {
+                "mechanism": g.get("mechanism", "gri30.yaml"),
+                "solve": g["solve"],
+            }
+            if "advance_time" in g:
+                meta["advance_time"] = g["advance_time"]
+        else:
+            raise ValueError(
+                f"Cannot export stage '{sid}' to STONE YAML: group metadata has no "
+                "'solver' block and no legacy 'solve' key. "
+                "The config was not properly normalized."
+            )
         stages_meta[sid] = meta
 
     stone_config["stages"] = stages_meta
@@ -1908,6 +2149,24 @@ def merge_config_into_yaml(
     #    ``convert_to_stone_format`` from normalization artifacts; if the user
     #    didn't write them they must not appear in the merged output.
     stone_for_merge = {k: v for k, v in stone.items() if k in original_data}
+
+    # 7b. Mirror original solver syntax.
+    #     convert_to_stone_format always emits ``solver:`` blocks (normalized form).
+    #     If the original stage used ``solve:`` / ``advance_time:``, rewrite back to
+    #     that form so the merge does not introduce ``solver:`` alongside the existing
+    #     ``solve:`` key (parser rejects both coexisting).
+    if "stages" in stone_for_merge and "stages" in original_data:
+        orig_stages = original_data["stages"]
+        for sid, stone_meta in list(stone_for_merge["stages"].items()):
+            orig_stage = orig_stages.get(sid) if isinstance(orig_stages, dict) else None
+            if not isinstance(orig_stage, dict):
+                continue
+            if "solve" in orig_stage and "solver" in stone_meta:
+                solver_block = stone_meta.pop("solver")
+                stone_meta["solve"] = solver_block.get("kind", "advance")
+                at = solver_block.get("advance_time")
+                if at is not None:
+                    stone_meta["advance_time"] = at
 
     # 8. Merge STONE dict into original ruamel tree in-place.
     _update_yaml_preserving_comments(

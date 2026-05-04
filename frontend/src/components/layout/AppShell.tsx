@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
+import { deriveMode } from "@/components/panels/solverShared";
 import { useThemeStore } from "@/stores/themeStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
@@ -20,6 +21,14 @@ export function AppShell() {
   const { theme, toggleTheme } = useThemeStore();
   const { config, fileName, setConfig } = useConfigStore();
   const { isRunning, beginSimulationRun, startSimulation: setStarted, setError } = useSimulationStore();
+  const solverMode = useMemo(() => {
+    const solver = (config.settings as Record<string, unknown> | null | undefined)
+      ?.solver as Record<string, unknown> | undefined;
+    return deriveMode(
+      solver?.kind as string | undefined,
+      solver?.mode as string | undefined,
+    );
+  }, [config.settings]);
   const [showYamlEditor, setShowYamlEditor] = useState(false);
 
   // Connect SSE stream
@@ -93,6 +102,50 @@ export function AppShell() {
           >
             {fileName ?? "untitled.yaml"}
           </Button>
+          {/* Solver mode badge */}
+          <span
+            data-testid="solver-mode-badge"
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${
+              solverMode === "transient"
+                ? "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200"
+                : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+            }`}
+          >
+            {solverMode === "transient" ? (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            )}
+            {solverMode}
+          </span>
         </div>
         <Button
           onClick={toggleTheme}

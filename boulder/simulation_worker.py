@@ -181,14 +181,9 @@ class SimulationWorker:
     ) -> None:
         """Background worker function that runs the actual simulation."""
         try:
-            # Mark running immediately so the UI overlay appears and can
-            # show build-phase progress before time integration begins.
-            # Count stages up front so the UI can show "Stage N / M" immediately.
-            from .staged_solver import build_stage_graph as _build_stage_graph
-
-            _plan = _build_stage_graph(config)
-            _n_stages = len(_plan.ordered_stages)
-
+            # Mark running immediately so the UI overlay appears.
+            # n_stages starts at 0 and is updated on the first stage-complete
+            # callback below (avoiding a redundant build_stage_graph call).
             with self._lock:
                 self.progress.is_running = True
                 self.progress.is_complete = False
@@ -197,13 +192,13 @@ class SimulationWorker:
                 self.progress.end_time = None
                 self.progress.total_time = simulation_time
                 self.progress.stages_done = 0
-                self.progress.n_stages = _n_stages
+                self.progress.n_stages = 0
 
-            logger.info(
-                "Building Cantera network in background (%d stages)...", _n_stages
-            )
+            logger.info("Building Cantera network in background...")
 
             # Callback fired by solve_staged after each stage completes.
+            # n_total is passed by the solver on each call, so n_stages stays
+            # current without a separate pre-parse.
             def _build_stage_callback(stage_id: str, n_done: int, n_total: int) -> None:
                 with self._lock:
                     self.progress.stages_done = n_done
@@ -215,9 +210,9 @@ class SimulationWorker:
             )
             logger.info("Network built successfully, starting streaming simulation...")
 
-            # Mark build fully complete.
+            # Mark build fully complete using the stage count from the callback.
             with self._lock:
-                self.progress.stages_done = _n_stages
+                self.progress.stages_done = self.progress.n_stages
 
             # Capture the connections list after post-build hooks have run.
             # Post-build hooks may inject synthetic connections into config so

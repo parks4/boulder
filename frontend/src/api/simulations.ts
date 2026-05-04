@@ -11,13 +11,12 @@ export function startSimulation(
   simulationTime?: number,
   timeStep?: number,
 ) {
+  const body: Record<string, unknown> = { config };
+  if (simulationTime !== undefined) body.simulation_time = simulationTime;
+  if (timeStep !== undefined) body.time_step = timeStep;
   return apiFetch<StartResponse>("/simulations", {
     method: "POST",
-    body: JSON.stringify({
-      config,
-      simulation_time: simulationTime ?? 10.0,
-      time_step: timeStep ?? 1.0,
-    }),
+    body: JSON.stringify(body),
   });
 }
 

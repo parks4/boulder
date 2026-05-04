@@ -400,6 +400,48 @@ class TestSimulationRoutes:
         assert worker_called is False
         simulation_routes._simulations.clear()
 
+    @pytest.mark.asyncio
+    async def test_start_simulation_synthesizes_default_group_when_absent(
+        self, monkeypatch
+    ):
+        """Start route must call synthesize_default_group before build_network.
+
+        So build_network always receives a config with a 'groups' section. The frontend
+        sends already-normalized configs (satellites already expanded); the route must
+        NOT call normalize_config again (expand_composite_kinds is not idempotent).
+        synthesize_default_group is the only idempotent step needed to satisfy
+        build_stage_graph.
+        """
+        simulation_routes._simulations.clear()
+        received_config: dict = {}
+
+        class DummyConverter:
+            def __init__(self, mechanism: str):
+                self.mechanism = mechanism
+
+        class DummyWorker:
+            def start_simulation(self, converter, config, simulation_time, time_step):
+                received_config.update(config)
+
+        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
+        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
+
+        # Already-normalized config without an explicit 'groups' key.
+        internal_config = {
+            "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
+            "connections": [],
+            "settings": {"end_time": 5.0, "dt": 0.5},
+        }
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/simulations", json={"config": internal_config}
+            )
+
+        assert resp.status_code == 200, resp.json()
+        assert "groups" in received_config, "synthesize_default_group should add groups"
+
+        simulation_routes._simulations.clear()
+
 
 # ---------------------------------------------------------------------------
 # POST /api/configs/sync
@@ -668,8 +710,8 @@ class TestSyncConfigRoute:
             "groups": {
                 "s1": {
                     "mechanism": "gri30.yaml",
-                    "solve": "equilibrate",
-                    "stage_order": 0,
+                    "solver": {"kind": "advance_to_steady_state", "mode": "steady"},
+                    "stage_order": 1,
                 },
             },
         }
@@ -697,3 +739,50 @@ class TestSyncConfigRoute:
                 },
             )
         assert resp.status_code in (422, 500)
+
+    @pytest.mark.asyncio
+    async def test_sync_staged_yaml_with_solver_scalar_returns_200(self):
+        """Assert /api/configs/sync returns 200 for a staged YAML using ``solver: advance`` scalar.
+
+        Regression: convert_to_stone_format raised KeyError 'solve' on normalized
+        multi-stage configs, causing HTTP 500 'solve' in the YAML editor.
+        The merged YAML must re-emit the scalar ``solver:`` form and not introduce
+        a nested block next to the original scalar key.
+        """
+        from boulder.config import (
+            _to_plain_dict,
+            load_yaml_string_with_comments,
+            normalize_config,
+            validate_config,
+        )
+
+        staged_yaml = (
+            "phases:\n"
+            "  gas:\n"
+            "    mechanism: gri30.yaml\n"
+            "stages:\n"
+            "  s1:\n"
+            "    mechanism: gri30.yaml\n"
+            "    solver: advance_to_steady_state\n"
+            "s1:\n"
+            "  - id: inlet\n"
+            "    Reservoir:\n"
+            "      temperature: 300.0\n"
+            "      pressure: 101325.0\n"
+            '      composition: "N2:1"\n'
+        )
+        plain = _to_plain_dict(load_yaml_string_with_comments(staged_yaml))
+        cfg = validate_config(normalize_config(plain))
+        assert "solver" in cfg["groups"]["s1"]
+        assert "solve" not in cfg["groups"]["s1"]
+
+        async with _make_client() as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": cfg, "original_yaml": staged_yaml},
+            )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert "advance_to_steady_state" in body["yaml"]
+        # Must not contain a nested block — scalar form only
+        assert "kind:" not in body["yaml"]

@@ -282,3 +282,132 @@ def test_boulder_runner_resolve_mechanism_identity():
     converter = DualCanteraConverter()
     assert converter.resolve_mechanism("gri30.yaml") == "gri30.yaml"
     assert converter.resolve_mechanism("some/custom.yaml") == "some/custom.yaml"
+
+
+# ---------------------------------------------------------------------------
+# Test 7: spatial inference from multi-point CustomStageNetwork.states
+# ---------------------------------------------------------------------------
+
+
+def test_spatial_series_inferred_from_custom_stage_network_states():
+    """run_streaming_simulation produces is_spatial series for a custom stage network.
+
+    Asserts:
+    - When a plugin's ReactorNet subclass exposes multi-point ``states`` on
+      ``network.states``, ``run_streaming_simulation`` sets ``is_spatial: True``
+      on the reactor's entry in ``reactors_series``.
+    - ``x``, ``T``, ``P``, ``X``, ``Y`` arrays all have length equal to the
+      number of points returned by ``network.states``.
+    - The one-point fallback snapshot is fully replaced (len > 1).
+    """
+    import cantera as ct
+
+    from boulder.cantera_converter import DualCanteraConverter
+    from boulder.config import normalize_config
+
+    N = 5  # synthetic spatial resolution
+
+    class _MultiPointNet(ct.ReactorNet):
+        """Fake spatial network: exposes N-point SolutionArray on .states."""
+
+        def __init__(self, reactors, **kw):
+            super().__init__(reactors)
+            self._spatial_states: ct.SolutionArray | None = None
+
+        def advance_to_steady_state(self) -> None:  # type: ignore[override]
+            # Do NOT call super() — we just need to build the synthetic
+            # spatial profile without running the real Cantera ODE solver,
+            # since this test only checks that Boulder reads network.states
+            # correctly, not that the physics converge.
+            gas = self.reactors[0].phase
+            arr = ct.SolutionArray(gas, extra=["t"])
+            for i in range(N):
+                arr.append(gas.state, t=float(i))  # type: ignore[call-arg]
+            self._spatial_states = arr
+
+        @property
+        def states(self) -> ct.SolutionArray | None:  # noqa: D102
+            return self._spatial_states
+
+        @property
+        def scalars(self) -> dict:  # noqa: D102
+            return {}
+
+    # Verify _MultiPointNet satisfies the CustomStageNetwork protocol
+    assert isinstance(_MultiPointNet, type)
+
+    # Register the class under a temporary module path so the YAML
+    # ``network_class`` dotted-path resolver can find it.  This is the
+    # correct plugin API: _select_network_class_for_stage checks the
+    # ``network_class`` property in the node config first (highest priority),
+    # which avoids having to set instance attributes on Cantera C++ types
+    # (those lack __dict__ and do not support arbitrary attribute assignment).
+    import sys
+
+    _tmp_mod_name = "_test_runner_multipoint_net"
+    import types as _types
+
+    _tmp_mod = _types.ModuleType(_tmp_mod_name)
+    _tmp_mod._MultiPointNet = _MultiPointNet  # type: ignore[attr-defined]
+    sys.modules[_tmp_mod_name] = _tmp_mod
+    try:
+        # Minimal single-reactor config with the custom network class
+        config: dict = {
+            "nodes": [
+                {
+                    "id": "feed",
+                    "type": "Reservoir",
+                    "properties": {
+                        "temperature": 300.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
+                },
+                {
+                    "id": "pfr_like",
+                    "type": "IdealGasConstPressureReactor",
+                    "properties": {
+                        "temperature": 300.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 1.0e-6,
+                        # Inject custom network class via the YAML property path —
+                        # the highest-priority slot in _select_network_class_for_stage.
+                        "network_class": f"{_tmp_mod_name}._MultiPointNet",
+                    },
+                },
+            ],
+            "connections": [
+                {
+                    "id": "feed_to_pfr",
+                    "type": "MassFlowController",
+                    "source": "feed",
+                    "target": "pfr_like",
+                    "properties": {"mass_flow_rate": 1.0e-5},
+                }
+            ],
+        }
+        config = normalize_config(config)
+
+        conv = DualCanteraConverter()
+        conv.build_network(config)
+        results, _ = conv.run_streaming_simulation(
+            simulation_time=1.0,
+            time_step=1.0,
+            config=config,
+        )
+
+        series = results["reactors"].get("pfr_like")
+        assert series is not None, "pfr_like must appear in reactors_series"
+        assert series.get("is_spatial") is True, (
+            "Series must be flagged is_spatial when network.states has multiple points"
+        )
+        assert len(series["T"]) == N, f"Expected {N} T samples, got {len(series['T'])}"
+        assert len(series["x"]) == N, (
+            f"Expected {N} x-axis values, got {len(series['x'])}"
+        )
+        assert len(series["P"]) == N
+        for sp_arr in series["X"].values():
+            assert len(sp_arr) == N
+    finally:
+        sys.modules.pop(_tmp_mod_name, None)

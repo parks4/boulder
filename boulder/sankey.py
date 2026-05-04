@@ -6,14 +6,75 @@ Generic Sankey builder and renderer operating on any solved
 link/node extraction logic.
 """
 
-from typing import List
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional
 
 import numpy as np
 
 from .ctutils import collect_all_reactors_and_reservoirs
 from .verbose_utils import get_verbose_logger
 
+if TYPE_CHECKING:
+    from .cantera_converter import BoulderPlugins
+
 logger = get_verbose_logger(__name__)
+
+
+def _species_sankey_hex_colors(
+    plugins: Optional["BoulderPlugins"] = None,
+) -> Dict[str, str]:
+    """Return hex colors for species Sankey bands.
+
+    Reads ``plugins.sankey_link_colors`` when a plugin has registered a palette
+    (e.g. Bloc via its ``boulder.plugins`` entry point).  Falls back to Boulder's
+    own light-theme defaults when the slot is unset or *plugins* is ``None``.
+    Boulder never references any third-party package by name here.
+    """
+    if plugins is not None and plugins.sankey_link_colors is not None:
+        return dict(plugins.sankey_link_colors)
+    from .utils import get_sankey_theme_config
+
+    lc = get_sankey_theme_config("light")["link_colors"]
+    return {"H2": lc["H2"], "CH4": lc["CH4"], "Cs": lc["Cs"]}
+
+
+def sankey_links_for_api(
+    links: Mapping[str, Any],
+    plugins: Optional["BoulderPlugins"] = None,
+) -> Dict[str, Any]:
+    """Copy Sankey ``links`` for JSON/API consumption.
+
+    Species bands (``H2``, ``CH4``, ``Cs``) are converted to hex using the
+    palette registered in ``plugins.sankey_link_colors`` (set by the installed
+    plugin, e.g. Bloc via its ``boulder.plugins`` entry point).  When no plugin
+    has registered a palette, Boulder falls back to its own light-theme defaults.
+    Literal ``#``/``rgb`` entries from custom generators are unchanged.
+    Semantic ``mass``, ``enthalpy``, and ``heat`` are left as-is so the
+    frontend can apply light/dark theming.
+    """
+    out: Dict[str, Any] = {}
+    for key, val in links.items():
+        if isinstance(val, list):
+            out[key] = list(val)
+        else:
+            out[key] = val
+    colors_in = out.get("color")
+    if not isinstance(colors_in, list):
+        return out
+    species = _species_sankey_hex_colors(plugins=plugins)
+    new_colors: List[str] = []
+    for raw in colors_in:
+        c = str(raw) if raw is not None else ""
+        c_stripped = c.strip()
+        low = c_stripped.lower()
+        if low.startswith("#") or low.startswith("rgb"):
+            new_colors.append(c_stripped)
+            continue
+        if c_stripped in species:
+            new_colors.append(species[c_stripped])
+            continue
+        new_colors.append(c_stripped)
+    out["color"] = new_colors
+    return out
 
 
 def _get_available_species_for_sankey_from_sim(sim) -> List[str]:
@@ -116,7 +177,13 @@ def plot_sankey_diagram(sim, mechanism="gri30.yaml"):
     plot_sankey_diagram_from_links_and_nodes(links, nodes, show=True)
 
 
-def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="light"):
+def plot_sankey_diagram_from_links_and_nodes(
+    links,
+    nodes,
+    show=False,
+    theme="light",
+    plugins: Optional["BoulderPlugins"] = None,
+):
     """Plot Sankey Diagram from links and nodes.
 
     Parameters
@@ -129,6 +196,10 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="li
         Whether to show the plot or not. Default is False.
     theme : str
         Theme to use for styling ("light" or "dark"). Default is "light".
+    plugins : BoulderPlugins, optional
+        Plugin container. When provided and ``plugins.sankey_link_colors`` is
+        set, species band colors are taken from the plugin palette (e.g. Bloc)
+        rather than Boulder's built-in defaults.
 
     Returns
     -------
@@ -142,7 +213,17 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="li
     from .utils import get_sankey_theme_config
 
     sankey_theme = get_sankey_theme_config(theme)
-    link_color_map = sankey_theme["link_colors"]
+    link_color_map = {
+        **sankey_theme["link_colors"],
+        **_species_sankey_hex_colors(plugins=plugins),
+    }
+
+    def _resolve_plot_link_color(raw: Any) -> str:
+        c = str(raw).strip() if raw is not None else ""
+        low = c.lower()
+        if low.startswith("#") or low.startswith("rgb"):
+            return c
+        return link_color_map.get(c, "grey")
 
     # Create a deep copy to avoid modifying the original dict from dcc.Store
     # Also ensure all arrays are proper Python lists (not NumPy arrays with references)
@@ -152,7 +233,7 @@ def plot_sankey_diagram_from_links_and_nodes(links, nodes, show=False, theme="li
         "target": list(links["target"]),
         "value": list(links["value"]),
         "label": list(links["label"]),
-        "color": [link_color_map.get(c, "grey") for c in links["color"]],
+        "color": [_resolve_plot_link_color(c) for c in links["color"]],
     }
 
     # Ensure nodes is a proper Python list

@@ -6,6 +6,7 @@ reactor network configurations in the STONE YAML format.
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from typing import Any, Dict
@@ -23,6 +24,7 @@ from ...config import (
     yaml_to_string_with_comments,
 )
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -144,7 +146,11 @@ async def sync_config(body: ConfigSyncRequest) -> Dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        logger.exception("POST /api/configs/sync failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"YAML sync failed ({type(exc).__name__}): {exc}",
+        ) from exc
 
 
 @router.post("/upload")
