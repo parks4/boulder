@@ -8,7 +8,7 @@ the base class; other entrypoints may pass ``runner_class=MyRunner``.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, Union
 
 if TYPE_CHECKING:
     import cantera as ct
@@ -202,6 +202,9 @@ class BoulderRunner:
         stage: "Stage",
         inlet_states: Dict[str, Any],
         trajectory: "LagrangianTrajectory",
+        interface_reservoirs: bool = False,
+        _iface_node_dicts: Optional[Dict[str, Any]] = None,
+        _iface_conns_by_stage: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Build and solve one stage, updating *inlet_states* and *trajectory* in place.
 
@@ -218,15 +221,29 @@ class BoulderRunner:
         inlet_states :
             Mutable ``{node_id: ct.Solution}`` dict.  Populated by upstream
             stages; consumed here to initialise inter-stage-inlet reactors.
-            Updated in place with this stage's outlet states.
+            Updated in place with this stage's outlet states (always kept as
+            an inspection snapshot, even in interface_reservoirs mode).
         trajectory :
             Accumulates per-stage :class:`~cantera.SolutionArray` segments.
+        interface_reservoirs :
+            When ``True``, use synthesised interface reservoirs and real MFCs on
+            both sides of each stage boundary.  Must match the flag used when
+            ``_iface_node_dicts`` and ``_iface_conns_by_stage`` were prepared
+            (typically by :meth:`build`).  Default ``False`` (legacy behaviour).
+        _iface_node_dicts :
+            Pre-built mapping ``{reservoir_id: node_dict}``.  Only used when
+            *interface_reservoirs* is ``True``.  Populated by :meth:`build`.
+        _iface_conns_by_stage :
+            Pre-built mapping ``{stage_id: [conn_dict, ...]}``.  Only used when
+            *interface_reservoirs* is ``True``.  Populated by :meth:`build`.
 
         Examples
         --------
         .. minigallery:: boulder.runner.BoulderRunner.solve_stage
            :add-heading: Examples using solve_stage
         """
+        import cantera as ct
+
         from .staged_solver import (
             _apply_mechanism_switch,
             _collect_stage_states,
@@ -241,9 +258,26 @@ class BoulderRunner:
             for n in (self.config.get("nodes") or [])
             if n["id"] in set(stage.node_ids)
         ]
+
+        # Augment with interface reservoir nodes and connection stubs when enabled
+        extra_nodes: list = []
+        extra_conns: list = []
+        if interface_reservoirs and _iface_node_dicts and _iface_conns_by_stage:
+            for ic in stage.inter_connections_out:
+                nd = _iface_node_dicts.get(ic.reservoir_id)
+                if nd is not None:
+                    extra_nodes.append(nd)
+            for ic in stage.inter_connections_in:
+                nd = _iface_node_dicts.get(ic.reservoir_id)
+                if nd is not None:
+                    extra_nodes.append(nd)
+            extra_conns = list(_iface_conns_by_stage.get(stage.id, []))
+
+        stage_connections = list(stage.intra_connections) + extra_conns
+
         network, stage_reactors = converter.build_sub_network(
-            stage_nodes=stage_nodes,
-            stage_connections=stage.intra_connections,
+            stage_nodes=stage_nodes + extra_nodes,
+            stage_connections=stage_connections,
             stage_mechanism=stage.mechanism,
             inlet_states=inlet_states,
             stage_id=stage.id,
@@ -283,6 +317,24 @@ class BoulderRunner:
                     ic.mechanism_switch,
                     converter,
                 )
+
+            if interface_reservoirs:
+                # Replace the placeholder iface reservoir with a fresh one holding
+                # the converged outlet state (ct.Reservoir is immutable after build).
+                new_res_gas = converter._get_gas_for_mech(stage.mechanism)
+                new_res_gas.TPY = outlet_gas.T, outlet_gas.P, outlet_gas.Y
+                new_iface_res = ct.Reservoir(new_res_gas, clone=False)
+                new_iface_res.name = ic.reservoir_id
+                converter.reactors[ic.reservoir_id] = new_iface_res
+                converter.reactor_meta.setdefault(ic.reservoir_id, {}).update(
+                    {
+                        "mechanism": stage.mechanism,
+                        "gas_solution": new_res_gas,
+                        "stage_interface": True,
+                    }
+                )
+
+            # Always keep inlet_states as an inspection snapshot
             inlet_states[ic.target_node] = outlet_gas
 
         trajectory.add_segment(
@@ -554,14 +606,40 @@ class BoulderRunner:
           facade after :meth:`solve` is called).
         - ``self.code`` is the generated standalone Python script string.
         """
+        from .staged_solver import synthesize_interface_nodes
+
         converter = self._ensure_converter()
 
         plan = self.build_stage_graph()
         trajectory = self.new_trajectory()
         inlet_states: Dict[str, Any] = {}
 
+        # Read feature flag from STONE settings block
+        settings = self.config.get("settings") or {}
+        staged_settings = settings.get("staged") or {}
+        use_iface_res: bool = bool(staged_settings.get("interface_reservoirs", False))
+
+        # Pre-build interface node/connection dicts once for all stages
+        iface_node_dicts: Dict[str, Any] = {}
+        iface_conns_by_stage: Dict[str, Any] = {}
+        if use_iface_res:
+            iface_nodes, iface_conns = synthesize_interface_nodes(plan)
+            for nd in iface_nodes:
+                iface_node_dicts[nd["id"]] = nd
+            for cd in iface_conns:
+                grp = cd.get("group", "")
+                iface_conns_by_stage.setdefault(grp, []).append(cd)
+
         for stage in plan.ordered_stages:
-            self.solve_stage(plan, stage, inlet_states, trajectory)
+            self.solve_stage(
+                plan,
+                stage,
+                inlet_states,
+                trajectory,
+                interface_reservoirs=use_iface_res,
+                _iface_node_dicts=iface_node_dicts,
+                _iface_conns_by_stage=iface_conns_by_stage,
+            )
 
         self.build_viz_network(plan, trajectory)
 

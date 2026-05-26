@@ -72,6 +72,21 @@ Boulder default.
 Simulation-level settings passed to the solver and post-processing. Schema is open; see individual
 plugin documentation for recognized keys.
 
+#### `settings.staged:` — staged-solver feature flags
+
+An optional `staged:` sub-block under `settings:` controls experimental features of the
+staged solver.
+
+```yaml
+settings:
+  staged:
+    interface_reservoirs: true  # default: false
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `interface_reservoirs` | bool | `false` | When `true`, synthesise a `ct.Reservoir` + two `MassFlowController` objects for every inter-stage connection. Each boundary stream becomes a first-class Cantera object visible to the sub-network integrators on both sides, so all flow rates are honoured at solve time (not just in the visualization network). Fixes PSR-style mixers that receive both intra-stage and inter-stage feeds. Default `false` while validation is ongoing. |
+
 #### `settings.solver:` — global integrator defaults
 
 An optional `solver:` sub-block under `settings:` sets default integrator knobs applied to every

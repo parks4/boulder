@@ -20,7 +20,9 @@ from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import load_config_file, normalize_config, validate_config
 from boulder.lagrangian import LagrangianTrajectory
 from boulder.staged_solver import (
+    InterStageConnection,
     build_stage_graph,
+    synthesize_interface_nodes,
 )
 
 # ---------------------------------------------------------------------------
@@ -455,3 +457,290 @@ class TestLagrangianTrajectory:
         r = repr(traj)
         assert "alpha" in r
         assert "n_points=1" in r
+
+
+# ---------------------------------------------------------------------------
+# synthesize_interface_nodes
+# ---------------------------------------------------------------------------
+
+
+class TestSynthesizeInterfaceNodes:
+    """Unit tests for synthesize_interface_nodes helper.
+
+    Asserts:
+    - One Reservoir node dict is emitted per InterStageConnection.
+    - Reservoir id follows the deterministic {ic.id}__iface convention.
+    - Two MFC connection dicts are emitted per connection (outlet + inlet).
+    - Metadata fields (stage_interface, upstream_stage, ...) are present.
+    - When mass_flow_rate is declared in ic.properties it is forwarded to both MFCs.
+    - When mass_flow_rate is absent neither MFC dict carries it.
+    """
+
+    def test_one_reservoir_per_inter_stage_connection(self):
+        """Exactly one Reservoir node is synthesised per inter-stage connection."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        nodes, _ = synthesize_interface_nodes(plan)
+        assert len(nodes) == 1
+        assert nodes[0]["type"] == "Reservoir"
+
+    def test_reservoir_id_is_deterministic(self):
+        """Reservoir id follows {connection_id}__iface."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        nodes, _ = synthesize_interface_nodes(plan)
+        ic = plan.all_inter_connections[0]
+        assert nodes[0]["id"] == ic.reservoir_id
+        assert nodes[0]["id"] == "a_to_b__iface"
+
+    def test_two_mfc_dicts_per_connection(self):
+        """Two MassFlowController connection dicts are produced per inter-stage connection."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        _, conns = synthesize_interface_nodes(plan)
+        assert len(conns) == 2
+        assert all(c["type"] == "MassFlowController" for c in conns)
+
+    def test_outlet_mfc_connects_source_to_reservoir(self):
+        """Outlet MFC: source=source_node, target=reservoir_id."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        ic = plan.all_inter_connections[0]
+        _, conns = synthesize_interface_nodes(plan)
+        outlet = next(c for c in conns if c["id"] == ic.outlet_mfc_id)
+        assert outlet["source"] == ic.source_node
+        assert outlet["target"] == ic.reservoir_id
+
+    def test_inlet_mfc_connects_reservoir_to_target(self):
+        """Inlet MFC: source=reservoir_id, target=target_node."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        ic = plan.all_inter_connections[0]
+        _, conns = synthesize_interface_nodes(plan)
+        inlet = next(c for c in conns if c["id"] == ic.inlet_mfc_id)
+        assert inlet["source"] == ic.reservoir_id
+        assert inlet["target"] == ic.target_node
+
+    def test_stage_interface_metadata_present(self):
+        """All synthesised nodes and connections carry stage_interface metadata."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        nodes, conns = synthesize_interface_nodes(plan)
+        for nd in nodes:
+            assert nd["properties"].get("stage_interface") is True
+            assert nd["metadata"].get("stage_interface") is True
+        for conn in conns:
+            assert conn.get("metadata", {}).get("stage_interface") is True
+
+    def test_mass_flow_rate_forwarded_when_declared(self):
+        """When ic.properties has mass_flow_rate, both MFCs inherit it."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        ic = plan.all_inter_connections[0]
+        assert ic.properties.get("mass_flow_rate") == 1e-4
+        _, conns = synthesize_interface_nodes(plan)
+        for conn in conns:
+            assert conn["properties"].get("mass_flow_rate") == pytest.approx(1e-4)
+
+    def test_mass_flow_rate_absent_when_not_declared(self):
+        """When ic.properties lacks mass_flow_rate, MFC dicts have empty properties."""
+        config_no_mdot = {
+            "groups": {
+                "stage_a": {"mechanism": "gri30.yaml", "solve": "advance_to_steady_state"},
+                "stage_b": {"mechanism": "gri30.yaml", "solve": "advance_to_steady_state"},
+            },
+            "phases": {"gas": {"mechanism": "gri30.yaml"}},
+            "nodes": [
+                {
+                    "id": "r_a",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_a",
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 1e-5,
+                    },
+                },
+                {
+                    "id": "r_b",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_b",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 5e-6,
+                    },
+                },
+            ],
+            "connections": [
+                {
+                    "id": "a_to_b",
+                    "type": "MassFlowController",
+                    "source": "r_a",
+                    "target": "r_b",
+                    # no mass_flow_rate
+                    "properties": {},
+                },
+            ],
+        }
+        plan = build_stage_graph(config_no_mdot)
+        _, conns = synthesize_interface_nodes(plan)
+        for conn in conns:
+            assert "mass_flow_rate" not in conn["properties"]
+
+    def test_upstream_downstream_stage_in_metadata(self):
+        """upstream_stage / downstream_stage are set correctly in node metadata."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        nodes, _ = synthesize_interface_nodes(plan)
+        nd = nodes[0]
+        assert nd["properties"]["upstream_stage"] == "stage_a"
+        assert nd["properties"]["downstream_stage"] == "stage_b"
+
+
+# ---------------------------------------------------------------------------
+# Interface-reservoir solve path
+# ---------------------------------------------------------------------------
+
+
+class TestInterfaceReservoirSolve:
+    """End-to-end staged solve with interface_reservoirs=True.
+
+    Asserts:
+    - Solve completes without error.
+    - Downstream reactor temperature is within 1 K of the legacy (inlet_states) solve.
+    - Interface reservoirs appear in converter.reactors.
+    - Each iface reservoir carries T matching the upstream reactor outlet.
+    """
+
+    @pytest.fixture(scope="class")
+    def _both_results(self):
+        """Solve a two-stage config with and without interface_reservoirs.
+
+        Returns (conv_legacy, conv_iface) after both builds.
+
+        Uses a config where r_b has an outlet Reservoir so that the real
+        inlet MFC (from the iface reservoir) does not cause mass accumulation
+        when advance_to_steady_state is used.
+        """
+        from boulder.staged_solver import solve_staged
+
+        # Two-stage config with an outlet reservoir for r_b
+        _config_with_outlet = {
+            "groups": {
+                "stage_a": {
+                    "mechanism": "gri30.yaml",
+                    "solver": {"kind": "advance", "advance_time": 1e-6},
+                },
+                "stage_b": {
+                    "mechanism": "gri30.yaml",
+                    "solver": {"kind": "advance", "advance_time": 1e-6},
+                },
+            },
+            "phases": {"gas": {"mechanism": "gri30.yaml"}},
+            "nodes": [
+                {
+                    "id": "r_a",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_a",
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 1e-5,
+                    },
+                },
+                {
+                    "id": "feed_a",
+                    "type": "Reservoir",
+                    "properties": {
+                        "group": "stage_a",
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
+                },
+                {
+                    "id": "r_b",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_b",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 5e-6,
+                    },
+                },
+                {
+                    "id": "sink_b",
+                    "type": "Reservoir",
+                    "properties": {
+                        "group": "stage_b",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
+                },
+            ],
+            "connections": [
+                {
+                    "id": "feed_to_a",
+                    "type": "MassFlowController",
+                    "source": "feed_a",
+                    "target": "r_a",
+                    "properties": {"mass_flow_rate": 1e-4},
+                    "group": "stage_a",
+                },
+                # Inter-stage
+                {
+                    "id": "a_to_b",
+                    "type": "MassFlowController",
+                    "source": "r_a",
+                    "target": "r_b",
+                    "properties": {"mass_flow_rate": 1e-4},
+                },
+                {
+                    "id": "b_to_sink",
+                    "type": "MassFlowController",
+                    "source": "r_b",
+                    "target": "sink_b",
+                    "properties": {"mass_flow_rate": 1e-4},
+                    "group": "stage_b",
+                },
+            ],
+        }
+
+        # Legacy (flag off, default)
+        conv_legacy = DualCanteraConverter(mechanism="gri30.yaml")
+        plan_legacy = build_stage_graph(_config_with_outlet)
+        solve_staged(
+            conv_legacy, plan_legacy, _config_with_outlet, interface_reservoirs=False
+        )
+
+        # Interface reservoirs enabled
+        conv_iface = DualCanteraConverter(mechanism="gri30.yaml")
+        plan_iface = build_stage_graph(_config_with_outlet)
+        solve_staged(
+            conv_iface, plan_iface, _config_with_outlet, interface_reservoirs=True
+        )
+
+        return conv_legacy, conv_iface
+
+    def test_both_builds_complete(self, _both_results):
+        """Both the legacy and interface-reservoir builds finish without raising."""
+        conv_legacy, conv_iface = _both_results
+        assert conv_legacy is not None
+        assert conv_iface is not None
+
+    def test_downstream_T_matches_legacy(self, _both_results):
+        """r_b temperature with interface_reservoirs=True matches legacy within 1 K."""
+        conv_legacy, conv_iface = _both_results
+        T_legacy = conv_legacy.reactors["r_b"].phase.T
+        T_iface = conv_iface.reactors["r_b"].phase.T
+        assert abs(T_iface - T_legacy) < 1.0
+
+    def test_iface_reservoir_in_converter(self, _both_results):
+        """Interface reservoir is present in converter.reactors after solve."""
+        _, conv_iface = _both_results
+        assert "a_to_b__iface" in conv_iface.reactors
+
+    def test_iface_reservoir_T_matches_source(self, _both_results):
+        """Interface reservoir T matches source reactor (r_a) outlet T."""
+        _, conv_iface = _both_results
+        T_source = conv_iface.reactors["r_a"].phase.T
+        T_iface = conv_iface.reactors["a_to_b__iface"].phase.T
+        assert abs(T_iface - T_source) < 1.0

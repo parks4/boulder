@@ -111,6 +111,12 @@ export function ReactorGraph() {
         style: { shape: "octagon" },
       },
       {
+        // Stage-interface reservoirs render as P&ID diamond stream nodes.
+        // Must follow [type = 'Reservoir'] to override its octagon shape.
+        selector: "[stage_interface = true]",
+        style: { shape: "diamond", width: "60px", height: "60px" },
+      },
+      {
         selector: "edge",
         style: {
           width: 3,

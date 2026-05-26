@@ -1150,6 +1150,13 @@ class DualCanteraConverter:
             rid = node["id"]
             props = node.get("properties") or {}
 
+            # Interface reservoirs are created once (in the upstream stage that first
+            # encounters them).  If already present in self.reactors, skip creation
+            # and go straight to registering the stage_reactor_ids entry.
+            if rid in self.reactors and props.get("stage_interface"):
+                stage_reactor_ids.append(rid)
+                continue
+
             # Use inlet state if provided (inter-stage flow), else use YAML props
             if rid in inlet_states:
                 inlet = inlet_states[rid]
@@ -1242,9 +1249,12 @@ class DualCanteraConverter:
             self.reactors[rid] = reactor
             stage_reactor_ids.append(rid)
 
-        # Build intra-stage connections.  Do NOT reset _mfc_topology or
-        # _mfc_flow_rates — they accumulate across stages so the final
-        # viz-network conservation pass sees the full cross-stage topology.
+        # Build intra-stage (and iface-MFC) connections.
+        # LEGACY WORKAROUND NOTE: _mfc_topology and _mfc_flow_rates are NOT reset
+        # between stages so that build_viz_network can run a second conservation pass
+        # with the full cross-stage topology visible.  With interface_reservoirs=True
+        # the conservation pass is self-contained per stage; this accumulation
+        # becomes a no-op and can be removed when the flag is the default.
         self._unresolved_mfc_ids = set()
         for conn in stage_connections:
             cid = conn["id"]
@@ -1485,20 +1495,21 @@ class DualCanteraConverter:
                     "Viz network: could not build connection '%s': %s", cid, exc
                 )
 
-        # Re-enqueue any MFCs that (a) had no explicit mass_flow_rate in the
-        # YAML and (b) were resolved to 0 during a per-stage conservation pass
-        # when the full cross-stage topology was not yet visible.  Now that all
-        # inter-stage devices are built the full topology is available and a
-        # second conservation pass can assign the correct flow rate.
+        # LEGACY WORKAROUND (remove when interface_reservoirs=True is default):
+        # Re-enqueue MFCs resolved to 0 during a partial-topology stage pass.
+        # With interface_reservoirs=True the inter-stage MFCs are materialised
+        # during the stage solve itself, so the full topology is already visible
+        # and this second pass is a no-op.  Until then, keep it for safety.
         for cid in list(self._originally_unspecified_mfc_ids):
             if self._mfc_flow_rates.get(cid, -1.0) == 0.0:
                 self._unresolved_mfc_ids.add(cid)
                 self._mfc_flow_rates.pop(cid, None)
 
-        # Build any PressureControllers that were deferred during stage builds
-        # because their master MFC was a logical inter-stage connection not yet
-        # registered at stage-build time.  Now that all inter-stage devices
-        # have been materialized above, the masters exist in self.connections.
+        # LEGACY WORKAROUND (remove when interface_reservoirs=True is default):
+        # Build PressureControllers deferred during stage builds because their
+        # master MFC was a virtual inter-stage connection not yet registered.
+        # With interface_reservoirs=True all inter-stage MFCs are real and
+        # exist from stage-solve time, so no deferral is needed.
         for conn in self._deferred_pc_conn_dicts:
             cid = conn["id"]
             if cid in self.connections:

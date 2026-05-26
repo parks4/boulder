@@ -49,6 +49,16 @@ CYTOSCAPE_STYLESHEET_LIGHT = [
         },
     },
     {
+        # Stage-interface reservoirs (diamond stream nodes on P&ID).
+        # Must appear after [type = 'Reservoir'] to take precedence.
+        "selector": "[stage_interface = true]",
+        "style": {
+            "shape": "diamond",
+            "width": "60px",
+            "height": "60px",
+        },
+    },
+    {
         "selector": "edge",
         "style": {
             "content": "data(label)",
@@ -127,6 +137,16 @@ CYTOSCAPE_STYLESHEET_DARK = [
         "selector": "[type = 'Reservoir']",
         "style": {
             "shape": "octagon",
+        },
+    },
+    {
+        # Stage-interface reservoirs (diamond stream nodes on P&ID).
+        # Must appear after [type = 'Reservoir'] to take precedence.
+        "selector": "[stage_interface = true]",
+        "style": {
+            "shape": "diamond",
+            "width": "60px",
+            "height": "60px",
         },
     },
     {

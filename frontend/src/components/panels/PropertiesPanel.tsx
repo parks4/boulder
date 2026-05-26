@@ -132,6 +132,60 @@ export function PropertiesPanel() {
         </div>
       </div>
 
+      {isNode && properties.stage_interface && (
+        <div className="border-t border-border pt-2 mt-1">
+          <p className="text-xs font-medium text-foreground mb-1.5">
+            Stage handoff
+          </p>
+          <div className="divide-y divide-border text-xs">
+            {properties.upstream_stage != null && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">From stage</span>
+                <span className="font-mono">{String(properties.upstream_stage)}</span>
+              </div>
+            )}
+            {properties.downstream_stage != null && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">To stage</span>
+                <span className="font-mono">{String(properties.downstream_stage)}</span>
+              </div>
+            )}
+            {properties.source_node != null && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">Source node</span>
+                <span className="font-mono">{String(properties.source_node)}</span>
+              </div>
+            )}
+            {properties.target_node != null && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">Target node</span>
+                <span className="font-mono">{String(properties.target_node)}</span>
+              </div>
+            )}
+            {properties.temperature != null && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">Interface T</span>
+                <span className="font-mono">
+                  {typeof properties.temperature === "number"
+                    ? `${kelvinToCelsius(properties.temperature).toFixed(1)} °C`
+                    : String(properties.temperature)}
+                </span>
+              </div>
+            )}
+            {properties.pressure != null && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">Interface P</span>
+                <span className="font-mono">
+                  {typeof properties.pressure === "number"
+                    ? `${(properties.pressure / 1e5).toFixed(3)} bar`
+                    : String(properties.pressure)}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {!isNode && entity && (
         <div className="text-xs text-muted-foreground">
           <span>Source: {String("source" in entity ? entity.source : "N/A")}</span>

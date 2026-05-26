@@ -8,25 +8,35 @@ mechanisms.
 
 Public API
 ----------
-- :func:`build_stage_graph` – parse config, return a :class:`StageExecutionPlan`
-- :func:`solve_staged`       – execute the plan, return a
+- :func:`build_stage_graph`         – parse config, return a :class:`StageExecutionPlan`
+- :func:`synthesize_interface_nodes` – return node/connection dicts for all iface reservoirs
+- :func:`solve_staged`              – execute the plan, return a
   :class:`~boulder.lagrangian.LagrangianTrajectory`
 
-Architecture
-------------
+Architecture (with interface_reservoirs enabled)
+------------------------------------------------
 1. ``build_stage_graph`` partitions nodes/connections by group, topologically
-   sorts the stages, and validates acyclicity.
+   sorts the stages, and validates acyclicity.  Each :class:`InterStageConnection`
+   is assigned a ``reservoir_id`` (``"{id}__iface"``) that will become a
+   ``ct.Reservoir`` at the stage boundary.
 2. ``solve_staged`` iterates in order:
-   a. Build a sub-ReactorNet for the stage (only intra-stage connections).
-   b. Initialise inter-stage-inlet reactors from the upstream outlet state
-      (no Reservoir injected – just ``reactor.phase.TPY``).
-   c. Solve the sub-network.
-   d. Extract outlet state(s).
-   e. If the outgoing connection carries ``mechanism_switch``, call the
-      registered ``mechanism_switch_fn`` plugin.
-   f. Record states in the trajectory.
+   a. Build a sub-ReactorNet for the stage including:
+      - upstream-side outlet MFCs to the interface reservoirs declared in
+        ``stage.inter_connections_out``.
+      - downstream-side inlet MFCs from the interface reservoirs declared in
+        ``stage.inter_connections_in``.
+   b. Solve the sub-network.
+   c. Extract outlet state(s) and write them into the interface reservoirs
+      (applying ``mechanism_switch`` when declared).
+   d. Record states in the trajectory.
 3. After all stages: build a single visualization ReactorNet from all converged
    reactor states with all connections (including inter-stage) restored.
+
+Legacy mode (``interface_reservoirs=False``)
+--------------------------------------------
+When the flag is off, behaviour is identical to the pre-2026 implementation:
+the inter-stage MFC is virtual and the upstream outlet state is copied directly
+onto the downstream ``reactor.phase.TPY`` via ``inlet_states``.
 """
 
 from __future__ import annotations
@@ -55,12 +65,19 @@ logger = logging.getLogger(__name__)
 class InterStageConnection:
     """A connection that crosses stage (group) boundaries.
 
-    At solve time, the connection is *virtual* – it is not built as a Cantera
-    :class:`~cantera.MassFlowController`.  Instead, the upstream reactor's
-    outlet state is used to initialise the downstream reactor directly.
+    When ``interface_reservoirs=True`` (default in new runs), each instance
+    corresponds to exactly one ``ct.Reservoir`` named ``reservoir_id``.  The
+    upstream stage builds an outlet MFC *into* the reservoir; the downstream
+    stage builds an inlet MFC *from* it.  The reservoir holds the converged
+    interface state (T, P, Y) after the upstream solve, with ``mechanism_switch``
+    applied when present.
 
-    The connection is *restored* in the final visualization ReactorNet so the
-    full topology is visible in ``ReactorNet.draw()`` and Sankey diagrams.
+    Legacy mode (``interface_reservoirs=False``): the connection remains virtual
+    – the upstream outlet state is copied directly to ``reactor.phase.TPY`` via
+    ``inlet_states``, matching pre-2026 behaviour.
+
+    The connection is always *restored* in the final visualization ReactorNet so
+    the full topology is visible in ``ReactorNet.draw()`` and Sankey diagrams.
     """
 
     id: str
@@ -72,6 +89,21 @@ class InterStageConnection:
     properties: Dict[str, Any] = field(default_factory=dict)
     #: Optional ``{htol: ..., Xtol: ...}`` block; triggers species mapping.
     mechanism_switch: Optional[Dict[str, Any]] = None
+
+    @property
+    def reservoir_id(self) -> str:
+        """Deterministic id for the synthesised interface :class:`~cantera.Reservoir`."""
+        return f"{self.id}__iface"
+
+    @property
+    def outlet_mfc_id(self) -> str:
+        """Id for the upstream-side MFC connecting source to interface reservoir."""
+        return f"{self.id}__iface_out"
+
+    @property
+    def inlet_mfc_id(self) -> str:
+        """Id for the downstream-side MFC connecting interface reservoir to target."""
+        return f"{self.id}__iface_in"
 
 
 @dataclass
@@ -287,6 +319,105 @@ def _topological_sort(stages: Dict[str, Stage]) -> List[Stage]:
 
 
 # ---------------------------------------------------------------------------
+# synthesize_interface_nodes
+# ---------------------------------------------------------------------------
+
+
+def synthesize_interface_nodes(
+    plan: StageExecutionPlan,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Return synthetic node and connection dicts for all interface reservoirs.
+
+    One :class:`~cantera.Reservoir` is created per :class:`InterStageConnection`
+    in *plan*.  Each reservoir is flanked by two ``MassFlowController`` stubs:
+    an outlet MFC from the source to the reservoir (in the upstream stage) and
+    an inlet MFC from the reservoir to the target (in the downstream stage).
+
+    The returned dicts follow the same normalized schema as regular nodes and
+    connections so they can be injected directly into ``build_sub_network``.
+
+    Parameters
+    ----------
+    plan :
+        Execution plan produced by :func:`build_stage_graph`.
+
+    Returns
+    -------
+    (nodes, connections)
+        ``nodes`` – one ``Reservoir`` dict per inter-stage connection.
+        ``connections`` – two ``MassFlowController`` dicts per inter-stage
+        connection (outlet side + inlet side).  ``mass_flow_rate`` is copied
+        from ``ic.properties`` when explicitly declared.
+    """
+    nodes: List[Dict[str, Any]] = []
+    connections: List[Dict[str, Any]] = []
+
+    for ic in plan.all_inter_connections:
+        # Interface Reservoir node
+        nodes.append(
+            {
+                "id": ic.reservoir_id,
+                "type": "Reservoir",
+                "properties": {
+                    # Placeholder T/P/composition - overwritten after upstream solve
+                    "temperature": 300.0,
+                    "pressure": 101325.0,
+                    "composition": "N2:1",
+                    # Metadata fields forwarded to the frontend
+                    "stage_interface": True,
+                    "upstream_stage": ic.source_stage,
+                    "downstream_stage": ic.target_stage,
+                    "source_node": ic.source_node,
+                    "target_node": ic.target_node,
+                },
+                "metadata": {
+                    "stage_interface": True,
+                    "upstream_stage": ic.source_stage,
+                    "downstream_stage": ic.target_stage,
+                    "source_node": ic.source_node,
+                    "target_node": ic.target_node,
+                    "original_connection_id": ic.id,
+                },
+            }
+        )
+
+        mdot = ic.properties.get("mass_flow_rate")
+        out_props: Dict[str, Any] = {}
+        in_props: Dict[str, Any] = {}
+        if mdot is not None:
+            out_props["mass_flow_rate"] = mdot
+            in_props["mass_flow_rate"] = mdot
+
+        # Upstream-side MFC: source_node → iface reservoir  (in upstream stage)
+        connections.append(
+            {
+                "id": ic.outlet_mfc_id,
+                "type": "MassFlowController",
+                "source": ic.source_node,
+                "target": ic.reservoir_id,
+                "properties": out_props,
+                "metadata": {"stage_interface": True, "side": "outlet"},
+                "group": ic.source_stage,
+            }
+        )
+
+        # Downstream-side MFC: iface reservoir → target_node  (in downstream stage)
+        connections.append(
+            {
+                "id": ic.inlet_mfc_id,
+                "type": "MassFlowController",
+                "source": ic.reservoir_id,
+                "target": ic.target_node,
+                "properties": in_props,
+                "metadata": {"stage_interface": True, "side": "inlet"},
+                "group": ic.target_stage,
+            }
+        )
+
+    return nodes, connections
+
+
+# ---------------------------------------------------------------------------
 # solve_staged
 # ---------------------------------------------------------------------------
 
@@ -296,16 +427,22 @@ def solve_staged(
     plan: StageExecutionPlan,
     config: Dict[str, Any],
     progress_callback: Optional[Callable] = None,
+    interface_reservoirs: bool = False,
 ) -> "LagrangianTrajectory":
     """Execute a :class:`StageExecutionPlan` sequentially.
 
     For each stage:
 
     1. Filter nodes/connections for this stage.
-    2. Initialise inter-stage-inlet reactors from upstream outlet state.
-    3. Build stage sub-ReactorNet (intra-stage connections only).
+    2. If *interface_reservoirs* is ``True``: inject iface reservoirs and build
+       real MFCs on both sides of each stage boundary (see
+       :func:`synthesize_interface_nodes`).
+       Otherwise (legacy): initialise inter-stage-inlet reactors from upstream
+       outlet state via ``inlet_states``.
+    3. Build stage sub-ReactorNet.
     4. Solve according to ``stage.solve_directive``.
-    5. Extract outlet state(s) and apply ``mechanism_switch`` if present.
+    5. Extract outlet state(s), apply ``mechanism_switch`` if present, and
+       write the result into the interface reservoir (or ``inlet_states``).
     6. Append states to the Lagrangian trajectory.
 
     After all stages: build visualization ReactorNet from all converged states.
@@ -321,6 +458,11 @@ def solve_staged(
         Normalized config (used to locate all nodes/connections for viz network).
     progress_callback :
         Optional callable ``(stage_id, n_done, n_total) -> None``.
+    interface_reservoirs :
+        When ``True``, synthesise a ``ct.Reservoir`` + two ``MassFlowController``
+        objects for every inter-stage connection so that each stage solve sees
+        the full mass flow (not just intra-stage flow).  Default ``False``
+        (legacy behaviour) while the feature is validated.
 
     Returns
     -------
@@ -330,9 +472,22 @@ def solve_staged(
 
     trajectory = LagrangianTrajectory()
 
-    # ``inlet_states[node_id]`` holds the ct.Solution ready to initialise
-    # the downstream reactor (already mechanism-switched if needed).
+    # ``inlet_states[node_id]`` holds the ct.Solution ready to initialise the
+    # downstream reactor.  In legacy mode this is the primary handoff mechanism.
+    # In interface_reservoirs mode it is kept as an inspection snapshot only.
     inlet_states: Dict[str, ct.Solution] = {}
+
+    # Pre-build all interface reservoirs and associated connection dicts once so
+    # both upstream and downstream stage builds can reference them.
+    iface_node_dicts: Dict[str, Dict[str, Any]] = {}  # reservoir_id -> node dict
+    iface_conns_by_stage: Dict[str, List[Dict[str, Any]]] = {}  # stage_id -> conn dicts
+    if interface_reservoirs:
+        iface_nodes, iface_conns = synthesize_interface_nodes(plan)
+        for nd in iface_nodes:
+            iface_node_dicts[nd["id"]] = nd
+        for cd in iface_conns:
+            grp = cd.get("group", "")
+            iface_conns_by_stage.setdefault(grp, []).append(cd)
 
     n_stages = len(plan.ordered_stages)
 
@@ -351,10 +506,29 @@ def solve_staged(
             n for n in (config.get("nodes") or []) if n["id"] in stage_node_ids
         ]
 
+        # Augment with iface reservoir nodes relevant to this stage
+        extra_nodes: List[Dict[str, Any]] = []
+        extra_conns: List[Dict[str, Any]] = []
+        if interface_reservoirs:
+            # Include reservoirs for outgoing connections (outlet side)
+            for ic in stage.inter_connections_out:
+                nd = iface_node_dicts.get(ic.reservoir_id)
+                if nd is not None:
+                    extra_nodes.append(nd)
+            # Include reservoirs for incoming connections (inlet side)
+            for ic in stage.inter_connections_in:
+                nd = iface_node_dicts.get(ic.reservoir_id)
+                if nd is not None:
+                    extra_nodes.append(nd)
+            extra_conns = iface_conns_by_stage.get(stage.id, [])
+
+        # Merge intra-stage connections with interface MFCs for this stage
+        stage_connections = list(stage.intra_connections) + extra_conns
+
         # Build sub-network and solve
         network, stage_reactors = converter.build_sub_network(
-            stage_nodes=stage_nodes,
-            stage_connections=stage.intra_connections,
+            stage_nodes=stage_nodes + extra_nodes,
+            stage_connections=stage_connections,
             stage_mechanism=stage.mechanism,
             inlet_states=inlet_states,
             stage_id=stage.id,
@@ -411,6 +585,36 @@ def solve_staged(
                 )
                 mapping_losses = losses
 
+            if interface_reservoirs:
+                # Replace the placeholder iface reservoir with a new one holding the
+                # converged outlet state.  Cantera Reservoir objects are immutable
+                # after construction; the only reliable way to update their state
+                # is to build a fresh Reservoir from the converged gas and swap it
+                # into self.reactors before the downstream stage builds its inlet MFC.
+                new_res_gas = converter._get_gas_for_mech(stage.mechanism)
+                new_res_gas.TPY = outlet_gas.T, outlet_gas.P, outlet_gas.Y
+                new_iface_res = ct.Reservoir(new_res_gas, clone=False)
+                new_iface_res.name = ic.reservoir_id
+                converter.reactors[ic.reservoir_id] = new_iface_res
+                converter.reactor_meta.setdefault(ic.reservoir_id, {}).update(
+                    {
+                        "mechanism": stage.mechanism,
+                        "gas_solution": new_res_gas,
+                        "stage_interface": True,
+                        "upstream_stage": ic.source_stage,
+                        "downstream_stage": ic.target_stage,
+                        "source_node": ic.source_node,
+                        "target_node": ic.target_node,
+                    }
+                )
+                logger.debug(
+                    "Interface reservoir '%s' updated: T=%.1f K", ic.reservoir_id, outlet_gas.T
+                )
+            else:
+                # Legacy: direct state copy to downstream reactor initialisation
+                inlet_states[ic.target_node] = outlet_gas
+
+            # Always keep inlet_states updated as an inspection snapshot
             inlet_states[ic.target_node] = outlet_gas
 
         trajectory.add_segment(
