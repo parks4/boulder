@@ -34,13 +34,6 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
   useKeyboardShortcuts: vi.fn(),
 }));
 
-vi.mock("@/hooks/useGraphPaneHeight", () => ({
-  useGraphPaneHeight: () => ({
-    graphPaneHeight: 360,
-    onResizePointerDown: vi.fn(),
-  }),
-}));
-
 vi.mock("@/api/configs", () => ({
   fetchPreloadedConfig: vi.fn().mockResolvedValue({ preloaded: false }),
   fetchDefaultConfig: vi.fn().mockResolvedValue({ config: { nodes: [], connections: [] }, yaml: "" }),
@@ -68,10 +61,6 @@ vi.mock("@/components/panels/PropertiesPanel", () => ({
 
 vi.mock("@/components/graph/ReactorGraph", () => ({
   ReactorGraph: () => <div data-testid="reactor-graph" />,
-}));
-
-vi.mock("@/components/layout/GraphPaneResizeHandle", () => ({
-  GraphPaneResizeHandle: () => <div data-testid="graph-resize-handle" />,
 }));
 
 vi.mock("@/components/results/ResultsTabs", () => ({

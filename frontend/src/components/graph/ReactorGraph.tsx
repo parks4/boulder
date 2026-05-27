@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import cytoscape, { type Core, type EventObject } from "cytoscape";
 // @ts-ignore - no types available
 import dagre from "cytoscape-dagre";
@@ -15,12 +15,34 @@ cytoscape.use(dagre);
  * Uses dagre left-to-right layout with stages ordered top-to-bottom.
  */
 const DBLTAP_MS = 300;
+const DEFAULT_GRAPH_HEIGHT = 360;
+const MIN_GRAPH_HEIGHT = 240;
+const GRAPH_HEIGHT_STORAGE_KEY = "boulder-graph-height";
 
-interface ReactorGraphProps {
-  height: number;
+function getMaxGraphHeight(): number {
+  if (typeof window === "undefined") return 900;
+  return Math.max(MIN_GRAPH_HEIGHT, Math.floor(window.innerHeight * 0.75));
 }
 
-export function ReactorGraph({ height }: ReactorGraphProps) {
+function loadStoredGraphHeight(): number {
+  if (typeof window === "undefined") return DEFAULT_GRAPH_HEIGHT;
+  const raw = localStorage.getItem(GRAPH_HEIGHT_STORAGE_KEY);
+  if (!raw) return DEFAULT_GRAPH_HEIGHT;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_GRAPH_HEIGHT;
+  return Math.min(getMaxGraphHeight(), Math.max(MIN_GRAPH_HEIGHT, parsed));
+}
+
+function saveGraphHeight(height: number): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GRAPH_HEIGHT_STORAGE_KEY, String(height));
+}
+
+function clampGraphHeight(height: number): number {
+  return Math.min(getMaxGraphHeight(), Math.max(MIN_GRAPH_HEIGHT, height));
+}
+
+export function ReactorGraph() {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const lastTappedRef = useRef<{ nodeId: string; time: number } | null>(null);
@@ -30,6 +52,37 @@ export function ReactorGraph({ height }: ReactorGraphProps) {
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
   const theme = useThemeStore((s) => s.theme);
+  const [graphHeight, setGraphHeight] = useState(loadStoredGraphHeight);
+
+  const handleResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startY = event.clientY;
+      const startHeight = graphHeight;
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        const delta = moveEvent.clientY - startY;
+        setGraphHeight(clampGraphHeight(startHeight + delta));
+      };
+
+      const handlePointerUp = (upEvent: PointerEvent) => {
+        const delta = upEvent.clientY - startY;
+        const finalHeight = clampGraphHeight(startHeight + delta);
+        saveGraphHeight(finalHeight);
+        setGraphHeight(finalHeight);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+      };
+
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+    },
+    [graphHeight],
+  );
 
   // Build cytoscape elements from config.
   // Stream-point diamonds are assigned to their upstream stage group so dagre
@@ -331,6 +384,25 @@ export function ReactorGraph({ height }: ReactorGraphProps) {
     });
   }, []);
 
+  const runGraphLayout = useCallback(
+    (cy: Core, animate = false) => {
+      const layout = cy.layout({
+        name: "dagre",
+        rankDir: "LR",
+        nodeSep: 120,
+        rankSep: 200,
+        animate,
+        animationDuration: animate ? 300 : 0,
+      } as any);
+      layout.run();
+      return layout.promiseOn("layoutstop").then(() => {
+        flipLayoutVertical(cy);
+        nudgeOverlappingNodes(cy);
+      });
+    },
+    [flipLayoutVertical, nudgeOverlappingNodes],
+  );
+
   // Initialize cytoscape
   useEffect(() => {
     if (!containerRef.current) return;
@@ -339,12 +411,6 @@ export function ReactorGraph({ height }: ReactorGraphProps) {
       container: containerRef.current,
       elements: buildElements(),
       style: buildStylesheet() as any,
-      layout: {
-        name: "dagre",
-        rankDir: "LR",
-        nodeSep: 120,
-        rankSep: 200,
-      } as any,
       minZoom: 0.3,
       maxZoom: 3,
       userPanningEnabled: true,
@@ -387,11 +453,6 @@ export function ReactorGraph({ height }: ReactorGraphProps) {
       if (e.target === cy) clearSelection();
     });
 
-    cy.one("layoutstop", () => {
-      flipLayoutVertical(cy);
-      nudgeOverlappingNodes(cy);
-    });
-
     cyRef.current = cy;
 
     return () => {
@@ -411,20 +472,8 @@ export function ReactorGraph({ height }: ReactorGraphProps) {
     const cy = cyRef.current;
     if (!cy) return;
     cy.json({ elements: buildElements() });
-    const layout = cy.layout({
-      name: "dagre",
-      rankDir: "LR",
-      nodeSep: 120,
-      rankSep: 200,
-      animate: true,
-      animationDuration: 300,
-    } as any);
-    layout.run();
-    layout.promiseOn("layoutstop").then(() => {
-      flipLayoutVertical(cy);
-      nudgeOverlappingNodes(cy);
-    });
-  }, [buildElements, flipLayoutVertical, nudgeOverlappingNodes]);
+    void runGraphLayout(cy, true);
+  }, [buildElements, runGraphLayout]);
 
   // Update stylesheet when theme changes
   useEffect(() => {
@@ -436,13 +485,13 @@ export function ReactorGraph({ height }: ReactorGraphProps) {
   // Keep Cytoscape canvas in sync when the pane is resized
   useEffect(() => {
     cyRef.current?.resize();
-  }, [height]);
+  }, [graphHeight]);
 
   return (
     <div
       id="graph-container"
-      className="shrink-0 overflow-hidden rounded-md border border-border"
-      style={{ height }}
+      className="relative overflow-hidden rounded-md border border-border"
+      style={{ height: graphHeight }}
     >
       <div
         ref={containerRef}
@@ -451,6 +500,19 @@ export function ReactorGraph({ height }: ReactorGraphProps) {
         style={{ background: "var(--color-cytoscape-bg)" }}
         data-cy="graph"
       />
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize network graph"
+        aria-valuenow={graphHeight}
+        aria-valuemin={MIN_GRAPH_HEIGHT}
+        aria-valuemax={getMaxGraphHeight()}
+        data-testid="graph-resize-handle"
+        className="group absolute bottom-0 left-0 right-0 z-10 flex h-3 cursor-ns-resize items-center justify-center border-t border-border bg-background/80 touch-none hover:bg-accent/50"
+        onPointerDown={handleResizePointerDown}
+      >
+        <span className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-muted-foreground" />
+      </div>
     </div>
   );
 }

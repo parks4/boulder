@@ -11,9 +11,7 @@ import { EditNetworkCard } from "@/components/panels/EditNetworkCard";
 import { SimulateCard } from "@/components/panels/SimulateCard";
 import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
 import { ReactorGraph } from "@/components/graph/ReactorGraph";
-import { GraphPaneResizeHandle } from "@/components/layout/GraphPaneResizeHandle";
 import { ResultsTabs } from "@/components/results/ResultsTabs";
-import { useGraphPaneHeight } from "@/hooks/useGraphPaneHeight";
 import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
 import { YAMLEditorModal } from "@/components/modals/YAMLEditorModal";
 import { Button } from "@/components/ui/Button";
@@ -32,7 +30,6 @@ export function AppShell() {
     );
   }, [config.settings]);
   const [showYamlEditor, setShowYamlEditor] = useState(false);
-  const { graphPaneHeight, onResizePointerDown } = useGraphPaneHeight();
 
   // Connect SSE stream
   useSimulationSSE();
@@ -212,15 +209,9 @@ export function AppShell() {
         </aside>
 
         {/* Right panel (9 cols) */}
-        <main className="col-span-12 flex flex-col md:col-span-9">
-          <ReactorGraph height={graphPaneHeight} />
-          <GraphPaneResizeHandle
-            height={graphPaneHeight}
-            onPointerDown={onResizePointerDown}
-          />
-          <div className="mt-4 min-h-0 flex-1">
-            <ResultsTabs />
-          </div>
+        <main className="col-span-12 space-y-4 md:col-span-9">
+          <ReactorGraph />
+          <ResultsTabs />
         </main>
       </div>
 
