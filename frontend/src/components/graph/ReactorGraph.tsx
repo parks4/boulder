@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import cytoscape, { type Core, type EventObject } from "cytoscape";
 // @ts-ignore - no types available
 import dagre from "cytoscape-dagre";
@@ -15,6 +15,32 @@ cytoscape.use(dagre);
  * Uses dagre left-to-right layout.
  */
 const DBLTAP_MS = 300;
+const DEFAULT_GRAPH_HEIGHT = 360;
+const MIN_GRAPH_HEIGHT = 240;
+const GRAPH_HEIGHT_STORAGE_KEY = "boulder-graph-height";
+
+function getMaxGraphHeight(): number {
+  if (typeof window === "undefined") return 900;
+  return Math.max(MIN_GRAPH_HEIGHT, Math.floor(window.innerHeight * 0.75));
+}
+
+function loadStoredGraphHeight(): number {
+  if (typeof window === "undefined") return DEFAULT_GRAPH_HEIGHT;
+  const raw = localStorage.getItem(GRAPH_HEIGHT_STORAGE_KEY);
+  if (!raw) return DEFAULT_GRAPH_HEIGHT;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_GRAPH_HEIGHT;
+  return Math.min(getMaxGraphHeight(), Math.max(MIN_GRAPH_HEIGHT, parsed));
+}
+
+function saveGraphHeight(height: number): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GRAPH_HEIGHT_STORAGE_KEY, String(height));
+}
+
+function clampGraphHeight(height: number): number {
+  return Math.min(getMaxGraphHeight(), Math.max(MIN_GRAPH_HEIGHT, height));
+}
 
 export function ReactorGraph() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -26,6 +52,37 @@ export function ReactorGraph() {
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
   const theme = useThemeStore((s) => s.theme);
+  const [graphHeight, setGraphHeight] = useState(loadStoredGraphHeight);
+
+  const handleResizePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startY = event.clientY;
+      const startHeight = graphHeight;
+
+      const handlePointerMove = (moveEvent: PointerEvent) => {
+        const delta = moveEvent.clientY - startY;
+        setGraphHeight(clampGraphHeight(startHeight + delta));
+      };
+
+      const handlePointerUp = (upEvent: PointerEvent) => {
+        const delta = upEvent.clientY - startY;
+        const finalHeight = clampGraphHeight(startHeight + delta);
+        saveGraphHeight(finalHeight);
+        setGraphHeight(finalHeight);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("pointermove", handlePointerMove);
+        window.removeEventListener("pointerup", handlePointerUp);
+      };
+
+      document.body.style.cursor = "ns-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+    },
+    [graphHeight],
+  );
 
   // Build cytoscape elements from config
   const buildElements = useCallback(() => {
@@ -47,12 +104,26 @@ export function ReactorGraph() {
         }
       }
 
+      const isStreamPoint =
+        Boolean(node.properties?.stream_point) ||
+        Boolean(node.metadata?.stream_point);
+
+      // Build a human-readable label: "Torch Outlet" from "torch_outlet"
+      const streamLabel = isStreamPoint
+        ? node.id
+            .replace(/_outlet$/, " Outlet")
+            .split("_")
+            .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ")
+        : node.id;
+
       elements.push({
         data: {
           id: node.id,
-          label: node.id,
+          label: streamLabel,
           type: node.type,
           temperature: Number(node.properties?.temperature ?? 300),
+          stream_point: isStreamPoint || undefined,
           ...(group ? { parent: `group:${group}` } : {}),
         },
       });
@@ -107,13 +178,19 @@ export function ReactorGraph() {
         },
       },
       {
+        // Reactor nodes (non-Reservoir, non-group) render as round-rectangle to
+        // distinguish them from boundary nodes (octagon) and stream points (diamond).
+        selector: "node:not([isGroup]):not([type = 'Reservoir'])",
+        style: { shape: "round-rectangle" },
+      },
+      {
         selector: "[type = 'Reservoir']",
         style: { shape: "octagon" },
       },
       {
-        // Stage-interface reservoirs render as P&ID diamond stream nodes.
+        // Stream-point reservoirs render as P&ID diamond nodes at stage boundaries.
         // Must follow [type = 'Reservoir'] to override its octagon shape.
-        selector: "[stage_interface = true]",
+        selector: "[stream_point = true]",
         style: { shape: "diamond", width: "60px", height: "60px" },
       },
       {
@@ -129,6 +206,22 @@ export function ReactorGraph() {
           "text-rotation": "none",
           "text-margin-y": -10,
           color: isDark ? "#ccc" : "#555",
+        },
+      },
+      {
+        // StreamConnector: display-only outlet edge from source reactor to
+        // stream-point diamond.  No Cantera object; shown as a thin dashed
+        // line with no label so it visually bridges the stage boundary without
+        // implying a flow device.
+        selector: "[type = 'StreamConnector']",
+        style: {
+          width: 1.5,
+          "line-style": "dashed",
+          "line-dash-pattern": [6, 4],
+          "target-arrow-shape": "triangle",
+          label: "",
+          "line-color": isDark ? "#666" : "#bbb",
+          "target-arrow-color": isDark ? "#666" : "#bbb",
         },
       },
       {
@@ -258,19 +351,37 @@ export function ReactorGraph() {
     cy.style(buildStylesheet() as any);
   }, [buildStylesheet]);
 
+  // Keep Cytoscape canvas in sync when the pane is resized
+  useEffect(() => {
+    cyRef.current?.resize();
+  }, [graphHeight]);
+
   return (
     <div
       id="graph-container"
       className="relative border border-border rounded-md overflow-hidden"
-      style={{ minHeight: 360 }}
+      style={{ height: graphHeight }}
     >
       <div
         ref={containerRef}
         id="reactor-graph"
-        className="w-full"
-        style={{ height: 360, background: "var(--color-cytoscape-bg)" }}
+        className="w-full h-full"
+        style={{ background: "var(--color-cytoscape-bg)" }}
         data-cy="graph"
       />
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize network graph"
+        aria-valuenow={graphHeight}
+        aria-valuemin={MIN_GRAPH_HEIGHT}
+        aria-valuemax={getMaxGraphHeight()}
+        data-testid="graph-resize-handle"
+        className="group absolute bottom-0 left-0 right-0 z-10 flex h-3 cursor-ns-resize items-center justify-center border-t border-border bg-background/80 touch-none hover:bg-accent/50"
+        onPointerDown={handleResizePointerDown}
+      >
+        <span className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-muted-foreground" />
+      </div>
     </div>
   );
 }

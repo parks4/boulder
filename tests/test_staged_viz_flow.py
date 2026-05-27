@@ -544,6 +544,44 @@ def test_pc_mastered_on_logical_inter_stage_mfc_builds_in_viz_network() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stream-connector edges: source → stream-point diamond is visually connected
+# ---------------------------------------------------------------------------
+
+
+def test_stream_connector_edges_in_synced_config() -> None:
+    """_sync_streams_into_config adds a StreamConnector edge per source node.
+
+    Asserts:
+    1. After solve_staged with stream_reservoirs=True, each source node has
+       exactly one ``StreamConnector`` edge pointing to its stream-point diamond.
+    2. The connector edge id follows the pattern ``{source}_to_{source}_outlet``.
+    3. No duplicate StreamConnector edges are created for fan-out sources.
+    """
+    from boulder.staged_solver import build_stage_graph, solve_staged
+
+    cfg = _two_stage_linear_chain()
+    conv = DualCanteraConverter(mechanism="gri30.yaml")
+    plan = build_stage_graph(cfg)
+    solve_staged(conv, plan, cfg, stream_reservoirs=True)
+
+    connector_conns = [
+        c for c in cfg.get("connections", []) if c.get("type") == "StreamConnector"
+    ]
+    source_nodes = {ic.source_node for ic in plan.all_inter_connections}
+    assert len(connector_conns) == len(source_nodes), (
+        f"Expected one StreamConnector per source node ({len(source_nodes)}), "
+        f"got {len(connector_conns)}"
+    )
+    for conn in connector_conns:
+        assert conn["target"].endswith("_outlet"), (
+            f"StreamConnector target should be a stream-point id, got: {conn['target']}"
+        )
+        assert conn["source"] in source_nodes, (
+            f"StreamConnector source '{conn['source']}' not a known source node"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Interface-reservoir mode: iface reservoirs appear in the viz network
 # ---------------------------------------------------------------------------
 
@@ -559,7 +597,10 @@ def test_interface_reservoirs_appear_in_viz_network() -> None:
     3. The reservoir id follows the {connection_id}__iface pattern.
     4. The iface reservoir carries metadata stage_interface=True in reactor_meta.
     """
-    from boulder.staged_solver import build_stage_graph, solve_staged, synthesize_interface_nodes
+    from boulder.staged_solver import (
+        build_stage_graph,
+        solve_staged,
+    )
 
     cfg = _two_stage_linear_chain()
     conv = DualCanteraConverter(mechanism="gri30.yaml")
@@ -569,18 +610,21 @@ def test_interface_reservoirs_appear_in_viz_network() -> None:
     # One iface reservoir per inter-stage connection
     iface_ids = [ic.reservoir_id for ic in plan.all_inter_connections]
     for rid in iface_ids:
-        assert rid in conv.reactors, f"Interface reservoir '{rid}' missing from reactors"
-        assert isinstance(
-            conv.reactors[rid], ct.Reservoir
-        ), f"'{rid}' should be a ct.Reservoir"
+        assert rid in conv.reactors, (
+            f"Interface reservoir '{rid}' missing from reactors"
+        )
+        assert isinstance(conv.reactors[rid], ct.Reservoir), (
+            f"'{rid}' should be a ct.Reservoir"
+        )
 
     # Metadata should be present
     for rid in iface_ids:
-        meta = conv.reactor_meta.get(rid) or {}
         # The iface reservoir is a Reservoir node; metadata carries stage_interface
-        props = (conv.reactor_meta.get(rid) or {})
+        props = conv.reactor_meta.get(rid) or {}
         # stage_interface is stored in the node properties, accessible via reactor_meta
-        assert props.get("stage_interface") is True or True  # best-effort: don't fail if absent
+        assert (
+            props.get("stage_interface") is True or True
+        )  # best-effort: don't fail if absent
 
 
 @pytest.mark.slow

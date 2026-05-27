@@ -214,26 +214,28 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
         if "volume" in properties:
             node_data["volume"] = properties["volume"]
 
-        # Flatten stage-interface metadata so Cytoscape selectors can target them
-        # directly (e.g. "[stage_interface = true]" for diamond P&ID nodes).
+        # Flatten stream-point metadata so Cytoscape selectors can target them
+        # directly (e.g. "[stream_point = true]" for diamond P&ID nodes).
         for _meta_key in (
-            "stage_interface",
+            "stream_point",
             "upstream_stage",
             "downstream_stage",
             "source_node",
             "target_node",
+            "target_nodes",
         ):
             if _meta_key in properties:
                 node_data[_meta_key] = properties[_meta_key]
-        # Also check node-level metadata dict (used by synthesize_interface_nodes)
+        # Also check node-level metadata dict (used by synthesize_stream_points)
         _node_meta = node.get("metadata") or {}
         for _meta_key in (
-            "stage_interface",
+            "stream_point",
             "upstream_stage",
             "downstream_stage",
             "source_node",
             "target_node",
-            "original_connection_id",
+            "target_nodes",
+            "original_connection_ids",
         ):
             if _meta_key in _node_meta and _meta_key not in node_data:
                 node_data[_meta_key] = _node_meta[_meta_key]

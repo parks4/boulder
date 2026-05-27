@@ -80,12 +80,22 @@ staged solver.
 ```yaml
 settings:
   staged:
-    interface_reservoirs: true  # default: false
+    stream_reservoirs: true  # default: false
 ```
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `interface_reservoirs` | bool | `false` | When `true`, synthesise a `ct.Reservoir` + two `MassFlowController` objects for every inter-stage connection. Each boundary stream becomes a first-class Cantera object visible to the sub-network integrators on both sides, so all flow rates are honoured at solve time (not just in the visualization network). Fixes PSR-style mixers that receive both intra-stage and inter-stage feeds. Default `false` while validation is ongoing. |
+| `stream_reservoirs` | bool | `false` | When `true`, synthesise a `ct.Reservoir` (P&ID *stream point*, rendered as a diamond) per source node at each inter-stage boundary, plus one inlet `MassFlowController` per downstream target. Each boundary stream becomes a first-class Cantera object visible to the sub-network integrators so all flow rates are honoured at solve time. Fixes PSR-style mixers that receive both intra-stage and inter-stage feeds. The old key `interface_reservoirs` is accepted as a deprecated alias. |
+
+> **Plugin authors — `post_build` topology constraint.** Boulder's `post_build` hooks
+> receive a *per-stage subset* dict `{"nodes": [...], "connections": [...]}` that is a
+> copy of the stage slice, not the full top-level config. Appending new node or connection
+> dicts inside a `post_build` hook does not make them visible to the frontend graph (they
+> are absent from `updated_nodes` / `updated_connections` in the SSE `complete` event).
+> To add topology that must appear in the visual graph, use a `ReactorUnfolder` (runs at
+> normalize-time) or a reactor builder that injects dicts into `config["nodes"]` /
+> `config["connections"]` before returning. See `ARCHITECTURE.md` — *`post_build` hooks —
+> topology constraint* for the full explanation.
 
 #### `settings.solver:` — global integrator defaults
 

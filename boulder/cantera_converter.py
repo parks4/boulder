@@ -1150,10 +1150,12 @@ class DualCanteraConverter:
             rid = node["id"]
             props = node.get("properties") or {}
 
-            # Interface reservoirs are created once (in the upstream stage that first
+            # Stream-point reservoirs are created once (in the upstream stage that first
             # encounters them).  If already present in self.reactors, skip creation
             # and go straight to registering the stage_reactor_ids entry.
-            if rid in self.reactors and props.get("stage_interface"):
+            if rid in self.reactors and (
+                props.get("stream_point") or props.get("stage_interface")
+            ):
                 stage_reactor_ids.append(rid)
                 continue
 
@@ -1249,10 +1251,10 @@ class DualCanteraConverter:
             self.reactors[rid] = reactor
             stage_reactor_ids.append(rid)
 
-        # Build intra-stage (and iface-MFC) connections.
+        # Build intra-stage (and stream-MFC) connections.
         # LEGACY WORKAROUND NOTE: _mfc_topology and _mfc_flow_rates are NOT reset
         # between stages so that build_viz_network can run a second conservation pass
-        # with the full cross-stage topology visible.  With interface_reservoirs=True
+        # with the full cross-stage topology visible.  With stream_reservoirs=True
         # the conservation pass is self-contained per stage; this accumulation
         # becomes a no-op and can be removed when the flag is the default.
         self._unresolved_mfc_ids = set()
@@ -1495,9 +1497,9 @@ class DualCanteraConverter:
                     "Viz network: could not build connection '%s': %s", cid, exc
                 )
 
-        # LEGACY WORKAROUND (remove when interface_reservoirs=True is default):
+        # LEGACY WORKAROUND (remove when stream_reservoirs=True is default):
         # Re-enqueue MFCs resolved to 0 during a partial-topology stage pass.
-        # With interface_reservoirs=True the inter-stage MFCs are materialised
+        # With stream_reservoirs=True the inter-stage MFCs are materialised
         # during the stage solve itself, so the full topology is already visible
         # and this second pass is a no-op.  Until then, keep it for safety.
         for cid in list(self._originally_unspecified_mfc_ids):
@@ -1505,10 +1507,10 @@ class DualCanteraConverter:
                 self._unresolved_mfc_ids.add(cid)
                 self._mfc_flow_rates.pop(cid, None)
 
-        # LEGACY WORKAROUND (remove when interface_reservoirs=True is default):
+        # LEGACY WORKAROUND (remove when stream_reservoirs=True is default):
         # Build PressureControllers deferred during stage builds because their
         # master MFC was a virtual inter-stage connection not yet registered.
-        # With interface_reservoirs=True all inter-stage MFCs are real and
+        # With stream_reservoirs=True all inter-stage MFCs are real and
         # exist from stage-solve time, so no deferral is needed.
         for conn in self._deferred_pc_conn_dicts:
             cid = conn["id"]
@@ -1581,9 +1583,23 @@ class DualCanteraConverter:
 
         from .staged_solver import build_stage_graph, solve_staged
 
+        # Read the stream_reservoirs feature flag from settings.staged.
+        # Accept both the new key and the deprecated alias.
+        _settings = config.get("settings") or {}
+        _staged_cfg = _settings.get("staged") or {}
+        _use_stream_res: bool = bool(
+            _staged_cfg.get(
+                "stream_reservoirs", _staged_cfg.get("interface_reservoirs", False)
+            )
+        )
+
         plan = build_stage_graph(config)
         trajectory = solve_staged(
-            self, plan, config, progress_callback=progress_callback
+            self,
+            plan,
+            config,
+            progress_callback=progress_callback,
+            stream_reservoirs=_use_stream_res,
         )
         self._staged_trajectory = trajectory
 

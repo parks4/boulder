@@ -60,9 +60,11 @@ class SimulationProgress:
     sankey_links: Optional[Dict[str, Any]] = None
     sankey_nodes: Optional[List[str]] = None
 
-    # Connections that were added programmatically during network build
-    # (e.g. by post-build hooks).  Sent to the client on completion so the
-    # visual graph can be updated to reflect the actual network topology.
+    # Nodes and connections added programmatically during network build
+    # (e.g. interface-reservoir nodes synthesised by the staged solver, or
+    # edges added by post-build hooks).  Both are sent to the client in the
+    # SSE "complete" event so the visual graph stays in sync with the solver.
+    updated_nodes: Optional[List[Dict[str, Any]]] = None
     updated_connections: Optional[List[Dict[str, Any]]] = None
 
     # Build-phase progress counters.  Updated after each staged-solver stage.
@@ -157,6 +159,11 @@ class SimulationWorker:
                 summary=self.progress.summary.copy(),
                 sankey_links=self.progress.sankey_links,
                 sankey_nodes=self.progress.sankey_nodes,
+                updated_nodes=(
+                    list(self.progress.updated_nodes)
+                    if self.progress.updated_nodes is not None
+                    else None
+                ),
                 updated_connections=(
                     list(self.progress.updated_connections)
                     if self.progress.updated_connections is not None
@@ -214,10 +221,12 @@ class SimulationWorker:
             with self._lock:
                 self.progress.stages_done = self.progress.n_stages
 
-            # Capture the connections list after post-build hooks have run.
-            # Post-build hooks may inject synthetic connections into config so
-            # that the visual graph reflects the actual network topology.
+            # Capture the full nodes + connections lists after post-build hooks
+            # and the staged solver have run.  Both may grow during the build
+            # (e.g. interface-reservoir nodes, programmatic edges) so the client
+            # receives a single source of truth for the visual graph.
             with self._lock:
+                self.progress.updated_nodes = list(config.get("nodes") or [])
                 self.progress.updated_connections = list(
                     config.get("connections") or []
                 )

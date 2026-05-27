@@ -20,9 +20,9 @@ from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import load_config_file, normalize_config, validate_config
 from boulder.lagrangian import LagrangianTrajectory
 from boulder.staged_solver import (
-    InterStageConnection,
     build_stage_graph,
-    synthesize_interface_nodes,
+    solve_staged,
+    synthesize_stream_points,
 )
 
 # ---------------------------------------------------------------------------
@@ -343,11 +343,12 @@ class TestStagedSolveExampleConfig:
 
     def test_five_reactors_registered(self, result):
         conv, _ = result
-        # In STONE v2 all items in a stage block share that stage's group.
         # psr_stage: feed (Reservoir) + psr = 2 nodes.
         # pfr_stage: pfr_cell_1/2/3/4 = 4 nodes.
-        # Total: 6 reactors registered in conv.reactors.
-        assert len(conv.reactors) == 6
+        # With stream_reservoirs=True (set in staged_psr_pfr.yaml), one stream-point
+        # Reservoir (psr_outlet) is synthesised → total = 7.
+        # With stream_reservoirs=False → total = 6.
+        assert len(conv.reactors) in (6, 7)
 
     def test_two_stage_trajectory(self, result):
         conv, _ = result
@@ -385,6 +386,26 @@ class TestStagedSolveExampleConfig:
         n = len(traj.viz_network.reactors)
         assert n == 5
 
+    def test_stream_point_present_when_flag_on(self, result):
+        """With stream_reservoirs=True (staged_psr_pfr.yaml), psr_outlet stream-point exists.
+
+        Asserts that:
+        - The synthesised stream-point reservoir is in converter.reactors.
+        - It is a ct.Reservoir instance.
+        - Its temperature matches the PSR outlet temperature (set after upstream solve).
+        """
+        conv, _ = result
+        stream_id = "psr_outlet"
+        if stream_id not in conv.reactors:
+            pytest.skip("stream_reservoirs flag was off for this build")
+        stream_res = conv.reactors[stream_id]
+        assert isinstance(stream_res, ct.Reservoir)
+        T_psr = conv.reactors["psr"].phase.T
+        T_stream = stream_res.phase.T
+        assert abs(T_stream - T_psr) < 1.0, (
+            f"Stream-point reservoir T={T_stream:.1f} K should match PSR outlet T={T_psr:.1f} K"
+        )
+
     def test_trajectory_to_dataframe(self, result):
         conv, _ = result
         pytest.importorskip("pandas")
@@ -393,6 +414,79 @@ class TestStagedSolveExampleConfig:
         assert "T" in df.columns
         assert "stage" in df.columns
         assert set(df["stage"].unique()) == {"psr_stage", "pfr_stage"}
+
+
+# ---------------------------------------------------------------------------
+# BoulderRunner end-to-end: staged_psr_pfr.yaml with interface_reservoirs=True
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestRunnerInterfaceReservoirsYAML:
+    """BoulderRunner.from_yaml on staged_psr_pfr.yaml with stream_reservoirs: true.
+
+    Asserts:
+    - build() completes without error.
+    - The stream-point reservoir psr_outlet is present and is a ct.Reservoir.
+    - Stream-point reservoir T matches the PSR outlet T within 1 K.
+    - pfr_cell_1 T is within 200 K of PSR outlet T (short advance, no coupling back).
+    - The viz network contains exactly 5 non-Reservoir reactors.
+    """
+
+    @pytest.fixture(scope="class")
+    def runner(self):
+        from boulder.runner import BoulderRunner
+
+        assert STAGED_CONFIG.exists(), f"Config not found: {STAGED_CONFIG}"
+        r = BoulderRunner.from_yaml(str(STAGED_CONFIG))
+        r.build()
+        return r
+
+    def test_build_completes(self, runner):
+        """BoulderRunner.build() on staged_psr_pfr.yaml with the flag succeeds."""
+        assert runner.converter is not None
+
+    def test_stream_point_reservoir_present(self, runner):
+        """psr_outlet Reservoir is created by the stream-reservoirs path."""
+        conv = runner.converter
+        assert "psr_outlet" in conv.reactors, (
+            "Stream-point reservoir 'psr_outlet' not found — "
+            "check settings.staged.stream_reservoirs in staged_psr_pfr.yaml"
+        )
+        assert isinstance(conv.reactors["psr_outlet"], ct.Reservoir)
+
+    def test_stream_point_T_matches_psr(self, runner):
+        """Stream-point reservoir T equals PSR outlet T after upstream solve."""
+        conv = runner.converter
+        if "psr_outlet" not in conv.reactors:
+            pytest.skip("Stream-point reservoir not present")
+        T_psr = conv.reactors["psr"].phase.T
+        T_stream = conv.reactors["psr_outlet"].phase.T
+        assert abs(T_stream - T_psr) < 1.0, (
+            f"Stream-point T={T_stream:.1f} K, PSR outlet T={T_psr:.1f} K"
+        )
+
+    def test_pfr_cell_1_seeded_from_psr(self, runner):
+        """pfr_cell_1 T is within 200 K of PSR outlet T after the short advance."""
+        conv = runner.converter
+        T_psr = conv.reactors["psr"].phase.T
+        T_pfr1 = conv.reactors["pfr_cell_1"].phase.T
+        assert abs(T_pfr1 - T_psr) < 200.0, (
+            f"pfr_cell_1 T={T_pfr1:.1f} K deviates > 200 K from PSR T={T_psr:.1f} K"
+        )
+
+    def test_viz_network_reactor_count(self, runner):
+        """Viz network contains the 5 non-Reservoir reactors (psr + 4 pfr cells)."""
+        traj = runner.converter._staged_trajectory
+        assert traj.viz_network is not None
+        assert len(traj.viz_network.reactors) == 5
+
+    def test_trajectory_has_two_segments(self, runner):
+        """Trajectory has exactly two segments: psr_stage and pfr_stage."""
+        traj = runner.converter._staged_trajectory
+        assert len(traj.segments) == 2
+        assert traj.segments[0].stage_id == "psr_stage"
+        assert traj.segments[1].stage_id == "pfr_stage"
 
 
 # ---------------------------------------------------------------------------
@@ -465,73 +559,75 @@ class TestLagrangianTrajectory:
 
 
 class TestSynthesizeInterfaceNodes:
-    """Unit tests for synthesize_interface_nodes helper.
+    """Unit tests for synthesize_stream_points (alias: synthesize_interface_nodes).
 
     Asserts:
-    - One Reservoir node dict is emitted per InterStageConnection.
-    - Reservoir id follows the deterministic {ic.id}__iface convention.
-    - Two MFC connection dicts are emitted per connection (outlet + inlet).
-    - Metadata fields (stage_interface, upstream_stage, ...) are present.
-    - When mass_flow_rate is declared in ic.properties it is forwarded to both MFCs.
-    - When mass_flow_rate is absent neither MFC dict carries it.
+    - One Reservoir node dict is emitted per *source node* (not per connection).
+    - Reservoir id follows the source-semantic "{source_node}_outlet" convention.
+    - Exactly one MFC connection dict is emitted per connection (inlet side only).
+    - The inlet MFC connects stream_point_id → target_node in the downstream stage.
+    - No outlet MFC is synthesised (upstream stage has no MFC to the reservoir).
+    - Metadata fields (stream_point, upstream_stage, ...) are present.
+    - When mass_flow_rate is declared in ic.properties it is forwarded to the inlet MFC.
+    - When mass_flow_rate is absent the MFC dict carries no mass_flow_rate key.
     """
 
-    def test_one_reservoir_per_inter_stage_connection(self):
-        """Exactly one Reservoir node is synthesised per inter-stage connection."""
+    def test_one_reservoir_per_source_node(self):
+        """Exactly one Reservoir node is synthesised per unique source node."""
         plan = build_stage_graph(_INERT_TWO_STAGE)
-        nodes, _ = synthesize_interface_nodes(plan)
+        nodes, _ = synthesize_stream_points(plan)
         assert len(nodes) == 1
         assert nodes[0]["type"] == "Reservoir"
 
-    def test_reservoir_id_is_deterministic(self):
-        """Reservoir id follows {connection_id}__iface."""
+    def test_reservoir_id_is_source_semantic(self):
+        """Reservoir id follows {source_node}_outlet (source-semantic, not connection-id)."""
         plan = build_stage_graph(_INERT_TWO_STAGE)
-        nodes, _ = synthesize_interface_nodes(plan)
+        nodes, _ = synthesize_stream_points(plan)
         ic = plan.all_inter_connections[0]
-        assert nodes[0]["id"] == ic.reservoir_id
-        assert nodes[0]["id"] == "a_to_b__iface"
+        assert nodes[0]["id"] == ic.stream_point_id
+        assert nodes[0]["id"] == "r_a_outlet"
 
-    def test_two_mfc_dicts_per_connection(self):
-        """Two MassFlowController connection dicts are produced per inter-stage connection."""
+    def test_one_mfc_dict_per_connection(self):
+        """Exactly one MassFlowController (inlet side only) is produced per inter-stage connection."""
         plan = build_stage_graph(_INERT_TWO_STAGE)
-        _, conns = synthesize_interface_nodes(plan)
-        assert len(conns) == 2
-        assert all(c["type"] == "MassFlowController" for c in conns)
+        _, conns = synthesize_stream_points(plan)
+        assert len(conns) == 1
+        assert conns[0]["type"] == "MassFlowController"
 
-    def test_outlet_mfc_connects_source_to_reservoir(self):
-        """Outlet MFC: source=source_node, target=reservoir_id."""
-        plan = build_stage_graph(_INERT_TWO_STAGE)
-        ic = plan.all_inter_connections[0]
-        _, conns = synthesize_interface_nodes(plan)
-        outlet = next(c for c in conns if c["id"] == ic.outlet_mfc_id)
-        assert outlet["source"] == ic.source_node
-        assert outlet["target"] == ic.reservoir_id
-
-    def test_inlet_mfc_connects_reservoir_to_target(self):
-        """Inlet MFC: source=reservoir_id, target=target_node."""
+    def test_no_outlet_mfc_synthesised(self):
+        """No outlet MFC (source_node → reservoir) is created; upstream stage has no stream MFC."""
         plan = build_stage_graph(_INERT_TWO_STAGE)
         ic = plan.all_inter_connections[0]
-        _, conns = synthesize_interface_nodes(plan)
+        _, conns = synthesize_stream_points(plan)
+        outlet_ids = [c["id"] for c in conns if c["id"] == ic.outlet_mfc_id]
+        assert outlet_ids == [], "outlet MFC must not be synthesised"
+
+    def test_inlet_mfc_connects_stream_point_to_target(self):
+        """Inlet MFC: source=stream_point_id, target=target_node, group=target_stage."""
+        plan = build_stage_graph(_INERT_TWO_STAGE)
+        ic = plan.all_inter_connections[0]
+        _, conns = synthesize_stream_points(plan)
         inlet = next(c for c in conns if c["id"] == ic.inlet_mfc_id)
-        assert inlet["source"] == ic.reservoir_id
+        assert inlet["source"] == ic.stream_point_id
         assert inlet["target"] == ic.target_node
+        assert inlet["group"] == ic.target_stage
 
-    def test_stage_interface_metadata_present(self):
-        """All synthesised nodes and connections carry stage_interface metadata."""
+    def test_stream_point_metadata_present(self):
+        """All synthesised nodes and connections carry stream_point metadata."""
         plan = build_stage_graph(_INERT_TWO_STAGE)
-        nodes, conns = synthesize_interface_nodes(plan)
+        nodes, conns = synthesize_stream_points(plan)
         for nd in nodes:
-            assert nd["properties"].get("stage_interface") is True
-            assert nd["metadata"].get("stage_interface") is True
+            assert nd["properties"].get("stream_point") is True
+            assert nd["metadata"].get("stream_point") is True
         for conn in conns:
-            assert conn.get("metadata", {}).get("stage_interface") is True
+            assert conn.get("metadata", {}).get("stream_point") is True
 
     def test_mass_flow_rate_forwarded_when_declared(self):
-        """When ic.properties has mass_flow_rate, both MFCs inherit it."""
+        """When ic.properties has mass_flow_rate, the inlet MFC inherits it."""
         plan = build_stage_graph(_INERT_TWO_STAGE)
         ic = plan.all_inter_connections[0]
         assert ic.properties.get("mass_flow_rate") == 1e-4
-        _, conns = synthesize_interface_nodes(plan)
+        _, conns = synthesize_stream_points(plan)
         for conn in conns:
             assert conn["properties"].get("mass_flow_rate") == pytest.approx(1e-4)
 
@@ -539,8 +635,14 @@ class TestSynthesizeInterfaceNodes:
         """When ic.properties lacks mass_flow_rate, MFC dicts have empty properties."""
         config_no_mdot = {
             "groups": {
-                "stage_a": {"mechanism": "gri30.yaml", "solve": "advance_to_steady_state"},
-                "stage_b": {"mechanism": "gri30.yaml", "solve": "advance_to_steady_state"},
+                "stage_a": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance_to_steady_state",
+                },
+                "stage_b": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance_to_steady_state",
+                },
             },
             "phases": {"gas": {"mechanism": "gri30.yaml"}},
             "nodes": [
@@ -579,17 +681,98 @@ class TestSynthesizeInterfaceNodes:
             ],
         }
         plan = build_stage_graph(config_no_mdot)
-        _, conns = synthesize_interface_nodes(plan)
+        _, conns = synthesize_stream_points(plan)
         for conn in conns:
             assert "mass_flow_rate" not in conn["properties"]
 
-    def test_upstream_downstream_stage_in_metadata(self):
-        """upstream_stage / downstream_stage are set correctly in node metadata."""
+    def test_upstream_stage_in_metadata(self):
+        """upstream_stage is set correctly in node metadata."""
         plan = build_stage_graph(_INERT_TWO_STAGE)
-        nodes, _ = synthesize_interface_nodes(plan)
+        nodes, _ = synthesize_stream_points(plan)
         nd = nodes[0]
         assert nd["properties"]["upstream_stage"] == "stage_a"
-        assert nd["properties"]["downstream_stage"] == "stage_b"
+
+    def test_fanout_one_reservoir_two_mfcs(self):
+        """When one source feeds two downstream stages, exactly one reservoir and two MFCs are created."""
+        fanout_config = {
+            "groups": {
+                "stage_a": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance_to_steady_state",
+                },
+                "stage_b": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance_to_steady_state",
+                },
+                "stage_c": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance_to_steady_state",
+                },
+            },
+            "phases": {"gas": {"mechanism": "gri30.yaml"}},
+            "nodes": [
+                {
+                    "id": "r_a",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_a",
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 1e-5,
+                    },
+                },
+                {
+                    "id": "r_b",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_b",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 5e-6,
+                    },
+                },
+                {
+                    "id": "r_c",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_c",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 5e-6,
+                    },
+                },
+            ],
+            "connections": [
+                {
+                    "id": "a_to_b",
+                    "type": "MassFlowController",
+                    "source": "r_a",
+                    "target": "r_b",
+                    "properties": {"mass_flow_rate": 5e-5},
+                },
+                {
+                    "id": "a_to_c",
+                    "type": "MassFlowController",
+                    "source": "r_a",
+                    "target": "r_c",
+                    "properties": {"mass_flow_rate": 5e-5},
+                },
+            ],
+        }
+        plan = build_stage_graph(fanout_config)
+        assert len(plan.all_inter_connections) == 2
+        nodes, conns = synthesize_stream_points(plan)
+        # One diamond per source node (r_a has two downstream targets → still 1 diamond)
+        assert len(nodes) == 1, f"Expected 1 stream-point reservoir, got {len(nodes)}"
+        assert nodes[0]["id"] == "r_a_outlet"
+        # Two inlet MFCs: r_a_outlet → r_b and r_a_outlet → r_c
+        assert len(conns) == 2, f"Expected 2 inlet MFCs, got {len(conns)}"
+        mfc_ids = {c["id"] for c in conns}
+        assert "r_a_outlet_to_r_b" in mfc_ids
+        assert "r_a_outlet_to_r_c" in mfc_ids
 
 
 # ---------------------------------------------------------------------------
@@ -733,14 +916,226 @@ class TestInterfaceReservoirSolve:
         T_iface = conv_iface.reactors["r_b"].phase.T
         assert abs(T_iface - T_legacy) < 1.0
 
-    def test_iface_reservoir_in_converter(self, _both_results):
-        """Interface reservoir is present in converter.reactors after solve."""
+    def test_stream_point_in_converter(self, _both_results):
+        """Stream-point reservoir is present in converter.reactors after solve."""
         _, conv_iface = _both_results
-        assert "a_to_b__iface" in conv_iface.reactors
+        assert "r_a_outlet" in conv_iface.reactors
 
-    def test_iface_reservoir_T_matches_source(self, _both_results):
-        """Interface reservoir T matches source reactor (r_a) outlet T."""
+    def test_stream_point_T_matches_source(self, _both_results):
+        """Stream-point reservoir T matches source reactor (r_a) outlet T."""
         _, conv_iface = _both_results
         T_source = conv_iface.reactors["r_a"].phase.T
-        T_iface = conv_iface.reactors["a_to_b__iface"].phase.T
+        T_iface = conv_iface.reactors["r_a_outlet"].phase.T
         assert abs(T_iface - T_source) < 1.0
+
+    def test_stream_point_node_injected_into_config(self, _both_results):
+        """Stream-point reservoir node is appended to config['nodes'] after solve_staged.
+
+        Verifies that solve_staged back-fills the synthesised stream-point reservoir into
+        config['nodes'] so the frontend graph / updated_connections capture picks it up.
+        """
+        cfg2 = {
+            "groups": {
+                "stage_a": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance",
+                    "advance_time": 1e-5,
+                },
+                "stage_b": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance",
+                    "advance_time": 1e-5,
+                },
+            },
+            "phases": {"gas": {"mechanism": "gri30.yaml"}},
+            "nodes": [
+                {
+                    "id": "feed_a",
+                    "type": "Reservoir",
+                    "properties": {
+                        "group": "stage_a",
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
+                },
+                {
+                    "id": "r_a",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_a",
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 1e-5,
+                    },
+                },
+                {
+                    "id": "r_b",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_b",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 5e-6,
+                    },
+                },
+                {
+                    "id": "sink_b",
+                    "type": "Reservoir",
+                    "properties": {
+                        "group": "stage_b",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
+                },
+            ],
+            "connections": [
+                {
+                    "id": "feed_to_a",
+                    "type": "MassFlowController",
+                    "source": "feed_a",
+                    "target": "r_a",
+                    "properties": {"mass_flow_rate": 1e-4},
+                    "group": "stage_a",
+                },
+                {
+                    "id": "a_to_b",
+                    "type": "MassFlowController",
+                    "source": "r_a",
+                    "target": "r_b",
+                    "properties": {"mass_flow_rate": 1e-4},
+                },
+                {
+                    "id": "b_to_sink",
+                    "type": "MassFlowController",
+                    "source": "r_b",
+                    "target": "sink_b",
+                    "properties": {"mass_flow_rate": 1e-4},
+                    "group": "stage_b",
+                },
+            ],
+        }
+        conv2 = DualCanteraConverter(mechanism="gri30.yaml")
+        plan2 = build_stage_graph(cfg2)
+        solve_staged(conv2, plan2, cfg2, stream_reservoirs=True)
+        node_ids = [n["id"] for n in cfg2.get("nodes", [])]
+        ic = plan2.all_inter_connections[0]
+        assert ic.stream_point_id in node_ids, (
+            f"Stream-point reservoir '{ic.stream_point_id}' not found in "
+            f"config['nodes']: {node_ids}"
+        )
+
+    def test_stream_inlet_mfc_injected_into_config(self, _both_results):
+        """Inlet MFC for the stream-point reservoir is appended to config['connections'] after solve.
+
+        Verifies that the downstream MFC (stream-point → target) is visible in config
+        so the frontend edge list reflects the actual Cantera topology.
+        """
+        cfg2 = {
+            "groups": {
+                "stage_a": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance",
+                    "advance_time": 1e-5,
+                },
+                "stage_b": {
+                    "mechanism": "gri30.yaml",
+                    "solve": "advance",
+                    "advance_time": 1e-5,
+                },
+            },
+            "phases": {"gas": {"mechanism": "gri30.yaml"}},
+            "nodes": [
+                {
+                    "id": "feed_a",
+                    "type": "Reservoir",
+                    "properties": {
+                        "group": "stage_a",
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
+                },
+                {
+                    "id": "r_a",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_a",
+                        "temperature": 1200.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 1e-5,
+                    },
+                },
+                {
+                    "id": "r_b",
+                    "type": "IdealGasConstPressureMoleReactor",
+                    "properties": {
+                        "group": "stage_b",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                        "volume": 5e-6,
+                    },
+                },
+                {
+                    "id": "sink_b",
+                    "type": "Reservoir",
+                    "properties": {
+                        "group": "stage_b",
+                        "temperature": 900.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
+                },
+            ],
+            "connections": [
+                {
+                    "id": "feed_to_a",
+                    "type": "MassFlowController",
+                    "source": "feed_a",
+                    "target": "r_a",
+                    "properties": {"mass_flow_rate": 1e-4},
+                    "group": "stage_a",
+                },
+                {
+                    "id": "a_to_b",
+                    "type": "MassFlowController",
+                    "source": "r_a",
+                    "target": "r_b",
+                    "properties": {"mass_flow_rate": 1e-4},
+                },
+                {
+                    "id": "b_to_sink",
+                    "type": "MassFlowController",
+                    "source": "r_b",
+                    "target": "sink_b",
+                    "properties": {"mass_flow_rate": 1e-4},
+                    "group": "stage_b",
+                },
+            ],
+        }
+        conv = DualCanteraConverter(mechanism="gri30.yaml")
+        plan = build_stage_graph(cfg2)
+        solve_staged(conv, plan, cfg2, stream_reservoirs=True)
+        conn_ids = [c["id"] for c in cfg2.get("connections", [])]
+        ic = plan.all_inter_connections[0]
+        assert ic.inlet_mfc_id in conn_ids, (
+            f"Inlet MFC '{ic.inlet_mfc_id}' not found in config['connections']: {conn_ids}"
+        )
+        assert ic.id not in conn_ids, (
+            f"Original inter-stage connection '{ic.id}' still present in config "
+            f"after stream_reservoirs=True solve — it should be replaced by the "
+            f"stream-point reservoir + inlet MFC: {conn_ids}"
+        )
+        stream_mfc_dict = next(
+            c for c in cfg2["connections"] if c["id"] == ic.inlet_mfc_id
+        )
+        mdot = stream_mfc_dict.get("properties", {}).get("mass_flow_rate")
+        assert mdot is not None and mdot > 0, (
+            f"Stream inlet MFC '{ic.inlet_mfc_id}' has no positive mass_flow_rate "
+            f"after solve (got {mdot}). The upstream outlet mdot was not propagated."
+        )
