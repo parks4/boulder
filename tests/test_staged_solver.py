@@ -345,10 +345,9 @@ class TestStagedSolveExampleConfig:
         conv, _ = result
         # psr_stage: feed (Reservoir) + psr = 2 nodes.
         # pfr_stage: pfr_cell_1/2/3/4 = 4 nodes.
-        # With stream_reservoirs=True (set in staged_psr_pfr.yaml), one stream-point
-        # Reservoir (psr_outlet) is synthesised → total = 7.
-        # With stream_reservoirs=False → total = 6.
-        assert len(conv.reactors) in (6, 7)
+        # Stream reservoirs are always enabled: one stream-point Reservoir
+        # (psr_outlet) is synthesised → total = 7.
+        assert len(conv.reactors) == 7
 
     def test_two_stage_trajectory(self, result):
         conv, _ = result
@@ -451,7 +450,7 @@ class TestRunnerInterfaceReservoirsYAML:
         conv = runner.converter
         assert "psr_outlet" in conv.reactors, (
             "Stream-point reservoir 'psr_outlet' not found — "
-            "check settings.staged.stream_reservoirs in staged_psr_pfr.yaml"
+            "stream reservoirs are always enabled in the staged solver."
         )
         assert isinstance(conv.reactors["psr_outlet"], ct.Reservoir)
 
@@ -887,19 +886,17 @@ class TestInterfaceReservoirSolve:
             ],
         }
 
-        # Legacy (flag off, default)
+        # Legacy path (explicit opt-out)
         conv_legacy = DualCanteraConverter(mechanism="gri30.yaml")
         plan_legacy = build_stage_graph(_config_with_outlet)
         solve_staged(
-            conv_legacy, plan_legacy, _config_with_outlet, interface_reservoirs=False
+            conv_legacy, plan_legacy, _config_with_outlet, stream_reservoirs=False
         )
 
-        # Interface reservoirs enabled
+        # Stream-reservoir path (now the default)
         conv_iface = DualCanteraConverter(mechanism="gri30.yaml")
         plan_iface = build_stage_graph(_config_with_outlet)
-        solve_staged(
-            conv_iface, plan_iface, _config_with_outlet, interface_reservoirs=True
-        )
+        solve_staged(conv_iface, plan_iface, _config_with_outlet)
 
         return conv_legacy, conv_iface
 
@@ -1020,7 +1017,7 @@ class TestInterfaceReservoirSolve:
         }
         conv2 = DualCanteraConverter(mechanism="gri30.yaml")
         plan2 = build_stage_graph(cfg2)
-        solve_staged(conv2, plan2, cfg2, stream_reservoirs=True)
+        solve_staged(conv2, plan2, cfg2)
         node_ids = [n["id"] for n in cfg2.get("nodes", [])]
         ic = plan2.all_inter_connections[0]
         assert ic.stream_point_id in node_ids, (
@@ -1120,7 +1117,7 @@ class TestInterfaceReservoirSolve:
         }
         conv = DualCanteraConverter(mechanism="gri30.yaml")
         plan = build_stage_graph(cfg2)
-        solve_staged(conv, plan, cfg2, stream_reservoirs=True)
+        solve_staged(conv, plan, cfg2)
         conn_ids = [c["id"] for c in cfg2.get("connections", [])]
         ic = plan.all_inter_connections[0]
         assert ic.inlet_mfc_id in conn_ids, (
@@ -1128,8 +1125,8 @@ class TestInterfaceReservoirSolve:
         )
         assert ic.id not in conn_ids, (
             f"Original inter-stage connection '{ic.id}' still present in config "
-            f"after stream_reservoirs=True solve — it should be replaced by the "
-            f"stream-point reservoir + inlet MFC: {conn_ids}"
+            f"after solve — it should be replaced by the stream-point reservoir + "
+            f"inlet MFC: {conn_ids}"
         )
         stream_mfc_dict = next(
             c for c in cfg2["connections"] if c["id"] == ic.inlet_mfc_id

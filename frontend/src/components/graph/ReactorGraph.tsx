@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import cytoscape, { type Core, type EventObject } from "cytoscape";
 // @ts-ignore - no types available
 import dagre from "cytoscape-dagre";
@@ -12,37 +12,15 @@ cytoscape.use(dagre);
 
 /**
  * Native Cytoscape.js graph component for the reactor network.
- * Uses dagre left-to-right layout.
+ * Uses dagre left-to-right layout with stages ordered top-to-bottom.
  */
 const DBLTAP_MS = 300;
-const DEFAULT_GRAPH_HEIGHT = 360;
-const MIN_GRAPH_HEIGHT = 240;
-const GRAPH_HEIGHT_STORAGE_KEY = "boulder-graph-height";
 
-function getMaxGraphHeight(): number {
-  if (typeof window === "undefined") return 900;
-  return Math.max(MIN_GRAPH_HEIGHT, Math.floor(window.innerHeight * 0.75));
+interface ReactorGraphProps {
+  height: number;
 }
 
-function loadStoredGraphHeight(): number {
-  if (typeof window === "undefined") return DEFAULT_GRAPH_HEIGHT;
-  const raw = localStorage.getItem(GRAPH_HEIGHT_STORAGE_KEY);
-  if (!raw) return DEFAULT_GRAPH_HEIGHT;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return DEFAULT_GRAPH_HEIGHT;
-  return Math.min(getMaxGraphHeight(), Math.max(MIN_GRAPH_HEIGHT, parsed));
-}
-
-function saveGraphHeight(height: number): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(GRAPH_HEIGHT_STORAGE_KEY, String(height));
-}
-
-function clampGraphHeight(height: number): number {
-  return Math.min(getMaxGraphHeight(), Math.max(MIN_GRAPH_HEIGHT, height));
-}
-
-export function ReactorGraph() {
+export function ReactorGraph({ height }: ReactorGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
   const lastTappedRef = useRef<{ nodeId: string; time: number } | null>(null);
@@ -52,63 +30,86 @@ export function ReactorGraph() {
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
   const theme = useThemeStore((s) => s.theme);
-  const [graphHeight, setGraphHeight] = useState(loadStoredGraphHeight);
 
-  const handleResizePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      const startY = event.clientY;
-      const startHeight = graphHeight;
-
-      const handlePointerMove = (moveEvent: PointerEvent) => {
-        const delta = moveEvent.clientY - startY;
-        setGraphHeight(clampGraphHeight(startHeight + delta));
-      };
-
-      const handlePointerUp = (upEvent: PointerEvent) => {
-        const delta = upEvent.clientY - startY;
-        const finalHeight = clampGraphHeight(startHeight + delta);
-        saveGraphHeight(finalHeight);
-        setGraphHeight(finalHeight);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        window.removeEventListener("pointermove", handlePointerMove);
-        window.removeEventListener("pointerup", handlePointerUp);
-      };
-
-      document.body.style.cursor = "ns-resize";
-      document.body.style.userSelect = "none";
-      window.addEventListener("pointermove", handlePointerMove);
-      window.addEventListener("pointerup", handlePointerUp);
-    },
-    [graphHeight],
-  );
-
-  // Build cytoscape elements from config
+  // Build cytoscape elements from config.
+  // Stream-point diamonds are assigned to their upstream stage group so dagre
+  // keeps them inside the source-stage compound box.  The MFC edge that crosses
+  // from the stream-point into the next stage group is what connects the stage
+  // boxes in the layout (dagre handles cross-group edges correctly).
+  //
+  // Pre-simulation synthesis: when the config has inter-stage connections but no
+  // stream-point nodes yet, the diamond nodes and two-hop edges are synthesised
+  // here so the initial graph matches the post-simulation topology.  The config
+  // is never mutated — synthesis is purely for display.
   const buildElements = useCallback(() => {
     const elements: cytoscape.ElementDefinition[] = [];
     const createdGroups = new Set<string>();
 
+    // --- helper: ensure a group compound node exists ---
+    const ensureGroup = (groupName: string) => {
+      const parentId = `group:${groupName}`;
+      if (!createdGroups.has(parentId)) {
+        createdGroups.add(parentId);
+        elements.push({ data: { id: parentId, label: groupName, isGroup: true } });
+      }
+    };
+
+    // --- build node-to-group map and find existing stream-point ids ---
+    const nodeToGroup = new Map<string, string>();
+    const existingStreamIds = new Set<string>();
     for (const node of config.nodes) {
-      const group = String(
+      const grp = String(
         node.group ?? node.properties?.group ?? node.properties?.group_name ?? "",
       ).trim();
-
-      if (group) {
-        const parentId = `group:${group}`;
-        if (!createdGroups.has(parentId)) {
-          createdGroups.add(parentId);
-          elements.push({
-            data: { id: parentId, label: group, isGroup: true },
-          });
-        }
+      if (grp) nodeToGroup.set(node.id, grp);
+      if (node.properties?.stream_point || node.metadata?.stream_point) {
+        existingStreamIds.add(node.id);
       }
+    }
 
+    // --- detect inter-stage connections needing synthesis ---
+    // inter_by_src[sourceId] = list of original connection objects
+    const interBySrc = new Map<string, typeof config.connections>();
+    for (const conn of config.connections) {
+      const srcGrp = nodeToGroup.get(conn.source);
+      const tgtGrp = nodeToGroup.get(conn.target);
+      const streamId = `${conn.source}_outlet`;
+      if (
+        srcGrp && tgtGrp && srcGrp !== tgtGrp &&
+        !existingStreamIds.has(streamId) &&
+        conn.type !== "StreamConnector"
+      ) {
+        if (!interBySrc.has(conn.source)) interBySrc.set(conn.source, []);
+        interBySrc.get(conn.source)!.push(conn);
+      }
+    }
+    const replacedConnIds = new Set(
+      [...interBySrc.values()].flatMap((cs) => cs.map((c) => c.id)),
+    );
+
+    // --- emit config nodes ---
+    for (const node of config.nodes) {
       const isStreamPoint =
         Boolean(node.properties?.stream_point) ||
         Boolean(node.metadata?.stream_point);
 
-      // Build a human-readable label: "Torch Outlet" from "torch_outlet"
+      const upstreamStage = isStreamPoint
+        ? String(
+            node.properties?.upstream_stage ??
+              node.metadata?.upstream_stage ??
+              "",
+          ).trim()
+        : "";
+
+      const group = String(
+        node.group ??
+          node.properties?.group ??
+          node.properties?.group_name ??
+          upstreamStage,
+      ).trim();
+
+      if (group) ensureGroup(group);
+
       const streamLabel = isStreamPoint
         ? node.id
             .replace(/_outlet$/, " Outlet")
@@ -117,19 +118,42 @@ export function ReactorGraph() {
             .join(" ")
         : node.id;
 
+      const nodeData: Record<string, unknown> = {
+        id: node.id,
+        label: streamLabel,
+        type: node.type,
+        temperature: Number(node.properties?.temperature ?? 300),
+        ...(group ? { parent: `group:${group}` } : {}),
+      };
+      if (isStreamPoint) nodeData.stream_point = true;
+      elements.push({ data: nodeData });
+    }
+
+    // --- synthesise placeholder stream-point diamond nodes (pre-simulation) ---
+    for (const [src, _conns] of interBySrc) {
+      const streamId = `${src}_outlet`;
+      const srcGrp = nodeToGroup.get(src)!;
+      ensureGroup(srcGrp);
+      const streamLabel = streamId
+        .replace(/_outlet$/, " Outlet")
+        .split("_")
+        .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
       elements.push({
         data: {
-          id: node.id,
+          id: streamId,
           label: streamLabel,
-          type: node.type,
-          temperature: Number(node.properties?.temperature ?? 300),
-          stream_point: isStreamPoint || undefined,
-          ...(group ? { parent: `group:${group}` } : {}),
+          type: "Reservoir",
+          stream_point: true,
+          temperature: 300,
+          parent: `group:${srcGrp}`,
         },
       });
     }
 
+    // --- emit config edges, skipping replaced inter-stage MFCs ---
     for (const conn of config.connections) {
+      if (replacedConnIds.has(conn.id)) continue;
       elements.push({
         data: {
           id: conn.id,
@@ -140,6 +164,32 @@ export function ReactorGraph() {
         },
       });
     }
+
+    // --- synthesise stream-point display edges (pre-simulation) ---
+    for (const [src, conns] of interBySrc) {
+      const streamId = `${src}_outlet`;
+      elements.push({
+        data: {
+          id: `${src}_to_${streamId}`,
+          label: `${src}_to_${streamId}`,
+          source: src,
+          target: streamId,
+          type: "StreamConnector",
+        },
+      });
+      for (const conn of conns) {
+        elements.push({
+          data: {
+            id: `${streamId}_to_${conn.target}`,
+            label: `${streamId}_to_${conn.target}`,
+            source: streamId,
+            target: conn.target,
+            type: "MassFlowController",
+          },
+        });
+      }
+    }
+
     return elements;
   }, [config]);
 
@@ -178,19 +228,25 @@ export function ReactorGraph() {
         },
       },
       {
-        // Reactor nodes (non-Reservoir, non-group) render as round-rectangle to
-        // distinguish them from boundary nodes (octagon) and stream points (diamond).
-        selector: "node:not([isGroup]):not([type = 'Reservoir'])",
-        style: { shape: "round-rectangle" },
+        // Non-group nodes default to ellipse (round).
+        // Subsequent rules override this for Reservoir (octagon) and
+        // stream-point (diamond) nodes via cascade specificity.
+        // [^isGroup] matches nodes where isGroup is undefined — i.e. all
+        // non-compound nodes.  :not([isGroup]) is unsupported in Cytoscape.js.
+        selector: "node[^isGroup]",
+        style: { shape: "ellipse" },
       },
       {
-        selector: "[type = 'Reservoir']",
+        // Boundary Reservoir nodes (feed tanks, sinks) use octagon.
+        selector: "[type='Reservoir']",
         style: { shape: "octagon" },
       },
       {
-        // Stream-point reservoirs render as P&ID diamond nodes at stage boundaries.
+        // Stream-point Reservoirs (P&ID diamonds at stage boundaries).
+        // [?stream_point] matches nodes where the key is present (and truthy),
+        // which is unambiguous — only set for stream-point nodes.
         // Must follow [type = 'Reservoir'] to override its octagon shape.
-        selector: "[stream_point = true]",
+        selector: "[?stream_point]",
         style: { shape: "diamond", width: "60px", height: "60px" },
       },
       {
@@ -213,7 +269,7 @@ export function ReactorGraph() {
         // stream-point diamond.  No Cantera object; shown as a thin dashed
         // line with no label so it visually bridges the stage boundary without
         // implying a flow device.
-        selector: "[type = 'StreamConnector']",
+        selector: "[type='StreamConnector']",
         style: {
           width: 1.5,
           "line-style": "dashed",
@@ -233,6 +289,47 @@ export function ReactorGraph() {
       },
     ];
   }, [theme]);
+
+  // Dagre LR layout stacks sibling stages bottom-to-top; mirror Y so flow reads top-to-bottom.
+  const flipLayoutVertical = useCallback((cy: Core): void => {
+    const nodes = cy.nodes();
+    if (nodes.length === 0) return;
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+    nodes.forEach((node) => {
+      const y = node.position().y;
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    });
+    const centerY = (minY + maxY) / 2;
+
+    nodes.forEach((node) => {
+      const pos = node.position();
+      node.position({ x: pos.x, y: centerY - (pos.y - centerY) });
+    });
+  }, []);
+
+  // Nudge nodes that share the same position to avoid "invalid endpoints" edge warnings
+  const nudgeOverlappingNodes = useCallback((cy: Core): void => {
+    const NUDGE = 25;
+    const positions = new Map<string, string[]>();
+    cy.nodes().forEach((node) => {
+      if (node.data("isGroup")) return;
+      const pos = node.position();
+      const key = `${pos.x.toFixed(2)},${pos.y.toFixed(2)}`;
+      if (!positions.has(key)) positions.set(key, []);
+      positions.get(key)!.push(node.id());
+    });
+    positions.forEach((nodeIds, _key) => {
+      if (nodeIds.length <= 1) return;
+      nodeIds.slice(1).forEach((id, i) => {
+        const node = cy.getElementById(id);
+        const pos = node.position();
+        node.position({ x: pos.x + (i + 1) * NUDGE, y: pos.y + (i + 1) * NUDGE });
+      });
+    });
+  }, []);
 
   // Initialize cytoscape
   useEffect(() => {
@@ -290,6 +387,11 @@ export function ReactorGraph() {
       if (e.target === cy) clearSelection();
     });
 
+    cy.one("layoutstop", () => {
+      flipLayoutVertical(cy);
+      nudgeOverlappingNodes(cy);
+    });
+
     cyRef.current = cy;
 
     return () => {
@@ -302,27 +404,6 @@ export function ReactorGraph() {
       cyRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Nudge nodes that share the same position to avoid "invalid endpoints" edge warnings
-  const nudgeOverlappingNodes = useCallback((cy: Core): void => {
-    const NUDGE = 25;
-    const positions = new Map<string, string[]>();
-    cy.nodes().forEach((node) => {
-      if (node.data("isGroup")) return;
-      const pos = node.position();
-      const key = `${pos.x.toFixed(2)},${pos.y.toFixed(2)}`;
-      if (!positions.has(key)) positions.set(key, []);
-      positions.get(key)!.push(node.id());
-    });
-    positions.forEach((nodeIds, _key) => {
-      if (nodeIds.length <= 1) return;
-      nodeIds.slice(1).forEach((id, i) => {
-        const node = cy.getElementById(id);
-        const pos = node.position();
-        node.position({ x: pos.x + (i + 1) * NUDGE, y: pos.y + (i + 1) * NUDGE });
-      });
-    });
   }, []);
 
   // Update elements when config changes
@@ -340,9 +421,10 @@ export function ReactorGraph() {
     } as any);
     layout.run();
     layout.promiseOn("layoutstop").then(() => {
+      flipLayoutVertical(cy);
       nudgeOverlappingNodes(cy);
     });
-  }, [buildElements, nudgeOverlappingNodes]);
+  }, [buildElements, flipLayoutVertical, nudgeOverlappingNodes]);
 
   // Update stylesheet when theme changes
   useEffect(() => {
@@ -354,34 +436,21 @@ export function ReactorGraph() {
   // Keep Cytoscape canvas in sync when the pane is resized
   useEffect(() => {
     cyRef.current?.resize();
-  }, [graphHeight]);
+  }, [height]);
 
   return (
     <div
       id="graph-container"
-      className="relative border border-border rounded-md overflow-hidden"
-      style={{ height: graphHeight }}
+      className="shrink-0 overflow-hidden rounded-md border border-border"
+      style={{ height }}
     >
       <div
         ref={containerRef}
         id="reactor-graph"
-        className="w-full h-full"
+        className="h-full w-full"
         style={{ background: "var(--color-cytoscape-bg)" }}
         data-cy="graph"
       />
-      <div
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize network graph"
-        aria-valuenow={graphHeight}
-        aria-valuemin={MIN_GRAPH_HEIGHT}
-        aria-valuemax={getMaxGraphHeight()}
-        data-testid="graph-resize-handle"
-        className="group absolute bottom-0 left-0 right-0 z-10 flex h-3 cursor-ns-resize items-center justify-center border-t border-border bg-background/80 touch-none hover:bg-accent/50"
-        onPointerDown={handleResizePointerDown}
-      >
-        <span className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-muted-foreground" />
-      </div>
     </div>
   );
 }

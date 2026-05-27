@@ -72,20 +72,18 @@ Boulder default.
 Simulation-level settings passed to the solver and post-processing. Schema is open; see individual
 plugin documentation for recognized keys.
 
-#### `settings.staged:` — staged-solver feature flags
+#### `settings.staged:` — staged-solver behaviour
 
-An optional `staged:` sub-block under `settings:` controls experimental features of the
-staged solver.
+Stream-point reservoirs (P&ID diamonds at each inter-stage boundary) are always
+synthesised by the staged solver. A `ct.Reservoir` and one inlet
+`MassFlowController` per downstream target are created at every stage boundary so
+that all flow rates are honoured at solve time and the full topology is visible to
+the Sankey and Network visualisations.
 
-```yaml
-settings:
-  staged:
-    stream_reservoirs: true  # default: false
-```
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `stream_reservoirs` | bool | `false` | When `true`, synthesise a `ct.Reservoir` (P&ID *stream point*, rendered as a diamond) per source node at each inter-stage boundary, plus one inlet `MassFlowController` per downstream target. Each boundary stream becomes a first-class Cantera object visible to the sub-network integrators so all flow rates are honoured at solve time. Fixes PSR-style mixers that receive both intra-stage and inter-stage feeds. The old key `interface_reservoirs` is accepted as a deprecated alias. |
+The former `settings.staged.stream_reservoirs` YAML key is no longer recognised;
+remove it from any existing configs. The deprecated code alias
+`interface_reservoirs` is still accepted by `solve_staged()` for backward
+compatibility in tests.
 
 > **Plugin authors — `post_build` topology constraint.** Boulder's `post_build` hooks
 > receive a *per-stage subset* dict `{"nodes": [...], "connections": [...]}` that is a

@@ -1497,21 +1497,18 @@ class DualCanteraConverter:
                     "Viz network: could not build connection '%s': %s", cid, exc
                 )
 
-        # LEGACY WORKAROUND (remove when stream_reservoirs=True is default):
         # Re-enqueue MFCs resolved to 0 during a partial-topology stage pass.
-        # With stream_reservoirs=True the inter-stage MFCs are materialised
-        # during the stage solve itself, so the full topology is already visible
-        # and this second pass is a no-op.  Until then, keep it for safety.
+        # Inter-stage MFCs are materialised during the stage solve itself, so
+        # the full topology is already visible and this second pass is a no-op.
+        # Kept for safety in case a partial build leaves zero-flow devices.
         for cid in list(self._originally_unspecified_mfc_ids):
             if self._mfc_flow_rates.get(cid, -1.0) == 0.0:
                 self._unresolved_mfc_ids.add(cid)
                 self._mfc_flow_rates.pop(cid, None)
 
-        # LEGACY WORKAROUND (remove when stream_reservoirs=True is default):
         # Build PressureControllers deferred during stage builds because their
         # master MFC was a virtual inter-stage connection not yet registered.
-        # With stream_reservoirs=True all inter-stage MFCs are real and
-        # exist from stage-solve time, so no deferral is needed.
+        # All inter-stage MFCs are real and exist from stage-solve time.
         for conn in self._deferred_pc_conn_dicts:
             cid = conn["id"]
             if cid in self.connections:
@@ -1583,23 +1580,12 @@ class DualCanteraConverter:
 
         from .staged_solver import build_stage_graph, solve_staged
 
-        # Read the stream_reservoirs feature flag from settings.staged.
-        # Accept both the new key and the deprecated alias.
-        _settings = config.get("settings") or {}
-        _staged_cfg = _settings.get("staged") or {}
-        _use_stream_res: bool = bool(
-            _staged_cfg.get(
-                "stream_reservoirs", _staged_cfg.get("interface_reservoirs", False)
-            )
-        )
-
         plan = build_stage_graph(config)
         trajectory = solve_staged(
             self,
             plan,
             config,
             progress_callback=progress_callback,
-            stream_reservoirs=_use_stream_res,
         )
         self._staged_trajectory = trajectory
 

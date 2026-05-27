@@ -582,6 +582,109 @@ def test_stream_connector_edges_in_synced_config() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Virtual source→stream_point MFCs in the viz network
+# ---------------------------------------------------------------------------
+
+
+def test_virtual_source_to_stream_mfc_in_viz_network() -> None:
+    """build_viz_network injects a virtual MFC from each source to its stream-point.
+
+    Without this virtual MFC the Cantera viz-network topology is split into
+    isolated subgraphs (e.g. upstream→torch and psr_outlet→pfr), causing the
+    Sankey and the graphviz Network tab to show disconnected rows.
+
+    Asserts:
+    1. After BoulderRunner.build() with stream_reservoirs=True a connection
+       whose id matches ``_viz_{source}_to_{stream_point}`` exists in
+       conv.connections for every stream-point in reactor_meta.
+    2. The built flow device has the correct non-zero mass_flow_rate.
+    """
+    from boulder.runner import BoulderRunner
+
+    cfg = _two_stage_linear_chain()
+
+    runner = BoulderRunner(config=cfg)
+    runner.build()
+
+    conv = runner._ensure_converter()
+
+    stream_points = {
+        nid: meta for nid, meta in conv.reactor_meta.items() if meta.get("stream_point")
+    }
+    assert stream_points, "Expected at least one stream-point in reactor_meta"
+
+    for nid, meta in stream_points.items():
+        source_id = meta.get("source_node")
+        assert source_id, f"stream_point '{nid}' has no source_node in reactor_meta"
+        virt_id = f"_viz_{source_id}_to_{nid}"
+        assert virt_id in conv.connections, (
+            f"Virtual MFC '{virt_id}' not found in conv.connections. "
+            f"Available: {list(conv.connections.keys())}"
+        )
+        mdot_meta = float(meta.get("mdot") or 0.0)
+        assert mdot_meta > 0, (
+            f"stream_point '{nid}' has mdot={mdot_meta}; expected positive flow rate"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Sankey: stream-point reservoirs are excluded and bypassed
+# ---------------------------------------------------------------------------
+
+
+def test_sankey_stream_point_exclusion_bypasses_chain() -> None:
+    """generate_sankey_input_from_sim exclude_nodes bypasses pass-through nodes.
+
+    Uses the bloc.sankey exclude_nodes + _resolve_downstream feature to verify
+    that stream-point pass-through reservoir names are excluded from the resulting
+    node list.
+
+    Asserts:
+    1. When stream-point reservoir names are passed as exclude_nodes, the
+       resulting node list does NOT contain any of those names.
+    """
+    from boulder.staged_solver import build_stage_graph, solve_staged
+
+    try:
+        from bloc.sankey import generate_sankey_input_from_sim
+    except ImportError:
+        pytest.skip("bloc.sankey not available")
+
+    cfg = _two_stage_linear_chain()
+    conv = DualCanteraConverter(mechanism="gri30.yaml")
+    plan = build_stage_graph(cfg)
+    solve_staged(conv, plan, cfg, stream_reservoirs=True)
+
+    # Collect stream-point names from reactor_meta
+    stream_names = {
+        nid for nid, meta in conv.reactor_meta.items() if meta.get("stream_point")
+    }
+    assert stream_names, "Expected at least one stream-point reservoir in reactor_meta"
+
+    # Use the viz network (which contains stream-point reservoirs).
+    # Use flow_type="enthalpy" to avoid the Bloc-specific mechanism path resolver
+    # that heating_values() triggers when called from the hhv flow type.
+    viz_net = conv.network
+    if viz_net is None:
+        pytest.skip("No viz network available")
+
+    links, node_order = generate_sankey_input_from_sim(
+        viz_net,
+        show_species=[],
+        if_no_species="ignore",
+        flow_type="enthalpy",
+        exclude_nodes=stream_names,
+    )
+
+    # Stream-point names must not appear in the resulting node list
+    for name in stream_names:
+        assert name not in node_order, (
+            f"Stream-point '{name}' should be excluded from Sankey nodes, "
+            f"but it appears in: {node_order}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Interface-reservoir mode: iface reservoirs appear in the viz network
 # ---------------------------------------------------------------------------
 

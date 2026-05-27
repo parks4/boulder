@@ -125,7 +125,9 @@ def points_from_streams(
         points.append(
             {
                 "id": nid,
-                "source_node": str(props.get("source_node") or meta.get("source_node") or ""),
+                "source_node": str(
+                    props.get("source_node") or meta.get("source_node") or ""
+                ),
                 "target_nodes": target_nodes,
                 "T_K": T_K,
                 "T_C": T_K - 273.15,

@@ -450,7 +450,7 @@ def solve_staged(
     plan: StageExecutionPlan,
     config: Dict[str, Any],
     progress_callback: Optional[Callable] = None,
-    stream_reservoirs: bool = False,
+    stream_reservoirs: bool = True,
     # Backward-compatible alias
     interface_reservoirs: Optional[bool] = None,
 ) -> "LagrangianTrajectory":
@@ -459,15 +459,12 @@ def solve_staged(
     For each stage:
 
     1. Filter nodes/connections for this stage.
-    2. If *stream_reservoirs* is ``True``: inject stream-point reservoirs and build
-       real MFCs on the downstream side of each stage boundary (see
-       :func:`synthesize_stream_points`).
-       Otherwise (legacy): initialise inter-stage-inlet reactors from upstream
-       outlet state via ``inlet_states``.
+    2. Synthesise stream-point reservoirs and build real MFCs on the downstream
+       side of each stage boundary (see :func:`synthesize_stream_points`).
     3. Build stage sub-ReactorNet.
     4. Solve according to ``stage.solve_directive``.
     5. Extract outlet state(s), apply ``mechanism_switch`` if present, and
-       write the result into the stream-point reservoir (or ``inlet_states``).
+       write the result into the stream-point reservoir.
     6. Append states to the Lagrangian trajectory.
 
     After all stages: build visualization ReactorNet from all converged states.
@@ -484,10 +481,9 @@ def solve_staged(
     progress_callback :
         Optional callable ``(stage_id, n_done, n_total) -> None``.
     stream_reservoirs :
-        When ``True``, synthesise a ``ct.Reservoir`` (P&ID stream-point diamond)
-        for every source node that has inter-stage connections.  Each downstream
-        stage receives one inlet ``MassFlowController`` from the shared reservoir.
-        Default ``False`` (legacy behaviour).
+        When ``True`` (default), synthesise a ``ct.Reservoir`` (P&ID
+        stream-point diamond) for every source node with inter-stage
+        connections.  Pass ``False`` only in tests exercising the legacy path.
     interface_reservoirs :
         Deprecated alias for *stream_reservoirs*.  Ignored when *stream_reservoirs*
         is also passed.  Will be removed in a future version.
@@ -689,9 +685,39 @@ def solve_staged(
         for ic in plan.all_inter_connections:
             already_built.add(ic.id)
 
+    # Assemble all_connections including virtual source→stream_point MFCs.
+    # Without these virtual MFCs the viz ReactorNet (and thus the Network tab
+    # and Sankey generator) would see two disconnected subgraphs: one for the
+    # upstream stage (source reactor alone) and one for the downstream stages
+    # (stream-point reservoir → target reactor).  The virtual MFC makes the
+    # topology fully connected and carries the correct mass flow rate.
+    all_connections = list(config.get("connections") or [])
+    if stream_reservoirs:
+        for nid, meta in converter.reactor_meta.items():
+            if not meta.get("stream_point"):
+                continue
+            source_id = meta.get("source_node")
+            mdot = float(meta.get("mdot") or 0.0)
+            if (
+                source_id
+                and source_id in converter.reactors
+                and nid in converter.reactors
+            ):
+                virt_id = f"_viz_{source_id}_to_{nid}"
+                all_connections.append(
+                    {
+                        "id": virt_id,
+                        "type": "MassFlowController",
+                        "source": source_id,
+                        "target": nid,
+                        "properties": {"mass_flow_rate": mdot},
+                        "metadata": {"virtual": True},
+                    }
+                )
+
     logger.info("Staged solve complete – building visualization ReactorNet.")
     viz_net = converter.build_viz_network(
-        all_connections=config.get("connections") or [],
+        all_connections=all_connections,
         built_conn_ids=already_built,
     )
     trajectory.viz_network = viz_net
@@ -882,7 +908,10 @@ def _sync_streams_into_config(
         stream_id = ic.stream_point_id
         source_id = ic.source_node
         connector_id = f"{source_id}_to_{stream_id}"
-        if source_id not in seen_connector_sources and connector_id not in existing_conn_ids:
+        if (
+            source_id not in seen_connector_sources
+            and connector_id not in existing_conn_ids
+        ):
             seen_connector_sources.add(source_id)
             config["connections"].append(
                 {
@@ -898,8 +927,19 @@ def _sync_streams_into_config(
 
     for ic in plan.all_inter_connections:
         for cd in stream_conns_by_stage.get(ic.target_stage, []):
-            if cd["id"] == ic.inlet_mfc_id and cd["id"] not in existing_conn_ids:
-                config["connections"].append(cd)
+            if cd["id"] == ic.inlet_mfc_id:
+                if cd["id"] not in existing_conn_ids:
+                    config["connections"].append(cd)
+                else:
+                    # Update mdot on a placeholder connection added by preseed.
+                    new_mdot = (cd.get("properties") or {}).get("mass_flow_rate")
+                    if new_mdot is not None and new_mdot > 0:
+                        for existing_cd in config["connections"]:
+                            if existing_cd["id"] == cd["id"]:
+                                existing_cd.setdefault("properties", {})[
+                                    "mass_flow_rate"
+                                ] = new_mdot
+                                break
 
 
 # Backward-compatible alias

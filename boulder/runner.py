@@ -202,7 +202,7 @@ class BoulderRunner:
         stage: "Stage",
         inlet_states: Dict[str, Any],
         trajectory: "LagrangianTrajectory",
-        stream_reservoirs: bool = False,
+        stream_reservoirs: bool = True,
         _stream_node_dicts: Optional[Dict[str, Any]] = None,
         _stream_conns_by_stage: Optional[Dict[str, Any]] = None,
         # Backward-compatible aliases
@@ -225,21 +225,18 @@ class BoulderRunner:
         inlet_states :
             Mutable ``{node_id: ct.Solution}`` dict.  Populated by upstream
             stages; consumed here to initialise inter-stage-inlet reactors.
-            Updated in place with this stage's outlet states (always kept as
-            an inspection snapshot, even in stream_reservoirs mode).
+            Updated in place with this stage's outlet states.
         trajectory :
             Accumulates per-stage :class:`~cantera.SolutionArray` segments.
         stream_reservoirs :
-            When ``True``, use synthesised stream-point reservoirs and real MFCs on
-            the downstream side of each stage boundary.  Must match the flag used when
-            ``_stream_node_dicts`` and ``_stream_conns_by_stage`` were prepared
-            (typically by :meth:`build`).  Default ``False`` (legacy behaviour).
+            When ``True`` (default), use synthesised stream-point reservoirs
+            and real MFCs on the downstream side of each stage boundary.
         _stream_node_dicts :
-            Pre-built mapping ``{stream_point_id: node_dict}``.  Only used when
-            *stream_reservoirs* is ``True``.  Populated by :meth:`build`.
+            Pre-built mapping ``{stream_point_id: node_dict}``.
+            Populated by :meth:`build`.
         _stream_conns_by_stage :
-            Pre-built mapping ``{stage_id: [conn_dict, ...]}``.  Only used when
-            *stream_reservoirs* is ``True``.  Populated by :meth:`build`.
+            Pre-built mapping ``{stage_id: [conn_dict, ...]}``.
+            Populated by :meth:`build`.
         interface_reservoirs :
             Deprecated alias for *stream_reservoirs*.
         _iface_node_dicts :
@@ -390,7 +387,7 @@ class BoulderRunner:
         self,
         plan: "StageExecutionPlan",
         trajectory: "LagrangianTrajectory",
-        stream_reservoirs: bool = False,
+        stream_reservoirs: bool = True,
         # Backward-compatible alias
         interface_reservoirs: Optional[bool] = None,
     ) -> None:
@@ -407,9 +404,10 @@ class BoulderRunner:
         trajectory :
             Updated in place: ``trajectory.viz_network`` is set.
         stream_reservoirs :
-            When ``True``, the original inter-stage connection IDs are added to
-            ``built_conn_ids`` so that ``build_viz_network`` does not create a
-            direct source→target MFC that bypasses the stream-point reservoir.
+            When ``True`` (default), the original inter-stage connection IDs
+            are added to ``built_conn_ids`` so that ``build_viz_network`` does
+            not create a direct source→target MFC that bypasses the
+            stream-point reservoir.
         interface_reservoirs :
             Deprecated alias for *stream_reservoirs*.
 
@@ -426,8 +424,40 @@ class BoulderRunner:
         if stream_reservoirs:
             for ic in plan.all_inter_connections:
                 already_built.add(ic.id)
+
+        all_connections = list(self.config.get("connections") or [])
+
+        if stream_reservoirs:
+            # Add a virtual source→stream_point MassFlowController for each
+            # stream-point reservoir.  In the staged solve the reservoir is filled
+            # by state-copying (no Cantera flow device), so the viz ReactorNet
+            # would otherwise show two disconnected subgraphs.  These virtual MFCs
+            # carry the correct mdot and make both the graphviz Network diagram and
+            # the Sankey generator see a fully connected process topology.
+            for nid, meta in converter.reactor_meta.items():
+                if not meta.get("stream_point"):
+                    continue
+                source_id = meta.get("source_node")
+                mdot = float(meta.get("mdot") or 0.0)
+                if (
+                    source_id
+                    and source_id in converter.reactors
+                    and nid in converter.reactors
+                ):
+                    virt_id = f"_viz_{source_id}_to_{nid}"
+                    all_connections.append(
+                        {
+                            "id": virt_id,
+                            "type": "MassFlowController",
+                            "source": source_id,
+                            "target": nid,
+                            "properties": {"mass_flow_rate": mdot},
+                            "metadata": {"virtual": True},
+                        }
+                    )
+
         viz_net = converter.build_viz_network(
-            all_connections=self.config.get("connections") or [],
+            all_connections=all_connections,
             built_conn_ids=already_built,
         )
         trajectory.viz_network = viz_net
@@ -670,26 +700,17 @@ class BoulderRunner:
         trajectory = self.new_trajectory()
         inlet_states: Dict[str, Any] = {}
 
-        # Read feature flag from STONE settings block.
-        # Accept both the new 'stream_reservoirs' and the old 'interface_reservoirs' key.
-        settings = self.config.get("settings") or {}
-        staged_settings = settings.get("staged") or {}
-        use_stream_res: bool = bool(
-            staged_settings.get(
-                "stream_reservoirs", staged_settings.get("interface_reservoirs", False)
-            )
-        )
-
-        # Pre-build stream-point node/connection dicts once for all stages
+        # Pre-build stream-point node/connection dicts once for all stages.
+        # Stream reservoirs are always enabled; the YAML config no longer has
+        # a 'settings.staged.stream_reservoirs' toggle.
         stream_node_dicts: Dict[str, Any] = {}
         stream_conns_by_stage: Dict[str, Any] = {}
-        if use_stream_res:
-            stream_nodes, stream_conns = synthesize_stream_points(plan)
-            for nd in stream_nodes:
-                stream_node_dicts[nd["id"]] = nd
-            for cd in stream_conns:
-                grp = cd.get("group", "")
-                stream_conns_by_stage.setdefault(grp, []).append(cd)
+        stream_nodes, stream_conns = synthesize_stream_points(plan)
+        for nd in stream_nodes:
+            stream_node_dicts[nd["id"]] = nd
+        for cd in stream_conns:
+            grp = cd.get("group", "")
+            stream_conns_by_stage.setdefault(grp, []).append(cd)
 
         for stage in plan.ordered_stages:
             self.solve_stage(
@@ -697,19 +718,17 @@ class BoulderRunner:
                 stage,
                 inlet_states,
                 trajectory,
-                stream_reservoirs=use_stream_res,
                 _stream_node_dicts=stream_node_dicts,
                 _stream_conns_by_stage=stream_conns_by_stage,
             )
 
-        self.build_viz_network(plan, trajectory, stream_reservoirs=use_stream_res)
+        self.build_viz_network(plan, trajectory)
 
-        if use_stream_res:
-            from .staged_solver import _sync_streams_into_config
+        from .staged_solver import _sync_streams_into_config
 
-            _sync_streams_into_config(
-                self.config, plan, stream_node_dicts, stream_conns_by_stage
-            )
+        _sync_streams_into_config(
+            self.config, plan, stream_node_dicts, stream_conns_by_stage
+        )
 
         # Mark the converter as staged-solved so run_streaming_simulation
         # knows to emit the steady-state report instead of a time loop.

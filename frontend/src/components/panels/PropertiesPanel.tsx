@@ -36,6 +36,10 @@ export function PropertiesPanel() {
 
   const properties = entity ? (entity.properties as Record<string, unknown>) : {};
 
+  // Stream-point nodes are fully computed from the upstream reactor; they have
+  // no user-configurable initial conditions and should not be editable.
+  const isStreamPoint = isNode && Boolean(properties.stream_point);
+
   // Start editing
   const handleEdit = () => {
     const vals: Record<string, string> = {};
@@ -83,54 +87,58 @@ export function PropertiesPanel() {
           <h3 className="font-semibold text-sm text-foreground">{id}</h3>
           <span className="text-xs text-muted-foreground">{entityType}</span>
         </div>
-        <div className="flex gap-1">
-          {!isEditing ? (
-            <Button onClick={handleEdit} variant="secondary" size="sm" className="text-xs">
-              Edit
+        {!isStreamPoint && (
+          <div className="flex gap-1">
+            {!isEditing ? (
+              <Button onClick={handleEdit} variant="secondary" size="sm" className="text-xs">
+                Edit
+              </Button>
+            ) : (
+              <Button onClick={handleSave} variant="primary" size="sm" className="text-xs">
+                Save
+              </Button>
+            )}
+            <Button onClick={handleDelete} variant="destructive" size="sm" className="text-xs">
+              Delete
             </Button>
-          ) : (
-            <Button onClick={handleSave} variant="primary" size="sm" className="text-xs">
-              Save
-            </Button>
-          )}
-          <Button onClick={handleDelete} variant="destructive" size="sm" className="text-xs">
-            Delete
-          </Button>
-        </div>
+          </div>
+        )}
       </div>
 
-      <div className="border-t border-border pt-2 mt-1">
-        <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
-        <div className="divide-y divide-border">
-          {Object.entries(properties).map(([key, value]) => (
-          <div key={key} className="py-1.5 flex items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground truncate">
-              {labelWithUnit(key)}
-            </span>
-            {isEditing ? (
-              <input
-                value={editValues[key] ?? ""}
-                onChange={(e) =>
-                  setEditValues((prev) => ({ ...prev, [key]: e.target.value }))
-                }
-                className="w-28 text-xs px-1.5 py-1 rounded bg-input border border-border text-foreground"
-              />
-            ) : (
-              <span className="text-xs font-mono text-foreground">
-                {key === "temperature" && typeof value === "number"
-                  ? `${kelvinToCelsius(value).toFixed(2)} °C`
-                  : typeof value === "number"
-                    ? formatNumber(value)
-                    : String(value ?? "")}
+      {!isStreamPoint && (
+        <div className="border-t border-border pt-2 mt-1">
+          <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
+          <div className="divide-y divide-border">
+            {Object.entries(properties).map(([key, value]) => (
+            <div key={key} className="py-1.5 flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground truncate">
+                {labelWithUnit(key)}
               </span>
-            )}
+              {isEditing ? (
+                <input
+                  value={editValues[key] ?? ""}
+                  onChange={(e) =>
+                    setEditValues((prev) => ({ ...prev, [key]: e.target.value }))
+                  }
+                  className="w-28 text-xs px-1.5 py-1 rounded bg-input border border-border text-foreground"
+                />
+              ) : (
+                <span className="text-xs font-mono text-foreground">
+                  {key === "temperature" && typeof value === "number"
+                    ? `${kelvinToCelsius(value).toFixed(2)} °C`
+                    : typeof value === "number"
+                      ? formatNumber(value)
+                      : String(value ?? "")}
+                </span>
+              )}
+            </div>
+          ))}
+          {Object.keys(properties).length === 0 && (
+            <p className="text-xs text-muted-foreground py-1 italic">No properties</p>
+          )}
           </div>
-        ))}
-        {Object.keys(properties).length === 0 && (
-          <p className="text-xs text-muted-foreground py-1 italic">No properties</p>
-        )}
         </div>
-      </div>
+      )}
 
       {isNode && !!properties.stream_point && (
         <div className="border-t border-border pt-2 mt-1">

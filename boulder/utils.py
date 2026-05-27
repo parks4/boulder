@@ -154,42 +154,101 @@ def coerce_config_units(obj: Any, _key: str = "") -> Any:
 def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Convert configuration to Cytoscape elements.
 
-    - Reactors and reservoirs become nodes
-    - Connections become edges
-    - Optional grouping: if a component property `group` (or `group_name`) is set,
+    - Reactors and reservoirs become nodes.
+    - Connections become edges.
+    - Optional grouping: if a component property ``group`` (or ``group_name``) is set,
       components sharing the same group appear inside a compound parent node.
+
+    Stream-point display synthesis
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Inter-stage connections (where source and target belong to different groups)
+    are replaced in the display with a two-hop topology::
+
+        source_reactor ──StreamConnector──► source_outlet ──MFC──► target_reactor
+
+    The ``source_outlet`` diamond node is either taken from the config (post-
+    simulation, when :func:`~boulder.staged_solver._sync_streams_into_config`
+    has populated it with converged data) or synthesised here as a placeholder
+    (pre-simulation).  The stored config is **never mutated**.
     """
     elements: List[Dict[str, Any]] = []
 
-    # Track created parent (group) nodes to avoid duplicates
+    nodes: List[Dict[str, Any]] = config.get("nodes") or []
+    connections: List[Dict[str, Any]] = config.get("connections") or []
+
+    # -----------------------------------------------------------------------
+    # Build helper maps
+    # -----------------------------------------------------------------------
+    node_to_group: Dict[str, str] = {}
+    for node in nodes:
+        props = node.get("properties") or {}
+        group = (
+            str(props.get("group", ""))
+            if props.get("group") is not None
+            else str(props.get("group_name", ""))
+        ).strip()
+        if group:
+            node_to_group[node["id"]] = group
+
+    # Stream-point nodes already in the config (post-simulation)
+    existing_stream_ids: set[str] = {
+        n["id"]
+        for n in nodes
+        if (n.get("properties") or {}).get("stream_point")
+        or (n.get("metadata") or {}).get("stream_point")
+    }
+
+    # Detect inter-stage MFCs that need stream-point display synthesis.
+    # Group by source node so one diamond is created per source even when
+    # there are multiple downstream targets.
+    #   inter_by_src[src] = list of original inter-stage connection dicts
+    inter_by_src: Dict[str, List[Dict[str, Any]]] = {}
+    for conn in connections:
+        src = conn["source"]
+        tgt = conn["target"]
+        src_grp = node_to_group.get(src)
+        tgt_grp = node_to_group.get(tgt)
+        stream_id = f"{src}_outlet"
+        if (
+            src_grp
+            and tgt_grp
+            and src_grp != tgt_grp
+            and stream_id not in existing_stream_ids
+            and conn.get("type", "MassFlowController") != "StreamConnector"
+        ):
+            inter_by_src.setdefault(src, []).append(conn)
+
+    replaced_conn_ids: set[str] = {
+        c["id"] for conns in inter_by_src.values() for c in conns
+    }
+
+    # -----------------------------------------------------------------------
+    # Track created parent nodes to avoid duplicates
+    # -----------------------------------------------------------------------
     created_groups: set[str] = set()
 
-    # Add nodes (reactors)
-    for node in config.get("nodes", []):
-        properties = node.get("properties", {})
+    def _ensure_group(group_name: str) -> None:
+        parent_id = f"group:{group_name}"
+        if parent_id not in created_groups:
+            created_groups.add(parent_id)
+            elements.append(
+                {"data": {"id": parent_id, "label": group_name, "isGroup": True}}
+            )
 
-        # Determine group (if any) from properties
+    # -----------------------------------------------------------------------
+    # Emit nodes from config
+    # -----------------------------------------------------------------------
+    for node in nodes:
+        properties = node.get("properties") or {}
+
         group_name = (
             str(properties.get("group", ""))
             if properties.get("group") is not None
             else str(properties.get("group_name", ""))
-        )
-        group_name = group_name.strip()
+        ).strip()
 
-        # If grouped, ensure a parent compound node exists
         if group_name:
-            parent_id = f"group:{group_name}"
-            if parent_id not in created_groups:
-                created_groups.add(parent_id)
-                elements.append(
-                    {
-                        "data": {
-                            "id": parent_id,
-                            "label": group_name,
-                            "isGroup": True,
-                        }
-                    }
-                )
+            _ensure_group(group_name)
 
         node_data: Dict[str, Any] = {
             "id": node["id"],
@@ -198,24 +257,15 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             "properties": properties,
         }
 
-        # Attach parent if grouped
         if group_name:
             node_data["parent"] = f"group:{group_name}"
             node_data["group"] = group_name
 
-        # Flatten commonly used properties for Cytoscape mapping
-        # This allows Cytoscape selectors like "mapData(temperature, ...)" to work
-        if "temperature" in properties:
-            node_data["temperature"] = properties["temperature"]
-        if "pressure" in properties:
-            node_data["pressure"] = properties["pressure"]
-        if "composition" in properties:
-            node_data["composition"] = properties["composition"]
-        if "volume" in properties:
-            node_data["volume"] = properties["volume"]
+        for _key in ("temperature", "pressure", "composition", "volume"):
+            if _key in properties:
+                node_data[_key] = properties[_key]
 
-        # Flatten stream-point metadata so Cytoscape selectors can target them
-        # directly (e.g. "[stream_point = true]" for diamond P&ID nodes).
+        # Flatten stream-point metadata for Cytoscape selectors.
         for _meta_key in (
             "stream_point",
             "upstream_stage",
@@ -226,7 +276,6 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
         ):
             if _meta_key in properties:
                 node_data[_meta_key] = properties[_meta_key]
-        # Also check node-level metadata dict (used by synthesize_stream_points)
         _node_meta = node.get("metadata") or {}
         for _meta_key in (
             "stream_point",
@@ -242,25 +291,81 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         elements.append({"data": node_data})
 
-    # Add edges (connections)
-    for connection in config.get("connections", []):
-        properties = connection.get("properties", {})
+    # -----------------------------------------------------------------------
+    # Synthesise placeholder stream-point diamond nodes (pre-simulation only)
+    # -----------------------------------------------------------------------
+    for src, _conns in inter_by_src.items():
+        stream_id = f"{src}_outlet"
+        src_grp = node_to_group[src]
+        _ensure_group(src_grp)
+        elements.append(
+            {
+                "data": {
+                    "id": stream_id,
+                    "label": stream_id,
+                    "type": "Reservoir",
+                    "stream_point": True,
+                    "upstream_stage": src_grp,
+                    "source_node": src,
+                    "parent": f"group:{src_grp}",
+                    "group": src_grp,
+                }
+            }
+        )
+
+    # -----------------------------------------------------------------------
+    # Emit edges from config (skip original inter-stage MFCs)
+    # -----------------------------------------------------------------------
+    for connection in connections:
+        if connection["id"] in replaced_conn_ids:
+            continue
+        properties = connection.get("properties") or {}
         edge_data: Dict[str, Any] = {
             "id": connection["id"],
             "source": connection["source"],
             "target": connection["target"],
             "label": connection["type"],
-            "type": connection["type"],  # Add type field for consistency
+            "type": connection["type"],
             "properties": properties,
         }
-
-        # Flatten commonly used properties for Cytoscape mapping
         if "mass_flow_rate" in properties:
             edge_data["mass_flow_rate"] = properties["mass_flow_rate"]
         if "valve_coeff" in properties:
             edge_data["valve_coeff"] = properties["valve_coeff"]
-
         elements.append({"data": edge_data})
+
+    # -----------------------------------------------------------------------
+    # Synthesise stream-point display edges (pre-simulation)
+    # -----------------------------------------------------------------------
+    for src, conns in inter_by_src.items():
+        stream_id = f"{src}_outlet"
+        elements.append(
+            {
+                "data": {
+                    "id": f"{src}_to_{stream_id}",
+                    "source": src,
+                    "target": stream_id,
+                    "label": "StreamConnector",
+                    "type": "StreamConnector",
+                    "properties": {},
+                }
+            }
+        )
+        for conn in conns:
+            tgt = conn["target"]
+            inlet_id = f"{stream_id}_to_{tgt}"
+            properties = conn.get("properties") or {}
+            edge_data = {
+                "id": inlet_id,
+                "source": stream_id,
+                "target": tgt,
+                "label": "MassFlowController",
+                "type": "MassFlowController",
+                "properties": properties,
+            }
+            if "mass_flow_rate" in properties:
+                edge_data["mass_flow_rate"] = properties["mass_flow_rate"]
+            elements.append({"data": edge_data})
 
     return elements
 
