@@ -680,6 +680,17 @@ def solve_staged(
     # (e.g. "psr_to_pfr") are passed as already-built so build_viz_network does
     # not create a direct source→target MFC that bypasses the stream-point reservoir.
     # The stream-point reservoir and its inlet MFC are already in converter.connections.
+    #
+    # Additionally, alias each original inter-stage connection ID to the corresponding
+    # stream-point inlet MFC object in converter.connections.  This lets downstream
+    # consumers (e.g. PressureController master lookups and test assertions) query
+    # the original YAML-declared name ("psr_to_pfr") and get the real MFC back.
+    if stream_reservoirs:
+        for ic in plan.all_inter_connections:
+            inlet_mfc = converter.connections.get(ic.inlet_mfc_id)
+            if inlet_mfc is not None and ic.id not in converter.connections:
+                converter.connections[ic.id] = inlet_mfc
+
     already_built = set(converter.connections.keys()) | set(converter.walls.keys())
     if stream_reservoirs:
         for ic in plan.all_inter_connections:
@@ -843,6 +854,11 @@ def _update_stream_point(
     for cd in stream_inlet_mfc_dicts:
         if cd.get("source") == stream_id or cd["id"] == ic.inlet_mfc_id:
             cd.setdefault("properties", {})["mass_flow_rate"] = outlet_mdot
+
+    # Keep the original inter-stage connection ID accessible in _mfc_flow_rates so
+    # callers can query ``conv._mfc_flow_rates["a_to_b"]`` using the YAML-declared
+    # name rather than the internal stream-point inlet MFC id.
+    converter._mfc_flow_rates[ic.id] = outlet_mdot
 
     logger.debug(
         "Stream-point reservoir '%s' updated: T=%.1f K, mdot=%.4g kg/s",

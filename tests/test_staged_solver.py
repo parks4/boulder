@@ -272,8 +272,13 @@ class TestStagedSolveInert:
         assert isinstance(net, ct.ReactorNet)
 
     def test_all_reactors_registered(self, result):
+        """User-declared reactors and the synthesised stream-point reservoir are registered.
+
+        With stream_reservoirs=True (default), solve_staged adds a ct.Reservoir for each
+        inter-stage source node (here r_a_outlet for the r_a → r_b boundary).
+        """
         conv, _ = result
-        assert set(conv.reactors.keys()) == {"r_a", "r_b"}
+        assert set(conv.reactors.keys()) == {"r_a", "r_b", "r_a_outlet"}
 
     def test_trajectory_attached(self, result):
         conv, _ = result

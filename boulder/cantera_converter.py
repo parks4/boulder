@@ -1569,7 +1569,7 @@ class DualCanteraConverter:
             called after each stage completes.  Forwarded to
             :func:`~boulder.staged_solver.solve_staged`.
         """
-        self._last_config = config
+        import copy
 
         if not config.get("groups"):
             raise ValueError(
@@ -1577,6 +1577,13 @@ class DualCanteraConverter:
                 "Call normalize_config() first — it synthesises a single "
                 "'default' group when the YAML has none."
             )
+
+        # Work on a deep copy so the caller's config dict is never mutated.
+        # _sync_streams_into_config (called inside solve_staged) replaces inter-stage
+        # connection dicts in-place; without the copy, module-level test fixtures and
+        # any caller that re-uses a config object would see a corrupted topology.
+        config = copy.deepcopy(config)
+        self._last_config = config
 
         from .staged_solver import build_stage_graph, solve_staged
 
