@@ -52,12 +52,30 @@ export interface SimulationResults extends SimulationProgress {
   sankey_links?: Record<string, unknown> | null;
   sankey_nodes?: string[] | null;
   elapsed_time?: number | null;
-  /** Connections list after post-build hooks, for visual graph sync. */
+  /**
+   * Authoritative node list after the staged-solver build completes.
+   * The client replaces configStore.nodes with this list wholesale so that
+   * synthesised stream-point diamonds and removed original inter-stage edges
+   * are always in sync with the Cantera topology.
+   * Always sent together with updated_connections; never sent partially.
+   */
+  updated_nodes?: Array<{
+    id: string;
+    type: string;
+    group?: string | null;
+    properties: Record<string, unknown>;
+    metadata?: Record<string, unknown> | null;
+  }> | null;
+  /**
+   * Authoritative connection list after the staged-solver build completes.
+   * See updated_nodes — always sent together with it.
+   */
   updated_connections?: Array<{
     id: string;
     source: string;
     target: string;
     type: string;
     properties: Record<string, unknown>;
+    metadata?: Record<string, unknown> | null;
   }> | null;
 }

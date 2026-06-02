@@ -43,9 +43,29 @@ CYTOSCAPE_STYLESHEET_LIGHT = [
         },
     },
     {
-        "selector": "[type = 'Reservoir']",
+        # Reactor nodes (non-Reservoir, non-group) use ellipse so they are clearly
+        # round and visually distinct from boundary octagon Reservoirs and stream-point
+        # diamonds.
+        "selector": "node[^isGroup]",
+        "style": {
+            "shape": "ellipse",
+        },
+    },
+    {
+        # Boundary Reservoir nodes (feed tanks, sinks) use octagon.
+        "selector": "[type='Reservoir']",
         "style": {
             "shape": "octagon",
+        },
+    },
+    {
+        # Stream-point reservoirs (P&ID diamond nodes at stage boundaries).
+        # Must appear after [type = 'Reservoir'] to take precedence.
+        "selector": "[?stream_point]",
+        "style": {
+            "shape": "diamond",
+            "width": "60px",
+            "height": "60px",
         },
     },
     {
@@ -72,7 +92,7 @@ CYTOSCAPE_STYLESHEET_LIGHT = [
     },
     {
         # Emphasize Walls with a distinct color visible in light mode
-        "selector": "edge[type = 'Wall']",
+        "selector": "edge[type='Wall']",
         "style": {
             "line-color": "#D0021B",
             "target-arrow-color": "#D0021B",
@@ -80,6 +100,22 @@ CYTOSCAPE_STYLESHEET_LIGHT = [
             "z-index": 20,
             # Slightly narrower so default edges peek around them
             "width": 4,
+        },
+    },
+    {
+        # StreamConnector: display-only outlet edge from a source reactor to its
+        # stream-point diamond.  No Cantera flow device — purely visual to keep
+        # the graph topologically connected across stage boundaries.
+        "selector": "edge[type='StreamConnector']",
+        "style": {
+            "content": "",
+            "line-style": "dashed",
+            "line-dash-pattern": [6, 4],
+            "line-color": "#bbb",
+            "target-arrow-color": "#bbb",
+            "target-arrow-shape": "triangle",
+            "width": 2,
+            "z-index": 4,
         },
     },
 ]
@@ -124,9 +160,27 @@ CYTOSCAPE_STYLESHEET_DARK = [
         },
     },
     {
-        "selector": "[type = 'Reservoir']",
+        # Reactor nodes (non-Reservoir, non-group) use ellipse.
+        "selector": "node[^isGroup]",
+        "style": {
+            "shape": "ellipse",
+        },
+    },
+    {
+        # Boundary Reservoir nodes (feed tanks, sinks) use octagon.
+        "selector": "[type='Reservoir']",
         "style": {
             "shape": "octagon",
+        },
+    },
+    {
+        # Stream-point reservoirs (P&ID diamond nodes at stage boundaries).
+        # Must appear after [type = 'Reservoir'] to take precedence.
+        "selector": "[?stream_point]",
+        "style": {
+            "shape": "diamond",
+            "width": "60px",
+            "height": "60px",
         },
     },
     {
@@ -154,7 +208,7 @@ CYTOSCAPE_STYLESHEET_DARK = [
     },
     {
         # Emphasize Walls with a distinct color visible in dark mode
-        "selector": "edge[type = 'Wall']",
+        "selector": "edge[type='Wall']",
         "style": {
             "line-color": "#FF4D4D",
             "target-arrow-color": "#FF4D4D",
@@ -162,6 +216,21 @@ CYTOSCAPE_STYLESHEET_DARK = [
             "z-index": 20,
             # Slightly narrower so default edges peek around them
             "width": 3,
+        },
+    },
+    {
+        # StreamConnector: display-only outlet edge from a source reactor to its
+        # stream-point diamond.  No Cantera flow device — purely visual.
+        "selector": "edge[type='StreamConnector']",
+        "style": {
+            "content": "",
+            "line-style": "dashed",
+            "line-dash-pattern": [6, 4],
+            "line-color": "#666",
+            "target-arrow-color": "#666",
+            "target-arrow-shape": "triangle",
+            "width": 2,
+            "z-index": 4,
         },
     },
 ]

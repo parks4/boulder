@@ -202,6 +202,13 @@ class BoulderRunner:
         stage: "Stage",
         inlet_states: Dict[str, Any],
         trajectory: "LagrangianTrajectory",
+        stream_reservoirs: bool = True,
+        _stream_node_dicts: Optional[Dict[str, Any]] = None,
+        _stream_conns_by_stage: Optional[Dict[str, Any]] = None,
+        # Backward-compatible aliases
+        interface_reservoirs: Optional[bool] = None,
+        _iface_node_dicts: Optional[Dict[str, Any]] = None,
+        _iface_conns_by_stage: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Build and solve one stage, updating *inlet_states* and *trajectory* in place.
 
@@ -221,17 +228,41 @@ class BoulderRunner:
             Updated in place with this stage's outlet states.
         trajectory :
             Accumulates per-stage :class:`~cantera.SolutionArray` segments.
+        stream_reservoirs :
+            When ``True`` (default), use synthesised stream-point reservoirs
+            and real MFCs on the downstream side of each stage boundary.
+        _stream_node_dicts :
+            Pre-built mapping ``{stream_point_id: node_dict}``.
+            Populated by :meth:`build`.
+        _stream_conns_by_stage :
+            Pre-built mapping ``{stage_id: [conn_dict, ...]}``.
+            Populated by :meth:`build`.
+        interface_reservoirs :
+            Deprecated alias for *stream_reservoirs*.
+        _iface_node_dicts :
+            Deprecated alias for *_stream_node_dicts*.
+        _iface_conns_by_stage :
+            Deprecated alias for *_stream_conns_by_stage*.
 
         Examples
         --------
         .. minigallery:: boulder.runner.BoulderRunner.solve_stage
            :add-heading: Examples using solve_stage
         """
+        # Honor deprecated aliases
+        if interface_reservoirs is not None and not stream_reservoirs:
+            stream_reservoirs = interface_reservoirs
+        if _iface_node_dicts is not None and _stream_node_dicts is None:
+            _stream_node_dicts = _iface_node_dicts
+        if _iface_conns_by_stage is not None and _stream_conns_by_stage is None:
+            _stream_conns_by_stage = _iface_conns_by_stage
+
         from .staged_solver import (
             _apply_mechanism_switch,
             _collect_stage_states,
             _extract_gas_state,
             _flow_order_within_stage,
+            _update_stream_point,
         )
 
         converter = self._ensure_converter()
@@ -241,9 +272,27 @@ class BoulderRunner:
             for n in (self.config.get("nodes") or [])
             if n["id"] in set(stage.node_ids)
         ]
+
+        # Augment with stream-point reservoir nodes and inlet MFCs for incoming
+        # inter-stage connections only.  The reservoir is built in the downstream
+        # stage (populated after the upstream solve); no outlet MFC is added to the
+        # upstream stage to avoid stale-reference collisions in the viz network.
+        extra_nodes: list = []
+        extra_conns: list = []
+        if stream_reservoirs and _stream_node_dicts and _stream_conns_by_stage:
+            seen_stream_ids: set = set()
+            for ic in stage.inter_connections_in:
+                nd = _stream_node_dicts.get(ic.stream_point_id)
+                if nd is not None and ic.stream_point_id not in seen_stream_ids:
+                    seen_stream_ids.add(ic.stream_point_id)
+                    extra_nodes.append(nd)
+            extra_conns = list(_stream_conns_by_stage.get(stage.id, []))
+
+        stage_connections = list(stage.intra_connections) + extra_conns
+
         network, stage_reactors = converter.build_sub_network(
-            stage_nodes=stage_nodes,
-            stage_connections=stage.intra_connections,
+            stage_nodes=stage_nodes + extra_nodes,
+            stage_connections=stage_connections,
             stage_mechanism=stage.mechanism,
             inlet_states=inlet_states,
             stage_id=stage.id,
@@ -267,6 +316,9 @@ class BoulderRunner:
                 )
                 continue
             outlet_gas = _extract_gas_state(source_reactor, stage.mechanism, converter)
+            # Save the pre-switch state for P&ID display in the stream-point.
+            outlet_gas_preswitched = outlet_gas
+            stream_mech = stage.mechanism
             if ic.mechanism_switch is not None:
                 target_stage = next(
                     (s for s in plan.ordered_stages if s.id == ic.target_stage),
@@ -283,6 +335,45 @@ class BoulderRunner:
                     ic.mechanism_switch,
                     converter,
                 )
+                stream_mech = target_stage.mechanism
+
+            if stream_reservoirs:
+                # Build the Cantera reservoir with the post-switch (target) gas so
+                # downstream reactors (e.g. DesignPFR on CRECK) can read it in their
+                # own species basis.  Pass display_gas=preswitched so the PropertiesPanel
+                # shows the source-mechanism composition (richer species).
+                _update_stream_point(
+                    ic,
+                    outlet_gas,
+                    stream_mech,
+                    converter,
+                    (_stream_conns_by_stage or {}).get(ic.target_stage, []),
+                    stage_intra_connections=list(stage.intra_connections),
+                    display_gas=outlet_gas_preswitched,
+                )
+                # Back-fill the node dict with converged state for PropertiesPanel
+                stream_id = ic.stream_point_id
+                nd = (_stream_node_dicts or {}).get(stream_id)
+                if nd is not None:
+                    meta = converter.reactor_meta.get(stream_id) or {}
+                    nd_props = nd.setdefault("properties", {})
+                    nd_props["temperature"] = float(outlet_gas.T)
+                    nd_props["pressure"] = float(outlet_gas.P)
+                    nd_props["mdot"] = meta.get("mdot", 0.0)
+                    nd_props["density"] = meta.get("density", 0.0)
+                    nd_props["h_mass"] = meta.get("h_mass", 0.0)
+                    nd_props["v_dot_normal_m3_h"] = (
+                        meta.get("v_dot_normal_m3_s", 0.0) * 3600.0
+                    )
+                    nd_props["v_dot_real_m3_h"] = (
+                        meta.get("v_dot_real_m3_s", 0.0) * 3600.0
+                    )
+                    nd_props["top_Y"] = meta.get("top_Y", {})
+                    nd_props["composition"] = ",".join(
+                        f"{sp}:{y:.4f}" for sp, y in (meta.get("top_Y") or {}).items()
+                    )
+
+            # Always keep inlet_states as an inspection snapshot
             inlet_states[ic.target_node] = outlet_gas
 
         trajectory.add_segment(
@@ -296,6 +387,9 @@ class BoulderRunner:
         self,
         plan: "StageExecutionPlan",
         trajectory: "LagrangianTrajectory",
+        stream_reservoirs: bool = True,
+        # Backward-compatible alias
+        interface_reservoirs: Optional[bool] = None,
     ) -> None:
         """Assemble the full visualization :class:`~cantera.ReactorNet` from all converged states.
 
@@ -309,18 +403,62 @@ class BoulderRunner:
             Execution plan (provides inter-stage connection list).
         trajectory :
             Updated in place: ``trajectory.viz_network`` is set.
+        stream_reservoirs :
+            When ``True`` (default), the original inter-stage connection IDs
+            are added to ``built_conn_ids`` so that ``build_viz_network`` does
+            not create a direct source→target MFC that bypasses the
+            stream-point reservoir.
+        interface_reservoirs :
+            Deprecated alias for *stream_reservoirs*.
 
         Examples
         --------
         .. minigallery:: boulder.runner.BoulderRunner.build_viz_network
            :add-heading: Examples using build_viz_network
         """
+        if interface_reservoirs is not None and not stream_reservoirs:
+            stream_reservoirs = interface_reservoirs
+
         converter = self._ensure_converter()
+        already_built = set(converter.connections.keys()) | set(converter.walls.keys())
+        if stream_reservoirs:
+            for ic in plan.all_inter_connections:
+                already_built.add(ic.id)
+
+        all_connections = list(self.config.get("connections") or [])
+
+        if stream_reservoirs:
+            # Add a virtual source→stream_point MassFlowController for each
+            # stream-point reservoir.  In the staged solve the reservoir is filled
+            # by state-copying (no Cantera flow device), so the viz ReactorNet
+            # would otherwise show two disconnected subgraphs.  These virtual MFCs
+            # carry the correct mdot and make both the graphviz Network diagram and
+            # the Sankey generator see a fully connected process topology.
+            for nid, meta in converter.reactor_meta.items():
+                if not meta.get("stream_point"):
+                    continue
+                source_id = meta.get("source_node")
+                mdot = float(meta.get("mdot") or 0.0)
+                if (
+                    source_id
+                    and source_id in converter.reactors
+                    and nid in converter.reactors
+                ):
+                    virt_id = f"_viz_{source_id}_to_{nid}"
+                    all_connections.append(
+                        {
+                            "id": virt_id,
+                            "type": "MassFlowController",
+                            "source": source_id,
+                            "target": nid,
+                            "properties": {"mass_flow_rate": mdot},
+                            "metadata": {"virtual": True},
+                        }
+                    )
+
         viz_net = converter.build_viz_network(
-            all_connections=self.config.get("connections") or [],
-            built_conn_ids=(
-                set(converter.connections.keys()) | set(converter.walls.keys())
-            ),
+            all_connections=all_connections,
+            built_conn_ids=already_built,
         )
         trajectory.viz_network = viz_net
         self.network = viz_net
@@ -554,16 +692,43 @@ class BoulderRunner:
           facade after :meth:`solve` is called).
         - ``self.code`` is the generated standalone Python script string.
         """
+        from .staged_solver import synthesize_stream_points
+
         converter = self._ensure_converter()
 
         plan = self.build_stage_graph()
         trajectory = self.new_trajectory()
         inlet_states: Dict[str, Any] = {}
 
+        # Pre-build stream-point node/connection dicts once for all stages.
+        # Stream reservoirs are always enabled; the YAML config no longer has
+        # a 'settings.staged.stream_reservoirs' toggle.
+        stream_node_dicts: Dict[str, Any] = {}
+        stream_conns_by_stage: Dict[str, Any] = {}
+        stream_nodes, stream_conns = synthesize_stream_points(plan)
+        for nd in stream_nodes:
+            stream_node_dicts[nd["id"]] = nd
+        for cd in stream_conns:
+            grp = cd.get("group", "")
+            stream_conns_by_stage.setdefault(grp, []).append(cd)
+
         for stage in plan.ordered_stages:
-            self.solve_stage(plan, stage, inlet_states, trajectory)
+            self.solve_stage(
+                plan,
+                stage,
+                inlet_states,
+                trajectory,
+                _stream_node_dicts=stream_node_dicts,
+                _stream_conns_by_stage=stream_conns_by_stage,
+            )
 
         self.build_viz_network(plan, trajectory)
+
+        from .staged_solver import _sync_streams_into_config
+
+        _sync_streams_into_config(
+            self.config, plan, stream_node_dicts, stream_conns_by_stage
+        )
 
         # Mark the converter as staged-solved so run_streaming_simulation
         # knows to emit the steady-state report instead of a time loop.

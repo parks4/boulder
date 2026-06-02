@@ -98,6 +98,7 @@ async def parse_yaml(body: YAMLParseRequest) -> Dict[str, Any]:
         plain = _to_plain_dict(data)
         normalized = normalize_config(plain)
         validated = validate_config(normalized)
+
         return {"config": validated, "yaml": body.yaml}
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -204,6 +205,7 @@ async def upload_config(file: UploadFile = File(...)) -> Dict[str, Any]:
         plain = _to_plain_dict(data)
         normalized = normalize_config(plain)
         validated = validate_config(normalized)
+
         return {
             "config": validated,
             "yaml": yaml_str,

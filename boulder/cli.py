@@ -676,12 +676,13 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
     import uvicorn
 
-    # Register the converter class on the API module before uvicorn starts
-    # so the lifespan handler picks it up via boulder.api.main._converter_class.
+    # Register the converter and runner classes on the API module before uvicorn
+    # starts so the lifespan handler can use the correct load pipeline.
     # We import the module directly (same process – uvicorn reuses cached module).
     from boulder.api import main as _api_main
 
     _api_main._converter_class = getattr(runner_class, "converter_class", None)
+    _api_main._runner_class = runner_class
 
     log_level = "info" if args.verbose else "warning"
     uvicorn.run(

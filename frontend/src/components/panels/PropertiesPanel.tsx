@@ -36,6 +36,10 @@ export function PropertiesPanel() {
 
   const properties = entity ? (entity.properties as Record<string, unknown>) : {};
 
+  // Stream-point nodes are fully computed from the upstream reactor; they have
+  // no user-configurable initial conditions and should not be editable.
+  const isStreamPoint = isNode && Boolean(properties.stream_point);
+
   // Start editing
   const handleEdit = () => {
     const vals: Record<string, string> = {};
@@ -83,54 +87,163 @@ export function PropertiesPanel() {
           <h3 className="font-semibold text-sm text-foreground">{id}</h3>
           <span className="text-xs text-muted-foreground">{entityType}</span>
         </div>
-        <div className="flex gap-1">
-          {!isEditing ? (
-            <Button onClick={handleEdit} variant="secondary" size="sm" className="text-xs">
-              Edit
+        {!isStreamPoint && (
+          <div className="flex gap-1">
+            {!isEditing ? (
+              <Button onClick={handleEdit} variant="secondary" size="sm" className="text-xs">
+                Edit
+              </Button>
+            ) : (
+              <Button onClick={handleSave} variant="primary" size="sm" className="text-xs">
+                Save
+              </Button>
+            )}
+            <Button onClick={handleDelete} variant="destructive" size="sm" className="text-xs">
+              Delete
             </Button>
-          ) : (
-            <Button onClick={handleSave} variant="primary" size="sm" className="text-xs">
-              Save
-            </Button>
-          )}
-          <Button onClick={handleDelete} variant="destructive" size="sm" className="text-xs">
-            Delete
-          </Button>
-        </div>
+          </div>
+        )}
       </div>
 
-      <div className="border-t border-border pt-2 mt-1">
-        <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
-        <div className="divide-y divide-border">
-          {Object.entries(properties).map(([key, value]) => (
-          <div key={key} className="py-1.5 flex items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground truncate">
-              {labelWithUnit(key)}
-            </span>
-            {isEditing ? (
-              <input
-                value={editValues[key] ?? ""}
-                onChange={(e) =>
-                  setEditValues((prev) => ({ ...prev, [key]: e.target.value }))
-                }
-                className="w-28 text-xs px-1.5 py-1 rounded bg-input border border-border text-foreground"
-              />
-            ) : (
-              <span className="text-xs font-mono text-foreground">
-                {key === "temperature" && typeof value === "number"
-                  ? `${kelvinToCelsius(value).toFixed(2)} °C`
-                  : typeof value === "number"
-                    ? formatNumber(value)
-                    : String(value ?? "")}
+      {!isStreamPoint && (
+        <div className="border-t border-border pt-2 mt-1">
+          <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
+          <div className="divide-y divide-border">
+            {Object.entries(properties).map(([key, value]) => (
+            <div key={key} className="py-1.5 flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground truncate">
+                {labelWithUnit(key)}
               </span>
+              {isEditing ? (
+                <input
+                  value={editValues[key] ?? ""}
+                  onChange={(e) =>
+                    setEditValues((prev) => ({ ...prev, [key]: e.target.value }))
+                  }
+                  className="w-28 text-xs px-1.5 py-1 rounded bg-input border border-border text-foreground"
+                />
+              ) : (
+                <span className="text-xs font-mono text-foreground">
+                  {key === "temperature" && typeof value === "number"
+                    ? `${kelvinToCelsius(value).toFixed(2)} °C`
+                    : typeof value === "number"
+                      ? formatNumber(value)
+                      : String(value ?? "")}
+                </span>
+              )}
+            </div>
+          ))}
+          {Object.keys(properties).length === 0 && (
+            <p className="text-xs text-muted-foreground py-1 italic">No properties</p>
+          )}
+          </div>
+        </div>
+      )}
+
+      {isNode && !!properties.stream_point && (
+        <div className="border-t border-border pt-2 mt-1">
+          <p className="text-xs font-medium text-foreground mb-1.5">
+            Material Stream
+          </p>
+          <div className="divide-y divide-border text-xs">
+            {properties.source_node != null && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">Source</span>
+                <span className="font-mono">{String(properties.source_node)}</span>
+              </div>
+            )}
+            {Array.isArray(properties.target_nodes) && properties.target_nodes.length > 0 && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">Target(s)</span>
+                <span className="font-mono">
+                  {(properties.target_nodes as unknown[]).map(String).join(", ")}
+                </span>
+              </div>
+            )}
+            {typeof properties.temperature === "number" && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">T</span>
+                <span className="font-mono">
+                  {kelvinToCelsius(properties.temperature).toFixed(1)} °C
+                </span>
+              </div>
+            )}
+            {typeof properties.pressure === "number" && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">P</span>
+                <span className="font-mono">
+                  {(properties.pressure / 1e5).toFixed(3)} bar
+                </span>
+              </div>
+            )}
+            {typeof properties.mdot === "number" && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">ṁ</span>
+                <span className="font-mono">
+                  {formatNumber(properties.mdot, 4)} kg/s
+                </span>
+              </div>
+            )}
+            {typeof properties.h_mass === "number" && properties.h_mass !== 0 && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">h</span>
+                <span className="font-mono">
+                  {formatNumber(properties.h_mass / 1e3)} kJ/kg
+                </span>
+              </div>
+            )}
+            {typeof properties.density === "number" && properties.density !== 0 && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">ρ</span>
+                <span className="font-mono">
+                  {formatNumber(properties.density)} kg/m³
+                </span>
+              </div>
+            )}
+            {typeof properties.v_dot_normal_m3_h === "number" &&
+              properties.v_dot_normal_m3_h !== 0 && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">V̇ (normal)</span>
+                <span className="font-mono">
+                  {formatNumber(properties.v_dot_normal_m3_h)} Nm³/h
+                </span>
+              </div>
+            )}
+            {typeof properties.v_dot_real_m3_h === "number" &&
+              properties.v_dot_real_m3_h !== 0 && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">V̇ (real)</span>
+                <span className="font-mono">
+                  {formatNumber(properties.v_dot_real_m3_h)} m³/h
+                </span>
+              </div>
+            )}
+            {properties.top_Y != null &&
+              typeof properties.top_Y === "object" &&
+              Object.keys(properties.top_Y).length > 0 && (
+              <div className="py-1">
+                <span className="text-muted-foreground block mb-0.5">Top species (Y)</span>
+                <div className="pl-2 space-y-0.5">
+                  {Object.entries(properties.top_Y as Record<string, number>).map(
+                    ([sp, y]) => (
+                      <div key={sp} className="flex justify-between gap-2">
+                        <span className="text-muted-foreground font-mono">{sp}</span>
+                        <span className="font-mono">{y.toFixed(4)}</span>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+            {properties.upstream_stage != null && (
+              <div className="py-1 flex justify-between gap-2">
+                <span className="text-muted-foreground">From stage</span>
+                <span className="font-mono">{String(properties.upstream_stage)}</span>
+              </div>
             )}
           </div>
-        ))}
-        {Object.keys(properties).length === 0 && (
-          <p className="text-xs text-muted-foreground py-1 italic">No properties</p>
-        )}
         </div>
-      </div>
+      )}
 
       {!isNode && entity && (
         <div className="text-xs text-muted-foreground">

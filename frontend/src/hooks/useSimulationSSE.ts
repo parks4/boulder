@@ -34,27 +34,29 @@ export function useSimulationSSE() {
         const data = JSON.parse(e.data) as SimulationResults;
         setResults(data);
 
-        // Sync programmatically-created connections back into the visual graph.
-        // Post-build hooks may add edges (e.g. tube_furnace → outlet) that were
-        // not declared in the YAML; merge any that are not yet in the config.
-        // Read fresh state via getState() to avoid a stale closure.
-        if (data.updated_connections) {
-          const { config: currentConfig, addConnection } =
-            useConfigStore.getState();
-          const existingIds = new Set(
-            currentConfig.connections.map((c) => c.id),
-          );
-          for (const conn of data.updated_connections) {
-            if (!existingIds.has(conn.id)) {
-              addConnection({
-                id: conn.id,
-                source: conn.source,
-                target: conn.target,
-                type: conn.type,
-                properties: conn.properties ?? {},
-              });
-            }
-          }
+        // Single source of truth: atomically replace nodes + connections with the
+        // authoritative post-build lists from the backend.  Both lists are always
+        // sent together; we require both to avoid leaving the graph half-updated.
+        if (data.updated_nodes != null && data.updated_connections != null) {
+          const { config: currentConfig, setConfig } = useConfigStore.getState();
+          setConfig({
+            ...currentConfig,
+            nodes: data.updated_nodes.map((n) => ({
+              id: n.id,
+              type: n.type,
+              group: n.group ?? null,
+              properties: n.properties ?? {},
+              metadata: n.metadata ?? null,
+            })),
+            connections: data.updated_connections.map((c) => ({
+              id: c.id,
+              source: c.source,
+              target: c.target,
+              type: c.type,
+              properties: c.properties ?? {},
+              metadata: c.metadata ?? null,
+            })),
+          });
         }
       } catch {
         /* ignore parse errors */

@@ -79,6 +79,65 @@ After touching runner, staged networks, unfold/composite reactors, or plugins:
 python -m pytest tests/test_runner.py tests/test_unfold.py tests/test_plugin_example.py -vv
 ```
 
+### Testing the live API on localhost
+
+Recipe for verifying a YAML against a running Boulder/Bloc API without using the browser.
+
+1. Start the server preloaded with a YAML:
+
+   ```bash
+   bloc <FILE>.yaml         # bloc CLI, recommended
+   # or:  boulder <FILE>.yaml --no-browser
+   ```
+
+   Windows note: `conda run -n bloc bloc ...` does not see the
+   `bloc` console script. Use one of:
+
+   ```powershell
+   & "$env:CONDA_PREFIX\envs\bloc\python.exe" path\to\bloc\cli.py FILE.yaml
+   # or activate the env first:
+   conda activate bloc; bloc FILE.yaml
+   ```
+
+1. Verify the API is up and the YAML is preloaded:
+
+   ```python
+   import urllib.request, json
+   r = urllib.request.urlopen("http://localhost:8050/api/configs/preloaded")
+   print(json.loads(r.read())["preloaded"])  # True
+   ```
+
+1. Trigger a simulation and stream events to completion:
+
+   ```python
+   import urllib.request, json
+
+   cfg = json.loads(urllib.request.urlopen(
+       "http://localhost:8050/api/configs/preloaded").read())["config"]
+   req = urllib.request.Request(
+       "http://localhost:8050/api/simulations",
+       data=json.dumps({"config": cfg}).encode(),
+       headers={"Content-Type": "application/json"}, method="POST")
+   sim_id = json.loads(urllib.request.urlopen(req).read())["simulation_id"]
+
+   with urllib.request.urlopen(
+           f"http://localhost:8050/api/simulations/{sim_id}/stream") as r:
+       event = None
+       while True:
+           line = r.readline().decode().strip()
+           if line.startswith("event:"):
+               event = line[6:].strip()
+           elif line.startswith("data:") and event in ("complete", "error"):
+               print(event, json.loads(line[5:]))
+               break
+   ```
+
+1. Assert post-solve invariants directly on the SSE payload, e.g.:
+
+   - `stream_point` nodes present in `updated_nodes`
+   - original inter-stage connection ids absent from `updated_connections`
+   - no `error_message`
+
 ## Coding conventions (.cursorrules + tooling)
 
 - **Line length**: keep lines under **110** characters where practical (Ruff pycodestyle max is aligned with this).

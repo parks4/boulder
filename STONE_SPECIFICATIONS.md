@@ -72,6 +72,29 @@ Boulder default.
 Simulation-level settings passed to the solver and post-processing. Schema is open; see individual
 plugin documentation for recognized keys.
 
+#### `settings.staged:` — staged-solver behaviour
+
+Stream-point reservoirs (P&ID diamonds at each inter-stage boundary) are always
+synthesised by the staged solver. A `ct.Reservoir` and one inlet
+`MassFlowController` per downstream target are created at every stage boundary so
+that all flow rates are honoured at solve time and the full topology is visible to
+the Sankey and Network visualisations.
+
+The former `settings.staged.stream_reservoirs` YAML key is no longer recognised;
+remove it from any existing configs. The deprecated code alias
+`interface_reservoirs` is still accepted by `solve_staged()` for backward
+compatibility in tests.
+
+> **Plugin authors — `post_build` topology constraint.** Boulder's `post_build` hooks
+> receive a *per-stage subset* dict `{"nodes": [...], "connections": [...]}` that is a
+> copy of the stage slice, not the full top-level config. Appending new node or connection
+> dicts inside a `post_build` hook does not make them visible to the frontend graph (they
+> are absent from `updated_nodes` / `updated_connections` in the SSE `complete` event).
+> To add topology that must appear in the visual graph, use a `ReactorUnfolder` (runs at
+> normalize-time) or a reactor builder that injects dicts into `config["nodes"]` /
+> `config["connections"]` before returning. See `ARCHITECTURE.md` — *`post_build` hooks —
+> topology constraint* for the full explanation.
+
 #### `settings.solver:` — global integrator defaults
 
 An optional `solver:` sub-block under `settings:` sets default integrator knobs applied to every

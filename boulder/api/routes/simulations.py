@@ -206,6 +206,8 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
         "sankey_links": progress.sankey_links,
         "sankey_nodes": progress.sankey_nodes,
         "elapsed_time": progress.get_calculation_time(),
+        "updated_nodes": progress.updated_nodes,
+        "updated_connections": progress.updated_connections,
     }
 
     # Optionally clean up completed/errored simulations to free memory

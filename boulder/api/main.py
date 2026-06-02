@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 _converter_class = None  # overridable by CLI before uvicorn starts
+_runner_class = None  # overridable by CLI before uvicorn starts
 
 
 @asynccontextmanager
@@ -74,11 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if env_config_path and env_config_path.strip():
         try:
-            from ..config import (
-                load_config_file_with_py_support_and_comments,
-                normalize_config,
-                validate_config,
-            )
+            from ..runner import BoulderRunner
 
             cleaned = env_config_path.strip()
             verbose = os.environ.get("BOULDER_VERBOSE") == "1"
@@ -86,11 +83,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             if verbose:
                 logger.info(f"Loading preloaded configuration from: {cleaned}")
 
-            config, original_yaml, actual_yaml_path = (
-                load_config_file_with_py_support_and_comments(cleaned, verbose)
-            )
-            normalized = normalize_config(config)
-            validated = validate_config(normalized)
+            # Use the runner class registered by the CLI (e.g. BlocRunner) so that
+            # its load() override is respected.  BlocRunner.load() resolves the
+            # Bloc-level `from:` inheritance chain before Boulder's normaliser sees
+            # the config.  Fall back to the standard loader for plain Boulder use.
+            runner_cls = _runner_class or BoulderRunner
+            config = runner_cls.load(cleaned)
+
+            # Keep the original YAML string for the editor panel.  For inheritance
+            # overlays the "original" shown is the leaf file (what the user opened),
+            # not the fully-merged result.
+            with open(cleaned, "r", encoding="utf-8") as _f:
+                original_yaml = _f.read()
+            actual_yaml_path = cleaned
+
+            normalized = runner_cls.normalize(config)
+            validated = runner_cls.validate(normalized)
 
             app.state.preloaded_config = validated
             app.state.preloaded_yaml = original_yaml

@@ -134,6 +134,22 @@ reactors by kind string.
 
 Plugins: `GET /api/plugins` lists tabs; `POST /api/plugins/{id}/render` returns structured JSON (image, table, html, plotly, etc.) consumed by `PluginTab`.
 
+#### Page-reload / late-joiner behavior
+
+All frontend state (simulation ID, results, post-solve topology) lives in **in-memory Zustand stores** and is not persisted to localStorage or sessionStorage. On a full page reload:
+
+1. The graph resets to the YAML-loaded config (stream-point diamonds are absent until
+   the next solve).
+1. `simulationStore.simulationId` is `null`; `useSimulationSSE` does not reconnect.
+1. Any completed simulation on the server is still accessible via
+   `GET /api/simulations/{id}/results`, but the ID is not known to the fresh page.
+
+`fetchSimulationResults` in `api/simulations.ts` exists for programmatic use (e.g. tests,
+headless scripts) but is intentionally not called on mount — the correct action after a
+reload is simply to re-run the simulation. This keeps the UI stateless and avoids a
+polling/persistence layer that would require server-side session management to be
+meaningful after a server restart.
+
 ## Plugin and extension system
 
 This section subsumes the former root **`PLUGIN_SYSTEM.md`** (removed; content lives here).
@@ -370,6 +386,37 @@ def register_plugins(plugins):
 STONE normalisation → expand_port_shortcuts → expand_composite_kinds
   → _sort_connections_by_master → synthesize_default_group
 ```
+
+### `post_build` hooks — topology constraint
+
+`post_build` hooks registered in `plugins.post_build_hooks` receive a **per-stage subset
+config** of the form `{"nodes": <stage_nodes>, "connections": <stage_connections>}`.
+This is a new `dict` whose `"nodes"` and `"connections"` values are fresh lists extracted
+from the full top-level config for that stage only.
+
+**Consequence**: mutations that add or remove entries to `cfg["nodes"]` or
+`cfg["connections"]` inside a `post_build` hook only affect the local stage subset
+list — they do **not** propagate to the top-level `config["nodes"]` / `config["connections"]`
+that `simulation_worker` reads after the build to populate `updated_nodes` /
+`updated_connections` for the SSE `complete` event.
+
+What **does** propagate:
+
+- In-place mutations of existing node/connection **dicts** (e.g.
+  `cfg["nodes"][0]["properties"]["foo"] = value`) — because the dicts are shared
+  references from the top-level config.
+- Physics attached to already-built Cantera objects (walls, MFC rates, etc.) — these
+  do not need to appear in the YAML dict at all.
+
+What does **not** propagate:
+
+- Appending brand-new node or connection dicts to the stage subset lists.
+- Replacing the lists wholesale (e.g. `cfg["nodes"] = [...]`).
+
+**Recommended pattern** for plugins that need to add topology visible to the frontend:
+use a `ReactorUnfolder` (runs at normalize-time, before `build_network`) or inject
+directly into `config["nodes"]` / `config["connections"]` in a reactor builder before
+returning. Do not rely on `post_build` for topology that must appear in the graph.
 
 ### Working example in this repo
 
