@@ -548,10 +548,10 @@ def solve_staged(
             # — this avoids the stale-reference collision in the viz network.
             seen_stream_ids: set = set()
             for ic in stage.inter_connections_in:
-                nd = stream_node_dicts.get(ic.stream_point_id)
-                if nd is not None and ic.stream_point_id not in seen_stream_ids:
+                stream_nd = stream_node_dicts.get(ic.stream_point_id)
+                if stream_nd is not None and ic.stream_point_id not in seen_stream_ids:
                     seen_stream_ids.add(ic.stream_point_id)
-                    extra_nodes.append(nd)
+                    extra_nodes.append(stream_nd)
             extra_conns = stream_conns_by_stage.get(stage.id, [])
 
         # Merge intra-stage connections with interface MFCs for this stage
@@ -629,10 +629,10 @@ def solve_staged(
                 # Back-fill the node dict with converged state so _sync_streams_into_config
                 # ships the full P&ID stream data to the frontend without a new API call.
                 stream_id = ic.stream_point_id
-                nd = stream_node_dicts.get(stream_id)
-                if nd is not None:
+                stream_nd = stream_node_dicts.get(stream_id)
+                if stream_nd is not None:
                     meta = converter.reactor_meta.get(stream_id) or {}
-                    nd_props = nd.setdefault("properties", {})
+                    nd_props = stream_nd.setdefault("properties", {})
                     nd_props["temperature"] = float(outlet_gas.T)
                     nd_props["pressure"] = float(outlet_gas.P)
                     nd_props["mdot"] = meta.get("mdot", 0.0)
