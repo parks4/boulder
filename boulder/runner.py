@@ -339,7 +339,7 @@ class BoulderRunner:
 
             if stream_reservoirs:
                 # Build the Cantera reservoir with the post-switch (target) gas so
-                # downstream reactors (e.g. DesignPFR on CRECK) can read it in their
+                # downstream reactors can read it in their
                 # own species basis.  Pass display_gas=preswitched so the PropertiesPanel
                 # shows the source-mechanism composition (richer species).
                 _update_stream_point(

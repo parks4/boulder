@@ -361,8 +361,7 @@ registry. STONE v2 specifies the outer grammar; the kind registry specifies the 
 | Kind | `pressure:` | `temperature:` |
 |---|---|---|
 | Const-volume (`IdealGasReactor`, etc.) | under `initial:` | under `initial:` |
-| Const-pressure (`IdealGasConstPressureReactor`, `DesignPSR`) | top-level operating constraint | invalid unless kind defines isothermal mode |
-| PFR-like (`DesignPFR`, `DesignPFRThinShell`) | top-level operating set-point | invalid unless kind defines isothermal mode |
+| Const-pressure (`IdealGasConstPressureReactor`, `CustomPSR`) | top-level operating constraint | invalid unless kind defines isothermal mode |
 
 Top-level reactor `temperature:` is invalid unless the kind schema explicitly defines a
 fixed-temperature model option.
@@ -532,7 +531,7 @@ reactor; ambiguous or missing masters fail validation.
 ### `Wall`
 
 Heat and/or volume coupling between two nodes. Carries thermal parameters from the kind schema.
-Composite reactor unfolders (e.g. `DesignPFR`) may also generate walls automatically.
+Composite reactor unfolders (e.g. a plugin-defined PFR kind) may also generate walls automatically.
 
 ### Logical staged connection
 
@@ -715,7 +714,8 @@ network:
 ```yaml
 psr_stage:
 - id: psr
-  DesignPSR:
+  # CustomPSR is an example of a reactor class provided by a plugin.
+  CustomPSR:
     pressure: 1.3 bar
     t_res_s: 1 ms
 - id: torch_to_psr

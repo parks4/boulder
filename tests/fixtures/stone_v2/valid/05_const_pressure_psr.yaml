@@ -1,4 +1,4 @@
-# Rule: Downstream DesignPSR with top-level pressure operating constraint | Expected: valid
+# Rule: Downstream CustomPSR with top-level pressure operating constraint | Expected: valid
 
 phases:
   gas:
@@ -29,7 +29,8 @@ torch_stage:
 
 psr_stage:
 - id: psr
-  DesignPSR:
+  # CustomPSR is an example of a reactor class provided by a plugin.
+  CustomPSR:
     pressure: 1.3 bar
     t_res_s: 1 ms
 - id: torch_to_psr_lc
