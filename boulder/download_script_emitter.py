@@ -316,11 +316,11 @@ class CanteraScriptEmitter:
                             )
                             out.append("    r = reactors.get(_rid)")
                             out.append("    if r is None:")
-                            out.append("        return 0.0")
-                            out.append("    try:")
-                            out.append("        return r.mass / _tau")
-                            out.append("    except Exception:")
-                            out.append("        return 0.0")
+                            out.append(
+                                f'        raise KeyError(f"residence_time MFC {cid}: '
+                                f'reactor {{_rid!r}} not found")'
+                            )
+                            out.append("    return r.mass / _tau")
                             out.append(f"{cref}.mass_flow_rate = ct.Func1({fn})")
                         else:
                             out.append(
@@ -456,10 +456,6 @@ class CanteraScriptEmitter:
             lines.extend(self._emit_connection(c, cref, f"{cref}_spec"))
 
         lines.append("_apply_flow_conservation()")
-        lines.append(
-            f"_post_build_design_volumes(_ctx, {{'nodes': [{', '.join(cfg_nodes)}], "
-            f"'connections': [{', '.join(cfg_conns)}]}})"
-        )
         lines.extend(self._emit_stage_extra_post_build(cfg_nodes, cfg_conns))
         lines.append("")
 
@@ -585,15 +581,11 @@ class CanteraScriptEmitter:
         """
         lines: List[str] = [
             "import cantera as ct",
-            "from types import SimpleNamespace",
             "from boulder.utils import coerce_unit_string",
             "from boulder.cantera_converter import resolve_unset_flow_rates",
             "",
-            "def _post_build_design_volumes(_ctx, cfg):  # noqa: ARG001",
-            "    pass",
-            "",
-            "def get_mechanism_path(mech):  # noqa: ARG001",
-            f"    return {self.mechanism!r}",
+            "def get_mechanism_path(mech):",
+            "    return mech",
         ]
         if self.has_mech_switch:
             lines += [
@@ -605,7 +597,7 @@ class CanteraScriptEmitter:
 
     def _emit_preamble(self) -> List[str]:
         """Return the global registry setup lines."""
-        return [
+        lines = [
             "",
             f"mechanism = {self.mechanism!r}",
             "",
@@ -618,14 +610,6 @@ class CanteraScriptEmitter:
             "_unresolved_mfc_ids = set()",
             "_deferred_pc_conn_dicts = []",
             "inlet_states = {}",
-            "",
-            "_ctx = SimpleNamespace(",
-            "    reactors=reactors,",
-            "    connections=connections,",
-            "    walls=walls,",
-            "    reactor_meta=reactor_meta,",
-            "    plugins=SimpleNamespace(mechanism_path_resolver=get_mechanism_path),",
-            ")",
             "",
             "def _parse_composition(comp_str):",
             "    return {",
@@ -648,14 +632,25 @@ class CanteraScriptEmitter:
             "        connections[cid].mass_flow_rate = _mfc_flow_rates[cid]",
             "",
         ]
+        lines += self._emit_extra_preamble()
+        return lines
+
+    def _emit_extra_preamble(self) -> List[str]:
+        """Return extra preamble lines (e.g. a plugin build context).
+
+        Override in a subclass to emit shared objects consumed by custom
+        post-build hooks (such as a ``_ctx`` namespace).  The base returns an
+        empty list because Boulder core needs no plugin build context.
+        """
+        return []
 
     def _emit_stage_extra_post_build(
         self, cfg_nodes: List[str], cfg_conns: List[str]
     ) -> List[str]:
-        """Return extra post-build lines emitted after ``_post_build_design_volumes``.
+        """Return per-stage post-build lines emitted after flow conservation.
 
-        Override in a subclass to inject additional per-stage post-build hooks
-        (e.g. ``_post_build_tube_furnace``) without overriding the entire
+        Override in a subclass to inject post-build hooks (e.g. plugin volume
+        or geometry resolution) without overriding the entire
         ``_emit_stage_block``.  The base returns an empty list.
         """
         return []
