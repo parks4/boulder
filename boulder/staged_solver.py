@@ -55,6 +55,59 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Stage-node ordering helper (used by emitter and converter)
+# ---------------------------------------------------------------------------
+
+
+def _order_stage_nodes_for_flow(
+    stage_nodes: List[Dict[str, Any]],
+    stage_connections: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Return stage nodes ordered so MFC sources are built before targets.
+
+    If YAML lists a downstream reactor before its upstream reservoir,
+    the target then keeps the template gas state.  Mass-flow edges within
+    the stage define a partial order; unknown edges or cycles keep the
+    original *stage_nodes* order.
+    """
+    from collections import deque
+
+    ids = [n["id"] for n in stage_nodes]
+    id_set = set(ids)
+    if len(ids) <= 1:
+        return stage_nodes
+
+    incoming: Dict[str, int] = {nid: 0 for nid in ids}
+    adj: Dict[str, List[str]] = {nid: [] for nid in ids}
+
+    for conn in stage_connections:
+        if conn.get("type") != "MassFlowController":
+            continue
+        src, tgt = conn["source"], conn["target"]
+        assert isinstance(src, str) and isinstance(tgt, str)
+        if src not in id_set or tgt not in id_set:
+            continue
+        incoming[tgt] += 1
+        adj[src].append(tgt)
+
+    queue = deque(nid for nid in ids if incoming[nid] == 0)
+    ordered_ids: List[str] = []
+    while queue:
+        u = queue.popleft()
+        ordered_ids.append(u)
+        for v in adj[u]:
+            incoming[v] -= 1
+            if incoming[v] == 0:
+                queue.append(v)
+
+    if len(ordered_ids) != len(ids):
+        return stage_nodes
+
+    id_to_node = {n["id"]: n for n in stage_nodes}
+    return [id_to_node[i] for i in ordered_ids]
+
+
+# ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
 

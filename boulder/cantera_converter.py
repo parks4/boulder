@@ -1,7 +1,6 @@
 import importlib
 import math
 import os
-from collections import deque
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import (
@@ -25,57 +24,10 @@ from .config import CANTERA_MECHANISM, TRANSIENT_SOLVER_KINDS
 from .output_summary import evaluate_output_items, parse_output_block
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
+from .staged_solver import _order_stage_nodes_for_flow
 from .verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
-
-
-def _order_stage_nodes_for_flow(
-    stage_nodes: List[Dict[str, Any]],
-    stage_connections: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """Return stage nodes ordered so MFC sources are built before targets.
-
-    If YAML lists a downstream reactor before its upstream reservoir,
-    :meth:`DualCanteraConverter._upstream_reservoir_tpy` cannot read
-    ``self.reactors[source]`` yet; the target then keeps the template gas state.
-    Mass-flow edges
-    within the stage define a partial order; unknown edges or cycles keep the
-    original *stage_nodes* order.
-    """
-    ids = [n["id"] for n in stage_nodes]
-    id_set = set(ids)
-    if len(ids) <= 1:
-        return stage_nodes
-
-    incoming: Dict[str, int] = {nid: 0 for nid in ids}
-    adj: Dict[str, List[str]] = {nid: [] for nid in ids}
-
-    for conn in stage_connections:
-        if conn.get("type") != "MassFlowController":
-            continue
-        src, tgt = conn["source"], conn["target"]
-        assert isinstance(src, str) and isinstance(tgt, str)
-        if src not in id_set or tgt not in id_set:
-            continue
-        incoming[tgt] += 1
-        adj[src].append(tgt)
-
-    queue = deque(nid for nid in ids if incoming[nid] == 0)
-    ordered_ids: List[str] = []
-    while queue:
-        u = queue.popleft()
-        ordered_ids.append(u)
-        for v in adj[u]:
-            incoming[v] -= 1
-            if incoming[v] == 0:
-                queue.append(v)
-
-    if len(ordered_ids) != len(ids):
-        return stage_nodes
-
-    id_to_node = {n["id"]: n for n in stage_nodes}
-    return [id_to_node[i] for i in ordered_ids]
 
 
 # Custom builder/hook types
@@ -456,6 +408,10 @@ class DualCanteraConverter:
        :add-heading: Examples using DualCanteraConverter
     """
 
+    from .download_script_emitter import CanteraScriptEmitter as _CanteraScriptEmitter
+
+    SCRIPT_EMITTER_CLASS: type = _CanteraScriptEmitter
+
     def __init__(
         self,
         mechanism: Optional[str] = None,
@@ -487,6 +443,11 @@ class DualCanteraConverter:
         )
         # Preserve last config for post-processing (e.g., output summary)
         self._last_config: Optional[Dict[str, Any]] = None
+        # Pre-sync normalised config snapshot used to emit the --download script.
+        # It must be captured BEFORE _sync_streams_into_config mutates nodes/
+        # connections, otherwise build_stage_graph in the generated file would
+        # rebuild a different plan than the live solve.
+        self._download_config: Optional[Dict[str, Any]] = None
         # Path to config file for --download script (set by CLI in headless mode)
         self._download_config_path: Optional[str] = None
         # Flow-conservation tracking: populated during connection building
@@ -587,42 +548,40 @@ class DualCanteraConverter:
         return name
 
     def script_load_lines(self, config_path: str, plan: Any = None) -> list:
-        """Return the staged-solve block for the generated standalone script.
+        """Return the staged-solve script block for generated download scripts.
 
-        The block uses :class:`~boulder.runner.BoulderRunner` class methods
-        only — no free-function imports.  When *plan* is provided its stage
-        list is unrolled into one :meth:`~boulder.runner.BoulderRunner.solve_stage`
-        call per stage with a comment showing the stage id and node list.
+        When a normalised config snapshot is available (``_download_config`` or
+        ``_last_config``), the Cantera-level emitter recomputes the stage plan
+        from that embedded config snapshot and delegates to
+        ``self.SCRIPT_EMITTER_CLASS`` — producing a fully self-contained
+        Cantera-native script with no runner dependency.
 
-        Subclasses may override this to substitute their own runner class name
-        and import line in emitted scripts.
+        When no config snapshot is available, falls back to a runner-based
+        script that re-loads the YAML at runtime.
 
         Parameters
         ----------
         config_path :
-            Path to the original YAML file, embedded verbatim in the script.
+            Path to the original YAML file. Used only as a fallback when no
+            normalised config is available on the converter.
         plan :
             :class:`~boulder.staged_solver.StageExecutionPlan` produced by
-            ``build_stage_graph()``.  When ``None`` the stage loop is omitted
-            and a plain ``runner.build()`` call is emitted instead.
+            ``build_stage_graph()``. Passed through to the runner-based fallback;
+            the Cantera-level emitter recomputes its own plan from the config
+            snapshot and does not use this argument.
         """
-        runner_import = "from boulder.runner import BoulderRunner"
-        runner_class = "BoulderRunner"
-        continuation = None
-        signals_block = None
-        bindings_block = None
-        if self._last_config is not None:
-            continuation = self._last_config.get("continuation") or None
-            signals_block = self._last_config.get("signals") or None
-            bindings_block = self._last_config.get("bindings") or None
+        cfg = self._download_config or self._last_config
+        if cfg is not None:
+            return self._script_lines_for_cantera(
+                "from boulder.cantera_converter import DualCanteraConverter",
+                "DualCanteraConverter",
+                cfg,
+            )
         return self._script_lines_for_runner(
-            runner_import,
-            runner_class,
+            "from boulder.runner import BoulderRunner",
+            "BoulderRunner",
             config_path,
             plan,
-            continuation=continuation,
-            signals_block=signals_block,
-            bindings_block=bindings_block,
         )
 
     @staticmethod
@@ -635,142 +594,40 @@ class DualCanteraConverter:
         signals_block: Any = None,
         bindings_block: Any = None,
     ) -> list:
-        """Shared helper: emit the runner-based staged-solve script block.
+        """Thin wrapper kept for backward compatibility with callers using this as an instance method.
 
-        For each stage the emitted snippet calls ``runner.solve_stage()``, which
-        delegates to the full solver dispatcher (including ``advance_grid`` and
-        ``micro_step`` loops).  After each stage a short human-readable progress
-        summary is printed so the downloaded script gives meaningful output when
-        run standalone.
-
-        When *continuation* is provided the emitted script wraps the stage loop
-        in an outer continuation sweep that mirrors the ``combustor.py`` pattern.
-
-        Transient stages (``advance_grid``, ``micro_step``) additionally emit a
-        progress line that shows the time elapsed, making the standalone script
-        more useful as a verification script.
-
-        When *signals_block* and *bindings_block* are provided the emitted script
-        includes the causal-layer wiring verbatim:
-        ``from boulder.signals import build_signal_registry``
-        ``from boulder.bindings import apply_bindings_block``
-        and wires signals into the built network so the standalone script is
-        fully runnable without manual signal setup.
+        Delegates entirely to :func:`boulder.download_script_emitter.script_lines_for_runner`.
         """
+        from .download_script_emitter import script_lines_for_runner
 
-        def _stage_block(plan, indent="") -> list:
-            lines: list = []
-            if plan is not None and plan.ordered_stages:
-                n = len(plan.ordered_stages)
-                for i, stage in enumerate(plan.ordered_stages):
-                    node_list = ", ".join(stage.node_ids)
-                    kind = (stage.solver or {}).get("kind", "advance_to_steady_state")
-                    is_transient = kind in TRANSIENT_SOLVER_KINDS
-                    lines += [
-                        f"{indent}# Stage {i + 1}/{n}: {stage.id}  [nodes: {node_list}]",
-                        f"{indent}runner.solve_stage(plan, plan.ordered_stages[{i}], "
-                        "inlet_states, trajectory)",
-                    ]
-                    if is_transient:
-                        lines += [
-                            f"{indent}print(f'Stage {stage.id} ({kind}) complete.')",
-                            f"{indent}for _r in runner.converter.reactors.values():",
-                            f"{indent}    if hasattr(_r.phase, 'T'):",
-                            f"{indent}        print(f'  {{_r.name}}: T={{_r.phase.T:.1f}} K"
-                            "  P={_r.phase.P:.0f} Pa')",
-                        ]
-                    else:
-                        lines += [
-                            f"{indent}print(f'Stage {stage.id} ({kind}) converged.')",
-                            f"{indent}for _r in runner.converter.reactors.values():",
-                            f"{indent}    if hasattr(_r.phase, 'T'):",
-                            f"{indent}        print(f'  {{_r.name}}: T={{_r.phase.T:.1f}} K"
-                            "  P={_r.phase.P:.0f} Pa')",
-                        ]
-                    lines.append("")
-            else:
-                lines += [f"{indent}runner.build()", ""]
-            return lines
-
-        lines = [
+        return script_lines_for_runner(
             runner_import,
-            "",
-            f"config_path = {repr(config_path)}",
-            f"runner = {runner_class}.from_yaml(config_path)",
-            "plan = runner.build_stage_graph()",
-            "trajectory = runner.new_trajectory()",
-            "inlet_states = {}",
-            "",
-        ]
+            runner_class,
+            config_path,
+            plan,
+            continuation,
+            signals_block,
+            bindings_block,
+        )
 
-        # Emit causal-layer signal/binding wiring verbatim when present.
-        # The emitted snippet is self-contained and uses boulder.signals /
-        # boulder.bindings so the downloaded script runs standalone.
-        if signals_block and bindings_block:
-            import json as _json
+    def _script_lines_for_cantera(
+        self,
+        converter_import: str,
+        converter_class: str,
+        config: Dict[str, Any],
+    ) -> list:
+        """Emit a Cantera-native download script.
 
-            lines += [
-                "# --- Causal layer: signals + bindings (derived_via: ast_match) ---",
-                "from boulder.signals import build_signal_registry",
-                "from boulder.bindings import apply_bindings_block",
-                "",
-                "# Build the network first so bindings can reference reactor objects.",
-                "# runner.build() or runner.solve_stage() must be called AFTER apply_bindings_block.",
-                f"_signals_block = {_json.dumps(signals_block, indent=2)}",
-                f"_bindings_block = {_json.dumps(bindings_block, indent=2)}",
-                "_signal_registry = build_signal_registry(_signals_block)",
-                "# Note: apply_bindings_block must be called after build_sub_network",
-                "# The staged solver applies them automatically when signals/bindings",
-                "# are present in the config YAML; this block is provided for transparency.",
-                "",
-            ]
+        Generates module-level ``reactors`` / ``connections`` / ``walls``
+        registries and direct ``ct.*`` construction per stage — see
+        :mod:`boulder.download_script_emitter`.
 
-        if continuation:
-            param = continuation.get("parameter", "")
-            update = continuation.get("update", {})
-            until = continuation.get("until", {})
-            max_iters = int(until.get("max_iters", 200))
-
-            # Emit while-loop header
-            until_cond_parts = []
-            if "reactor_T_below" in until:
-                t = until["reactor_T_below"]
-                until_cond_parts.append(
-                    f"all(r.phase.T >= {t} for r in runner.converter.reactors.values() "
-                    "if not hasattr(r, '_is_reservoir'))"
-                )
-            if not until_cond_parts:
-                until_cond_parts.append(f"_cont_iter < {max_iters}")
-
-            lines += [
-                "_cont_iter = 0",
-                f"while {' and '.join(until_cond_parts)} and _cont_iter < {max_iters}:",
-            ]
-            lines += _stage_block(plan, indent="    ")
-            # Emit update step
-            if "multiply" in update:
-                f = update["multiply"]
-                parts = param.split(".")
-                if parts[0] == "connections" and len(parts) >= 3:
-                    cid = parts[1]
-                    attr = ".".join(parts[2:])
-                    lines += [
-                        f"    runner.converter.connections['{cid}'].{attr} *= {f}",
-                    ]
-            lines += [
-                "    _cont_iter += 1",
-                "",
-            ]
-        else:
-            lines += _stage_block(plan)
-
-        lines += [
-            "# Assemble visualization network from all converged states",
-            "runner.build_viz_network(plan, trajectory)",
-            "network = runner.network",
-            "converter = runner.converter",
-        ]
-        return lines
+        Dispatch is virtual: subclasses override ``SCRIPT_EMITTER_CLASS`` to inject
+        a custom emitter without modifying Boulder.
+        The ``converter_import`` and ``converter_class`` parameters are kept for
+        backward compatibility with existing callers but are ignored.
+        """
+        return self.SCRIPT_EMITTER_CLASS(converter=self).emit(config)
 
     def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
         """Return (creating and caching if needed) a :class:`~cantera.Solution`.
@@ -1584,6 +1441,9 @@ class DualCanteraConverter:
         # any caller that re-uses a config object would see a corrupted topology.
         config = copy.deepcopy(config)
         self._last_config = config
+        # Snapshot the pre-sync config for the --download script before
+        # solve_staged mutates `config` via _sync_streams_into_config.
+        self._download_config = copy.deepcopy(config)
 
         from .staged_solver import build_stage_graph, solve_staged
 

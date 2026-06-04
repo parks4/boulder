@@ -212,8 +212,14 @@ def test_cantera_examples_headless_download_script_runs(
 
     with open(download_py, encoding="utf-8") as fh:
         body = fh.read()
-    assert "from boulder.runner import BoulderRunner" in body
-    assert "BoulderRunner.from_yaml" in body
+    assert "import cantera as ct" in body
+    assert "reactors = {}" in body
+    assert "DualCanteraConverter" not in body
+    assert "BlocConverter" not in body
+    assert "build_sub_network" not in body
+    assert "config = {" not in body
+    assert "BoulderRunner.from_yaml" not in body
+    assert "network_" in body or "network = ct.ReactorNet" in body
 
     run = subprocess.run(
         [sys.executable, str(download_py)],
