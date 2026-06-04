@@ -122,7 +122,6 @@ class TestBackwardCompatWrapper:
         assert isinstance(lines, list)
 
 
-
 class TestScriptLinesForRunner:
     """Verify script_lines_for_runner is importable as a module-level function."""
 
