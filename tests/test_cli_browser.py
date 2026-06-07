@@ -81,7 +81,9 @@ def test_main_uses_schedule_browser_open_not_sync_open(monkeypatch):
 
     import uvicorn
 
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: (_ for _ in ()).throw(SystemExit(0)))
+    monkeypatch.setattr(
+        uvicorn, "run", lambda *a, **kw: (_ for _ in ()).throw(SystemExit(0))
+    )
 
     import boulder.cli as cli
 
@@ -115,7 +117,9 @@ def test_dev_mode_schedules_vite_browser_open(monkeypatch, tmp_path):
 
     import uvicorn
 
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: (_ for _ in ()).throw(SystemExit(0)))
+    monkeypatch.setattr(
+        uvicorn, "run", lambda *a, **kw: (_ for _ in ()).throw(SystemExit(0))
+    )
 
     import boulder.cli as cli
 

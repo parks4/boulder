@@ -12,7 +12,7 @@
 
 **Reference:** `sda/dashboard/app.py` — `_wait_and_open()` (poll until port bound, then open browser)
 
----
+______________________________________________________________________
 
 ## Background
 
@@ -37,20 +37,21 @@ In `--dev` mode (~521–537), a fixed `time.sleep(5)` before opening Vite is bri
 ### Success criteria
 
 1. Browser opens only after the target port is bound (or timeout fallback).
-2. `--no-open` still suppresses browser open.
-3. `--dev` polls port 5173 instead of sleeping 5 s.
-4. New unit tests cover helpers; existing CLI tests pass.
-5. Manual smoke test: `boulder` loads without "Unable to connect".
+1. `--no-open` still suppresses browser open.
+1. `--dev` polls port 5173 instead of sleeping 5 s.
+1. New unit tests cover helpers; existing CLI tests pass.
+1. Manual smoke test: `boulder` loads without "Unable to connect".
 
 ### Port detection note
 
 `is_port_in_use(host, port)` returns `False` when the port is free, `True` when something is listening. Poll until it returns `True`.
 
----
+______________________________________________________________________
 
 ## Task 1: Extract port-wait helpers
 
 **Files:**
+
 - Modify: `boulder/boulder/cli.py` (after `find_available_port`, ~line 47)
 - Create: `boulder/tests/test_cli_browser.py`
 
@@ -76,25 +77,27 @@ Add `wait_for_port` and `schedule_browser_open` after `find_available_port`.
 pytest tests/test_cli_browser.py -v
 ```
 
----
+______________________________________________________________________
 
 ## Task 2: Wire production mode
 
 **Files:**
+
 - Modify: `boulder/boulder/cli.py` (~664–670)
 
 Replace immediate `webbrowser.open()` with `schedule_browser_open()`.
 
----
+______________________________________________________________________
 
 ## Task 3: Improve `--dev` mode
 
 **Files:**
+
 - Modify: `boulder/boulder/cli.py` (~521–537)
 
 Replace fixed `time.sleep(5)` with `schedule_browser_open()` polling port 5173.
 
----
+______________________________________________________________________
 
 ## Task 4: Final verification
 
@@ -103,7 +106,7 @@ pytest tests/test_cli_browser.py tests/test_cli_import.py tests/test_cli_headles
 python -c "from boulder.cli import wait_for_port, schedule_browser_open; print('ok')"
 ```
 
----
+______________________________________________________________________
 
 ## Agent constraints
 
