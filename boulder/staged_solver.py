@@ -780,6 +780,11 @@ def solve_staged(
                 )
 
     logger.info("Staged solve complete – building visualization ReactorNet.")
+    # Legacy OutletSink only (deprecated — see _refresh_terminal_sinks).  Production
+    # chains (e.g. SPRING_A4 torch→PSR→PFR) use inter-stage stream-point diamonds
+    # refreshed in _update_stream_point during the stage loop; this call is a no-op
+    # for those configs.
+    _refresh_terminal_sinks(converter, config)
     viz_net = converter.build_viz_network(
         all_connections=all_connections,
         built_conn_ids=already_built,
@@ -923,6 +928,121 @@ def _update_stream_point(
 
 # Backward-compatible alias
 _update_iface_reservoir = _update_stream_point
+
+_FLOW_DEVICE_TYPES = frozenset({"MassFlowController", "PressureController", "Valve"})
+# DEPRECATED with OutletSink — remove when OutletSink is dropped from STONE.
+_TERMINAL_SINK_TYPES = frozenset({"OutletSink"})
+
+
+def _refresh_terminal_sinks(converter: Any, config: Dict[str, Any]) -> None:
+    """Copy upstream reactor outlet state into legacy intra-stage ``OutletSink`` nodes.
+
+    .. deprecated::
+        ``OutletSink`` is being retired in favour of inter-stage stream-point
+        diamonds (``{source}_outlet``), which are refreshed by
+        :func:`_update_stream_point` during :func:`solve_staged`.  Production
+        models such as SPRING_A4 (torch → PSR → PFR) never use this path.
+
+    This helper exists only so old single-stage YAMLs that still declare a
+    terminal ``OutletSink`` (e.g. tube-furnace examples) show converged thermo
+    in the UI instead of build-time placeholder gas.  Delete this function and
+    its call site when ``OutletSink`` is removed from STONE.
+    """
+    nodes: List[Dict[str, Any]] = config.get("nodes") or []
+    connections: List[Dict[str, Any]] = config.get("connections") or []
+    if not nodes:
+        return
+
+    for node in nodes:
+        if node.get("type") not in _TERMINAL_SINK_TYPES:
+            continue
+        sink_id = node["id"]
+        meta = converter.reactor_meta.get(sink_id) or {}
+        if meta.get("stream_point") or meta.get("stage_interface"):
+            continue
+
+        inbound = [
+            c
+            for c in connections
+            if c.get("target") == sink_id and c.get("type") in _FLOW_DEVICE_TYPES
+        ]
+        outbound = [
+            c
+            for c in connections
+            if c.get("source") == sink_id and c.get("type") in _FLOW_DEVICE_TYPES
+        ]
+        if not inbound or outbound:
+            continue
+
+        source_id = inbound[0].get("source")
+        if not source_id:
+            continue
+        source_reactor = converter.reactors.get(source_id)
+        if source_reactor is None or isinstance(source_reactor, ct.Reservoir):
+            continue
+
+        src_meta = converter.reactor_meta.get(source_id) or {}
+        mechanism = str(
+            src_meta.get("mechanism") or getattr(converter.gas, "source", "")
+        )
+        outlet_gas = _extract_gas_state(source_reactor, mechanism, converter)
+        mdot = _measure_outlet_mdot(source_id, converter)
+
+        new_res_gas = converter._get_gas_for_mech(mechanism)
+        new_res_gas.TPY = outlet_gas.T, outlet_gas.P, outlet_gas.Y
+        new_sink = ct.Reservoir(new_res_gas, clone=False)
+        new_sink.name = sink_id
+        converter.reactors[sink_id] = new_sink
+
+        try:
+            rho = float(outlet_gas.density)
+            h_mass = float(outlet_gas.enthalpy_mass)
+            T_norm = 273.15
+            P_norm = 101325.0
+            norm_gas = converter._get_gas_for_mech(mechanism)
+            norm_gas.TPY = T_norm, P_norm, outlet_gas.Y
+            rho_norm = float(norm_gas.density)
+            v_dot_norm = mdot / rho_norm if rho_norm > 0 else 0.0
+            v_dot_real = mdot / rho if rho > 0 else 0.0
+            Y = {
+                sp: float(outlet_gas.Y[i])
+                for i, sp in enumerate(outlet_gas.species_names)
+            }
+            top_Y = dict(sorted(Y.items(), key=lambda kv: kv[1], reverse=True)[:3])
+        except Exception:
+            rho = h_mass = v_dot_norm = v_dot_real = 0.0
+            top_Y = {}
+
+        display_props = {
+            # DEPRECATED with OutletSink — stream-point diamonds use stream_point=True.
+            "terminal_sink": True,
+            "source_node": source_id,
+            "temperature": float(outlet_gas.T),
+            "pressure": float(outlet_gas.P),
+            "mdot": mdot,
+            "density": rho,
+            "h_mass": h_mass,
+            "v_dot_normal_m3_s": v_dot_norm,
+            "v_dot_real_m3_s": v_dot_real,
+            "top_Y": top_Y,
+            "composition": ",".join(f"{sp}:{y:.4f}" for sp, y in top_Y.items()),
+        }
+        converter.reactor_meta.setdefault(sink_id, {}).update(
+            {
+                "mechanism": mechanism,
+                "gas_solution": new_res_gas,
+                **display_props,
+            }
+        )
+        node.setdefault("properties", {}).update(display_props)
+
+        logger.debug(
+            "Terminal OutletSink '%s' refreshed from '%s': T=%.1f K, mdot=%.4g kg/s",
+            sink_id,
+            source_id,
+            outlet_gas.T,
+            mdot,
+        )
 
 
 def _sync_streams_into_config(

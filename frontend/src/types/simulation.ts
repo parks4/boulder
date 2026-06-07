@@ -18,6 +18,12 @@ export interface ReactorSeries {
   fbs_convergence?: number[];
   /** True when the reactor is a Perfectly Stirred Reactor (PSR/CSTR). */
   is_psr?: boolean;
+  /**
+   * True when the series is a physical residence-time profile (closed CSTR /
+   * Lagrangian parcel), not a solver convergence trace.  ``t`` holds residence
+   * time [s] on the x-axis in the Plots tab.
+   */
+  is_residence?: boolean;
 }
 
 /** Connection (e.g. MFC) report from backend: mass and volumetric flow rates. */

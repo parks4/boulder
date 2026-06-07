@@ -786,3 +786,21 @@ class TestSyncConfigRoute:
         assert "advance_to_steady_state" in body["yaml"]
         # Must not contain a nested block — scalar form only
         assert "kind:" not in body["yaml"]
+
+
+class TestStaticFrontend:
+    @pytest.mark.asyncio
+    async def test_missing_asset_returns_404_not_html(self):
+        """Stale hashed chunks must 404; returning index.html breaks dynamic import MIME checks."""
+        from pathlib import Path
+
+        dist = (
+            Path(__file__).resolve().parent.parent / "frontend" / "dist" / "assets"
+        )
+        if not dist.is_dir():
+            pytest.skip("frontend dist/ not built")
+
+        async with _make_client() as client:
+            resp = await client.get("/assets/SankeyTab-stalehash.js")
+        assert resp.status_code == 404
+        assert "text/html" not in resp.headers.get("content-type", "")

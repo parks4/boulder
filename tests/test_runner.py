@@ -320,9 +320,9 @@ def test_spatial_series_inferred_from_custom_stage_network_states():
             # since this test only checks that Boulder reads network.states
             # correctly, not that the physics converge.
             gas = self.reactors[0].phase
-            arr = ct.SolutionArray(gas, extra=["t"])
+            arr = ct.SolutionArray(gas, extra=["x", "t"])
             for i in range(N):
-                arr.append(gas.state, t=float(i))  # type: ignore[call-arg]
+                arr.append(gas.state, x=float(i) * 0.1, t=float(i))  # type: ignore[call-arg]
             self._spatial_states = arr
 
         @property

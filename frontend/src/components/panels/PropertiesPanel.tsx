@@ -36,9 +36,12 @@ export function PropertiesPanel() {
 
   const properties = entity ? (entity.properties as Record<string, unknown>) : {};
 
-  // Stream-point nodes are fully computed from the upstream reactor; they have
-  // no user-configurable initial conditions and should not be editable.
+  // Stream-point nodes (inter-stage diamonds) and legacy terminal OutletSink nodes
+  // are computed from upstream reactors.  OutletSink + terminal_sink is deprecated;
+  // remove isTerminalSink when OutletSink is dropped from STONE.
   const isStreamPoint = isNode && Boolean(properties.stream_point);
+  const isTerminalSink = isNode && Boolean(properties.terminal_sink);
+  const isComputedStream = isStreamPoint || isTerminalSink;
 
   // Start editing
   const handleEdit = () => {
@@ -87,7 +90,7 @@ export function PropertiesPanel() {
           <h3 className="font-semibold text-sm text-foreground">{id}</h3>
           <span className="text-xs text-muted-foreground">{entityType}</span>
         </div>
-        {!isStreamPoint && (
+        {!isComputedStream && (
           <div className="flex gap-1">
             {!isEditing ? (
               <Button onClick={handleEdit} variant="secondary" size="sm" className="text-xs">
@@ -105,7 +108,7 @@ export function PropertiesPanel() {
         )}
       </div>
 
-      {!isStreamPoint && (
+      {!isComputedStream && (
         <div className="border-t border-border pt-2 mt-1">
           <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
           <div className="divide-y divide-border">
@@ -140,7 +143,7 @@ export function PropertiesPanel() {
         </div>
       )}
 
-      {isNode && !!properties.stream_point && (
+      {isComputedStream && (
         <div className="border-t border-border pt-2 mt-1">
           <p className="text-xs font-medium text-foreground mb-1.5">
             Material Stream

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 import cantera as ct  # type: ignore
 import numpy as np
 
-from .lagrangian import LagrangianTrajectory, _get_t_axis
+from .lagrangian import LagrangianTrajectory
 
 if TYPE_CHECKING:
     from .cantera_converter import DualCanteraConverter
@@ -39,19 +39,17 @@ def _resolve_spatial_x_axis(
     states: ct.SolutionArray,
     reactor_meta: Dict[str, Any],
     n_points: int,
-) -> np.ndarray:
-    """Pick an x-axis for spatial plots: explicit meta, then ``t`` extra, else [0..1]."""
+) -> Optional[np.ndarray]:
+    """Pick an x-axis for spatial plots: explicit meta, then ``x`` extra only."""
     custom = reactor_meta.get("spatial_x_m")
     if isinstance(custom, (list, tuple)) and len(custom) == n_points:
         return np.asarray(custom, dtype=float)
     if isinstance(custom, np.ndarray) and int(custom.size) == n_points:
         return custom.astype(float)
-    t_ax = _get_t_axis(states)
-    if t_ax is not None and len(t_ax) == n_points:
-        return np.asarray(t_ax, dtype=float)
-    if n_points == 1:
-        return np.array([0.0], dtype=float)
-    return np.linspace(0.0, 1.0, n_points)
+    extras = getattr(states, "_extras", []) or []
+    if "x" in extras or hasattr(states, "x"):
+        return np.asarray(states.x, dtype=float)
+    return None
 
 
 def _fbs_from_stage_network(network: Any) -> Optional[List[float]]:
@@ -158,11 +156,20 @@ def try_infer_spatial_reactor_series(
         return None
 
     meta = converter.reactor_meta.get(reactor_id) or {}
+    if meta.get("profile_axis") == "residence_time":
+        return None
+
+    extras = getattr(states, "_extras", []) or []
+    if "x" not in extras and not hasattr(states, "x"):
+        return None
+
     gas = meta.get("gas_solution") or converter.gas
     if gas is None:
         return None
 
     x_axis = _resolve_spatial_x_axis(states, meta, n_points)
+    if x_axis is None:
+        return None
     net = traj.networks.get(stage_id)
     fbs = _fbs_from_stage_network(net) if net is not None else None
 

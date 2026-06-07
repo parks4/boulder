@@ -1141,3 +1141,121 @@ class TestInterfaceReservoirSolve:
             f"Stream inlet MFC '{ic.inlet_mfc_id}' has no positive mass_flow_rate "
             f"after solve (got {mdot}). The upstream outlet mdot was not propagated."
         )
+
+
+def test_refresh_terminal_outlet_sink_copies_upstream_state():
+    """Legacy OutletSink shim: _refresh_terminal_sinks copies upstream reactor phase.
+
+    Remove with OutletSink deprecation.  SPRING_A4-style chains use inter-stage
+    stream-point diamonds (_update_stream_point) instead and do not hit this path.
+    """
+    from boulder.staged_solver import _refresh_terminal_sinks
+
+    conv = DualCanteraConverter(mechanism="gri30.yaml")
+    gas = conv.gas
+    gas.TPX = 1500.0, 101325.0, "N2:1"
+    reactor = ct.IdealGasConstPressureMoleReactor(gas, clone=True)
+    reactor.name = "reactor"
+    conv.reactors["reactor"] = reactor
+    conv.reactor_meta["reactor"] = {"mechanism": "gri30.yaml"}
+
+    sink_gas = conv._get_gas_for_mech("gri30.yaml")
+    sink_gas.TPX = 300.0, 101325.0, "N2:1"
+    sink = ct.Reservoir(sink_gas, clone=False)
+    sink.name = "outlet"
+    conv.reactors["outlet"] = sink
+    conv.reactor_meta["outlet"] = {"mechanism": "gri30.yaml"}
+
+    cfg = {
+        "nodes": [
+            {
+                "id": "reactor",
+                "type": "IdealGasConstPressureMoleReactor",
+                "properties": {},
+            },
+            {"id": "outlet", "type": "OutletSink", "properties": {}},
+        ],
+        "connections": [
+            {
+                "id": "reactor_to_outlet",
+                "type": "PressureController",
+                "source": "reactor",
+                "target": "outlet",
+                "properties": {},
+            },
+        ],
+    }
+    _refresh_terminal_sinks(conv, cfg)
+
+    assert abs(conv.reactors["outlet"].phase.T - 1500.0) < 1.0
+    outlet_props = next(n for n in cfg["nodes"] if n["id"] == "outlet")["properties"]
+    assert outlet_props.get("terminal_sink") is True
+    assert outlet_props.get("source_node") == "reactor"
+
+
+def test_terminal_outlet_sink_matches_upstream_reactor_after_solve():
+    """Legacy OutletSink: terminal sink thermo matches upstream after staged solve.
+
+    Remove with OutletSink deprecation.  Not exercised by SPRING_A4 (psr_outlet
+    stream-point diamond is refreshed via _update_stream_point).
+    """
+    cfg = normalize_config(
+        {
+            "phases": {"gas": {"mechanism": "gri30.yaml"}},
+            "settings": {
+                "solver": {"kind": "advance", "advance_time": 1e-6},
+            },
+            "network": [
+                {
+                    "id": "feed",
+                    "Reservoir": {
+                        "temperature": 300.0,
+                        "pressure": 101325.0,
+                        "composition": "N2:1",
+                    },
+                },
+                {
+                    "id": "reactor",
+                    "IdealGasConstPressureMoleReactor": {
+                        "volume": 1e-5,
+                        "initial": {
+                            "temperature": 1500.0,
+                            "pressure": 101325.0,
+                            "composition": "N2:1",
+                        },
+                    },
+                },
+                {
+                    "id": "feed_to_reactor",
+                    "MassFlowController": {"mass_flow_rate": 1e-4},
+                    "source": "feed",
+                    "target": "reactor",
+                },
+                {
+                    "id": "reactor_to_outlet",
+                    "PressureController": {
+                        "master": "feed_to_reactor",
+                        "pressure_coeff": 0.0,
+                    },
+                    "source": "reactor",
+                    "target": "outlet",
+                },
+                {"id": "outlet", "OutletSink": {}},
+            ],
+        }
+    )
+    conv = DualCanteraConverter(mechanism="gri30.yaml")
+    plan = build_stage_graph(cfg)
+    solve_staged(conv, plan, cfg)
+
+    T_reactor = float(conv.reactors["reactor"].phase.T)
+    T_sink = float(conv.reactors["outlet"].phase.T)
+    assert abs(T_sink - T_reactor) < 1.0, (
+        f"OutletSink T={T_sink:.2f} K differs from reactor T={T_reactor:.2f} K"
+    )
+
+    outlet_node = next(n for n in cfg["nodes"] if n["id"] == "outlet")
+    props = outlet_node.get("properties") or {}
+    assert props.get("terminal_sink") is True
+    assert props.get("source_node") == "reactor"
+    assert abs(float(props["temperature"]) - T_reactor) < 1.0

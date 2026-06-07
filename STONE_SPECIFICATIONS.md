@@ -411,6 +411,11 @@ Flow rates belong on edges, not on `Reservoir` nodes.
 
 ### `OutletSink`
 
+**Deprecated.** Prefer inter-stage **stream-point diamonds** (`{source}_outlet`
+Reservoirs synthesised by the staged solver and refreshed by
+`_update_stream_point`). `OutletSink` remains for legacy single-stage diagrams
+only and will be removed in a future STONE version.
+
 A visualization-only terminal node with no physical state:
 
 ```yaml

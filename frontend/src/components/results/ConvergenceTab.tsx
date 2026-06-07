@@ -58,7 +58,7 @@ export function ConvergenceTab({ data }: Props) {
       .map((s) => s.name);
   }, [series?.Y]);
 
-  if (!data.times.length && !series?.is_spatial) {
+  if (!data.times.length && !series?.is_spatial && !series?.is_residence) {
     return <p className="text-sm text-muted-foreground">No data yet.</p>;
   }
 
@@ -71,6 +71,14 @@ export function ConvergenceTab({ data }: Props) {
   }
 
   const gridcolor = theme === "dark" ? "#333" : "#e0e0e0";
+
+  if (series?.is_residence) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Physical residence-time profile is in the <strong>Plots</strong> tab.
+      </p>
+    );
+  }
 
   // --- Spatial reactor: FBS convergence plot ---
   if (series?.is_spatial) {
