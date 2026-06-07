@@ -47,6 +47,53 @@ def find_available_port(host: str, start_port: int, max_attempts: int = 10) -> i
     )
 
 
+def wait_for_port(
+    host: str,
+    port: int,
+    *,
+    timeout: float = 30.0,
+    poll_interval: float = 0.25,
+) -> bool:
+    """Return True once *port* is bound (server listening), False on timeout."""
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if is_port_in_use(host, port):
+            return True
+        time.sleep(poll_interval)
+    return False
+
+
+def schedule_browser_open(
+    url: str,
+    host: str,
+    port: int,
+    *,
+    timeout: float = 30.0,
+    poll_interval: float = 0.25,
+    verbose: bool = False,
+) -> None:
+    """Open *url* in a background thread once *host*:*port* is listening."""
+    import threading
+
+    def _open_when_ready() -> None:
+        if verbose:
+            print(f"⏳ Waiting for server at {url}...")
+        ready = wait_for_port(host, port, timeout=timeout, poll_interval=poll_interval)
+        if verbose:
+            if ready:
+                print(f"🌐 Opening browser at {url}")
+            else:
+                print(f"⚠️  Timed out waiting for {url}; opening browser anyway")
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    threading.Thread(target=_open_when_ready, daemon=True).start()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     dev_epilog = (
         "Developers:\n"
@@ -518,23 +565,14 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
         print("⚙️  Starting backend server...")
 
-        # Open browser to Vite dev server after waiting for it to be ready
+        # Open browser to Vite dev server once its port is bound
         if not args.no_open:
-            import time
-
-            def open_browser_delayed():
-                # Wait longer for Vite to fully start
-                print("⏳ Waiting for Vite dev server to be ready...")
-                time.sleep(5)  # Increased delay for Vite to fully start
-                vite_url = "http://localhost:5173"
-                print(f"🌐 Opening browser at {vite_url}")
-                try:
-                    webbrowser.open(vite_url)
-                except Exception:
-                    pass
-
-            browser_thread = threading.Thread(target=open_browser_delayed, daemon=True)
-            browser_thread.start()
+            schedule_browser_open(
+                "http://localhost:5173",
+                "127.0.0.1",
+                5173,
+                verbose=True,
+            )
 
         # Continue to start backend below (disable opening backend URL)
         args.no_open = True
@@ -663,11 +701,12 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
     url = f"http://{args.host}:{args.port}"
     if not args.no_open:
-        # Open browser slightly before server starts; browser will retry the connection
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
+        schedule_browser_open(
+            url,
+            args.host,
+            args.port,
+            verbose=args.verbose,
+        )
 
     if args.verbose and args.port != original_port:
         print(f"Boulder server will start on {url} (port changed from {original_port})")
