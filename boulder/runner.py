@@ -724,7 +724,13 @@ class BoulderRunner:
 
         self.build_viz_network(plan, trajectory)
 
+        import copy as _copy
+
         from .staged_solver import _sync_streams_into_config
+
+        # Snapshot the config BEFORE the stream-sync mutation so the generated
+        # --download script rebuilds the same stage plan as this live solve.
+        converter._download_config = _copy.deepcopy(self.config)
 
         _sync_streams_into_config(
             self.config, plan, stream_node_dicts, stream_conns_by_stage
