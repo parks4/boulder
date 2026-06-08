@@ -741,7 +741,7 @@ def solve_staged(
     if stream_reservoirs:
         for ic in plan.all_inter_connections:
             inlet_mfc = converter.connections.get(ic.inlet_mfc_id)
-            if inlet_mfc is not None and ic.id not in converter.connections:
+            if inlet_mfc is not None:
                 converter.connections[ic.id] = inlet_mfc
 
     already_built = set(converter.connections.keys()) | set(converter.walls.keys())
@@ -1148,10 +1148,10 @@ def _measure_outlet_mdot(
        where ``upstream.name == source_node_id``.
     2. Fall back to inlet MFCs (``downstream.name == source_node_id``) — at
        steady state, mass-in = mass-out.
-    3. If Cantera objects are not available (e.g. plugin-built composite reactors
-       that do not register a standard MFC), scan *stage_intra_connections* for
-       a connection with ``target == source_node_id`` that carries a
-       ``mass_flow_rate`` property.  This is the zero-Cantera-object fallback.
+    3. Use ``converter._mfc_flow_rates`` when a structural visualization network
+       has not initialized the Cantera flow-device getter.
+    4. Fall back to reactor metadata or explicit connection dicts for plugin-built
+       reactors that do not register a standard MFC in the current stage.
 
     Identity comparison (``is``) is attempted first; name comparison is used as
     a fallback for plugin-built composite reactors where the stored object may
@@ -1169,12 +1169,19 @@ def _measure_outlet_mdot(
             except AttributeError:
                 return False
 
+        def _conn_mdot(conn_id: str, conn: ct.MassFlowController) -> float:
+            try:
+                return float(conn.mass_flow_rate)
+            except ct.CanteraError:
+                rates = getattr(converter, "_mfc_flow_rates", {}) or {}
+                return float(rates.get(conn_id, 0.0) or 0.0)
+
         outlet_mdot = inlet_mdot = 0.0
-        for conn in converter.connections.values():
+        for conn_id, conn in converter.connections.items():
             if not isinstance(conn, ct.MassFlowController):
                 continue
             try:
-                mdot = float(conn.mass_flow_rate)
+                mdot = _conn_mdot(conn_id, conn)
                 if _is_source(conn.upstream):
                     outlet_mdot += mdot
                 elif _is_source(conn.downstream):
@@ -1185,6 +1192,15 @@ def _measure_outlet_mdot(
         cantera_mdot = outlet_mdot if outlet_mdot > 0.0 else inlet_mdot
         if cantera_mdot > 0.0:
             return cantera_mdot
+
+    meta = getattr(converter, "reactor_meta", {}).get(source_node_id) or {}
+    for key in ("mass_flow_rate", "mdot_in_kg_s", "mdot"):
+        try:
+            meta_mdot = float(meta.get(key, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if meta_mdot > 0.0:
+            return meta_mdot
 
     # Fallback: scan connection dicts for explicit mass_flow_rate targeting this node.
     if stage_intra_connections:
