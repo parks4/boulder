@@ -747,7 +747,10 @@ class DualCanteraConverter:
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         elif typ == "OutletSink":
-            # STONE v2 visual-only terminal node; modelled as a Reservoir sink.
+            # DEPRECATED: OutletSink is legacy single-stage diagram syntax.
+            # Prefer inter-stage stream-point diamonds (``{source}_outlet`` Reservoirs
+            # populated by :func:`boulder.staged_solver._update_stream_point`).
+            # Remove this branch when OutletSink is dropped from STONE v2.
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         else:
@@ -1307,6 +1310,25 @@ class DualCanteraConverter:
         for cb in getattr(self, "_schedule_callbacks", []):
             cb(network, t_start, t_end)
 
+    def _unique_non_reservoir_reactors(self) -> List[ct.ReactorBase]:
+        """Non-reservoir reactors, deduplicated by object identity.
+
+        Plugin post-build hooks (e.g. ``TubeFurnace`` outlet aliases) may
+        register the same :class:`~cantera.Reactor` under multiple dict keys.
+        A :class:`~cantera.ReactorNet` must list each reactor once.
+        """
+        seen: set[int] = set()
+        unique: List[ct.ReactorBase] = []
+        for reactor in self.reactors.values():
+            if isinstance(reactor, ct.Reservoir):
+                continue
+            obj_id = id(reactor)
+            if obj_id in seen:
+                continue
+            seen.add(obj_id)
+            unique.append(reactor)
+        return unique
+
     def build_viz_network(
         self,
         all_connections: List[Dict[str, Any]],
@@ -1394,7 +1416,7 @@ class DualCanteraConverter:
         # stay at 0 kg/s and make Sankey bands collapse.
         self.apply_flow_conservation()
 
-        non_res = [r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)]
+        non_res = self._unique_non_reservoir_reactors()
         viz_net = ct.ReactorNet(cast(Sequence[ct.Reactor], non_res))
         viz_net.advance(0.0)
         self.network = viz_net
@@ -1597,9 +1619,7 @@ class DualCanteraConverter:
 
         # Initialize data structures
         times: List[float] = []
-        reactor_list = [
-            r for r in self.reactors.values() if not isinstance(r, ct.Reservoir)
-        ]
+        reactor_list = self._unique_non_reservoir_reactors()
 
         # Per-reactor capture using SolutionArray
         reactors_series: Dict[str, Dict[str, Any]] = {}

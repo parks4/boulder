@@ -71,7 +71,7 @@ export function PlotsTab({ data }: Props) {
       .map((s) => s.name);
   }, [reactorSeries?.Y]);
 
-  if (!data.times.length && !reactorSeries?.is_spatial) {
+  if (!data.times.length && !reactorSeries?.is_spatial && !reactorSeries?.is_residence) {
     return <p className="text-sm text-muted-foreground">No data yet.</p>;
   }
 
@@ -85,17 +85,21 @@ export function PlotsTab({ data }: Props) {
 
   const gridcolor = theme === "dark" ? "#333" : "#e0e0e0";
 
-  // --- Spatial reactor: axial profiles ---
-  if (reactorSeries?.is_spatial) {
-    const xAxis = reactorSeries.x ?? [];
-    const xLabel = "Position (m)";
-    const spatialTraceMode = traceModeForSamples(xAxis.length);
+  // --- Axial (PFR) or residence-time (closed CSTR / torch) profiles ---
+  if (reactorSeries?.is_spatial || reactorSeries?.is_residence) {
+    const isResidence = Boolean(reactorSeries?.is_residence);
+    const xAxis = isResidence
+      ? (reactorSeries.t ?? [])
+      : (reactorSeries.x ?? []);
+    const xLabel = isResidence ? "Residence time (s)" : "Position (m)";
+    const coordLabel = isResidence ? "Residence time" : "Position";
+    const profileTraceMode = traceModeForSamples(xAxis.length);
 
     const moleFractionTraces = mainSpeciesMole.map((species) => ({
       x: xAxis,
       y: reactorSeries.X?.[species] ?? [],
       type: "scatter" as const,
-      mode: spatialTraceMode,
+      mode: profileTraceMode,
       name: species,
       line: { width: 2 },
     }));
@@ -104,7 +108,7 @@ export function PlotsTab({ data }: Props) {
       x: xAxis,
       y: reactorSeries.Y?.[species] ?? [],
       type: "scatter" as const,
-      mode: spatialTraceMode,
+      mode: profileTraceMode,
       name: species,
       line: { width: 2 },
     }));
@@ -119,14 +123,14 @@ export function PlotsTab({ data }: Props) {
                 x: xAxis,
                 y: reactorSeries.T?.map((t) => t - 273.15) ?? [],
                 type: "scatter",
-                mode: spatialTraceMode,
+                mode: profileTraceMode,
                 name: selectedReactorId,
                 line: { width: 2 },
               },
             ]}
             layout={{
               ...layoutDefaults,
-              title: { text: "Temperature vs Position", font: { size: 14 } },
+              title: { text: `Temperature vs ${coordLabel}`, font: { size: 14 } },
               xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },
               yaxis: { title: { text: "Temperature (°C)", font: { size: 12 } }, gridcolor },
             }}
@@ -144,14 +148,14 @@ export function PlotsTab({ data }: Props) {
                 x: xAxis,
                 y: reactorSeries.P ?? [],
                 type: "scatter",
-                mode: spatialTraceMode,
+                mode: profileTraceMode,
                 name: selectedReactorId,
                 line: { width: 2 },
               },
             ]}
             layout={{
               ...layoutDefaults,
-              title: { text: "Pressure vs Position", font: { size: 14 } },
+              title: { text: `Pressure vs ${coordLabel}`, font: { size: 14 } },
               xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },
               yaxis: { title: { text: "Pressure (Pa)", font: { size: 12 } }, gridcolor },
             }}
@@ -169,7 +173,7 @@ export function PlotsTab({ data }: Props) {
               layout={{
                 ...layoutDefaults,
                 title: {
-                  text: "Mole fraction vs Position (main species)",
+                  text: `Mole fraction vs ${coordLabel} (main species)`,
                   font: { size: 14 },
                 },
                 xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },
@@ -194,7 +198,7 @@ export function PlotsTab({ data }: Props) {
               layout={{
                 ...layoutDefaults,
                 title: {
-                  text: "Mass fraction vs Position (main species)",
+                  text: `Mass fraction vs ${coordLabel} (main species)`,
                   font: { size: 14 },
                 },
                 xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },

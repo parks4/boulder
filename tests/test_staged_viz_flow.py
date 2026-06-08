@@ -21,6 +21,7 @@ remaining unset MFC against the full cross-stage topology, including:
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Dict
 
 import cantera as ct
@@ -751,3 +752,28 @@ def test_interface_reservoirs_t_matches_upstream_after_solve() -> None:
     assert abs(T_iface - T_source) < 1.0, (
         f"Interface reservoir T={T_iface:.2f} K differs from source T={T_source:.2f} K"
     )
+
+
+def test_build_viz_network_deduplicates_outlet_alias_reactors() -> None:
+    """build_viz_network lists each reactor once when outlet aliases share an object.
+
+    TubeFurnace post-build registers ``{id}_outlet`` as the same reactor instance.
+    ReactorNet must not receive duplicate references (Cantera 3.x warns; 3.2+ error).
+    """
+    conv = DualCanteraConverter(mechanism="gri30.yaml")
+    gas = conv.gas
+    gas.TPX = 300, ct.one_atm, "N2:1"
+    reactor = ct.IdealGasConstPressureMoleReactor(gas, clone=True)
+    reactor.name = "tube_furnace"
+    conv.reactors["tube_furnace"] = reactor
+    conv.reactors["tube_furnace_outlet"] = reactor
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        viz_net = conv.build_viz_network([])
+
+    assert len(viz_net.reactors) == 1
+    shared_solution_warnings = [
+        w for w in caught if "same Solution object" in str(w.message)
+    ]
+    assert shared_solution_warnings == []

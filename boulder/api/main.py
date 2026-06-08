@@ -155,21 +155,30 @@ def create_app() -> FastAPI:
     # Serve React static build in production (if dist/ exists)
     frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
     if frontend_dist.is_dir():
-        # Serve index.html for all non-API routes (SPA fallback)
+        from fastapi import HTTPException
         from fastapi.responses import FileResponse
+
+        # Mount hashed JS/CSS chunks BEFORE the SPA catch-all.  If the catch-all
+        # runs first, a stale browser bundle requesting a removed chunk (e.g.
+        # /assets/SankeyTab-oldhash.js) gets index.html (text/html) instead of
+        # 404, which breaks dynamic import with a MIME-type error.
+        assets_dir = frontend_dist / "assets"
+        if assets_dir.is_dir():
+            app.mount(
+                "/assets",
+                StaticFiles(directory=str(assets_dir)),
+                name="assets",
+            )
 
         @app.get("/{full_path:path}")
         async def serve_spa(full_path: str) -> FileResponse:
+            if full_path.startswith("assets/"):
+                raise HTTPException(status_code=404, detail="Asset not found")
             file_path = frontend_dist / full_path
             if file_path.is_file():
                 return FileResponse(file_path)
             return FileResponse(frontend_dist / "index.html")
 
-        app.mount(
-            "/assets",
-            StaticFiles(directory=str(frontend_dist / "assets")),
-            name="assets",
-        )
         logger.info(f"Serving React frontend from {frontend_dist}")
 
     return app
