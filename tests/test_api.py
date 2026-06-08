@@ -794,9 +794,7 @@ class TestStaticFrontend:
         """Stale hashed chunks must 404; returning index.html breaks dynamic import MIME checks."""
         from pathlib import Path
 
-        dist = (
-            Path(__file__).resolve().parent.parent / "frontend" / "dist" / "assets"
-        )
+        dist = Path(__file__).resolve().parent.parent / "frontend" / "dist" / "assets"
         if not dist.is_dir():
             pytest.skip("frontend dist/ not built")
 

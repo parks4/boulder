@@ -372,6 +372,23 @@ Each reactor kind defines one sizing basis. Authoring multiple sizing fields on 
 (e.g., both `volume:` and `t_res_s:`) is invalid unless the kind schema explicitly allows the
 combination.
 
+#### `t_res_s:` — residence-time sizing (PSR / well-mixed reactors)
+
+When a reactor node declares `t_res_s:` (seconds) and no explicit `volume:`, Boulder sets volume
+after mass-flow conservation at build time:
+
+```text
+V = t_res_s × ṁ_in / ρ
+```
+
+where `ṁ_in` is the sum of resolved incoming `MassFlowController` rates (kg/s) and `ρ` is the
+reactor gas density at sizing time. Hydraulic residence time at startup is therefore approximately
+`t_res_s`.
+
+PSR / mixing stages should use `solver.kind: advance_to_steady_state` (the default). Do not
+duplicate `t_res_s` as `advance_time` on the stage — `advance_time` is an integration horizon, not
+a residence-time substitute (see Physics Rules).
+
 ### `clone:` — phase sharing between reactors
 
 By default Boulder creates an independent copy of the Cantera `Solution` object for each reactor
@@ -583,7 +600,9 @@ ______________________________________________________________________
 
 ## 9. Physics Rules
 
-- `advance_time:` is an integration horizon, not a residence time.
+- `advance_time:` is an integration horizon, not a residence time. Size PSR volume with `t_res_s:`
+  on the reactor node; integrate open PSR stages to steady state unless you deliberately need a
+  transient horizon.
 - `composition:` means mole fractions (`X`), normalized by Cantera. `mass_composition:` means mass
   fractions (`Y`). They are mutually exclusive.
 - Use unit-bearing literals: `300 K`, `1 bar`, `1 L`, `0.1 kg/s`, `1 ms`.
