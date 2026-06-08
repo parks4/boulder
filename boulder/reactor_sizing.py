@@ -27,7 +27,7 @@ def resolve_volume_from_t_res_s(
     t_res_s: float,
     mdot_in: float,
 ) -> float:
-    """Return reactor volume [m³] so that τ ≈ t_res_s at the current density.
+    r"""Return reactor volume [m³] so that τ ≈ t_res_s at the current density.
 
     Uses :math:`V = t_{res} \\dot m / \\rho` with :math:`\\rho` from
     ``reactor.phase.density`` at sizing time.

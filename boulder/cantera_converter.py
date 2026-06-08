@@ -1310,7 +1310,7 @@ class DualCanteraConverter:
         for cb in getattr(self, "_schedule_callbacks", []):
             cb(network, t_start, t_end)
 
-    def _unique_non_reservoir_reactors(self) -> List[ct.Reactor]:
+    def _unique_non_reservoir_reactors(self) -> List[ct.ReactorBase]:
         """Non-reservoir reactors, deduplicated by object identity.
 
         Plugin post-build hooks (e.g. ``TubeFurnace`` outlet aliases) may
@@ -1318,7 +1318,7 @@ class DualCanteraConverter:
         A :class:`~cantera.ReactorNet` must list each reactor once.
         """
         seen: set[int] = set()
-        unique: List[ct.Reactor] = []
+        unique: List[ct.ReactorBase] = []
         for reactor in self.reactors.values():
             if isinstance(reactor, ct.Reservoir):
                 continue

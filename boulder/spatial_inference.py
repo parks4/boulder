@@ -46,9 +46,9 @@ def _resolve_spatial_x_axis(
         return np.asarray(custom, dtype=float)
     if isinstance(custom, np.ndarray) and int(custom.size) == n_points:
         return custom.astype(float)
-    extras = getattr(states, "_extras", []) or []
-    if "x" in extras or hasattr(states, "x"):
-        return np.asarray(states.x, dtype=float)
+    x_axis = getattr(states, "x", None)
+    if x_axis is not None:
+        return np.asarray(x_axis, dtype=float)
     return None
 
 
