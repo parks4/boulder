@@ -653,6 +653,7 @@ def solve_staged(
             outlet_gas = _extract_gas_state(source_reactor, stage.mechanism, converter)
 
             # Apply mechanism switch if requested
+            outlet_mechanism = stage.mechanism  # mechanism for the stream-point reservoir
             if ic.mechanism_switch is not None:
                 target_stage = next(
                     (s for s in plan.ordered_stages if s.id == ic.target_stage), None
@@ -669,12 +670,15 @@ def solve_staged(
                     converter,
                 )
                 mapping_losses = losses
+                # After a mechanism switch the outlet_gas is in the target mechanism;
+                # the stream-point reservoir must be built with matching species count.
+                outlet_mechanism = target_stage.mechanism
 
             if stream_reservoirs:
                 _update_stream_point(
                     ic,
                     outlet_gas,
-                    stage.mechanism,
+                    outlet_mechanism,
                     converter,
                     stream_conns_by_stage.get(ic.target_stage, []),
                     stage_intra_connections=list(stage.intra_connections),
