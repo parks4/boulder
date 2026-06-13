@@ -1,4 +1,5 @@
 import Plot from "react-plotly.js";
+import { mapSankeyNodeColors } from "@/lib/cytoscapeNodeColor";
 import { useThemeStore } from "@/stores/themeStore";
 import type { SimulationResults } from "@/types/simulation";
 
@@ -71,6 +72,13 @@ export function SankeyTab({ results }: Props) {
   if (linkLabels) linkTrace.label = linkLabels;
   if (linkColors) linkTrace.color = linkColors;
 
+  const nodeColors = mapSankeyNodeColors(
+    results.sankey_nodes,
+    results.reactor_reports as Record<string, unknown> | undefined,
+    results.updated_nodes,
+    theme,
+  );
+
   return (
     <Plot
       data={[
@@ -78,6 +86,7 @@ export function SankeyTab({ results }: Props) {
           type: "sankey" as const,
           node: {
             label: results.sankey_nodes,
+            color: nodeColors,
             pad: 15,
             thickness: 20,
           },
