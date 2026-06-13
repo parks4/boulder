@@ -21,17 +21,10 @@ const GRAPH_HEIGHT_STORAGE_KEY = "boulder-graph-height";
 
 // Lane layout constants — used by alignLayoutLanes.
 // "main_flow" is the horizontal baseline; all other lanes are placed at a
-// fixed Y offset relative to that baseline (negative = above in screen space
-// after flipLayoutVertical has mirrored the dagre output).
+// Y offset defined in each node's metadata.layout_y_offset (negative = above
+// in screen space after flipLayoutVertical has mirrored the dagre output).
 const LAYOUT_LANE_MAIN = "main_flow";
-const LAYOUT_LANE_OFFSETS: Record<string, number> = {
-  [LAYOUT_LANE_MAIN]: 0,
-};
-const LAYOUT_LANE_DEFAULT_OFFSET = -160; // non-main lanes → one row above
-// Ambient-loss reservoir nodes (synthesised by unfolders as "{reactor_id}_ambient")
-// are snapped below the main flow line.  The node's own reactor is identified
-// by stripping the "_ambient" suffix and looking it up in the main_flow set.
-const LAYOUT_AMBIENT_OFFSET = +160;  // below main flow (positive Y = down)
+const LAYOUT_LANE_DEFAULT_OFFSET = -160; // fallback when layout_y_offset absent
 
 function getMaxGraphHeight(): number {
   if (typeof window === "undefined") return 900;
@@ -160,6 +153,10 @@ export function ReactorGraph() {
 
     // --- emit config nodes ---
     for (const node of config.nodes) {
+      // Composite placeholder nodes (unfolded into children) are hidden —
+      // showing them as orphaned circles would distort compound bounding boxes.
+      if (node.metadata?.skip_viz) continue;
+
       const isStreamPoint =
         Boolean(node.properties?.stream_point) ||
         Boolean(node.metadata?.stream_point);
@@ -315,6 +312,25 @@ export function ReactorGraph() {
         style: { shape: "octagon" },
       },
       {
+        // PFR-derived reactor types (tube-like, axial-flow) use a wide
+        // horizontal rectangle to visually distinguish them from stirred
+        // reactors (ellipse) and boundary nodes (octagon).  All types that
+        // inherit from PFR in Bloc are listed here; add new ones as needed.
+        selector: [
+          "RefractoryReactor",
+          "TubeFurnace",
+          "PFRHomogeneousShell",
+          "PFRThinShell",
+          "PFRGasTemperatureProfile",
+          "PFRWallProfile",
+        ].map((t) => `[type='${t}']`).join(", "),
+        style: {
+          shape: "rectangle",
+          width: "120px",
+          height: "48px",
+        },
+      },
+      {
         // Stream-point Reservoirs (P&ID diamonds at stage boundaries).
         // [?stream_point] matches nodes where the key is present (and truthy),
         // which is unambiguous — only set for stream-point nodes.
@@ -338,19 +354,31 @@ export function ReactorGraph() {
         },
       },
       {
-        // StreamConnector: display-only outlet edge from source reactor to
-        // stream-point diamond.  No Cantera object; shown as a thin dashed
-        // line with no label so it visually bridges the stage boundary without
-        // implying a flow device.
+        // StreamConnector: display-only material stream edge from source reactor
+        // to stream-point diamond.  Solid line per P&ID convention for material
+        // streams.  No label to avoid clutter at stage boundaries.
         selector: "[type='StreamConnector']",
+        style: {
+          width: 2,
+          "line-style": "solid",
+          "target-arrow-shape": "triangle",
+          label: "",
+          "line-color": isDark ? "#888" : "#999",
+          "target-arrow-color": isDark ? "#888" : "#999",
+        },
+      },
+      {
+        // Wall: energy/heat stream per P&ID convention — dashed line, orange
+        // tint to distinguish from material streams.  Arrow points from the
+        // process side (reactor) toward the heat sink (ambient).
+        selector: "[type='Wall']",
         style: {
           width: 1.5,
           "line-style": "dashed",
-          "line-dash-pattern": [6, 4],
+          "line-dash-pattern": [8, 4],
           "target-arrow-shape": "triangle",
-          label: "",
-          "line-color": isDark ? "#666" : "#bbb",
-          "target-arrow-color": isDark ? "#666" : "#bbb",
+          "line-color": isDark ? "#e07b39" : "#c0622a",
+          "target-arrow-color": isDark ? "#e07b39" : "#c0622a",
         },
       },
       {
@@ -400,12 +428,33 @@ export function ReactorGraph() {
   // a main_flow lane determines the X anchor.
   const alignLayoutLanes = useCallback((cy: Core): void => {
     // -------------------------------------------------------------------------
-    // Step 0: Build helper maps from the config.
+    // Step 0: Build helper maps from the config metadata.
+    //
+    // layout_lane:     swim-lane id ("main_flow" = horizontal baseline).
+    // layout_y_offset: Y offset (px) relative to mainFlowY; negative = above.
+    //                  Falls back to LAYOUT_LANE_DEFAULT_OFFSET when absent.
+    // layout_x_offset: X offset (px) relative to the downstream main-flow node.
+    //                  Falls back to 0 when absent.
+    // layout_order:    integer rank override for main-flow node ordering.
+    //                  When absent, rank is determined by Kahn's topo-sort.
     // -------------------------------------------------------------------------
     const nodeToLane = new Map<string, string>();
+    const nodeToYOffset = new Map<string, number>();
+    const nodeToXOffset = new Map<string, number>();
+    const nodeToOrder = new Map<string, number>();
+    const nodeToAnchor = new Map<string, string>(); // explicit layout_anchor override
     for (const node of config.nodes) {
+      if (node.metadata?.skip_viz) continue; // placeholder nodes are not rendered
       const lane = String(node.metadata?.layout_lane ?? "").trim();
       if (lane) nodeToLane.set(node.id, lane);
+      const yOff = node.metadata?.layout_y_offset;
+      if (typeof yOff === "number" && Number.isFinite(yOff)) nodeToYOffset.set(node.id, yOff);
+      const xOff = node.metadata?.layout_x_offset;
+      if (typeof xOff === "number" && Number.isFinite(xOff)) nodeToXOffset.set(node.id, xOff);
+      const ord = node.metadata?.layout_order;
+      if (typeof ord === "number" && Number.isFinite(ord)) nodeToOrder.set(node.id, ord);
+      const anchor = node.metadata?.layout_anchor;
+      if (typeof anchor === "string" && anchor.trim()) nodeToAnchor.set(node.id, anchor.trim());
     }
     if (nodeToLane.size === 0) return;
 
@@ -444,7 +493,7 @@ export function ReactorGraph() {
     };
     for (const conn of config.connections) {
       addEdge(conn.source, conn.target);
-      // "_outlet" alias: "tmr_outlet" → source="tmr", target="cgr_t1"
+      // "_outlet" alias: e.g. "reactor_outlet" → source="reactor", target="next_reactor"
       if (conn.source.endsWith("_outlet")) {
         addEdge(conn.source.slice(0, -"_outlet".length), conn.target);
       }
@@ -453,32 +502,38 @@ export function ReactorGraph() {
       addEdge(e.source().id(), e.target().id());
     });
 
-    // Kahn's topological sort (BFS).
+    // Kahn's topological sort (BFS) — nodes with layout_order metadata are
+    // sorted by that value and interleaved with topo-sort for the rest.
     const order: string[] = [];
     const queue: string[] = [];
     for (const id of mainFlowIds) {
       if ((inDegree.get(id) ?? 0) === 0) queue.push(id);
     }
+    // Sort the initial zero-in-degree set by layout_order if provided.
+    queue.sort((a, b) => (nodeToOrder.get(a) ?? Infinity) - (nodeToOrder.get(b) ?? Infinity));
     while (queue.length > 0) {
       const cur = queue.shift()!;
       order.push(cur);
+      const nextBatch: string[] = [];
       for (const next of outEdges.get(cur) ?? []) {
         const deg = (inDegree.get(next) ?? 0) - 1;
         inDegree.set(next, deg);
-        if (deg === 0) queue.push(next);
+        if (deg === 0) nextBatch.push(next);
       }
+      // Respect layout_order within each BFS level.
+      nextBatch.sort((a, b) => (nodeToOrder.get(a) ?? Infinity) - (nodeToOrder.get(b) ?? Infinity));
+      queue.push(...nextBatch);
     }
-    // Any remaining (cycles / unreachable) appended in stable order.
-    for (const id of mainFlowIds) {
-      if (!order.includes(id)) order.push(id);
-    }
+    // Any remaining (cycles / unreachable) appended in layout_order then stable order.
+    const remaining = [...mainFlowIds].filter((id) => !order.includes(id));
+    remaining.sort((a, b) => (nodeToOrder.get(a) ?? Infinity) - (nodeToOrder.get(b) ?? Infinity));
+    order.push(...remaining);
 
     // Assign evenly-spaced X positions starting from a fixed left anchor.
     // cy.fit() called after this function centres the viewport on the graph,
     // so absolute coordinates don't matter — we just need consistent spacing.
     const X_STEP = 320;   // horizontal spacing between main-flow columns [px]
-    // Left padding: accounts for unlabelled siblings placed at X_ANCHOR - N*SIBLING_X_OFFSET
-    // and for the compound group label/border.  300px keeps everything in positive coords.
+    // Left padding keeps everything in positive coords.
     const X_ANCHOR = 300;
     const xForMainNode = new Map<string, number>();
     order.forEach((id, idx) => {
@@ -510,49 +565,6 @@ export function ReactorGraph() {
       if (n.data("isGroup") || !mainFlowIds.has(n.id())) return;
       const x = xForMainNode.get(n.id()) ?? n.position().x;
       n.position({ x, y: mainFlowY });
-    });
-
-    // -------------------------------------------------------------------------
-    // Step 3.5: Nodes with NO layout_lane that reside in a group containing at
-    //           least one main_flow node get snapped to mainFlowY.  This prevents
-    //           unlabed sibling nodes (e.g. Reservoir "feed" in torch_stage) from
-    //           blowing out the group bounding box vertically.
-    // -------------------------------------------------------------------------
-    // Build a set of group ids that contain at least one main_flow node.
-    const mainFlowGroupIds = new Set<string>();
-    cy.nodes().forEach((n) => {
-      if (!n.data("isGroup") && mainFlowIds.has(n.id())) {
-        const parentId = n.data("parent");
-        if (parentId) mainFlowGroupIds.add(parentId);
-      }
-    });
-    // For unlabelled siblings in a main-flow group, we space them to the LEFT
-    // of the main-flow node(s) in the same group so they don't overlap.
-    // siblingOffset counts how many unlabelled siblings already placed, giving
-    // each a distinct X = mainFlowX - (siblingOffset+1) * SIBLING_X_OFFSET.
-    const SIBLING_X_OFFSET = 80; // [px] how far left each unlabelled sibling goes
-    // Track how many unlabelled siblings have been placed per group.
-    const siblingCountPerGroup = new Map<string, number>();
-    cy.nodes().forEach((n) => {
-      if (n.data("isGroup")) return;
-      if (nodeToLane.has(n.id())) return; // already handled by lane logic
-      if (n.id().endsWith("_ambient")) return; // handled in step 5
-      if (n.data("stream_point")) return; // stream-point outlets handled separately
-      const parentId = n.data("parent");
-      if (parentId && mainFlowGroupIds.has(parentId)) {
-        // Find the main_flow sibling X in this group.
-        let mainSiblingX: number | undefined;
-        cy.getElementById(parentId).children().forEach((sibling) => {
-          if (mainFlowIds.has(sibling.id())) {
-            mainSiblingX = xForMainNode.get(sibling.id()) ?? sibling.position().x;
-          }
-        });
-        if (mainSiblingX === undefined) return;
-        const count = siblingCountPerGroup.get(parentId) ?? 0;
-        siblingCountPerGroup.set(parentId, count + 1);
-        // Stagger siblings to the left of the main-flow node.
-        n.position({ x: mainSiblingX - (count + 1) * SIBLING_X_OFFSET, y: mainFlowY });
-      }
     });
 
     // -------------------------------------------------------------------------
@@ -603,44 +615,64 @@ export function ReactorGraph() {
     });
 
     // -------------------------------------------------------------------------
-    // Step 4: Non-main-flow nodes (e.g. injection feeds) → placed directly
-    //         above their downstream main_flow target.
+    // Step 4: Non-main-flow nodes → placed relative to their downstream
+    //         main_flow target using per-node metadata offsets.
+    //
+    //   layout_anchor:   explicit id of a main_flow node to anchor to (highest priority).
+    //   layout_y_offset: Y distance from mainFlowY (px). Default: LAYOUT_LANE_DEFAULT_OFFSET.
+    //   layout_x_offset: X shift from the target node's X (px). Default: 0.
+    //
+    // Also handles nodes without a layout_lane that carry layout_y_offset
+    // metadata (e.g. synthesised side-branch reservoirs injected by plugin builders).
     // -------------------------------------------------------------------------
     const nonMainToTarget = new Map<string, string>();
+    // Honour explicit layout_anchor overrides first.
+    nodeToAnchor.forEach((anchorId, nodeId) => {
+      nonMainToTarget.set(nodeId, anchorId);
+    });
     for (const conn of config.connections) {
       const srcLane = nodeToLane.get(conn.source);
       const tgtLane = nodeToLane.get(conn.target);
       if (srcLane && srcLane !== LAYOUT_LANE_MAIN && tgtLane === LAYOUT_LANE_MAIN) {
         nonMainToTarget.set(conn.source, conn.target);
       }
+      // Also map un-laned nodes that have an explicit layout_y_offset to their
+      // nearest main-flow connection partner (source or target).
+      if (nodeToYOffset.has(conn.source) && !nodeToAnchor.has(conn.source)) {
+        if (!nodeToLane.has(conn.source) && mainFlowIds.has(conn.target)) {
+          if (!nonMainToTarget.has(conn.source)) {
+            nonMainToTarget.set(conn.source, conn.target);
+          }
+        }
+      }
+      if (nodeToYOffset.has(conn.target) && !nodeToAnchor.has(conn.target)) {
+        if (!nodeToLane.has(conn.target) && mainFlowIds.has(conn.source)) {
+          if (!nonMainToTarget.has(conn.target)) {
+            nonMainToTarget.set(conn.target, conn.source);
+          }
+        }
+      }
     }
     cy.nodes().forEach((n) => {
       if (n.data("isGroup")) return;
-      const lane = nodeToLane.get(n.id());
-      if (!lane || lane === LAYOUT_LANE_MAIN) return;
-      const offset =
-        lane in LAYOUT_LANE_OFFSETS ? LAYOUT_LANE_OFFSETS[lane] : LAYOUT_LANE_DEFAULT_OFFSET;
-      const targetId = nonMainToTarget.get(n.id());
+      const id = n.id();
+      const lane = nodeToLane.get(id);
+      const hasYOffset = nodeToYOffset.has(id);
+      // Skip main-flow nodes and nodes with neither a non-main lane nor a y-offset.
+      if (lane === LAYOUT_LANE_MAIN) return;
+      if (!lane && !hasYOffset) return;
+      if (n.data("stream_point")) return; // stream-point outlets handled in Step 3.6
+      const yOffset = nodeToYOffset.has(id) ? nodeToYOffset.get(id)! : LAYOUT_LANE_DEFAULT_OFFSET;
+      const xOffset = nodeToXOffset.get(id) ?? 0;
+      const targetId = nonMainToTarget.get(id);
       const targetX = targetId
         ? (xForMainNode.get(targetId) ?? cy.getElementById(targetId).position().x)
         : n.position().x;
-      n.position({ x: targetX, y: mainFlowY + offset });
+      n.position({ x: targetX + xOffset, y: mainFlowY + yOffset });
     });
 
     // -------------------------------------------------------------------------
-    // Step 5: Ambient-loss reservoirs → placed below their parent reactor.
-    // -------------------------------------------------------------------------
-    cy.nodes().forEach((n) => {
-      if (n.data("isGroup")) return;
-      const id = n.id();
-      if (!id.endsWith("_ambient") || nodeToLane.has(id)) return;
-      const parentId = id.slice(0, -"_ambient".length);
-      const parentX = xForMainNode.get(parentId) ?? n.position().x;
-      n.position({ x: parentX, y: mainFlowY + LAYOUT_AMBIENT_OFFSET });
-    });
-
-    // -------------------------------------------------------------------------
-    // Step 6: Let Cytoscape auto-refit compound (group) nodes.
+    // Step 5: Let Cytoscape auto-refit compound (group) nodes.
     //
     //         Compound node position in Cytoscape is *computed* from the
     //         bounding box of its children — calling .position() on a compound
@@ -731,7 +763,19 @@ export function ReactorGraph() {
 
     cy.on("tap", "node", (e: EventObject) => {
       const data = e.target.data();
-      if (data.isGroup) return;
+      if (data.isGroup) {
+        // Compound group box tapped — select the group so the Plots tab
+        // can show the stage-level aggregated profile (e.g. full CGR).
+        // Use the plain stage name (strip "group:" prefix) as the id so
+        // it aligns with reactors_series keys produced by the backend.
+        const rawId = String(data.id ?? "");
+        const stageId = rawId.startsWith("group:") ? rawId.slice("group:".length) : rawId;
+        setSelectedElement({
+          type: "node",
+          data: { ...data, id: stageId, isGroup: true, label: stageId },
+        });
+        return;
+      }
       const nodeId = String(data.id);
       const now = Date.now();
       const last = lastTappedRef.current;

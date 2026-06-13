@@ -182,11 +182,13 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     node_to_group: Dict[str, str] = {}
     for node in nodes:
         props = node.get("properties") or {}
+        # STONE normalization places stage membership in the top-level node["group"];
+        # Boulder's own builder also writes it into properties.group.  Accept either.
         group = (
             str(props.get("group", ""))
             if props.get("group") is not None
             else str(props.get("group_name", ""))
-        ).strip()
+        ).strip() or str(node.get("group", "")).strip()
         if group:
             node_to_group[node["id"]] = group
 
@@ -231,9 +233,12 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
         parent_id = f"group:{group_name}"
         if parent_id not in created_groups:
             created_groups.add(parent_id)
-            elements.append(
-                {"data": {"id": parent_id, "label": group_name, "isGroup": True}}
-            )
+            group_data: Dict[str, Any] = {
+                "id": parent_id,
+                "label": group_name,
+                "isGroup": True,
+            }
+            elements.append({"data": group_data})
 
     # -----------------------------------------------------------------------
     # Emit nodes from config
@@ -245,7 +250,7 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             str(properties.get("group", ""))
             if properties.get("group") is not None
             else str(properties.get("group_name", ""))
-        ).strip()
+        ).strip() or str(node.get("group", "")).strip()
 
         if group_name:
             _ensure_group(group_name)
@@ -285,6 +290,9 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             "target_node",
             "target_nodes",
             "original_connection_ids",
+            "layout_lane",
+            "layout_x_offset",
+            "layout_y_offset",
         ):
             if _meta_key in _node_meta and _meta_key not in node_data:
                 node_data[_meta_key] = _node_meta[_meta_key]

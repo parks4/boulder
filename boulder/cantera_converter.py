@@ -140,21 +140,38 @@ def _select_network_class_for_stage(
     stage_id: Optional[str],
     stage_nodes: List[Dict[str, Any]],
     non_res_ids: List[str],
+    stage_network_class: Optional[str] = None,
 ) -> Tuple[Any, Dict[str, Any]]:
     """Pick the ReactorNet class for a single stage.
 
     Precedence (high -> low):
 
+    0. Stage-level ``network_class`` dotted-path (set on the group config,
+       e.g. by a composite-reactor unfolder).  When present, this takes top
+       precedence and the per-reactor conflict scan is **skipped** entirely,
+       allowing multiple child reactors with their own ``NETWORK_CLASS`` to
+       coexist inside one composite stage.
     1. Per-node YAML ``network_class`` dotted-path override.
     2. ``reactor.NETWORK_CLASS`` class attribute.
     3. :class:`cantera.ReactorNet`.
+
+    Parameters
+    ----------
+    stage_network_class :
+        Optional dotted-path string from the stage/group config.  When not
+        ``None`` it bypasses the per-reactor scan entirely.
 
     Raises
     ------
     ValueError
         If two reactors in the same stage resolve to different non-default
-        classes.  Previously the first-wins silent fallback hid misconfiguration.
+        classes (only when *stage_network_class* is ``None``).
     """
+    # Precedence 0: stage-level override — skips all per-reactor conflict logic.
+    if stage_network_class:
+        resolved_class = resolve_dotted_path(str(stage_network_class))
+        return resolved_class, {}
+
     node_by_id: Dict[str, Dict[str, Any]] = {n["id"]: n for n in stage_nodes}
 
     resolved: Optional[Any] = None
@@ -1174,6 +1191,8 @@ class DualCanteraConverter:
         ]
 
         # Select ReactorNet class with precedence:
+        #   0. Stage-level network_class (set on the group config by a composite unfolder) —
+        #      takes top precedence and disables per-reactor conflict scan.
         #   1. Per-node YAML ``network_class`` dotted-path override.
         #   2. ``reactor.NETWORK_CLASS`` class attribute set by the plugin.
         #   3. ``ct.ReactorNet`` default.
@@ -1181,8 +1200,11 @@ class DualCanteraConverter:
         # If two reactors in the same stage resolve to different non-default
         # network classes, raise an error (previously the first-wins silent
         # fallback hid a latent misconfiguration).
+        stage_net_cls: Optional[str] = (
+            stage.network_class if stage is not None else None
+        )
         ReactorNetClass, net_kw = _select_network_class_for_stage(
-            self, stage_id, stage_nodes, non_res_ids
+            self, stage_id, stage_nodes, non_res_ids, stage_network_class=stage_net_cls
         )
 
         rseq = [self.reactors[rid] for rid in non_res_ids]
@@ -1690,6 +1712,14 @@ class DualCanteraConverter:
                     _series = try_infer_spatial_reactor_series(self, reactor_id)
                 if _series is not None:
                     reactors_series[reactor_id] = _series
+                    # If this reactor is the representative of a composite group
+                    # (e.g. CGR placeholder), also register under the group/stage
+                    # id so clicking the compound box shows the full profile.
+                    _group_series_id = self.reactor_meta.get(reactor_id, {}).get(
+                        "group_series_id"
+                    )
+                    if _group_series_id:
+                        reactors_series[_group_series_id] = _series
 
                 # PSR reactors: if the plugin flagged this reactor as a PSR,
                 # propagate the flag so the frontend can adapt its visualisation.
@@ -1841,6 +1871,23 @@ class DualCanteraConverter:
         self, times: List[float], reactors_series: Dict[str, Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Finalize simulation results with post-processing."""
+        # Apply spatial_series_fn overrides and group_series_id aliases.
+        # These may not have been applied yet when called from the streaming
+        # simulation path.
+        for reactor_id in list(reactors_series.keys()):
+            _meta = self.reactor_meta.get(reactor_id, {})
+            _spatial_fn = _meta.get("spatial_series_fn")
+            if _spatial_fn is not None:
+                try:
+                    _series = _spatial_fn()
+                    if _series is not None:
+                        reactors_series[reactor_id] = _series
+                        _group_series_id = _meta.get("group_series_id")
+                        if _group_series_id:
+                            reactors_series[_group_series_id] = _series
+                except Exception:
+                    pass
+
         results: Dict[str, Any] = {
             "time": times,
             "reactors": reactors_series,
