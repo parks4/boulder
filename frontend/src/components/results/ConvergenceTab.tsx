@@ -70,6 +70,15 @@ export function ConvergenceTab({ data }: Props) {
     );
   }
 
+  // Group (stage) selected — convergence lives on individual segments.
+  if (selectedElement?.data.isGroup) {
+    return (
+      <p className="text-sm text-muted-foreground italic">
+        Click on individual segments for convergence.
+      </p>
+    );
+  }
+
   const gridcolor = theme === "dark" ? "#333" : "#e0e0e0";
 
   if (series?.is_residence) {

@@ -151,6 +151,7 @@ _CONN_STANDARD_FIELDS: frozenset = frozenset(
         "logical",
         "description",
         "label",
+        "port",  # composite-node port reference (ASPEN/DWSIM inlet/outlet naming)
     }
 )
 
@@ -991,6 +992,8 @@ def _process_stage_items(
                     conn["metadata"] = item["metadata"]
                 if "mass_flow_rate" in item and "mass_flow_rate" not in conn_props:
                     conn_props["mass_flow_rate"] = item["mass_flow_rate"]
+                if "port" in item:
+                    conn["port"] = item["port"]
                 connections.append(conn)
 
     return nodes, connections
@@ -1045,6 +1048,14 @@ def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
     :data:`~boulder.cantera_converter.ReactorUnfolder`, invoke the unfolder and
     append the returned nodes/connections into *config* in place.
 
+    **Port rewriting** (flowsheet-port primitive): if the unfolder returns a
+    ``port_map: {port_name: internal_node_id}`` in its result dict, any
+    connection in *config* that targets or sources the composite node via a
+    ``port:`` field is rewritten so its endpoint points at the mapped internal
+    node.  The ``port:`` field is then removed from the connection.  Errors are
+    raised on unknown port names and on duplicate ``port:`` targets pointing at
+    the same composite node.
+
     Generated ids must be unique: if the unfolder emits an id that already
     exists and the existing entry is **not** byte-identical, a ``ValueError``
     is raised.  Silent overrides are forbidden so that composite reactors
@@ -1066,6 +1077,10 @@ def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
     conns = config.setdefault("connections", [])
     by_node_id: Dict[str, Any] = {n["id"]: n for n in nodes if "id" in n}
     by_conn_id: Dict[str, Any] = {c["id"]: c for c in conns if "id" in c}
+
+    # Collect port_maps emitted by unfolders: {composite_node_id: {port: internal_id}}
+    composite_port_maps: Dict[str, Dict[str, str]] = {}
+
     for node in list(nodes):  # snapshot — we may append to nodes below
         unfolder = plugins.reactor_unfolders.get(node.get("type"))
         if unfolder is None:
@@ -1105,6 +1120,84 @@ def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
                     f"'{c['id']}' in your YAML — it is managed internally and must "
                     "not be declared by the user."
                 )
+
+        port_map: Dict[str, str] = result.get("port_map") or {}
+        if port_map:
+            composite_port_maps[node["id"]] = port_map
+
+        # Apply group-level patches emitted by the unfolder (e.g. network_class).
+        group_patches: Dict[str, Dict[str, Any]] = result.get("group_patches") or {}
+        if group_patches:
+            groups_cfg = config.setdefault("groups", {})
+            for gid, patch in group_patches.items():
+                if gid not in groups_cfg:
+                    groups_cfg[gid] = {}
+                groups_cfg[gid].update(patch)
+
+        # Mark the original composite node as a visualisation placeholder so
+        # the UI can skip rendering it (it has been unfolded into children).
+        # This prevents orphan nodes from distorting compound group bounding boxes.
+        node.setdefault("metadata", {})
+        if isinstance(node["metadata"], dict):
+            node["metadata"]["skip_viz"] = True
+
+    # Port rewriting: resolve ``port:``-bearing connections to their internal targets.
+    if composite_port_maps:
+        _rewrite_port_connections(conns, composite_port_maps)
+
+
+def _rewrite_port_connections(
+    conns: List[Dict[str, Any]],
+    composite_port_maps: Dict[str, Dict[str, str]],
+) -> None:
+    """Rewrite connections that address a composite node via a named port.
+
+    A connection may carry a ``port:`` field alongside ``source:`` or
+    ``target:``.  When the field is present and the referenced node is a
+    composite that declared a ``port_map``, the connection endpoint is
+    replaced with the mapped internal node id and the ``port:`` field is
+    removed.
+
+    Parameters
+    ----------
+    conns :
+        List of connection dicts (mutated in place).
+    composite_port_maps :
+        ``{composite_node_id: {port_name: internal_node_id}}`` collected from
+        unfolder results.
+
+    Raises
+    ------
+    ValueError
+        If a ``port:`` field references an unknown port name on the composite.
+    """
+    for conn in conns:
+        port = conn.get("port")
+        if port is None:
+            continue
+        # Determine which endpoint references a composite.
+        target = conn.get("target", "")
+        source = conn.get("source", "")
+        if target in composite_port_maps:
+            port_map = composite_port_maps[target]
+            if port not in port_map:
+                raise ValueError(
+                    f"Connection '{conn.get('id', '?')}' references port '{port}' "
+                    f"on composite node '{target}', but that port is not declared. "
+                    f"Known ports: {sorted(port_map)}."
+                )
+            conn["target"] = port_map[port]
+            del conn["port"]
+        elif source in composite_port_maps:
+            port_map = composite_port_maps[source]
+            if port not in port_map:
+                raise ValueError(
+                    f"Connection '{conn.get('id', '?')}' references port '{port}' "
+                    f"on composite node '{source}', but that port is not declared. "
+                    f"Known ports: {sorted(port_map)}."
+                )
+            conn["source"] = port_map[port]
+            del conn["port"]
 
 
 def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, Any]:
