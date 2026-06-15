@@ -3,6 +3,7 @@ import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
 import { Button } from "@/components/ui/Button";
+import { ConfirmDeleteNodeModal } from "@/components/modals/ConfirmDeleteNodeModal";
 import { toast } from "sonner";
 
 export function PropertiesPanel() {
@@ -12,8 +13,10 @@ export function PropertiesPanel() {
   const updateConnection = useConfigStore((s) => s.updateConnection);
   const removeNode = useConfigStore((s) => s.removeNode);
   const removeConnection = useConfigStore((s) => s.removeConnection);
+  const clearSelection = useSelectionStore((s) => s.clearSelection);
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   if (!selectedElement) {
     return (
@@ -104,9 +107,20 @@ export function PropertiesPanel() {
     toast.success("Properties saved");
   };
 
-  const handleDelete = () => {
-    if (isNode) removeNode(id);
-    else removeConnection(id);
+  const handleDeleteClick = () => {
+    if (isNode) {
+      setShowDeleteConfirm(true);
+      return;
+    }
+    removeConnection(id);
+    clearSelection();
+    toast.info(`Deleted ${id}`);
+  };
+
+  const handleConfirmDeleteNode = () => {
+    removeNode(id);
+    clearSelection();
+    setShowDeleteConfirm(false);
     toast.info(`Deleted ${id}`);
   };
 
@@ -128,7 +142,13 @@ export function PropertiesPanel() {
                 Save
               </Button>
             )}
-            <Button onClick={handleDelete} variant="destructive" size="sm" className="text-xs">
+            <Button
+              id="delete-element"
+              onClick={handleDeleteClick}
+              variant="destructive"
+              size="sm"
+              className="text-xs"
+            >
               Delete
             </Button>
           </div>
@@ -281,6 +301,16 @@ export function PropertiesPanel() {
           {" → "}
           <span>Target: {String("target" in entity ? entity.target : "N/A")}</span>
         </div>
+      )}
+
+      {isNode && (
+        <ConfirmDeleteNodeModal
+          open={showDeleteConfirm}
+          nodeId={id}
+          nodeType={entityType}
+          onClose={() => setShowDeleteConfirm(false)}
+          onConfirm={handleConfirmDeleteNode}
+        />
       )}
     </div>
   );
