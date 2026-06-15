@@ -215,7 +215,6 @@ def test_cantera_examples_headless_download_script_runs(
     assert "import cantera as ct" in body
     assert "reactors = {}" in body
     assert "DualCanteraConverter" not in body
-    assert "BlocConverter" not in body
     assert "build_sub_network" not in body
     assert "config = {" not in body
     assert "BoulderRunner.from_yaml" not in body

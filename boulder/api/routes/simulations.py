@@ -26,6 +26,33 @@ router = APIRouter()
 _simulations: Dict[str, tuple[SimulationWorker, float]] = {}
 
 
+def get_completed_simulation_data(sim_id: str) -> Optional[Dict[str, Any]]:
+    """Return serialised results for a completed simulation, or None."""
+    entry = _simulations.get(sim_id)
+    if entry is None:
+        return None
+
+    worker, _ = entry
+    progress = worker.get_progress()
+    if not progress.is_complete or progress.error_message:
+        return None
+
+    from ..sse import _serialise_reports
+
+    return {
+        "times": progress.times,
+        "reactors_series": progress.reactors_series,
+        "reactor_reports": _serialise_reports(progress.reactor_reports),
+        "connection_reports": progress.connection_reports.copy(),
+        "code_str": progress.code_str,
+        "summary": progress.summary,
+        "sankey_links": progress.sankey_links,
+        "sankey_nodes": progress.sankey_nodes,
+        "updated_nodes": progress.updated_nodes,
+        "updated_connections": progress.updated_connections,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Request / response schemas
 # ---------------------------------------------------------------------------

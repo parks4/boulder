@@ -65,12 +65,12 @@ class TestBoulderConfig:
         2. Returned metadata contains the same non-empty string
         """
         raw = {
-            "metadata": {"gui_app_title": "Bloc", "description": "test"},
+            "metadata": {"gui_app_title": "MyApp", "description": "test"},
             "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
             "connections": [],
         }
         validated = validate_config(normalize_config(raw))
-        assert validated["metadata"]["gui_app_title"] == "Bloc"
+        assert validated["metadata"]["gui_app_title"] == "MyApp"
 
     def test_get_initial_config_components(self):
         """Test initial config components have required fields.

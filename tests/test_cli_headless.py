@@ -92,7 +92,6 @@ class TestCLIHeadless:
             assert "import cantera as ct" in generated_code
             assert "reactors = {}" in generated_code
             assert "DualCanteraConverter" not in generated_code
-            assert "BlocConverter" not in generated_code
             assert "build_sub_network" not in generated_code
             assert "config = {" not in generated_code
             assert "BoulderRunner.from_yaml" not in generated_code

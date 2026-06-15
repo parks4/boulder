@@ -178,7 +178,7 @@ class MetadataModel(BaseModel):
 
     scenario_id: Optional[str] = None
     title: Optional[str] = None
-    #: Short label for the web UI header (e.g. ``Bloc``); omitted defaults to "Boulder".
+    #: Short label for the web UI header (e.g. ``MyApp``); omitted defaults to "Boulder".
     gui_app_title: Optional[str] = None
     name: Optional[str] = None
     scenario_name: Optional[str] = None
@@ -282,6 +282,8 @@ class NormalizedConfigModel(BaseModel):
     # Preserve top-level `output` block (flexible shape). Validation of its content
     # is handled by feature-specific parsers; we just carry it through here.
     output: Optional[Any] = None
+    #: Calculation Note / reporting export block (host-package metadata).
+    export: Optional[Any] = None
     #: Staged-solving group definitions.
     #: ``{group_id: {stage_order, mechanism, solve, advance_time}}``
     groups: Optional[Dict[str, Any]] = None

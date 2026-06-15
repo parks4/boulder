@@ -634,22 +634,22 @@ def test_virtual_source_to_stream_mfc_in_viz_network() -> None:
 
 
 def test_sankey_stream_point_exclusion_bypasses_chain() -> None:
-    """generate_sankey_input_from_sim exclude_nodes bypasses pass-through nodes.
+    """Plugin sankey generator exclude_nodes bypasses pass-through nodes.
 
-    Uses the bloc.sankey exclude_nodes + _resolve_downstream feature to verify
-    that stream-point pass-through reservoir names are excluded from the resulting
-    node list.
+    Uses a registered ``sankey_generator`` with ``exclude_nodes`` support to
+    verify that stream-point pass-through reservoir names are excluded from
+    the resulting node list.
 
     Asserts:
     1. When stream-point reservoir names are passed as exclude_nodes, the
        resulting node list does NOT contain any of those names.
     """
+    from boulder.cantera_converter import get_plugins
     from boulder.staged_solver import build_stage_graph, solve_staged
 
-    try:
-        from bloc.sankey import generate_sankey_input_from_sim
-    except ImportError:
-        pytest.skip("bloc.sankey not available")
+    sankey_gen = get_plugins().sankey_generator
+    if sankey_gen is None:
+        pytest.skip("Plugin sankey generator with exclude_nodes support not available")
 
     cfg = _two_stage_linear_chain()
     conv = DualCanteraConverter(mechanism="gri30.yaml")
@@ -663,13 +663,12 @@ def test_sankey_stream_point_exclusion_bypasses_chain() -> None:
     assert stream_names, "Expected at least one stream-point reservoir in reactor_meta"
 
     # Use the viz network (which contains stream-point reservoirs).
-    # Use flow_type="enthalpy" to avoid the Bloc-specific mechanism path resolver
-    # that heating_values() triggers when called from the hhv flow type.
+    # Use flow_type="enthalpy" to avoid plugin-specific HHV mechanism resolution.
     viz_net = conv.network
     if viz_net is None:
         pytest.skip("No viz network available")
 
-    links, node_order = generate_sankey_input_from_sim(
+    links, node_order = sankey_gen(
         viz_net,
         show_species=[],
         if_no_species="ignore",

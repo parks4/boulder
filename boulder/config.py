@@ -202,7 +202,8 @@ def _is_const_pressure_kind(kind: str) -> bool:
        directly as YAML kind strings).
     3. Plugin registry: ``issubclass`` check against all Cantera const-pressure
        base classes (both standard and ``Extensible*`` roots).  Plugin reactors
-       like those in Bloc inherit from ``ct.ExtensibleIdealGasConstPressureMoleReactor``
+       like those registered by host plugins inherit from
+       ``ct.ExtensibleIdealGasConstPressureMoleReactor`` and are caught here
        and are caught here automatically via the registered ``reactor_class``.
     """
     if kind in _CONST_PRESSURE_KINDS or "ConstPressure" in kind:

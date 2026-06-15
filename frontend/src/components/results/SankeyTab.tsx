@@ -9,7 +9,7 @@ interface Props {
 
 /**
  * Theme-only link colors (mass / enthalpy / heat). Species bands are resolved
- * to hex on the server via ``sankey_links_for_api`` (Bloc ``plot.py`` when installed).
+ * to hex on the server via ``sankey_links_for_api`` (plugin palette when registered).
  */
 const LIGHT_LINK_COLORS: Record<string, string> = {
   mass: "pink",

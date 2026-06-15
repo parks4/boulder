@@ -175,8 +175,8 @@ solver:
 
 ### `export:`
 
-KPI functions, figure generators, calc-note targets. Consumed by `bloc.yaml_utils` and
-`bloc.calc_note`. Not interpreted by Boulder core.
+KPI functions, figure generators, calc-note targets. Consumed by downstream
+host packages. Not interpreted by Boulder core.
 
 ______________________________________________________________________
 
