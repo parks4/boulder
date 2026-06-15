@@ -9,11 +9,14 @@ Historic STONE v1 files using top-level ``nodes:`` / ``connections:`` /
 ``groups:`` are rejected. See STONE_SPECIFICATIONS.md.
 """
 
+import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 from ruamel.yaml import YAML
+
+logger = logging.getLogger(__name__)
 
 # Global variable for temperature scale coloring
 USE_TEMPERATURE_SCALE = True
@@ -1144,6 +1147,24 @@ def expand_composite_kinds(config: Dict[str, Any], plugins: Any) -> None:
     # Port rewriting: resolve ``port:``-bearing connections to their internal targets.
     if composite_port_maps:
         _rewrite_port_connections(conns, composite_port_maps)
+        # Also rewrite direct references to composite nodes (no ``port:`` field).
+        # A connection sourcing a composite id uses the "out" port (downstream
+        # boundary); one targeting it uses the "main" port (upstream inlet).
+        # This handles legacy YAMLs that address composites directly by node id
+        # rather than via the port shorthand.
+        for conn in conns:
+            if conn.get("port") is not None:
+                continue  # already handled above
+            src = conn.get("source", "")
+            tgt = conn.get("target", "")
+            if src in composite_port_maps:
+                out_id = composite_port_maps[src].get("out")
+                if out_id:
+                    conn["source"] = out_id
+            if tgt in composite_port_maps:
+                main_id = composite_port_maps[tgt].get("main")
+                if main_id:
+                    conn["target"] = main_id
 
 
 def _rewrite_port_connections(
@@ -2075,6 +2096,46 @@ def _collect_authored_ids(ruamel_tree: Any) -> set:
     return ids
 
 
+def _collect_authored_conn_endpoints(ruamel_tree: Any) -> Dict[str, Dict[str, Any]]:
+    """Return the authored ``source``/``target``/``port`` for every connection in the YAML.
+
+    Composite expanders (``expand_composite_kinds``) rewrite ``port:`` connections
+    so that the target changes from the composite boundary id to an internal child id.
+    This helper records the *pre-expansion* values so ``merge_config_into_yaml`` can
+    restore them before writing the YAML back, preventing composite-internal ids from
+    leaking into the authored file.
+
+    Returns
+    -------
+    dict
+        ``{conn_id: {"source": ..., "target": ..., "port": ...}}`` for every item
+        that has an ``id`` and at least a ``source`` or ``target`` key.  The ``port``
+        key is only present when it was explicitly authored.
+    """
+    endpoints: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(ruamel_tree, dict):
+        return endpoints
+    for val in ruamel_tree.values():
+        if not isinstance(val, list):
+            continue
+        for item in val:
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("id")
+            if not item_id:
+                continue
+            rec: Dict[str, Any] = {}
+            if "source" in item:
+                rec["source"] = str(item["source"])
+            if "target" in item:
+                rec["target"] = str(item["target"])
+            if "port" in item:
+                rec["port"] = str(item["port"])
+            if rec:
+                endpoints[item_id] = rec
+    return endpoints
+
+
 def _fresh_normalize_original(
     original_yaml_str: str,
 ) -> Tuple[set, Dict[str, Dict[str, Any]]]:
@@ -2198,16 +2259,88 @@ def merge_config_into_yaml(
         item_id = item.get("id")
         if item_id and item_id in fresh_synthesized_ids:
             return False
+        # Filter out simulation-transient nodes/connections added by the staged
+        # solver after the build step.  These must NOT appear in the saved YAML:
+        #   • stream-point reservoir nodes  (metadata.stream_point or properties.stream_point)
+        #   • inlet MFC connections         (metadata.stream_point — same flag, side="inlet")
+        #   • StreamConnector connections   (type == "StreamConnector")
+        #   • virtual MFC connections       (metadata.virtual == True) — visualisation-only
+        props = item.get("properties") or {}
+        meta = item.get("metadata") or {}
+        if props.get("stream_point") or meta.get("stream_point"):
+            return False
+        if item.get("type") == "StreamConnector":
+            return False
+        if meta.get("virtual"):
+            return False
         return True
 
     config_for_stone = dict(config)
-    config_for_stone["nodes"] = [
-        n for n in (config.get("nodes") or []) if _should_keep(n)
-    ]
-    config_for_stone["connections"] = [
-        c for c in (config.get("connections") or []) if _should_keep(c)
-    ]
+    all_nodes = list(config.get("nodes") or [])
+    all_conns = list(config.get("connections") or [])
+    kept_nodes = [n for n in all_nodes if _should_keep(n)]
+    kept_conns = [c for c in all_conns if _should_keep(c)]
+    logger.debug(
+        "[merge_config_into_yaml] nodes: %d → %d kept  |  connections: %d → %d kept  "
+        "|  fresh_synthesized_ids=%s",
+        len(all_nodes), len(kept_nodes),
+        len(all_conns), len(kept_conns),
+        sorted(fresh_synthesized_ids),
+    )
+    logger.debug(
+        "[merge_config_into_yaml] filtered-OUT connections: %s",
+        [c.get("id") for c in all_conns if not _should_keep(c)],
+    )
+    logger.debug(
+        "[merge_config_into_yaml] kept connections: %s",
+        [(c.get("id"), c.get("type"), c.get("group")) for c in kept_conns],
+    )
+    # Guard: warn if kept connections are missing a group in a multi-stage config.
+    # A missing group causes convert_to_stone_format to omit them from all stage
+    # lists, which makes _update_yaml_array_preserving_comments drop them from
+    # the YAML.  The caller (useSimulationSSE.ts) must preserve the group field.
+    if config.get("groups") and len(config["groups"]) > 1:
+        missing_group = [c.get("id") for c in kept_conns if not c.get("group")]
+        if missing_group:
+            logger.warning(
+                "[merge_config_into_yaml] %d connection(s) have no 'group' field in a "
+                "multi-stage config — they will be missing from the merged YAML: %s",
+                len(missing_group), missing_group,
+            )
+    config_for_stone["nodes"] = kept_nodes
+    config_for_stone["connections"] = kept_conns
+
+    # 4b. Restore authored connection endpoints for port-bearing connections.
+    #
+    # expand_composite_kinds rewrites 'port:' connections: the target changes
+    # from the composite node id to an internal child id, and the 'port:' field
+    # is removed.  When the frontend sends back the expanded config, kept_conns
+    # contains these rewritten endpoints.  We must restore the original
+    # source/target/port so the authored YAML is not corrupted with internal ids.
+    #
+    # Strategy: for every kept connection whose id existed in the original YAML,
+    # overwrite its source/target/port with the authored values.
+    authored_endpoints = _collect_authored_conn_endpoints(original_data)
+    if authored_endpoints:
+        for conn in kept_conns:
+            conn_id = conn.get("id")
+            if conn_id and conn_id in authored_endpoints:
+                authored = authored_endpoints[conn_id]
+                if "source" in authored:
+                    conn["source"] = authored["source"]
+                if "target" in authored:
+                    conn["target"] = authored["target"]
+                if "port" in authored:
+                    conn["port"] = authored["port"]
+                elif "port" in conn:
+                    # Original did not have port:, remove any expansion artifact
+                    del conn["port"]
+
     stone = convert_to_stone_format(config_for_stone)
+    logger.debug(
+        "[merge_config_into_yaml] STONE top-level keys: %s",
+        list(stone.keys()),
+    )
 
     # 5. Shape-conflict guard: original uses network: XOR stages:.
     orig_has_network = "network" in original_data
@@ -2423,6 +2556,12 @@ def _update_yaml_array_preserving_comments(
                     orig_item, new_by_id[item_id], injected_props=injected
                 )
                 new_items.append(merged)
+            else:
+                logger.warning(
+                    "[_update_yaml_array_preserving_comments] Dropping '%s' "
+                    "(array key=%r) — id not in new_array.",
+                    item_id, array_key,
+                )
             # If item_id not in new_by_id, the item was removed — skip it.
         else:
             new_items.append(orig_item)
@@ -2490,6 +2629,17 @@ def _update_yaml_item_preserving_comments(original_item, new_item, injected_prop
 
     orig_kind = _kind_key(original_item)
     new_kind = _kind_key(new_item)
+
+    # Guard: if the original item uses compact/scalar syntax (no dict-valued kind
+    # key, e.g. ``port: main``) but the new item carries an expanded dict-valued
+    # kind key (e.g. ``MassFlowController: {...}``), the expander has converted
+    # the compact form to its internal expanded representation.  Merging the
+    # expanded form back into the compact original would corrupt the YAML (adding
+    # a second kind key and changing target to the expanded target).  In this
+    # case the authored compact form is authoritative — return the original
+    # item unchanged.
+    if orig_kind is None and new_kind is not None:
+        return original_item
 
     # -- Handle kind-key change --
     if orig_kind and new_kind and orig_kind != new_kind:
