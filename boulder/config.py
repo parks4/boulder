@@ -2283,8 +2283,10 @@ def merge_config_into_yaml(
     logger.debug(
         "[merge_config_into_yaml] nodes: %d → %d kept  |  connections: %d → %d kept  "
         "|  fresh_synthesized_ids=%s",
-        len(all_nodes), len(kept_nodes),
-        len(all_conns), len(kept_conns),
+        len(all_nodes),
+        len(kept_nodes),
+        len(all_conns),
+        len(kept_conns),
         sorted(fresh_synthesized_ids),
     )
     logger.debug(
@@ -2305,7 +2307,8 @@ def merge_config_into_yaml(
             logger.warning(
                 "[merge_config_into_yaml] %d connection(s) have no 'group' field in a "
                 "multi-stage config — they will be missing from the merged YAML: %s",
-                len(missing_group), missing_group,
+                len(missing_group),
+                missing_group,
             )
     config_for_stone["nodes"] = kept_nodes
     config_for_stone["connections"] = kept_conns
@@ -2560,7 +2563,8 @@ def _update_yaml_array_preserving_comments(
                 logger.warning(
                     "[_update_yaml_array_preserving_comments] Dropping '%s' "
                     "(array key=%r) — id not in new_array.",
-                    item_id, array_key,
+                    item_id,
+                    array_key,
                 )
             # If item_id not in new_by_id, the item was removed — skip it.
         else:

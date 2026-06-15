@@ -15,12 +15,11 @@ when opening the YAML editor after running a simulation.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 
 from boulder.config import merge_config_into_yaml, normalize_config
-
 
 # ---------------------------------------------------------------------------
 # Minimal composite YAML fixture (ThreeSegmentsReactor without Cantera kinds)
@@ -98,8 +97,11 @@ cgr_stage:
 def _register_test_plugins():
     """Register ThreeSegmentsReactor unfolder via BlocConverter plugin path."""
     try:
+        from bloc.boulder_plugins.register import (
+            _register_bloc_solver_plugins,  # noqa: PLC0415
+        )
+
         from boulder.cantera_converter import BoulderPlugins  # noqa: PLC0415
-        from bloc.boulder_plugins.register import _register_bloc_solver_plugins  # noqa: PLC0415
 
         plugins = BoulderPlugins()
         _register_bloc_solver_plugins(plugins)
@@ -110,7 +112,10 @@ def _register_test_plugins():
 
 def _normalize_composite(yaml_str: str) -> dict:
     """Normalize the composite YAML using Bloc plugins (expansion happens inside normalize_config)."""
-    from boulder.config import _to_plain_dict, load_yaml_string_with_comments  # noqa: PLC0415
+    from boulder.config import (  # noqa: PLC0415
+        _to_plain_dict,
+        load_yaml_string_with_comments,
+    )
 
     _register_test_plugins()  # ensure unfolders registered in global plugin registry
     raw = load_yaml_string_with_comments(yaml_str)
@@ -154,8 +159,9 @@ def _emulate_post_sim_config(expanded_cfg: dict) -> dict:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _authored_conn_ids() -> set:
-    """Connection ids that are explicitly authored in the YAML."""
+    """Return connection ids that are explicitly authored in the YAML."""
     return {"tmr_to_cgr", "inj_1_to_cgr", "cgr_to_downstream"}
 
 
@@ -198,11 +204,9 @@ class TestCompositeRoundTrip:
     """merge_config_into_yaml preserves composite form after Run Simulation."""
 
     def test_composite_node_preserved(self, post_sim_config, original_yaml):
-        """cgr composite node remains in the merged YAML (not replaced by children)."""
+        """Cgr composite node remains in the merged YAML (not replaced by children)."""
         merged_yaml, _warnings = merge_config_into_yaml(post_sim_config, original_yaml)
-        final = normalize_config(
-            _to_plain_dict_from_yaml(merged_yaml)
-        )
+        final = normalize_config(_to_plain_dict_from_yaml(merged_yaml))
         node_ids = {n["id"] for n in final.get("nodes", [])}
         assert "cgr" in node_ids, (
             f"'cgr' composite node missing from merged YAML. Present ids: {sorted(node_ids)}"
@@ -212,8 +216,13 @@ class TestCompositeRoundTrip:
         """Synthesized child ids (cgr_seg*, cgr_mix_*, cgr_ambient) absent from merged YAML."""
         merged_yaml, _warnings = merge_config_into_yaml(post_sim_config, original_yaml)
         # Check raw YAML text — child ids must not appear as 'id: cgr_seg1' etc.
-        synthesized_ids = {"cgr_seg1", "cgr_seg2", "cgr_mix_1", "cgr_ambient",
-                           "cgr_int_cgr_seg1_to_cgr_mix_1"}
+        synthesized_ids = {
+            "cgr_seg1",
+            "cgr_seg2",
+            "cgr_mix_1",
+            "cgr_ambient",
+            "cgr_int_cgr_seg1_to_cgr_mix_1",
+        }
         for sid in synthesized_ids:
             assert f"id: {sid}" not in merged_yaml, (
                 f"Synthesized child '{sid}' leaked into merged YAML."
@@ -277,7 +286,12 @@ class TestCompositeRoundTrip:
 # Helper: plain dict from yaml string (no plugins)
 # ---------------------------------------------------------------------------
 
+
 def _to_plain_dict_from_yaml(yaml_str: str) -> dict:
-    from boulder.config import _to_plain_dict, load_yaml_string_with_comments  # noqa: PLC0415
+    from boulder.config import (  # noqa: PLC0415
+        _to_plain_dict,
+        load_yaml_string_with_comments,
+    )
+
     raw = load_yaml_string_with_comments(yaml_str)
     return _to_plain_dict(raw)

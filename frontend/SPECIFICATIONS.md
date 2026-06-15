@@ -1,11 +1,11 @@
 # Boulder Frontend — UI/UX Specifications
 
 This document is the normative reference for Boulder's React + Cytoscape graph
-editor behaviour.  Backend API contracts live in the top-level
+editor behaviour. Backend API contracts live in the top-level
 [SPECIFICATIONS.md](../SPECIFICATIONS.md), [ARCHITECTURE.md](../ARCHITECTURE.md)
 and [STONE_SPECIFICATIONS.md](../STONE_SPECIFICATIONS.md).
 
----
+______________________________________________________________________
 
 ## GRAPH-01 — Layout stability across simulation runs
 
@@ -13,14 +13,14 @@ and [STONE_SPECIFICATIONS.md](../STONE_SPECIFICATIONS.md).
 
 After "Run Simulation" completes, the SSE `complete` event delivers
 `updated_nodes` / `updated_connections` (post-build stream-point nodes,
-resolved temperatures, etc.).  `setConfig` fires, `buildElements` gets a new
+resolved temperatures, etc.). `setConfig` fires, `buildElements` gets a new
 `useCallback` identity, and the `useEffect` that watches it calls
-`cy.json({ elements })` + `runGraphLayout`.  The result:
+`cy.json({ elements })` + `runGraphLayout`. The result:
 
 1. All node positions are wiped by `cy.json()`.
-2. Dagre re-runs from scratch, re-positioning every node.
-3. User-adjusted layout is discarded.
-4. A visible flash of the un-aligned layout appears during the animation.
+1. Dagre re-runs from scratch, re-positioning every node.
+1. User-adjusted layout is discarded.
+1. A visible flash of the un-aligned layout appears during the animation.
 
 ### Required behaviour
 
@@ -36,24 +36,22 @@ resolved temperatures, etc.).  `setConfig` fires, `buildElements` gets a new
 ### Implementation
 
 1. **Topology fingerprint** — a stable string built from sorted node-ids +
-   connection-ids, stored in a `useRef`.  `runGraphLayout` is called only when
+   connection-ids, stored in a `useRef`. `runGraphLayout` is called only when
    the fingerprint changes.
-2. **In-place data update** — when the fingerprint is unchanged, iterate over
+1. **In-place data update** — when the fingerprint is unchanged, iterate over
    nodes and call `cy.getElementById(id).data()` to refresh `temperature` and
    any other visual-data properties.
-3. **Selective element merge** — when topology does change, use `cy.add()` /
-   `cy.remove()` for only the delta elements rather than `cy.json({ elements
-   })`, which wipes all positions.
+1. **Selective element merge** — when topology does change, use `cy.add()` /
+   `cy.remove()` for only the delta elements rather than `cy.json({ elements })`, which wipes all positions.
 
----
+______________________________________________________________________
 
 ## GRAPH-02 — Persistent manual positions
 
 ### Problem
 
-Users may drag nodes to preferred positions.  These are held only in
-Cytoscape's canvas state.  Any `cy.json({ elements })` call or `cy.layout()
-.run()` discards them.
+Users may drag nodes to preferred positions. These are held only in
+Cytoscape's canvas state. Any `cy.json({ elements })` call or `cy.layout() .run()` discards them.
 
 ### Required behaviour
 
@@ -70,23 +68,22 @@ Cytoscape's canvas state.  Any `cy.json({ elements })` call or `cy.layout()
 Single source of truth: `metadata.layout_offset: {dx, dy}` on the node, stored
 as part of the config and round-tripped through the YAML sync pipeline.
 `dx` and `dy` are the manual drag offset in pixels relative to the node's
-algorithmically computed "natural" position.  This makes stored offsets
+algorithmically computed "natural" position. This makes stored offsets
 topology-independent: if the graph re-lays-out (e.g. after a topology change),
 the node tracks its neighbors rather than jumping to a stale absolute coordinate.
 
 1. **Drag-stop** — Cytoscape `dragfree` event captures the node's current
    position, subtracts the natural position stored in `naturalPosRef`, then calls
-   `useConfigStore.getState().updateNode(id, { metadata: { ...existing.metadata,
-   layout_offset: { dx, dy } } })`.  Topology is unchanged so the data-only config
+   `useConfigStore.getState().updateNode(id, { metadata: { ...existing.metadata, layout_offset: { dx, dy } } })`. Topology is unchanged so the data-only config
    effect fires; no layout re-run, node stays where dropped.
-2. **Layout pass** — After `nudgeOverlappingNodes`, the current pin-free positions
-   are snapshotted into `naturalPosRef`.  Then `applyPinnedPositions(cy)` is
+1. **Layout pass** — After `nudgeOverlappingNodes`, the current pin-free positions
+   are snapshotted into `naturalPosRef`. Then `applyPinnedPositions(cy)` is
    called: it looks up each node's natural position and adds the stored `layout_offset`.
-3. **YAML sync** — because `layout_offset` is in `node.metadata`, it is included
+1. **YAML sync** — because `layout_offset` is in `node.metadata`, it is included
    in `convert_to_stone_format` output and merged back into the YAML tree by
-   `merge_config_into_yaml`.  On re-parse it is restored into the config and
+   `merge_config_into_yaml`. On re-parse it is restored into the config and
    picked up by `applyPinnedPositions` on next layout.
-4. **Reset layout** — toolbar button removes `layout_offset` (and legacy
+1. **Reset layout** — toolbar button removes `layout_offset` (and legacy
    `layout_pos`) from all node metadata via `setConfig`, clears
    `topoFingerprintRef` to force a full layout pass, then the config effect
    re-runs dagre from scratch.
@@ -95,7 +92,7 @@ the node tracks its neighbors rather than jumping to a stale absolute coordinate
 `config.nodes`; dragging them is not persisted (acceptable — they auto-place
 between stage boxes).
 
----
+______________________________________________________________________
 
 ## GRAPH-03 — Node shapes by reactor type (P&ID conventions)
 
@@ -109,7 +106,7 @@ between stage boxes).
 Plugin authors must add new reactor types to the CSS selector list in
 `ReactorGraph.tsx` when they warrant a distinct shape.
 
----
+______________________________________________________________________
 
 ## GRAPH-04 — Edge styles (P&ID conventions)
 
@@ -122,7 +119,7 @@ Plugin authors must add new reactor types to the CSS selector list in
 `Wall` edges use a dashed orange line to distinguish energy streams from
 material streams at a glance, in line with P&ID conventions.
 
----
+______________________________________________________________________
 
 ## GRAPH-05 — Composite reactor group interaction
 
@@ -150,7 +147,7 @@ Unfolders may attach the following keys to child node `metadata` to guide layout
 | `skip_viz: true` | boolean | Node is a hidden placeholder; skip rendering and all layout. |
 | `layout_offset: {dx, dy}` | `{dx: number, dy: number}` | Manual drag offset (px) from the node's computed layout position. Survives re-layout by tracking neighbors. Set by drag-stop, cleared by Reset layout. |
 
----
+______________________________________________________________________
 
 ## GRAPH-06 — Defensive edge rendering
 
@@ -159,12 +156,12 @@ marked `skip_viz`) must be **silently skipped**, not cause a Cytoscape crash.
 This applies to:
 
 1. Edges from `config.connections` (guarded by `renderedNodeIds`).
-2. Synthesised stream-point edges (`${streamId}_to_${conn.target}`) — if
+1. Synthesised stream-point edges (`${streamId}_to_${conn.target}`) — if
    `conn.target` is not in `renderedNodeIds`, skip the synthesised hop.
-3. The upstream `${src}_to_${streamId}` edge — if `src` is not rendered, skip
+1. The upstream `${src}_to_${streamId}` edge — if `src` is not rendered, skip
    both the diamond node and the two-hop edges.
 
----
+______________________________________________________________________
 
 ## PANEL-01 — Properties panel
 
@@ -176,7 +173,7 @@ This applies to:
 | Edge | Source → Target |
 | Nothing selected | Placeholder: "Click a node or edge to view properties." |
 
----
+______________________________________________________________________
 
 ## PANEL-02 — Convergence tab
 
@@ -188,11 +185,12 @@ This applies to:
 | Composite group box | "Click on individual segments for convergence." |
 | Nothing / no data | "Select a reactor node to view convergence data." |
 
----
+______________________________________________________________________
 
 ## PANEL-03 — Node colour coding
 
 Node background colour is mapped from `temperature` data:
+
 - Cold (300 K) → `deepskyblue`
 - Hot (2273 K) → `tomato`
 
