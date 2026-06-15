@@ -81,22 +81,12 @@ python -m pytest tests/test_runner.py tests/test_unfold.py tests/test_plugin_exa
 
 ### Testing the live API on localhost
 
-Recipe for verifying a YAML against a running Boulder/Bloc API without using the browser.
+Recipe for verifying a YAML against a running Boulder API without using the browser.
 
 1. Start the server preloaded with a YAML:
 
    ```bash
-   bloc <FILE>.yaml         # bloc CLI, recommended
-   # or:  boulder <FILE>.yaml --no-browser
-   ```
-
-   Windows note: `conda run -n bloc bloc ...` does not see the
-   `bloc` console script. Use one of:
-
-   ```powershell
-   & "$env:CONDA_PREFIX\envs\bloc\python.exe" path\to\bloc\cli.py FILE.yaml
-   # or activate the env first:
-   conda activate bloc; bloc FILE.yaml
+   boulder <FILE>.yaml --no-browser
    ```
 
 1. Verify the API is up and the YAML is preloaded:

@@ -420,7 +420,7 @@ export function ReactorGraph() {
         // PFR-derived reactor types (tube-like, axial-flow) use a wide
         // horizontal rectangle to visually distinguish them from stirred
         // reactors (ellipse) and boundary nodes (octagon).  All types that
-        // inherit from PFR in Bloc are listed here; add new ones as needed.
+        // inherit from PFR-style axial reactors are listed here; add new ones as needed.
         selector: [
           "RefractoryReactor",
           "TubeFurnace",

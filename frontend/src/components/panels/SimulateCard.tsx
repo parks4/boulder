@@ -1,8 +1,10 @@
 import { useCallback, useState, useEffect, useMemo } from "react";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
+import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
 import { startSimulation } from "@/api/simulations";
 import { Button } from "@/components/ui/Button";
+import type { GuiActionMeta } from "@/types/guiAction";
 import { toast } from "sonner";
 import { SolverDetailsModal } from "./SolverDetailsModal";
 import {
@@ -19,6 +21,7 @@ export function SimulateCard() {
   const config = useConfigStore((s) => s.config);
   const setConfig = useConfigStore((s) => s.setConfig);
   const fileName = useConfigStore((s) => s.fileName);
+  const originalYaml = useConfigStore((s) => s.originalYaml);
   const {
     isRunning,
     simulationId,
@@ -43,6 +46,8 @@ export function SimulateCard() {
   });
 
   const [solverDetailsOpen, setSolverDetailsOpen] = useState(false);
+  const [guiActions, setGuiActions] = useState<GuiActionMeta[]>([]);
+  const [runningActionId, setRunningActionId] = useState<string | null>(null);
 
   const [simTime, setSimTime] = useState("10");
   const [timeStep, setTimeStep] = useState("1");
@@ -64,6 +69,20 @@ export function SimulateCard() {
     if (solver?.atol != null) setAtol(String(solver.atol));
     if (solver?.max_steps != null) setMaxSteps(String(solver.max_steps));
   }, [config.settings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchGuiActions()
+      .then((actions) => {
+        if (!cancelled) setGuiActions(actions);
+      })
+      .catch(() => {
+        if (!cancelled) setGuiActions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [config, simulationId]);
 
   const handleModeChange = useCallback(
     (newMode: SolverMode) => {
@@ -181,6 +200,33 @@ export function SimulateCard() {
     toast.success("Python code downloaded");
   }, [pythonCode]);
 
+  const handleGuiAction = useCallback(
+    async (action: GuiActionMeta) => {
+      setRunningActionId(action.id);
+      try {
+        const { blob, filename: downloadName } = await runGuiAction(action.id, {
+          config: config as unknown as Record<string, unknown>,
+          config_yaml: originalYaml || null,
+          filename: fileName,
+          simulation_id: simulationId,
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = downloadName;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast.success(`${action.label} downloaded`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.error(`${action.label} failed: ${msg}`);
+      } finally {
+        setRunningActionId(null);
+      }
+    },
+    [config, originalYaml, fileName, simulationId],
+  );
+
   const runDisabled = isRunning || config.nodes.length === 0;
   const runVariant = runDisabled ? "muted" : "success";
   const kinds = mode === "steady" ? STEADY_KINDS : TRANSIENT_KINDS;
@@ -279,6 +325,23 @@ export function SimulateCard() {
           Download Python
         </Button>
       )}
+
+      {guiActions.map((action) => (
+        <Button
+          key={action.id}
+          id={`gui-action-${action.id}`}
+          onClick={() => handleGuiAction(action)}
+          disabled={
+            runningActionId !== null
+            || isRunning
+            || (action.requires_simulation && !simulationId)
+          }
+          variant="secondary"
+          className="w-full"
+        >
+          {runningActionId === action.id ? "Exporting..." : action.label}
+        </Button>
+      ))}
     </div>
   );
 }

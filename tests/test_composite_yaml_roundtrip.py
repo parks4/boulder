@@ -94,24 +94,120 @@ cgr_stage:
 """
 
 
-def _register_test_plugins():
-    """Register ThreeSegmentsReactor unfolder via BlocConverter plugin path."""
-    try:
-        from bloc.boulder_plugins.register import (
-            _register_bloc_solver_plugins,  # noqa: PLC0415
+def _three_segments_test_unfolder(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Test-only unfolder emitting the satellite ids this round-trip suite expects."""
+    props = node.get("properties") or {}
+    rid = node["id"]
+    group = node.get("group") or "cgr_stage"
+    segments = list(props.get("segments") or [])
+    if not segments:
+        raise ValueError(f"ThreeSegmentsReactor '{rid}': 'segments' must be non-empty.")
+
+    inj_ports: Dict[int, str] = {}
+    for ip in props.get("inlet_ports") or []:
+        port_name = ip.get("port", "")
+        after_seg = int(ip.get("after_segment", 0))
+        if port_name != "main" and after_seg >= 1:
+            inj_ports[after_seg - 1] = port_name
+
+    ambient_id = f"{rid}_ambient"
+    nodes: list[Dict[str, Any]] = [
+        {
+            "id": ambient_id,
+            "type": "Reservoir",
+            "properties": {
+                "temperature": 298.15,
+                "pressure": 101325.0,
+                "composition": "N2:1",
+                "group": group,
+                "composite_child": True,
+            },
+            "group": group,
+        }
+    ]
+    conns: list[Dict[str, Any]] = []
+    port_map: Dict[str, str] = {}
+    prev_id: str | None = None
+
+    for seg_idx, seg_spec in enumerate(segments):
+        seg_id = f"{rid}_seg{seg_idx + 1}"
+        nodes.append(
+            {
+                "id": seg_id,
+                "type": "RefractoryReactor",
+                "properties": {
+                    "length": float(seg_spec.get("length", 1.0)),
+                    "group": group,
+                    "composite_child": True,
+                },
+                "group": group,
+                "metadata": {"layout_lane": "main_flow"},
+            }
         )
+        if seg_idx == 0:
+            port_map["main"] = seg_id
+        if prev_id is not None:
+            conns.append(
+                {
+                    "id": f"{rid}_int_{prev_id}_to_{seg_id}",
+                    "type": "MassFlowController",
+                    "source": prev_id,
+                    "target": seg_id,
+                    "properties": {"group": group},
+                    "group": group,
+                }
+            )
 
-        from boulder.cantera_converter import BoulderPlugins  # noqa: PLC0415
+        if seg_idx in inj_ports:
+            port_name = inj_ports[seg_idx]
+            mix_id = f"{rid}_mix_{seg_idx + 1}"
+            nodes.append(
+                {
+                    "id": mix_id,
+                    "type": "InstantaneousMixingReactor",
+                    "properties": {
+                        "t_res_s": float(props.get("t_res_mix_s", 1e-9)),
+                        "group": group,
+                        "composite_child": True,
+                    },
+                    "group": group,
+                    "metadata": {"layout_lane": "main_flow"},
+                }
+            )
+            conns.append(
+                {
+                    "id": f"{rid}_int_{seg_id}_to_{mix_id}",
+                    "type": "MassFlowController",
+                    "source": seg_id,
+                    "target": mix_id,
+                    "properties": {"group": group},
+                    "group": group,
+                }
+            )
+            port_map[port_name] = mix_id
+            prev_id = mix_id
+        else:
+            prev_id = seg_id
 
-        plugins = BoulderPlugins()
-        _register_bloc_solver_plugins(plugins)
-        return plugins
-    except Exception:
-        return None
+    port_map["out"] = f"{rid}_seg{len(segments)}"
+    return {"nodes": nodes, "connections": conns, "port_map": port_map}
+
+
+def _register_test_plugins():
+    """Ensure ThreeSegmentsReactor unfolder is registered for composite expansion."""
+    from boulder.cantera_converter import get_plugins  # noqa: PLC0415
+    from boulder.schema_registry import register_reactor_unfolder  # noqa: PLC0415
+
+    plugins = get_plugins()
+    if "ThreeSegmentsReactor" not in plugins.reactor_unfolders:
+        register_reactor_unfolder(
+            plugins, "ThreeSegmentsReactor", _three_segments_test_unfolder
+        )
+    return plugins
 
 
 def _normalize_composite(yaml_str: str) -> dict:
-    """Normalize the composite YAML using Bloc plugins (expansion happens inside normalize_config)."""
+    """Normalize the composite YAML (expansion happens inside normalize_config)."""
     from boulder.config import (  # noqa: PLC0415
         _to_plain_dict,
         load_yaml_string_with_comments,

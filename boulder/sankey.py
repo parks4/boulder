@@ -25,7 +25,7 @@ def _species_sankey_hex_colors(
     """Return hex colors for species Sankey bands.
 
     Reads ``plugins.sankey_link_colors`` when a plugin has registered a palette
-    (e.g. Bloc via its ``boulder.plugins`` entry point).  Falls back to Boulder's
+    (via the ``boulder.plugins`` entry point).  Falls back to Boulder's
     own light-theme defaults when the slot is unset or *plugins* is ``None``.
     Boulder never references any third-party package by name here.
     """
@@ -45,7 +45,7 @@ def sankey_links_for_api(
 
     Species bands (``H2``, ``CH4``, ``Cs``) are converted to hex using the
     palette registered in ``plugins.sankey_link_colors`` (set by the installed
-    plugin, e.g. Bloc via its ``boulder.plugins`` entry point).  When no plugin
+    plugin, via the ``boulder.plugins`` entry point).  When no plugin
     has registered a palette, Boulder falls back to its own light-theme defaults.
     Literal ``#``/``rgb`` entries from custom generators are unchanged.
     Semantic ``mass``, ``enthalpy``, and ``heat`` are left as-is so the
@@ -198,8 +198,7 @@ def plot_sankey_diagram_from_links_and_nodes(
         Theme to use for styling ("light" or "dark"). Default is "light".
     plugins : BoulderPlugins, optional
         Plugin container. When provided and ``plugins.sankey_link_colors`` is
-        set, species band colors are taken from the plugin palette (e.g. Bloc)
-        rather than Boulder's built-in defaults.
+        set, species band colors are taken from the plugin palette rather than Boulder's built-in defaults.
 
     Returns
     -------

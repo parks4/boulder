@@ -30,7 +30,7 @@ class CanteraScriptEmitter:
     """Emits a standalone Cantera-native staged-solve script from a config dict.
 
     Subclass and override ``_emit_reactor``, ``_emit_download_imports``, or
-    ``_emit_post_build_calls`` to inject custom behaviour (e.g. Bloc-specific
+    ``_emit_post_build_calls`` to inject custom behaviour (e.g. host-specific
     reactor types) without modifying Boulder.
 
     Parameters

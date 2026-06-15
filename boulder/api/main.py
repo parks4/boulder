@@ -30,7 +30,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .routes import configs, graph, mechanisms, plugins, simulations
+from .routes import configs, graph, gui_actions, mechanisms, plugins, simulations
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +83,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             if verbose:
                 logger.info(f"Loading preloaded configuration from: {cleaned}")
 
-            # Use the runner class registered by the CLI (e.g. BlocRunner) so that
-            # its load() override is respected.  BlocRunner.load() resolves the
-            # Bloc-level `from:` inheritance chain before Boulder's normaliser sees
-            # the config.  Fall back to the standard loader for plain Boulder use.
+            # Use the runner class registered by the CLI (e.g. a host-package
+            # subclass) so that its load() override is respected.  A custom
+            # runner may resolve YAML ``from:`` inheritance before Boulder's
+            # normaliser sees the config.  Fall back to the standard loader for
+            # plain Boulder use.
             runner_cls = _runner_class or BoulderRunner
             config = runner_cls.load(cleaned)
 
@@ -146,6 +147,9 @@ def create_app() -> FastAPI:
     app.include_router(mechanisms.router, prefix="/api/mechanisms", tags=["mechanisms"])
     app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
     app.include_router(plugins.router, prefix="/api/plugins", tags=["plugins"])
+    app.include_router(
+        gui_actions.router, prefix="/api/gui-actions", tags=["gui-actions"]
+    )
 
     # Health check
     @app.get("/api/health")

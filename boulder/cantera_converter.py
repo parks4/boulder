@@ -56,10 +56,11 @@ class BoulderPlugins:
     summary_builders: Dict[str, Any] = field(
         default_factory=dict
     )  # Summary builder plugins
+    gui_actions: List[Any] = field(default_factory=list)
     sankey_generator: Optional[Callable] = None  # Custom Sankey generation function
     #: Hex color mapping for species bands in the Sankey diagram.
     #: Keys: ``"H2"``, ``"CH4"``, ``"Cs"`` (and any others the plugin wants to add).
-    #: Registered by an external plugin (e.g. Bloc) via the ``boulder.plugins`` entry
+    #: Registered by an external plugin via the ``boulder.plugins`` entry
     #: point.  When ``None``, Boulder falls back to its own light-theme defaults.
     sankey_link_colors: Optional[Dict[str, str]] = None
     #: ``(gas, new_mechanism, htol, Xtol) -> ct.Solution``
@@ -398,6 +399,13 @@ def get_plugins() -> BoulderPlugins:
     except ImportError as e:
         logger.debug(f"Summary builder plugins not available: {e}")
 
+    try:
+        from .gui_actions import get_gui_action_registry
+
+        plugins.gui_actions = get_gui_action_registry().actions.copy()
+    except ImportError as e:
+        logger.debug(f"GUI action plugins not available: {e}")
+
     _PLUGIN_CACHE = plugins
 
     if is_verbose_mode():
@@ -406,7 +414,8 @@ def get_plugins() -> BoulderPlugins:
             f"{len(plugins.connection_builders)} connection builders, "
             f"{len(plugins.post_build_hooks)} post-build hooks, "
             f"{len(plugins.output_pane_plugins)} output pane plugins, "
-            f"{len(plugins.summary_builders)} summary builders"
+            f"{len(plugins.summary_builders)} summary builders, "
+            f"{len(plugins.gui_actions)} GUI actions"
         )
 
     return plugins
@@ -1066,7 +1075,7 @@ class DualCanteraConverter:
                         T_u, P_u, Y_u = upstream_tpy
                         gas_for_node.TPY = T_u, P_u, Y_u
                     # else: leave gas_for_node from _get_gas_for_mech; plugin reactors
-                    # read the axial feed via _inlet_reservoir (Bloc post-build hook).
+                    # read the axial feed via _inlet_reservoir (plugin post-build hook).
                 else:
                     node_type = node.get("type", "")
                     if node_type == "Reservoir":
