@@ -194,6 +194,13 @@ class Stage:
     inter_connections_in: List[InterStageConnection] = field(default_factory=list)
     inter_connections_out: List[InterStageConnection] = field(default_factory=list)
 
+    #: Optional dotted-path override for the stage-level ReactorNet class.
+    #: When set (e.g. by a composite-reactor unfolder), takes highest precedence
+    #: in :func:`~boulder.cantera_converter._select_network_class_for_stage` and
+    #: disables the per-reactor conflict guard so multiple child reactors with
+    #: their own ``NETWORK_CLASS`` can coexist in one stage.
+    network_class: Optional[str] = None
+
 
 @dataclass
 class StageExecutionPlan:
@@ -275,12 +282,17 @@ def build_stage_graph(config: Dict[str, Any]) -> StageExecutionPlan:
         solve_directive = str(resolved_solver.get("kind", "advance_to_steady_state"))
         advance_time_val = float(resolved_solver.get("advance_time", 1.0))
 
+        # Stage-level network_class: composite unfolders may set this on the
+        # group config so a single custom net owns the entire stage.
+        stage_network_class: Optional[str] = gcfg.get("network_class") or None
+
         stages[gid] = Stage(
             id=gid,
             mechanism=str(gcfg.get("mechanism", default_mechanism)),
             solver=resolved_solver,
             solve_directive=solve_directive,
             advance_time=advance_time_val,
+            network_class=stage_network_class,
         )
 
     # Map each node to its stage via node.properties.group
@@ -653,6 +665,9 @@ def solve_staged(
             outlet_gas = _extract_gas_state(source_reactor, stage.mechanism, converter)
 
             # Apply mechanism switch if requested
+            outlet_mechanism = (
+                stage.mechanism
+            )  # mechanism for the stream-point reservoir
             if ic.mechanism_switch is not None:
                 target_stage = next(
                     (s for s in plan.ordered_stages if s.id == ic.target_stage), None
@@ -669,12 +684,15 @@ def solve_staged(
                     converter,
                 )
                 mapping_losses = losses
+                # After a mechanism switch the outlet_gas is in the target mechanism;
+                # the stream-point reservoir must be built with matching species count.
+                outlet_mechanism = target_stage.mechanism
 
             if stream_reservoirs:
                 _update_stream_point(
                     ic,
                     outlet_gas,
-                    stage.mechanism,
+                    outlet_mechanism,
                     converter,
                     stream_conns_by_stage.get(ic.target_stage, []),
                     stage_intra_connections=list(stage.intra_connections),

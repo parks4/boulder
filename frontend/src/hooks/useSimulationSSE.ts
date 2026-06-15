@@ -37,17 +37,34 @@ export function useSimulationSSE() {
         // Single source of truth: atomically replace nodes + connections with the
         // authoritative post-build lists from the backend.  Both lists are always
         // sent together; we require both to avoid leaving the graph half-updated.
+        //
+        // Frontend-only metadata keys (e.g. layout_offset set by the user dragging
+        // nodes) are NOT known to the backend and are absent from updated_nodes.
+        // Carry them forward from the current config so dragged positions survive
+        // the simulation update.
         if (data.updated_nodes != null && data.updated_connections != null) {
           const { config: currentConfig, setConfig } = useConfigStore.getState();
+          // Build a lookup map: nodeId → frontend-only metadata to preserve.
+          // Currently only layout_offset is considered frontend-only; expand as needed.
+          const frontendMeta = new Map<string, Record<string, unknown>>();
+          for (const n of currentConfig.nodes) {
+            const off = (n.metadata as Record<string, unknown> | null)?.layout_offset;
+            if (off !== undefined) frontendMeta.set(n.id, { layout_offset: off });
+          }
           setConfig({
             ...currentConfig,
-            nodes: data.updated_nodes.map((n) => ({
-              id: n.id,
-              type: n.type,
-              group: n.group ?? null,
-              properties: n.properties ?? {},
-              metadata: n.metadata ?? null,
-            })),
+            nodes: data.updated_nodes.map((n) => {
+              const extra = frontendMeta.get(n.id);
+              return {
+                id: n.id,
+                type: n.type,
+                group: n.group ?? null,
+                properties: n.properties ?? {},
+                metadata: extra
+                  ? { ...(n.metadata ?? {}), ...extra }
+                  : (n.metadata ?? null),
+              };
+            }),
             connections: data.updated_connections.map((c) => ({
               id: c.id,
               source: c.source,
@@ -55,6 +72,12 @@ export function useSimulationSSE() {
               type: c.type,
               properties: c.properties ?? {},
               metadata: c.metadata ?? null,
+              // group and logical must be preserved so that convert_to_stone_format
+              // can route each connection to the correct stage block when the user
+              // opens the YAML editor.  Without group, all connections are silently
+              // dropped from the merged YAML.
+              group: c.group ?? null,
+              logical: c.logical ?? null,
             })),
           });
         }

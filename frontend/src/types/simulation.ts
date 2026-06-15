@@ -83,5 +83,10 @@ export interface SimulationResults extends SimulationProgress {
     type: string;
     properties: Record<string, unknown>;
     metadata?: Record<string, unknown> | null;
+    /** Staged-solving group tag — required to route connections to the correct
+     *  YAML stage block during merge_config_into_yaml. */
+    group?: string | null;
+    /** True for logical (kind-less) inter-stage connections. */
+    logical?: boolean | null;
   }> | null;
 }

@@ -25,3 +25,8 @@ pipeline, API layer, plugin system, staged solver, and frontend.
 
 See [AGENTS.md](AGENTS.md) for development conventions, test commands, and coding guidelines for
 contributors and AI agents.
+
+## Frontend UI/UX
+
+Detailed frontend behaviour specifications (graph layout, edge styles, P&ID conventions, panel
+behaviour) live in **[frontend/SPECIFICATIONS.md](frontend/SPECIFICATIONS.md)**.
