@@ -57,6 +57,7 @@ class BoulderPlugins:
         default_factory=dict
     )  # Summary builder plugins
     gui_actions: List[Any] = field(default_factory=list)
+    cache_contributors: List[Any] = field(default_factory=list)
     sankey_generator: Optional[Callable] = None  # Custom Sankey generation function
     #: Hex color mapping for species bands in the Sankey diagram.
     #: Keys: ``"H2"``, ``"CH4"``, ``"Cs"`` (and any others the plugin wants to add).
@@ -406,6 +407,13 @@ def get_plugins() -> BoulderPlugins:
     except ImportError as e:
         logger.debug(f"GUI action plugins not available: {e}")
 
+    try:
+        from .result_cache import get_cache_contributor_registry
+
+        plugins.cache_contributors = get_cache_contributor_registry().contributors.copy()
+    except ImportError as e:
+        logger.debug(f"Cache contributor plugins not available: {e}")
+
     _PLUGIN_CACHE = plugins
 
     if is_verbose_mode():
@@ -415,7 +423,8 @@ def get_plugins() -> BoulderPlugins:
             f"{len(plugins.post_build_hooks)} post-build hooks, "
             f"{len(plugins.output_pane_plugins)} output pane plugins, "
             f"{len(plugins.summary_builders)} summary builders, "
-            f"{len(plugins.gui_actions)} GUI actions"
+            f"{len(plugins.gui_actions)} GUI actions, "
+            f"{len(plugins.cache_contributors)} cache contributors"
         )
 
     return plugins

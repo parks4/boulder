@@ -306,7 +306,9 @@ class TestSimulationRoutes:
                 self.mechanism = mechanism
 
         class DummyWorker:
-            def start_simulation(self, converter, config, simulation_time, time_step):
+            def start_simulation(
+                self, converter, config, simulation_time, time_step, **kwargs
+            ):
                 captured["simulation_time"] = simulation_time
                 captured["time_step"] = time_step
 
@@ -338,7 +340,9 @@ class TestSimulationRoutes:
                 self.mechanism = mechanism
 
         class DummyWorker:
-            def start_simulation(self, converter, config, simulation_time, time_step):
+            def start_simulation(
+                self, converter, config, simulation_time, time_step, **kwargs
+            ):
                 captured["simulation_time"] = simulation_time
                 captured["time_step"] = time_step
 
@@ -378,7 +382,9 @@ class TestSimulationRoutes:
                 self.mechanism = mechanism
 
         class DummyWorker:
-            def start_simulation(self, converter, config, simulation_time, time_step):
+            def start_simulation(
+                self, converter, config, simulation_time, time_step, **kwargs
+            ):
                 nonlocal worker_called
                 worker_called = True
 
@@ -420,7 +426,9 @@ class TestSimulationRoutes:
                 self.mechanism = mechanism
 
         class DummyWorker:
-            def start_simulation(self, converter, config, simulation_time, time_step):
+            def start_simulation(
+                self, converter, config, simulation_time, time_step, **kwargs
+            ):
                 received_config.update(config)
 
         monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)

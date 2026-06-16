@@ -7,6 +7,7 @@ import { useSimulationSSE } from "@/hooks/useSimulationSSE";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { startSimulation } from "@/api/simulations";
 import { fetchDefaultConfig, fetchPreloadedConfig } from "@/api/configs";
+import { fetchCachedResult } from "@/api/resultCache";
 import { EditNetworkCard } from "@/components/panels/EditNetworkCard";
 import { SimulateCard } from "@/components/panels/SimulateCard";
 import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
@@ -20,7 +21,8 @@ import { toast } from "sonner";
 export function AppShell() {
   const { theme, toggleTheme } = useThemeStore();
   const { config, fileName, setConfig } = useConfigStore();
-  const { isRunning, beginSimulationRun, startSimulation: setStarted, setError } = useSimulationStore();
+  const { isRunning, beginSimulationRun, startSimulation: setStarted, setError, setResults } =
+    useSimulationStore();
   const solverMode = useMemo(() => {
     const solver = (config.settings as Record<string, unknown> | null | undefined)
       ?.solver as Record<string, unknown> | undefined;
@@ -34,22 +36,71 @@ export function AppShell() {
   // Connect SSE stream
   useSimulationSSE();
 
-  // Load preloaded config if available, otherwise load default config on mount
+  // Load preloaded config if available, otherwise load default config on mount.
+  // After a successful preloaded-config fetch, check for a matching cache entry
+  // so outputs are visible immediately without re-running (issue #51).
   useEffect(() => {
     fetchPreloadedConfig()
       .then((resp) => {
         if (resp.preloaded && resp.config) {
           setConfig(resp.config, resp.filename || "config.yaml", resp.yaml);
           toast.success(`Loaded ${resp.filename || "configuration"}`);
+
+          // Try to populate the UI with cached results for this config.
+          return fetchCachedResult().then((cacheResp) => {
+            if (!cacheResp.cached) return;
+
+            const result = cacheResp.result;
+            setResults(result);
+
+            // Sync graph topology: apply updated_nodes / updated_connections
+            // exactly as the SSE complete handler does.
+            if (result.updated_nodes != null && result.updated_connections != null) {
+              const currentConfig = useConfigStore.getState().config;
+              const frontendMeta = new Map<string, Record<string, unknown>>();
+              for (const n of currentConfig.nodes) {
+                const off = (n.metadata as Record<string, unknown> | null)?.layout_offset;
+                if (off !== undefined) frontendMeta.set(n.id, { layout_offset: off });
+              }
+              setConfig({
+                ...currentConfig,
+                nodes: result.updated_nodes.map((n) => {
+                  const extra = frontendMeta.get(n.id);
+                  return {
+                    id: n.id,
+                    type: n.type,
+                    group: n.group ?? null,
+                    properties: n.properties ?? {},
+                    metadata: extra
+                      ? { ...(n.metadata ?? {}), ...extra }
+                      : (n.metadata ?? null),
+                    network_class: n.network_class ?? null,
+                  };
+                }),
+                connections: result.updated_connections.map((c) => ({
+                  id: c.id,
+                  source: c.source,
+                  target: c.target,
+                  type: c.type,
+                  properties: c.properties ?? {},
+                  metadata: c.metadata ?? null,
+                  group: c.group ?? null,
+                  logical: c.logical ?? null,
+                  mechanism_switch: c.mechanism_switch ?? null,
+                })),
+              });
+            }
+
+            const created = cacheResp.meta.created_at;
+            const ageMin = Math.round((Date.now() / 1000 - created) / 60);
+            const ageStr = ageMin < 2 ? "just now" : `${ageMin} min ago`;
+            toast.success(`Loaded cached results from ${ageStr}. Re-run skipped.`);
+          });
         } else {
           // No preloaded config, load default
-          return fetchDefaultConfig();
-        }
-      })
-      .then((resp) => {
-        // Only runs if fetchDefaultConfig was called
-        if (resp) {
-          setConfig(resp.config, "default.yaml", resp.yaml);
+          return fetchDefaultConfig().then((defResp) => {
+            if (defResp) setConfig(defResp.config, "default.yaml", defResp.yaml);
+          });
         }
       })
       .catch(() => {

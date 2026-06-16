@@ -153,9 +153,14 @@ async def start_simulation(
             grid["stop"] = simulation_time
             grid["dt"] = time_step
 
-        # Create a fresh worker for this simulation
+        # Create a fresh worker for this simulation.
+        # Pass app.state so the worker can update preloaded_result after the
+        # solve completes without requiring a server restart.
         worker = SimulationWorker()
-        worker.start_simulation(converter, config, simulation_time, time_step)
+        worker.start_simulation(
+            converter, config, simulation_time, time_step,
+            app_state=request.app.state,
+        )
         _simulations[sim_id] = (worker, time.time())
 
         return {"simulation_id": sim_id}
@@ -256,6 +261,129 @@ async def stop_simulation(sim_id: str) -> Dict[str, Any]:
     # Remove the worker from the dictionary to free memory
     del _simulations[sim_id]
     return {"stopped": True, "simulation_id": sim_id}
+
+
+@router.post("/check-cache")
+async def check_simulation_cache(
+    body: StartSimulationRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    """Check whether a cached result exists for the submitted config.
+
+    Computes the fingerprint from ``body.config`` (exactly as the simulation
+    worker would) and returns the matching entry when found.
+
+    Returns ``{"cached": true, "result": {...}, "fingerprint": "...", "meta": {...}}``
+    or ``{"cached": false}``.
+    """
+    from ...result_cache import cache_dir_for, compute_fingerprint, load_result_flexible
+
+    config = dict(body.config)
+    mechanism = body.mechanism
+    if not mechanism:
+        phases = config.get("phases", {})
+        if isinstance(phases, dict):
+            gas = phases.get("gas", {})
+            if isinstance(gas, dict):
+                mechanism = gas.get("mechanism")
+
+    config_path = getattr(request.app.state, "preloaded_config_path", None)
+    cache_root = cache_dir_for(config_path)
+    if cache_root is None:
+        return {"cached": False}
+
+    fingerprint = compute_fingerprint(config, mechanism=mechanism or None)
+    # Use flexible lookup: if a direct hit is absent, follow any alias file
+    # written for the post-build fingerprint during the last solve.
+    cached = load_result_flexible(cache_root, fingerprint)
+
+    if cached is None:
+        # Fallback: compare the incoming config fingerprint against the
+        # post-build config_snapshot stored in the server's preloaded result.
+        # This handles existing cache entries that were written before alias
+        # files were introduced, as well as any server restart where the
+        # preloaded_result is already loaded from disk.
+        preloaded = getattr(request.app.state, "preloaded_result", None)
+        if preloaded is not None:
+            snapshot = preloaded.get("config_snapshot") or {}
+            if snapshot:
+                snapshot_fp = compute_fingerprint(
+                    snapshot, mechanism=mechanism or None
+                )
+                if snapshot_fp == fingerprint:
+                    cached = preloaded
+
+    if cached is None:
+        return {"cached": False}
+
+    meta = cached.get("meta", {})
+    return {
+        "cached": True,
+        "fingerprint": fingerprint,
+        "result": cached.get("gui_payload", {}),
+        "config_snapshot": cached.get("config_snapshot", {}),
+        "meta": meta,
+    }
+
+
+@router.get("/cached")
+async def get_cached_result(request: Request) -> Dict[str, Any]:
+    """Return the cached simulation result for the preloaded configuration.
+
+    Returns ``{"cached": true, "result": {...}, "meta": {...}, "fingerprint": "..."}``
+    when a valid cache entry exists for the preloaded config fingerprint, or
+    ``{"cached": false}`` otherwise.
+    """
+    cached = getattr(request.app.state, "preloaded_result", None)
+    fingerprint = getattr(request.app.state, "preloaded_fingerprint", None)
+    if cached is None:
+        return {"cached": False}
+
+    meta = cached.get("meta", {})
+    return {
+        "cached": True,
+        "fingerprint": fingerprint,
+        "result": cached.get("gui_payload", {}),
+        "config_snapshot": cached.get("config_snapshot", {}),
+        "meta": meta,
+    }
+
+
+@router.get("/cached/artifacts/{artifact_name}")
+async def get_cached_artifact(
+    artifact_name: str,
+    request: Request,
+) -> Any:
+    """Serve a file from the cached artifacts directory.
+
+    Used by contributor plugins (e.g. Bloc) to fetch package-specific
+    artifacts they wrote during a previous solve.
+    """
+    from fastapi.responses import FileResponse
+
+    cached = getattr(request.app.state, "preloaded_result", None)
+    if cached is None:
+        raise HTTPException(status_code=404, detail="No cached result available")
+
+    artifacts_dir = cached.get("artifacts_dir")
+    if artifacts_dir is None:
+        raise HTTPException(status_code=404, detail="No artifacts directory in cache")
+
+    from pathlib import Path as _Path
+
+    artifact_path = _Path(artifacts_dir) / artifact_name
+    if not artifact_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Artifact '{artifact_name}' not found in cache",
+        )
+    # Safety: ensure the resolved path stays inside the artifacts directory
+    try:
+        artifact_path.resolve().relative_to(_Path(artifacts_dir).resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Path traversal denied")
+
+    return FileResponse(str(artifact_path))
 
 
 @router.post("/cleanup")

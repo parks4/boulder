@@ -21,6 +21,10 @@ class GuiActionContext:
     simulation_id: Optional[str] = None
     config_path: Optional[str] = None
     simulation_data: Optional[Dict[str, Any]] = None
+    #: True when a valid on-disk cache entry exists for the current config.
+    has_cached_result: bool = False
+    #: Fingerprint hex of the cached entry, or None when no cache is available.
+    cache_fingerprint: Optional[str] = None
 
 
 @dataclass

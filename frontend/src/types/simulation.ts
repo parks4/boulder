@@ -71,6 +71,8 @@ export interface SimulationResults extends SimulationProgress {
     group?: string | null;
     properties: Record<string, unknown>;
     metadata?: Record<string, unknown> | null;
+    /** Custom ReactorNet subclass dotted-path (Pydantic default: null). */
+    network_class?: string | null;
   }> | null;
   /**
    * Authoritative connection list after the staged-solver build completes.
@@ -88,5 +90,7 @@ export interface SimulationResults extends SimulationProgress {
     group?: string | null;
     /** True for logical (kind-less) inter-stage connections. */
     logical?: boolean | null;
+    /** Per-stage mechanism-switch spec (htol / Xtol thresholds). */
+    mechanism_switch?: Record<string, unknown> | null;
   }> | null;
 }

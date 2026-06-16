@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -72,6 +73,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.preloaded_yaml = None
     app.state.preloaded_filename = None
     app.state.preloaded_config_path = None  # full path for script generation
+    app.state.preloaded_result = None
+    app.state.preloaded_fingerprint = None
 
     if env_config_path and env_config_path.strip():
         try:
@@ -107,6 +110,60 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app.state.preloaded_config_path = str(actual_yaml_path)
 
             logger.info(f"Preloaded configuration: {app.state.preloaded_filename}")
+
+            # Attempt to load a matching cache entry for the preloaded config.
+            try:
+                from ..result_cache import (
+                    cache_dir_for,
+                    compute_fingerprint,
+                    find_result_by_config_snapshot,
+                    load_result,
+                )
+
+                cache_root = cache_dir_for(str(actual_yaml_path))
+                if cache_root is not None:
+                    mechanism = None
+                    phases = validated.get("phases", {})
+                    if isinstance(phases, dict):
+                        gas = phases.get("gas", {})
+                        if isinstance(gas, dict):
+                            mechanism = gas.get("mechanism")
+                    fingerprint = compute_fingerprint(validated, mechanism=mechanism)
+                    cached = load_result(cache_root, fingerprint)
+                    # If direct lookup misses, scan entries for one whose
+                    # config_snapshot fingerprint matches the startup fingerprint.
+                    # This handles legacy entries where pre-build and startup
+                    # fingerprints diverged due to type normalisation differences.
+                    if cached is None:
+                        cached = find_result_by_config_snapshot(
+                            cache_root, fingerprint, mechanism=mechanism
+                        )
+                    app.state.preloaded_result = cached
+                    app.state.preloaded_fingerprint = fingerprint if cached else None
+                    if cached:
+                        meta = cached.get("meta", {})
+                        created = meta.get("created_at", 0.0)
+                        logger.info(
+                            "Loaded cached simulation result for %s "
+                            "(created %.0f s ago, fingerprint %s…)",
+                            app.state.preloaded_filename,
+                            time.time() - created,
+                            fingerprint[:12],
+                        )
+                    else:
+                        logger.info(
+                            "No valid cache entry found for preloaded config "
+                            "(fingerprint %s…). Run the simulation to populate the cache.",
+                            fingerprint[:12],
+                        )
+                else:
+                    app.state.preloaded_result = None
+                    app.state.preloaded_fingerprint = None
+            except Exception as cache_err:
+                logger.warning("Cache load at startup failed: %s", cache_err)
+                app.state.preloaded_result = None
+                app.state.preloaded_fingerprint = None
+
         except Exception as e:
             logger.error(f"Failed to load preloaded configuration: {e}")
 
