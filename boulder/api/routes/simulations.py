@@ -158,7 +158,10 @@ async def start_simulation(
         # solve completes without requiring a server restart.
         worker = SimulationWorker()
         worker.start_simulation(
-            converter, config, simulation_time, time_step,
+            converter,
+            config,
+            simulation_time,
+            time_step,
             app_state=request.app.state,
         )
         _simulations[sim_id] = (worker, time.time())
@@ -276,42 +279,32 @@ async def check_simulation_cache(
     Returns ``{"cached": true, "result": {...}, "fingerprint": "...", "meta": {...}}``
     or ``{"cached": false}``.
     """
-    from ...result_cache import cache_dir_for, compute_fingerprint, load_result_flexible
+    from ...result_cache import (
+        cache_dir_for,
+        lookup_cached_result,
+        resolve_mechanism_for_fingerprint,
+    )
 
     config = dict(body.config)
-    mechanism = body.mechanism
-    if not mechanism:
-        phases = config.get("phases", {})
-        if isinstance(phases, dict):
-            gas = phases.get("gas", {})
-            if isinstance(gas, dict):
-                mechanism = gas.get("mechanism")
+    converter_cls = getattr(request.app.state, "converter_class", None)
+    mechanism = resolve_mechanism_for_fingerprint(
+        config,
+        converter_class=converter_cls,
+        body_mechanism=body.mechanism,
+    )
 
     config_path = getattr(request.app.state, "preloaded_config_path", None)
     cache_root = cache_dir_for(config_path)
     if cache_root is None:
         return {"cached": False}
 
-    fingerprint = compute_fingerprint(config, mechanism=mechanism or None)
-    # Use flexible lookup: if a direct hit is absent, follow any alias file
-    # written for the post-build fingerprint during the last solve.
-    cached = load_result_flexible(cache_root, fingerprint)
-
-    if cached is None:
-        # Fallback: compare the incoming config fingerprint against the
-        # post-build config_snapshot stored in the server's preloaded result.
-        # This handles existing cache entries that were written before alias
-        # files were introduced, as well as any server restart where the
-        # preloaded_result is already loaded from disk.
-        preloaded = getattr(request.app.state, "preloaded_result", None)
-        if preloaded is not None:
-            snapshot = preloaded.get("config_snapshot") or {}
-            if snapshot:
-                snapshot_fp = compute_fingerprint(
-                    snapshot, mechanism=mechanism or None
-                )
-                if snapshot_fp == fingerprint:
-                    cached = preloaded
+    preloaded = getattr(request.app.state, "preloaded_result", None)
+    fingerprint, cached = lookup_cached_result(
+        cache_root,
+        config,
+        mechanism=mechanism,
+        preloaded_result=preloaded,
+    )
 
     if cached is None:
         return {"cached": False}

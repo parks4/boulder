@@ -346,8 +346,13 @@ class SimulationWorker:
             # Persist results to disk cache (best-effort: never aborts the solve).
             # Pass pre_build_config so the fingerprint matches the startup fingerprint.
             self._persist_to_cache(
-                converter, config, results, reactor_reports, connection_reports,
-                code_str, pre_build_config=pre_build_config,
+                converter,
+                config,
+                results,
+                reactor_reports,
+                connection_reports,
+                code_str,
+                pre_build_config=pre_build_config,
             )
 
         except Exception as e:
@@ -392,11 +397,14 @@ class SimulationWorker:
             )
             from .simulation_result import make_simulation_result
 
-            mechanism = getattr(converter, "mechanism", None)
+            mechanism_raw = getattr(converter, "mechanism", None) or "gri30.yaml"
+            mechanism = converter.resolve_mechanism(mechanism_raw)
             config_path = getattr(converter, "_download_config_path", None)
             cache_root = cache_dir_for(config_path)
             if cache_root is None:
-                logger.debug("No cache root available (no config path); skipping cache.")
+                logger.debug(
+                    "No cache root available (no config path); skipping cache."
+                )
                 return
 
             progress = self.get_progress()
@@ -455,7 +463,8 @@ class SimulationWorker:
                 save_alias(cache_root, post_build_fp, fingerprint)
                 logger.debug(
                     "Cache post-build alias written: %s → %s",
-                    post_build_fp[:12], fingerprint[:12],
+                    post_build_fp[:12],
+                    fingerprint[:12],
                 )
 
             artifacts_dir = entry / "artifacts"
@@ -473,7 +482,9 @@ class SimulationWorker:
                         fingerprint[:12],
                     )
                 except Exception as state_exc:  # noqa: BLE001
-                    logger.debug("Could not update app.state (pre-contrib): %s", state_exc)
+                    logger.debug(
+                        "Could not update app.state (pre-contrib): %s", state_exc
+                    )
 
             contributors = getattr(
                 getattr(converter, "plugins", None), "cache_contributors", []

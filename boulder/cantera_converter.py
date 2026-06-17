@@ -410,7 +410,9 @@ def get_plugins() -> BoulderPlugins:
     try:
         from .result_cache import get_cache_contributor_registry
 
-        plugins.cache_contributors = get_cache_contributor_registry().contributors.copy()
+        plugins.cache_contributors = (
+            get_cache_contributor_registry().contributors.copy()
+        )
     except ImportError as e:
         logger.debug(f"Cache contributor plugins not available: {e}")
 

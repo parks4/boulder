@@ -22,6 +22,11 @@ class GuiActionRunRequest(BaseModel):
 
 def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None) -> Any:
     from ...gui_actions import GuiActionContext
+    from ...result_cache import (
+        cache_dir_for,
+        lookup_cached_result,
+        resolve_mechanism_for_fingerprint,
+    )
 
     preloaded_config = getattr(request.app.state, "preloaded_config", None)
     preloaded_yaml = getattr(request.app.state, "preloaded_yaml", None)
@@ -51,10 +56,22 @@ def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None)
     preloaded_result = getattr(request.app.state, "preloaded_result", None)
     preloaded_fingerprint = getattr(request.app.state, "preloaded_fingerprint", None)
     has_cached_result = preloaded_result is not None
-    # Expose the fingerprint even when preloaded_result is not yet set (e.g.
-    # contributors are still writing artifacts).  Actions that can poll for
-    # bundle readiness use the fingerprint to locate the cache entry directory.
     cache_fingerprint = preloaded_fingerprint
+
+    if body is not None and body.config is not None and isinstance(config, dict):
+        converter_cls = getattr(request.app.state, "converter_class", None)
+        mechanism = resolve_mechanism_for_fingerprint(
+            config, converter_class=converter_cls
+        )
+        cache_root = cache_dir_for(preloaded_config_path)
+        fingerprint, cached = lookup_cached_result(
+            cache_root,
+            dict(config),
+            mechanism=mechanism,
+            preloaded_result=preloaded_result,
+        )
+        cache_fingerprint = fingerprint
+        has_cached_result = cached is not None
 
     return GuiActionContext(
         config=config,

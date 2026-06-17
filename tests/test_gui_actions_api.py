@@ -6,6 +6,9 @@ that POST /api/gui-actions/{id}/run returns a downloadable file response.
 
 from __future__ import annotations
 
+import time
+from typing import Any, Dict
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -19,6 +22,31 @@ from boulder.gui_actions import (  # noqa: E402
     get_gui_action_registry,
     register_gui_action,
 )
+from boulder.result_cache import CACHE_VERSION, save_result  # noqa: E402
+
+SIMPLE_CONFIG: Dict[str, Any] = {
+    "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {"T": 1000}}],
+    "connections": [],
+    "settings": {"solver": {"kind": "steady_state"}},
+    "phases": {"gas": {"mechanism": "gri30.yaml"}},
+}
+
+SIMPLE_PAYLOAD: Dict[str, Any] = {
+    "status": "complete",
+    "is_complete": True,
+    "error_message": None,
+    "times": [0.0],
+    "reactors_series": {"r1": {"T": [1000.0], "P": [101325.0], "X": {}}},
+    "reactor_reports": {},
+    "connection_reports": {},
+    "code_str": "# generated",
+    "summary": [],
+    "sankey_links": None,
+    "sankey_nodes": None,
+    "elapsed_time": 1.23,
+    "updated_nodes": None,
+    "updated_connections": None,
+}
 
 
 class _EchoAction(GuiActionPlugin):
@@ -93,3 +121,82 @@ class TestGuiActionsApi:
             1 for action in registry.actions if action.action_id == "test_echo_action"
         )
         assert after == before
+
+
+class TestGuiActionCacheContext:
+    def test_build_context_matches_check_cache(self, tmp_path):
+        """_build_context and check-cache agree on has_cached_result for body.config."""
+        from boulder.api.routes.gui_actions import _build_context
+        from boulder.result_cache import (
+            compute_fingerprint,
+            resolve_mechanism_for_fingerprint,
+        )
+
+        yaml_path = tmp_path / "model.yaml"
+        yaml_path.write_text("nodes: []\n", encoding="utf-8")
+        mechanism = resolve_mechanism_for_fingerprint(SIMPLE_CONFIG)
+        fingerprint = compute_fingerprint(SIMPLE_CONFIG, mechanism=mechanism)
+        save_result(
+            cache_root=tmp_path / ".boulder-cache",
+            fingerprint=fingerprint,
+            gui_payload=SIMPLE_PAYLOAD,
+            config_snapshot=SIMPLE_CONFIG,
+        )
+
+        app = create_app()
+        with TestClient(app) as client:
+            app.state.preloaded_config_path = str(yaml_path)
+            app.state.preloaded_result = None
+            app.state.preloaded_fingerprint = None
+
+            body = {
+                "config": SIMPLE_CONFIG,
+                "mechanism": "gri30.yaml",
+            }
+            cache_resp = client.post("/api/simulations/check-cache", json=body)
+            assert cache_resp.json()["cached"] is True
+
+            from boulder.api.routes.gui_actions import GuiActionRunRequest
+
+            class _Req:
+                app = client.app
+
+            ctx = _build_context(_Req(), GuiActionRunRequest(**body))
+            assert ctx.has_cached_result is True
+            assert ctx.cache_fingerprint is not None
+
+    def test_build_context_rejects_stale_preloaded_fingerprint(self, tmp_path):
+        """Edited body.config must not inherit startup cache state."""
+        from boulder.api.routes.gui_actions import GuiActionRunRequest, _build_context
+
+        yaml_path = tmp_path / "model.yaml"
+        yaml_path.write_text("nodes: []\n", encoding="utf-8")
+        fingerprint = "d" * 64
+        cached = {
+            "fingerprint": fingerprint,
+            "gui_payload": SIMPLE_PAYLOAD,
+            "config_snapshot": SIMPLE_CONFIG,
+            "meta": {"cache_version": CACHE_VERSION, "created_at": time.time()},
+            "artifacts_dir": tmp_path / ".boulder-cache" / fingerprint / "artifacts",
+        }
+
+        edited_config = dict(SIMPLE_CONFIG)
+        edited_config["nodes"] = [
+            {"id": "r2", "type": "IdealGasReactor", "properties": {"T": 2000}}
+        ]
+
+        app = create_app()
+        with TestClient(app) as client:
+            app.state.preloaded_config_path = str(yaml_path)
+            app.state.preloaded_result = cached
+            app.state.preloaded_fingerprint = fingerprint
+
+            class _Req:
+                app = client.app
+
+            ctx = _build_context(
+                _Req(),
+                GuiActionRunRequest(config=edited_config, mechanism="gri30.yaml"),
+            )
+            assert ctx.has_cached_result is False
+            assert ctx.cache_fingerprint is not None

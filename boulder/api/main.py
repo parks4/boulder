@@ -115,40 +115,43 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             try:
                 from ..result_cache import (
                     cache_dir_for,
-                    compute_fingerprint,
-                    find_result_by_config_snapshot,
-                    load_result,
+                    lookup_cached_result,
+                    resolve_mechanism_for_fingerprint,
                 )
 
                 cache_root = cache_dir_for(str(actual_yaml_path))
                 if cache_root is not None:
-                    mechanism = None
-                    phases = validated.get("phases", {})
-                    if isinstance(phases, dict):
-                        gas = phases.get("gas", {})
-                        if isinstance(gas, dict):
-                            mechanism = gas.get("mechanism")
-                    fingerprint = compute_fingerprint(validated, mechanism=mechanism)
-                    cached = load_result(cache_root, fingerprint)
-                    # If direct lookup misses, scan entries for one whose
-                    # config_snapshot fingerprint matches the startup fingerprint.
-                    # This handles legacy entries where pre-build and startup
-                    # fingerprints diverged due to type normalisation differences.
+                    converter_cls = getattr(app.state, "converter_class", None)
+                    mechanism = resolve_mechanism_for_fingerprint(
+                        validated, converter_class=converter_cls
+                    )
+                    fingerprint, cached = lookup_cached_result(
+                        cache_root,
+                        validated,
+                        mechanism=mechanism,
+                    )
                     if cached is None:
+                        from ..result_cache import find_result_by_config_snapshot
+
                         cached = find_result_by_config_snapshot(
                             cache_root, fingerprint, mechanism=mechanism
                         )
                     app.state.preloaded_result = cached
-                    app.state.preloaded_fingerprint = fingerprint if cached else None
+                    # Use the *actual* cache-entry fingerprint (directory name) so
+                    # that artifacts_dir_for() resolves correctly in export actions.
+                    app.state.preloaded_fingerprint = (
+                        cached.get("fingerprint") if cached else None
+                    )
                     if cached:
                         meta = cached.get("meta", {})
                         created = meta.get("created_at", 0.0)
+                        actual_fp = cached.get("fingerprint", fingerprint)
                         logger.info(
                             "Loaded cached simulation result for %s "
                             "(created %.0f s ago, fingerprint %s…)",
                             app.state.preloaded_filename,
                             time.time() - created,
-                            fingerprint[:12],
+                            actual_fp[:12],
                         )
                     else:
                         logger.info(

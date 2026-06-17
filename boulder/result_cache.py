@@ -30,7 +30,9 @@ SHA-256 hex of canonical sorted-key JSON of:
 
 * normalized config (nodes, connections, settings, phases)
 * mechanism identity (content hash for local files; name+cantera-version for builtins)
-* package versions: boulder, cantera
+* package source identity (git HEAD + dirty token for editable installs)
+* cantera version
+* per-plugin source identity from ``BOULDER_PLUGINS``
 * ``BOULDER_PLUGINS`` env var
 * ``CACHE_VERSION`` integer
 
@@ -45,6 +47,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 import time
 from abc import ABC, abstractmethod
@@ -137,14 +140,7 @@ def _mechanism_identity(mechanism: Optional[str]) -> str:
 
 
 def _package_version(package: str) -> str:
-    """Return the base (major.minor.patch) version of *package*, or 'unknown'.
-
-    Development-install suffixes (``.dev*``, ``+local``, ``.dirty``) are
-    stripped so that cache entries survive code edits within the same release
-    series.  :data:`CACHE_VERSION` is the authoritative discriminator for
-    schema-breaking changes; a version bump (e.g. 0.5.4 → 0.5.5) still
-    produces a different fingerprint and invalidates old entries.
-    """
+    """Return the base (major.minor.patch) version of *package*, or 'unknown'."""
     try:
         import re
         from importlib.metadata import version
@@ -154,6 +150,211 @@ def _package_version(package: str) -> str:
         return m.group(1) if m else raw
     except Exception:
         return "unknown"
+
+
+def _ignore_code_changes() -> bool:
+    """Return True when ``BOULDER_CACHE_IGNORE_CODE`` disables git-based identity."""
+    return os.environ.get("BOULDER_CACHE_IGNORE_CODE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _find_git_root(start: Path) -> Optional[Path]:
+    """Walk parents of *start* looking for a ``.git`` directory."""
+    current = start.resolve()
+    for parent in [current, *current.parents]:
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def _git_head(repo_dir: Path) -> Optional[str]:
+    """Return ``git rev-parse HEAD`` for *repo_dir*, or None."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def _git_dirty_token(repo_dir: Path) -> Optional[str]:
+    """Return a short hash when the work tree has uncommitted or untracked changes."""
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        diff = subprocess.run(
+            ["git", "diff", "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        combined = (status.stdout or "") + (diff.stdout or "")
+        if not combined.strip():
+            return None
+        return hashlib.sha256(combined.encode()).hexdigest()[:12]
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _package_install_dir(package: str) -> Optional[Path]:
+    """Return the on-disk directory for *package*, when discoverable."""
+    try:
+        import importlib
+        from importlib.metadata import distribution
+
+        dist = distribution(package)
+        for entry in dist.files or []:
+            if entry.name == "__init__.py":
+                loc = entry.locate()
+                if loc is not None and loc.is_file():
+                    return loc.parent
+        mod = importlib.import_module(package)
+        mod_file = getattr(mod, "__file__", None)
+        if mod_file:
+            return Path(mod_file).parent
+    except Exception:
+        pass
+    return None
+
+
+def _source_identity(package: str) -> str:
+    """Return a stable identity string for *package* source code.
+
+    When the install lives inside a git work tree, uses ``HEAD`` plus a dirty
+    token derived from ``git diff`` and ``git status``.  Falls back to the
+    stripped package version for wheel installs or when git is unavailable.
+
+    Set ``BOULDER_CACHE_IGNORE_CODE=1`` to restore version-only identity.
+    """
+    if _ignore_code_changes():
+        return _package_version(package)
+
+    install_dir = _package_install_dir(package)
+    if install_dir is None:
+        return _package_version(package)
+
+    git_root = _find_git_root(install_dir)
+    if git_root is None:
+        return _package_version(package)
+
+    head = _git_head(git_root)
+    if head is None:
+        return _package_version(package)
+
+    dirty = _git_dirty_token(git_root)
+    if dirty:
+        return f"git:{head[:12]}+dirty:{dirty}"
+    return f"git:{head[:12]}"
+
+
+def _plugins_source_identity() -> Dict[str, str]:
+    """Return source-identity strings for each top-level ``BOULDER_PLUGINS`` package."""
+    plugins_env = os.environ.get("BOULDER_PLUGINS", "").strip()
+    if not plugins_env:
+        return {}
+
+    identities: Dict[str, str] = {}
+    for entry in plugins_env.split(","):
+        module_name = entry.strip()
+        if not module_name:
+            continue
+        root_pkg = module_name.split(".")[0]
+        if root_pkg in identities:
+            continue
+        try:
+            import importlib
+
+            mod = importlib.import_module(module_name)
+            pkg_name = (mod.__package__ or module_name).split(".")[0]
+            identities[pkg_name] = _source_identity(pkg_name)
+        except ImportError:
+            identities[root_pkg] = _source_identity(root_pkg)
+    return identities
+
+
+def mechanism_from_config(
+    config: Dict[str, Any],
+    body_mechanism: Optional[str] = None,
+) -> str:
+    """Extract the mechanism string from *config* or an explicit POST override."""
+    if body_mechanism:
+        return body_mechanism
+    phases = config.get("phases", {})
+    if isinstance(phases, dict):
+        gas = phases.get("gas", {})
+        if isinstance(gas, dict):
+            mechanism = gas.get("mechanism")
+            if mechanism:
+                return str(mechanism)
+    return "gri30.yaml"
+
+
+def resolve_mechanism_for_fingerprint(
+    config: Dict[str, Any],
+    converter_class: Any = None,
+    body_mechanism: Optional[str] = None,
+) -> str:
+    """Resolve the mechanism string used for cache fingerprinting.
+
+    Applies :meth:`~boulder.cantera_converter.DualCanteraConverter.resolve_mechanism`
+    from *converter_class* when provided, without constructing a full converter
+    (avoids loading Cantera during cache lookups).
+    """
+    raw = mechanism_from_config(config, body_mechanism=body_mechanism)
+    if converter_class is None:
+        return raw
+    try:
+        instance = object.__new__(converter_class)
+        return converter_class.resolve_mechanism(instance, raw)
+    except Exception:
+        return raw
+
+
+def lookup_cached_result(
+    cache_root: Optional[Path],
+    config: Dict[str, Any],
+    mechanism: Optional[str] = None,
+    preloaded_result: Optional[Dict[str, Any]] = None,
+) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Compute a fingerprint and load a matching cache entry when present.
+
+    Returns
+    -------
+    tuple
+        ``(fingerprint, cached_entry)``.  *fingerprint* is always computed
+        when *cache_root* is set; *cached_entry* is ``None`` on a miss.
+    """
+    if cache_root is None:
+        return None, None
+
+    fingerprint = compute_fingerprint(config, mechanism=mechanism)
+    cached = load_result_flexible(cache_root, fingerprint)
+    if cached is None and preloaded_result is not None:
+        snapshot = preloaded_result.get("config_snapshot") or {}
+        if snapshot:
+            snapshot_fp = compute_fingerprint(snapshot, mechanism=mechanism)
+            if snapshot_fp == fingerprint:
+                cached = preloaded_result
+    return fingerprint, cached
 
 
 def compute_fingerprint(
@@ -182,8 +383,9 @@ def compute_fingerprint(
         "cache_version": CACHE_VERSION,
         "config": _coerce(config),
         "mechanism": _mechanism_identity(mechanism),
-        "boulder_version": _package_version("boulder"),
+        "boulder_source": _source_identity("boulder"),
         "cantera_version": _package_version("cantera"),
+        "plugins_source": _plugins_source_identity(),
         "boulder_plugins": os.environ.get("BOULDER_PLUGINS", ""),
     }
     if extra:
@@ -385,7 +587,9 @@ def save_alias(cache_root: Path, alias_fp: str, canonical_fp: str) -> None:
     logger.debug("Cache alias written: %s → %s", alias_fp[:12], canonical_fp[:12])
 
 
-def load_result_flexible(cache_root: Path, fingerprint: str) -> Optional[Dict[str, Any]]:
+def load_result_flexible(
+    cache_root: Path, fingerprint: str
+) -> Optional[Dict[str, Any]]:
     """Load a cached result, following alias files when needed.
 
     Tries the direct entry first; if absent, checks for a
@@ -450,9 +654,7 @@ def find_result_by_config_snapshot(
             result_data = json.loads(
                 (entry_dir / "result.json").read_text(encoding="utf-8")
             )
-            meta = json.loads(
-                (entry_dir / "meta.json").read_text(encoding="utf-8")
-            )
+            meta = json.loads((entry_dir / "meta.json").read_text(encoding="utf-8"))
             if meta.get("cache_version") != CACHE_VERSION:
                 continue
             snapshot = result_data.get("config_snapshot") or {}
@@ -479,6 +681,23 @@ def clear_cache(cache_root: Path) -> None:
     logger.info("Cache cleared: %s", cache_root)
 
 
+def _prune_orphan_aliases(cache_root: Path) -> None:
+    """Remove alias files whose canonical cache entry no longer exists."""
+    if not cache_root.exists():
+        return
+    for alias_file in cache_root.iterdir():
+        if not alias_file.is_file() or not alias_file.name.startswith("_alias_"):
+            continue
+        try:
+            canonical_fp = alias_file.read_text(encoding="utf-8").strip()
+            target_dir = _entry_dir(cache_root, canonical_fp)
+            if not (target_dir / "COMPLETE").exists():
+                alias_file.unlink(missing_ok=True)
+                logger.debug("Pruned orphan cache alias: %s", alias_file.name[:20])
+        except OSError:
+            continue
+
+
 def _prune_cache(cache_root: Path) -> None:
     """Remove oldest cache entries when count exceeds :data:`MAX_CACHE_ENTRIES`."""
     entries = [
@@ -486,12 +705,12 @@ def _prune_cache(cache_root: Path) -> None:
         for d in cache_root.iterdir()
         if d.is_dir() and not d.name.startswith("_tmp_") and (d / "COMPLETE").exists()
     ]
-    if len(entries) <= MAX_CACHE_ENTRIES:
-        return
-    entries.sort(key=lambda d: (d / "COMPLETE").stat().st_mtime)
-    for old in entries[: len(entries) - MAX_CACHE_ENTRIES]:
-        shutil.rmtree(old, ignore_errors=True)
-        logger.debug("Pruned cache entry: %s", old.name[:12])
+    if len(entries) > MAX_CACHE_ENTRIES:
+        entries.sort(key=lambda d: (d / "COMPLETE").stat().st_mtime)
+        for old in entries[: len(entries) - MAX_CACHE_ENTRIES]:
+            shutil.rmtree(old, ignore_errors=True)
+            logger.debug("Pruned cache entry: %s", old.name[:12])
+    _prune_orphan_aliases(cache_root)
 
 
 # ---------------------------------------------------------------------------

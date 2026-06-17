@@ -25,10 +25,15 @@ from boulder.result_cache import (
     CacheContributorPlugin,
     CacheContributorRegistry,
     _entry_dir,
+    _prune_cache,
+    _source_identity,
     cache_dir_for,
     compute_fingerprint,
     load_result,
+    lookup_cached_result,
+    resolve_mechanism_for_fingerprint,
     run_contributors,
+    save_alias,
     save_result,
 )
 
@@ -76,7 +81,9 @@ class TestComputeFingerprint:
     def test_changes_with_config(self):
         """Different configs produce different fingerprints."""
         cfg2 = dict(SIMPLE_CONFIG)
-        cfg2["nodes"] = [{"id": "r2", "type": "IdealGasReactor", "properties": {"T": 2000}}]
+        cfg2["nodes"] = [
+            {"id": "r2", "type": "IdealGasReactor", "properties": {"T": 2000}}
+        ]
         fp1 = compute_fingerprint(SIMPLE_CONFIG)
         fp2 = compute_fingerprint(cfg2)
         assert fp1 != fp2
@@ -260,11 +267,133 @@ class TestPruning:
             time.sleep(0.01)  # ensure mtime ordering
 
         complete_entries = [
-            d
-            for d in tmp_path.iterdir()
-            if d.is_dir() and (d / "COMPLETE").exists()
+            d for d in tmp_path.iterdir() if d.is_dir() and (d / "COMPLETE").exists()
         ]
         assert len(complete_entries) == MAX_CACHE_ENTRIES
+
+
+class TestSourceIdentity:
+    def test_ignore_code_env_uses_package_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """BOULDER_CACHE_IGNORE_CODE=1 restores version-only identity."""
+        monkeypatch.setenv("BOULDER_CACHE_IGNORE_CODE", "1")
+        identity = _source_identity("boulder")
+        assert identity.count(".") >= 2 or identity == "unknown"
+
+    def test_dirty_worktree_changes_fingerprint(self, monkeypatch: pytest.MonkeyPatch):
+        """Uncommitted changes produce a different fingerprint than a clean tree."""
+        monkeypatch.delenv("BOULDER_CACHE_IGNORE_CODE", raising=False)
+
+        def fake_source(package: str) -> str:
+            if package == "boulder":
+                return "git:abc123"
+            return "unknown"
+
+        def fake_dirty(package: str) -> str:
+            if package == "boulder":
+                return "git:abc123+dirty:deadbeef1234"
+            return "unknown"
+
+        monkeypatch.setattr("boulder.result_cache._source_identity", fake_source)
+        fp_clean = compute_fingerprint(SIMPLE_CONFIG)
+        monkeypatch.setattr("boulder.result_cache._source_identity", fake_dirty)
+        fp_dirty = compute_fingerprint(SIMPLE_CONFIG)
+        assert fp_clean != fp_dirty
+
+
+class TestResolveMechanismForFingerprint:
+    def test_subclass_override_is_applied(self):
+        """resolve_mechanism_for_fingerprint honours converter subclass overrides."""
+
+        class _RedirectConverter:
+            def resolve_mechanism(self, name: str) -> str:
+                return "/custom/mech.yaml"
+
+        resolved = resolve_mechanism_for_fingerprint(
+            SIMPLE_CONFIG,
+            converter_class=_RedirectConverter,
+        )
+        assert resolved == "/custom/mech.yaml"
+
+    def test_reader_writer_use_same_resolved_mechanism(self):
+        """Fingerprint with resolved mechanism matches worker-style hashing."""
+
+        class _RedirectConverter:
+            def resolve_mechanism(self, name: str) -> str:
+                return "h2o2.yaml"
+
+        mechanism = resolve_mechanism_for_fingerprint(
+            SIMPLE_CONFIG,
+            converter_class=_RedirectConverter,
+        )
+        fp_reader = compute_fingerprint(SIMPLE_CONFIG, mechanism=mechanism)
+        fp_writer = compute_fingerprint(SIMPLE_CONFIG, mechanism="h2o2.yaml")
+        assert fp_reader == fp_writer
+
+
+class TestLookupCachedResult:
+    def test_hit_via_alias(self, tmp_path: Path):
+        """lookup_cached_result follows post-build alias files."""
+        canonical = compute_fingerprint(SIMPLE_CONFIG, mechanism="gri30.yaml")
+        post_build = dict(SIMPLE_CONFIG)
+        post_build["nodes"] = list(SIMPLE_CONFIG["nodes"]) + [
+            {"id": "outlet", "type": "Reservoir", "properties": {}}
+        ]
+        post_fp = compute_fingerprint(post_build, mechanism="gri30.yaml")
+        save_result(
+            cache_root=tmp_path,
+            fingerprint=canonical,
+            gui_payload=SIMPLE_PAYLOAD,
+            config_snapshot=post_build,
+        )
+        save_alias(tmp_path, post_fp, canonical)
+        fingerprint, cached = lookup_cached_result(
+            tmp_path, post_build, mechanism="gri30.yaml"
+        )
+        assert cached is not None
+        assert fingerprint == post_fp
+
+    def test_snapshot_fallback(self, tmp_path: Path):
+        """lookup_cached_result accepts a matching preloaded snapshot."""
+        fingerprint = compute_fingerprint(SIMPLE_CONFIG, mechanism="gri30.yaml")
+        preloaded = {
+            "fingerprint": fingerprint,
+            "gui_payload": SIMPLE_PAYLOAD,
+            "config_snapshot": SIMPLE_CONFIG,
+            "meta": {"cache_version": CACHE_VERSION},
+        }
+        fp, cached = lookup_cached_result(
+            tmp_path,
+            SIMPLE_CONFIG,
+            mechanism="gri30.yaml",
+            preloaded_result=preloaded,
+        )
+        assert fp == fingerprint
+        assert cached is preloaded
+
+
+class TestAliasPruning:
+    def test_orphan_alias_removed_after_entry_pruned(self, tmp_path: Path):
+        """_prune_cache deletes alias files whose canonical entry was removed."""
+        from boulder.result_cache import MAX_CACHE_ENTRIES
+
+        fingerprints = []
+        for i in range(MAX_CACHE_ENTRIES + 2):
+            fp = f"{i:064x}"
+            fingerprints.append(fp)
+            save_result(
+                cache_root=tmp_path,
+                fingerprint=fp,
+                gui_payload=SIMPLE_PAYLOAD,
+                config_snapshot=SIMPLE_CONFIG,
+            )
+            time.sleep(0.01)
+
+        orphan_alias = tmp_path / f"_alias_{'f' * 64}"
+        orphan_alias.write_text(fingerprints[0], encoding="utf-8")
+        _prune_cache(tmp_path)
+        assert not orphan_alias.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +456,9 @@ class TestCacheContributorPlugin:
             def contributor_id(self) -> str:
                 return "test_failing"
 
-            def contribute(self, config, converter, simulation_result, fingerprint, artifacts_dir):
+            def contribute(
+                self, config, converter, simulation_result, fingerprint, artifacts_dir
+            ):
                 raise RuntimeError("intentional failure")
 
         artifacts_dir = tmp_path / "artifacts"
