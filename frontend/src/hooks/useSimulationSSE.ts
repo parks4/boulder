@@ -63,6 +63,9 @@ export function useSimulationSSE() {
                 metadata: extra
                   ? { ...(n.metadata ?? {}), ...extra }
                   : (n.metadata ?? null),
+                // Preserve Pydantic-default fields so the fingerprint computed
+                // from the store matches the one written to cache by the worker.
+                network_class: n.network_class ?? null,
               };
             }),
             connections: data.updated_connections.map((c) => ({
@@ -78,6 +81,7 @@ export function useSimulationSSE() {
               // dropped from the merged YAML.
               group: c.group ?? null,
               logical: c.logical ?? null,
+              mechanism_switch: c.mechanism_switch ?? null,
             })),
           });
         }

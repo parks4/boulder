@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -72,6 +73,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.preloaded_yaml = None
     app.state.preloaded_filename = None
     app.state.preloaded_config_path = None  # full path for script generation
+    app.state.preloaded_result = None
+    app.state.preloaded_fingerprint = None
 
     if env_config_path and env_config_path.strip():
         try:
@@ -107,6 +110,62 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             app.state.preloaded_config_path = str(actual_yaml_path)
 
             logger.info(f"Preloaded configuration: {app.state.preloaded_filename}")
+
+            # Attempt to load a matching cache entry for the preloaded config.
+            try:
+                from ..result_cache import (
+                    cache_dir_for,
+                    lookup_cached_result,
+                    resolve_mechanism_for_fingerprint,
+                )
+
+                cache_root = cache_dir_for(str(actual_yaml_path))
+                if cache_root is not None:
+                    mechanism = resolve_mechanism_for_fingerprint(
+                        validated, converter_class=app.state.converter_class
+                    )
+                    fingerprint, cached = lookup_cached_result(
+                        cache_root,
+                        validated,
+                        mechanism=mechanism,
+                    )
+                    if cached is None and fingerprint is not None:
+                        from ..result_cache import find_result_by_config_snapshot
+
+                        cached = find_result_by_config_snapshot(
+                            cache_root, fingerprint, mechanism=mechanism
+                        )
+                    app.state.preloaded_result = cached
+                    # Use the *actual* cache-entry fingerprint (directory name) so
+                    # that artifacts_dir_for() resolves correctly in export actions.
+                    app.state.preloaded_fingerprint = (
+                        cached.get("fingerprint") if cached else None
+                    )
+                    if cached:
+                        meta = cached.get("meta", {})
+                        created = meta.get("created_at", 0.0)
+                        actual_fp = str(cached.get("fingerprint") or fingerprint or "")
+                        logger.info(
+                            "Loaded cached simulation result for %s "
+                            "(created %.0f s ago, fingerprint %s…)",
+                            app.state.preloaded_filename,
+                            time.time() - created,
+                            actual_fp[:12],
+                        )
+                    elif fingerprint is not None:
+                        logger.info(
+                            "No valid cache entry found for preloaded config "
+                            "(fingerprint %s…). Run the simulation to populate the cache.",
+                            fingerprint[:12],
+                        )
+                else:
+                    app.state.preloaded_result = None
+                    app.state.preloaded_fingerprint = None
+            except Exception as cache_err:
+                logger.warning("Cache load at startup failed: %s", cache_err)
+                app.state.preloaded_result = None
+                app.state.preloaded_fingerprint = None
+
         except Exception as e:
             logger.error(f"Failed to load preloaded configuration: {e}")
 

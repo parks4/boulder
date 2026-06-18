@@ -104,6 +104,9 @@ class SimulationWorker:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
+        #: Optional reference to FastAPI app.state; updated with cache result on
+        #: successful solve so GUI actions see the new cache without server restart.
+        self._app_state: Optional[Any] = None
 
     def start_simulation(
         self,
@@ -111,6 +114,7 @@ class SimulationWorker:
         config: Dict[str, Any],
         simulation_time: float = 10.0,
         time_step: float = 1.0,
+        app_state: Optional[Any] = None,
     ) -> None:
         """Start a background simulation."""
         if self._worker_thread and self._worker_thread.is_alive():
@@ -119,6 +123,7 @@ class SimulationWorker:
 
         # Reset state
         self._stop_event.clear()
+        self._app_state = app_state
         with self._lock:
             self.progress = SimulationProgress()
 
@@ -202,6 +207,18 @@ class SimulationWorker:
                 self.progress.n_stages = 0
 
             logger.info("Building Cantera network in background...")
+
+            # Snapshot nodes/connections before build_network mutates the config
+            # in-place (staged solver adds outlet/interface nodes).  The pre-build
+            # snapshot is used for fingerprinting so the startup fingerprint—
+            # computed from the un-enriched validated config—matches the cache entry.
+            import copy as _copy
+
+            pre_build_config: Dict[str, Any] = {
+                **config,
+                "nodes": _copy.deepcopy(config.get("nodes") or []),
+                "connections": _copy.deepcopy(config.get("connections") or []),
+            }
 
             # Callback fired by solve_staged after each stage completes.
             # n_total is passed by the solver on each call, so n_stages stays
@@ -306,6 +323,8 @@ class SimulationWorker:
 
             # Finalize results
             logger.info(f"Simulation completed: {len(results['time'])} time points")
+            reactor_reports = self._generate_reactor_reports(converter, results)
+            connection_reports = self._generate_connection_reports(converter)
             with self._lock:
                 self.progress.times = results["time"]
                 self.progress.reactors_series = results["reactors"]
@@ -315,19 +334,26 @@ class SimulationWorker:
                 # Store Sankey data if present
                 self.progress.sankey_links = results.get("sankey_links")
                 self.progress.sankey_nodes = results.get("sankey_nodes")
-                # Generate reactor reports for thermo analysis
-                self.progress.reactor_reports = self._generate_reactor_reports(
-                    converter, results
-                )
-                self.progress.connection_reports = self._generate_connection_reports(
-                    converter
-                )
+                self.progress.reactor_reports = reactor_reports
+                self.progress.connection_reports = connection_reports
                 self.progress.is_running = False
                 self.progress.is_complete = True
                 self.progress.end_time = time.time()
                 # Carry through final error message if present in results
                 if isinstance(results, dict) and results.get("error_message"):
                     self.progress.error_message = results.get("error_message")
+
+            # Persist results to disk cache (best-effort: never aborts the solve).
+            # Pass pre_build_config so the fingerprint matches the startup fingerprint.
+            self._persist_to_cache(
+                converter,
+                config,
+                results,
+                reactor_reports,
+                connection_reports,
+                code_str,
+                pre_build_config=pre_build_config,
+            )
 
         except Exception as e:
             logger.error(f"Simulation failed: {e}", exc_info=True)
@@ -336,6 +362,147 @@ class SimulationWorker:
                 self.progress.is_running = False
                 self.progress.is_complete = False
                 self.progress.end_time = time.time()
+
+    def _persist_to_cache(
+        self,
+        converter: Any,
+        config: Dict[str, Any],
+        results: Dict[str, Any],
+        reactor_reports: Dict[str, Any],
+        connection_reports: Dict[str, Any],
+        code_str: str,
+        pre_build_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist GUI payload + SimulationResult to disk cache (best-effort).
+
+        Parameters
+        ----------
+        pre_build_config:
+            Config snapshot taken *before* ``build_network`` enriched it with
+            outlet/interface nodes.  When provided, the fingerprint is computed
+            from this snapshot so it matches the fingerprint computed from the
+            validated config at startup (which is also pre-build).  The
+            post-build ``config`` is still stored as the config_snapshot.
+
+        Failures are logged at WARNING level and never propagate to the caller.
+        """
+        try:
+            from .result_cache import (
+                cache_dir_for,
+                compute_fingerprint,
+                load_result,
+                run_contributors,
+                save_alias,
+                save_result,
+            )
+            from .simulation_result import make_simulation_result
+
+            mechanism_raw = getattr(converter, "mechanism", None) or "gri30.yaml"
+            mechanism = converter.resolve_mechanism(mechanism_raw)
+            config_path = getattr(converter, "_download_config_path", None)
+            cache_root = cache_dir_for(config_path)
+            if cache_root is None:
+                logger.debug(
+                    "No cache root available (no config path); skipping cache."
+                )
+                return
+
+            progress = self.get_progress()
+            # Use pre-build snapshot for fingerprinting when available so the hash
+            # matches the startup fingerprint (computed from the un-enriched config).
+            fp_config = pre_build_config if pre_build_config is not None else config
+            fingerprint = compute_fingerprint(fp_config, mechanism=mechanism)
+
+            # Expose the fingerprint immediately so GUI actions can detect this
+            # cache entry before contributors finish writing artifacts.
+            if self._app_state is not None:
+                try:
+                    self._app_state.preloaded_fingerprint = fingerprint
+                except Exception:  # noqa: BLE001
+                    pass
+
+            gui_payload: Dict[str, Any] = {
+                "status": "complete",
+                "is_complete": True,
+                "error_message": None,
+                "times": progress.times,
+                "reactors_series": progress.reactors_series,
+                "reactor_reports": reactor_reports,
+                "connection_reports": connection_reports,
+                "code_str": code_str,
+                "summary": progress.summary,
+                "sankey_links": progress.sankey_links,
+                "sankey_nodes": progress.sankey_nodes,
+                "elapsed_time": progress.get_calculation_time(),
+                "updated_nodes": progress.updated_nodes,
+                "updated_connections": progress.updated_connections,
+            }
+
+            from .api.sse import _serialise_reports
+
+            gui_payload["reactor_reports"] = _serialise_reports(reactor_reports)
+
+            simulation_result = make_simulation_result(converter, config)
+
+            entry = save_result(
+                cache_root=cache_root,
+                fingerprint=fingerprint,
+                gui_payload=gui_payload,
+                config_snapshot=config,
+                mechanism=mechanism,
+            )
+
+            # Write an alias from the post-build fingerprint → canonical entry.
+            # After a solve, the frontend stores the post-build config (with
+            # stream-point nodes added by the staged solver).  On the next
+            # "Run Simulation" click, check-cache fingerprints the post-build
+            # config, which differs from the pre-build fingerprint used here.
+            # The alias lets load_result_flexible find the entry via either key.
+            post_build_fp = compute_fingerprint(config, mechanism=mechanism)
+            if post_build_fp != fingerprint:
+                save_alias(cache_root, post_build_fp, fingerprint)
+                logger.debug(
+                    "Cache post-build alias written: %s → %s",
+                    post_build_fp[:12],
+                    fingerprint[:12],
+                )
+
+            artifacts_dir = entry / "artifacts"
+
+            # Update app.state immediately after save_result so the frontend
+            # detects the cache hit and Export can poll for the bundle instead
+            # of triggering a full re-solve.  Contributors write their artifacts
+            # next (potentially slow), but the cache entry is already addressable.
+            cached = load_result(cache_root, fingerprint)
+            if cached is not None and self._app_state is not None:
+                try:
+                    self._app_state.preloaded_result = cached
+                    logger.debug(
+                        "app.state.preloaded_result updated (pre-contributors, %s…)",
+                        fingerprint[:12],
+                    )
+                except Exception as state_exc:  # noqa: BLE001
+                    logger.debug(
+                        "Could not update app.state (pre-contrib): %s", state_exc
+                    )
+
+            contributors = getattr(
+                getattr(converter, "plugins", None), "cache_contributors", []
+            )
+            if contributors:
+                run_contributors(
+                    contributors,
+                    config,
+                    converter,
+                    simulation_result,
+                    fingerprint,
+                    artifacts_dir,
+                )
+
+        except OSError as exc:
+            logger.warning("Cache persistence failed (OSError): %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cache persistence failed: %s", exc)
 
     def _generate_reactor_reports(
         self, converter: Any, results: Dict[str, Any]

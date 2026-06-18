@@ -3,6 +3,7 @@ import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
 import { startSimulation } from "@/api/simulations";
+import { checkSimulationCache } from "@/api/resultCache";
 import { Button } from "@/components/ui/Button";
 import type { GuiActionMeta } from "@/types/guiAction";
 import { toast } from "sonner";
@@ -25,10 +26,12 @@ export function SimulateCard() {
   const {
     isRunning,
     simulationId,
+    results,
     pythonCode,
     beginSimulationRun,
     startSimulation: setStarted,
     setError,
+    setResults,
   } = useSimulationStore();
 
   const configSolver = (config.settings as Record<string, unknown> | null | undefined)?.solver as
@@ -70,19 +73,36 @@ export function SimulateCard() {
     if (solver?.max_steps != null) setMaxSteps(String(solver.max_steps));
   }, [config.settings]);
 
+  // Re-fetch whenever config, simulationId, or results change.
+  // After a solve completes (results becomes non-null), the server's cache
+  // is populated and is_available will change for export actions.
+  // A second fetch fires after a short delay to catch the (async) cache write.
   useEffect(() => {
     let cancelled = false;
-    fetchGuiActions()
-      .then((actions) => {
-        if (!cancelled) setGuiActions(actions);
-      })
-      .catch(() => {
-        if (!cancelled) setGuiActions([]);
-      });
+
+    const doFetch = () =>
+      fetchGuiActions()
+        .then((actions) => {
+          if (!cancelled) setGuiActions(actions);
+        })
+        .catch(() => {
+          if (!cancelled) setGuiActions([]);
+        });
+
+    doFetch();
+
+    // When results just arrived, fire a second fetch after the background
+    // cache-write thread has had time to finish (~3 s is conservative).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (results !== null) {
+      timer = setTimeout(doFetch, 3000);
+    }
+
     return () => {
       cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [config, simulationId]);
+  }, [config, simulationId, results]);
 
   const handleModeChange = useCallback(
     (newMode: SolverMode) => {
@@ -173,6 +193,31 @@ export function SimulateCard() {
       toast.error("Add at least one reactor before simulating");
       return;
     }
+
+    // Check whether a cached result already exists for the current config.
+    // This avoids re-running the full simulation when nothing has changed.
+    // Only applies to steady-state mode; transient runs always execute fresh.
+    if (mode === "steady") {
+      try {
+        const cfgRaw = config as unknown as Record<string, unknown>;
+        const phases = cfgRaw.phases as Record<string, unknown> | undefined;
+        const gas = phases?.gas as Record<string, unknown> | undefined;
+        const mechStr = (gas?.mechanism as string | undefined) ?? null;
+
+        const cacheResp = await checkSimulationCache(cfgRaw, mechStr);
+        if (cacheResp.cached) {
+          setResults(cacheResp.result);
+          const created = cacheResp.meta.created_at;
+          const ageMin = Math.round((Date.now() / 1000 - created) / 60);
+          const ageStr = ageMin < 2 ? "just now" : `${ageMin} min ago`;
+          toast.success(`Loaded cached results from ${ageStr}. Re-run skipped.`);
+          return;
+        }
+      } catch {
+        // Cache check failed (no config path, network error, etc.) — proceed normally.
+      }
+    }
+
     beginSimulationRun();
     try {
       const resp = await startSimulation(
@@ -186,7 +231,7 @@ export function SimulateCard() {
       toast.error(`Failed: ${msg}`);
       setError(msg);
     }
-  }, [config, simTime, timeStep, mode, beginSimulationRun, setStarted, setError]);
+  }, [config, simTime, timeStep, mode, beginSimulationRun, setStarted, setError, setResults]);
 
   const handleDownloadPy = useCallback(() => {
     if (!pythonCode) return;
@@ -334,7 +379,7 @@ export function SimulateCard() {
           disabled={
             runningActionId !== null
             || isRunning
-            || (action.requires_simulation && !simulationId)
+            || !action.is_available
           }
           variant="secondary"
           className="w-full"
