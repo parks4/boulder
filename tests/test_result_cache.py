@@ -544,9 +544,9 @@ class TestCachedEndpoint:
         resp = client_with_cache.get("/api/simulations/cached/artifacts/missing.txt")
         assert resp.status_code == 404
 
-    def test_artifact_served(self, client_with_cache: TestClient):
+    def test_artifact_served(self, client_with_cache: TestClient, tmp_path: Path):
         """GET /api/simulations/cached/artifacts/<name> serves existing artifact files."""
-        artifacts_dir = client_with_cache.app.state.preloaded_result["artifacts_dir"]
+        artifacts_dir = tmp_path / "artifacts"
         test_file = artifacts_dir / "test.txt"
         test_file.write_text("hello", encoding="utf-8")
         resp = client_with_cache.get("/api/simulations/cached/artifacts/test.txt")

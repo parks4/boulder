@@ -121,16 +121,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
                 cache_root = cache_dir_for(str(actual_yaml_path))
                 if cache_root is not None:
-                    converter_cls = getattr(app.state, "converter_class", None)
                     mechanism = resolve_mechanism_for_fingerprint(
-                        validated, converter_class=converter_cls
+                        validated, converter_class=app.state.converter_class
                     )
                     fingerprint, cached = lookup_cached_result(
                         cache_root,
                         validated,
                         mechanism=mechanism,
                     )
-                    if cached is None:
+                    if cached is None and fingerprint is not None:
                         from ..result_cache import find_result_by_config_snapshot
 
                         cached = find_result_by_config_snapshot(
@@ -145,7 +144,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     if cached:
                         meta = cached.get("meta", {})
                         created = meta.get("created_at", 0.0)
-                        actual_fp = cached.get("fingerprint", fingerprint)
+                        actual_fp = str(cached.get("fingerprint") or fingerprint or "")
                         logger.info(
                             "Loaded cached simulation result for %s "
                             "(created %.0f s ago, fingerprint %s…)",
@@ -153,7 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             time.time() - created,
                             actual_fp[:12],
                         )
-                    else:
+                    elif fingerprint is not None:
                         logger.info(
                             "No valid cache entry found for preloaded config "
                             "(fingerprint %s…). Run the simulation to populate the cache.",

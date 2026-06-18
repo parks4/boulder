@@ -225,8 +225,10 @@ def _package_install_dir(package: str) -> Optional[Path]:
         for entry in dist.files or []:
             if entry.name == "__init__.py":
                 loc = entry.locate()
-                if loc is not None and loc.is_file():
-                    return loc.parent
+                if loc is not None:
+                    loc_path = Path(loc)
+                    if loc_path.is_file():
+                        return loc_path.parent
         mod = importlib.import_module(package)
         mod_file = getattr(mod, "__file__", None)
         if mod_file:
