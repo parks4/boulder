@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import Plot from "react-plotly.js";
+import { coerceNumericSeries, pressureYAxis } from "@/lib/plotAxis";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useThemeStore } from "@/stores/themeStore";
 import type { SimulationProgress } from "@/types/simulation";
@@ -146,7 +147,7 @@ export function PlotsTab({ data }: Props) {
             data={[
               {
                 x: xAxis,
-                y: reactorSeries.P ?? [],
+                y: coerceNumericSeries(reactorSeries.P),
                 type: "scatter",
                 mode: profileTraceMode,
                 name: selectedReactorId,
@@ -157,7 +158,7 @@ export function PlotsTab({ data }: Props) {
               ...layoutDefaults,
               title: { text: `Pressure vs ${coordLabel}`, font: { size: 14 } },
               xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },
-              yaxis: { title: { text: "Pressure (Pa)", font: { size: 12 } }, gridcolor },
+              yaxis: pressureYAxis(gridcolor),
             }}
             config={{ responsive: true, displayModeBar: false }}
             useResizeHandler
@@ -378,7 +379,7 @@ export function PlotsTab({ data }: Props) {
           data={[
             {
               x: data.times,
-              y: data.reactors_series[selectedReactorId]?.P ?? [],
+              y: coerceNumericSeries(data.reactors_series[selectedReactorId]?.P),
               type: "scatter" as const,
               mode: timeTraceMode,
               name: selectedReactorId,
@@ -392,10 +393,7 @@ export function PlotsTab({ data }: Props) {
               title: { text: "Time (s)", font: { size: 12 } },
               gridcolor,
             },
-            yaxis: {
-              title: { text: "Pressure (Pa)", font: { size: 12 } },
-              gridcolor,
-            },
+            yaxis: pressureYAxis(gridcolor),
           }}
           config={{ responsive: true, displayModeBar: false }}
           useResizeHandler
