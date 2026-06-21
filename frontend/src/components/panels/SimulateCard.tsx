@@ -5,6 +5,7 @@ import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
 import { startSimulation } from "@/api/simulations";
 import { checkSimulationCache } from "@/api/resultCache";
 import { Button } from "@/components/ui/Button";
+import { RunControl } from "./RunControl";
 import type { GuiActionMeta } from "@/types/guiAction";
 import { toast } from "sonner";
 import { SolverDetailsModal } from "./SolverDetailsModal";
@@ -273,7 +274,6 @@ export function SimulateCard() {
   );
 
   const runDisabled = isRunning || config.nodes.length === 0;
-  const runVariant = runDisabled ? "muted" : "success";
   const kinds = mode === "steady" ? STEADY_KINDS : TRANSIENT_KINDS;
 
   return (
@@ -349,15 +349,11 @@ export function SimulateCard() {
         onTimeStepChange={setTimeStep}
       />
 
-      <Button
-        id="run-simulation"
-        onClick={handleRun}
-        disabled={runDisabled}
-        variant={runVariant}
-        className="w-full"
-      >
-        {isRunning ? "Running..." : "Run Simulation (Ctrl+Enter)"}
-      </Button>
+      <RunControl
+        onRunSimulation={handleRun}
+        isRunning={isRunning}
+        runDisabled={runDisabled}
+      />
 
       {simulationId && (
         <Button

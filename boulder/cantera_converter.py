@@ -20,6 +20,7 @@ from typing import (
 import cantera as ct  # type: ignore
 import numpy as np
 
+from .config import CANTERA_MECHANISM, TRANSIENT_SOLVER_KINDS
 from .reactor_energy import (
     build_reactor_with_energy,
     energy_ctor_suffix,
