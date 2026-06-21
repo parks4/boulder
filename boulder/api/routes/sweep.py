@@ -30,8 +30,8 @@ _SCENARIO_RE = re.compile(r"scenario\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 _RUNNER_NAME = "run_sweep.py"
 
 
-def _count_scenarios(sweeps: Dict[str, Any]) -> int:
-    """Cartesian-product size of the sweep axes (generic; no host import)."""
+def _sweep_points(sweeps: Dict[str, Any]) -> int:
+    """Cartesian-product size of a sweep block's axes (generic; no host import)."""
     if not isinstance(sweeps, dict) or not sweeps:
         return 0
     total = 1
@@ -50,9 +50,28 @@ def _count_scenarios(sweeps: Dict[str, Any]) -> int:
     return total
 
 
-def _sweeps(request: Request) -> Dict[str, Any]:
+def _sweep_block(d: Dict[str, Any]) -> Dict[str, Any]:
+    return d.get("sweep") or d.get("sweeps") or {}
+
+
+def _run_set_size(raw: Dict[str, Any]) -> int:
+    """Union run-set size (generic; mirrors expand_scenarios without importing it):
+    global sweep points ⊎ each `scenario:` entry (its inner sweep, else 1)."""
+    scenario = raw.get("scenario") or {}
+    total = _sweep_points(_sweep_block(raw))  # global sweep points (0 if none)
+    for overlay in scenario.values():
+        inner = _sweep_block(overlay or {})
+        total += _sweep_points(inner) if inner else 1
+    return total
+
+
+def _has_run_set(request: Request) -> bool:
     raw = getattr(request.app.state, "preloaded_raw", None) or {}
-    return raw.get("sweeps") or {}
+    return bool(raw.get("scenario") or _sweep_block(raw))
+
+
+def _raw(request: Request) -> Dict[str, Any]:
+    return getattr(request.app.state, "preloaded_raw", None) or {}
 
 
 def _runner_path(request: Request) -> Optional[Path]:
@@ -65,24 +84,24 @@ def _runner_path(request: Request) -> Optional[Path]:
 
 @router.get("")
 async def sweep_info(request: Request) -> Dict[str, Any]:
-    """Report whether a sweep can be run for the preloaded config."""
-    sweeps = _sweeps(request)
-    n = _count_scenarios(sweeps)
+    """Report whether a run-set (scenarios and/or sweep) can be run."""
+    has = _has_run_set(request)
+    n = _run_set_size(_raw(request))
     runner = _runner_path(request)
     job = getattr(request.app.state, "sweep_job", None)
     running = bool(job and job.get("status") == "running")
 
-    if not sweeps:
-        reason = "No sweep in this config"
+    if not has:
+        reason = "No scenarios or sweep in this config"
     elif runner is None:
         reason = f"No {_RUNNER_NAME} next to the config"
     else:
-        reason = f"Run {n} sweep scenarios"
+        reason = f"Run {n} scenarios"
 
     return {
-        "available": bool(sweeps),
+        "available": has,
         "n_scenarios": n,
-        "can_run": bool(sweeps) and runner is not None,
+        "can_run": has and runner is not None,
         "reason": reason,
         "running": running,
     }
@@ -90,18 +109,17 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
 
 @router.post("/run")
 async def sweep_run(request: Request) -> Dict[str, Any]:
-    """Start the sweep subprocess for the preloaded config."""
-    sweeps = _sweeps(request)
+    """Start the run-set subprocess for the preloaded config."""
     runner = _runner_path(request)
-    if not sweeps or runner is None:
-        raise HTTPException(status_code=400, detail="No runnable sweep for this config")
+    if not _has_run_set(request) or runner is None:
+        raise HTTPException(status_code=400, detail="No runnable run-set for this config")
 
     job = getattr(request.app.state, "sweep_job", None)
     if job and job.get("status") == "running":
         raise HTTPException(status_code=409, detail="A sweep is already running")
 
     cfg_path = Path(str(getattr(request.app.state, "preloaded_config_path")))
-    total = _count_scenarios(sweeps)
+    total = _run_set_size(_raw(request))
     state: Dict[str, Any] = {
         "status": "running",
         "current": 0,
