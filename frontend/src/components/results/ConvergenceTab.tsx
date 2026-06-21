@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import Plot from "react-plotly.js";
+import { coerceNumericSeries, pressureYAxis } from "@/lib/plotAxis";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useThemeStore } from "@/stores/themeStore";
 import type { SimulationProgress } from "@/types/simulation";
@@ -194,7 +195,7 @@ export function ConvergenceTab({ data }: Props) {
           data={[
             {
               x: times,
-              y: series.P ?? [],
+              y: coerceNumericSeries(series.P),
               type: "scatter",
               mode: "lines",
               name: selectedReactorId,
@@ -205,7 +206,7 @@ export function ConvergenceTab({ data }: Props) {
             ...layoutDefaults,
             title: { text: "Pressure vs Time", font: { size: 14 } },
             xaxis: { title: { text: "Time (s)", font: { size: 12 } }, gridcolor },
-            yaxis: { title: { text: "Pressure (Pa)", font: { size: 12 } }, gridcolor },
+            yaxis: pressureYAxis(gridcolor),
           }}
           config={{ responsive: true, displayModeBar: false }}
           useResizeHandler

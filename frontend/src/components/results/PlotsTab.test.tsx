@@ -20,6 +20,10 @@ interface PlotTrace {
 
 interface PlotProps {
   data: PlotTrace[];
+  layout?: {
+    yaxis?: Record<string, unknown>;
+    title?: { text?: string };
+  };
 }
 
 const plotCalls = vi.hoisted(() => [] as PlotProps[]);
@@ -56,6 +60,22 @@ const steadySingleSample: SimulationProgress = {
   },
 };
 
+const spatialPressureSample = {
+  is_running: false,
+  is_complete: true,
+  times: [],
+  reactors_series: {
+    pfr: {
+      is_spatial: true,
+      x: [5.7, 5.8, 5.9],
+      T: [1200, 1210, 1220],
+      P: ["100000", "101325", "102500"],
+      X: { N2: [0.8, 0.79, 0.78] },
+      Y: { N2: [0.8, 0.79, 0.78] },
+    },
+  },
+} as unknown as SimulationProgress;
+
 describe("PlotsTab", () => {
   beforeEach(() => {
     plotCalls.length = 0;
@@ -76,6 +96,28 @@ describe("PlotsTab", () => {
       x: [0],
       y: [101325],
       mode: "lines+markers",
+    });
+    expect(plotCalls[1].layout?.yaxis).toMatchObject({
+      rangemode: "tozero",
+      tickformat: ",.0f",
+    });
+  });
+
+  it("uses a zero baseline for spatial pressure profiles", () => {
+    useSelectionStore.setState({
+      selectedElement: { type: "node", data: { id: "pfr" } },
+    });
+    render(<PlotsTab data={spatialPressureSample} />);
+
+    const pressurePlot = plotCalls.find(
+      (plot) => plot.layout?.title?.text === "Pressure vs Position",
+    );
+    expect(pressurePlot).toBeDefined();
+    expect(pressurePlot?.data[0]?.y).toEqual([100000, 101325, 102500]);
+    expect(pressurePlot?.layout?.yaxis).toMatchObject({
+      rangemode: "tozero",
+      tickformat: ",.0f",
+      exponentformat: "none",
     });
   });
 });
