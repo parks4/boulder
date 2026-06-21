@@ -438,6 +438,61 @@ def get_plugins() -> BoulderPlugins:
     return plugins
 
 
+class _TrajectoryRecorder:
+    """Full-state recorder for a transient solve, driven by the existing
+    ``_scope_recorder.record(t)`` hook in :meth:`_run_transient_solver`.
+
+    The staged ``advance_grid`` solve already steps each reactor through every
+    grid time; this captures the per-reactor state at each step so the GUI can
+    show the real ``T(t)`` trajectory. The network is therefore solved **once** —
+    no re-integration. It does not modify the solve (the ``record`` calls already
+    exist) and produces no side effects on reactor state.
+    """
+
+    def __init__(self, converter: "DualCanteraConverter") -> None:
+        self._converter = converter
+        self._data: Dict[str, Dict[str, Any]] = {}
+
+    def record(self, t: float) -> None:
+        try:
+            reactors = self._converter._unique_non_reservoir_reactors()
+        except Exception:  # noqa: BLE001 — recording must never break the solve
+            return
+        for reactor in reactors:
+            rid = getattr(reactor, "name", "") or str(id(reactor))
+            phase = reactor.thermo
+            d = self._data.setdefault(
+                rid,
+                {"t": [], "T": [], "P": [], "X": [], "names": list(phase.species_names)},
+            )
+            d["t"].append(float(t))
+            d["T"].append(float(phase.T))
+            d["P"].append(float(phase.P))
+            d["X"].append(phase.X.copy())
+
+    def series(self) -> Dict[str, Dict[str, Any]]:
+        """Return ``{reactor_id: series}`` for reactors with a real trajectory."""
+        import numpy as np
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for rid, d in self._data.items():
+            if len(d["t"]) < 2:
+                continue
+            names = d["names"]
+            xmat = np.asarray(d["X"], dtype=float)
+            out[rid] = {
+                "T": [float(v) for v in d["T"]],
+                "P": [float(v) for v in d["P"]],
+                "X": {
+                    sp: [float(xmat[i, j]) for i in range(xmat.shape[0])]
+                    for j, sp in enumerate(names)
+                },
+                "t": [float(v) for v in d["t"]],
+                "is_residence": True,
+            }
+        return out
+
+
 # class CanteraConverter:
 #    """Former Cantera converter lived there, now fully replaced by DualCanteraConverter
 #    which generates code in parallel to solving the simulation
@@ -1093,99 +1148,6 @@ class DualCanteraConverter:
         self.reactors[rid] = reactor
         return reactor, gas
 
-    @staticmethod
-    def _transient_save_times(config: Optional[Dict[str, Any]]) -> List[float]:
-        """Save-time grid for a transient trajectory, read from ``settings.solver``.
-
-        Accepts ``solver.grid`` as an explicit list (e.g. a logspace residence
-        grid) or a ``{start, stop, dt}`` dict, falling back to top-level
-        ``settings.end_time``/``dt``. Returns ``[]`` when no grid is declared.
-        """
-        import numpy as np
-
-        settings = (config or {}).get("settings") or {}
-        solver = settings.get("solver") or {}
-        grid = solver.get("grid")
-        if isinstance(grid, (list, tuple)) and len(grid) > 0:
-            return [float(t) for t in grid]
-        if isinstance(grid, dict) and "stop" in grid and "dt" in grid:
-            start, stop, dt = (
-                float(grid.get("start", 0.0)),
-                float(grid["stop"]),
-                float(grid["dt"]),
-            )
-            if dt > 0 and stop > start:
-                return [float(t) for t in np.arange(start + dt, stop + dt / 2, dt)]
-        end, dt = settings.get("end_time"), settings.get("dt")
-        if end and dt and float(end) > 0 and float(dt) > 0:
-            return [float(t) for t in np.arange(float(dt), float(end) + float(dt) / 2, float(dt))]
-        return []
-
-    def _capture_transient_trajectory(
-        self, config: Optional[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
-        """Capture one transient reactor's full ``T(t)`` over the save-time grid.
-
-        For a config with exactly one non-reservoir reactor and a transient grid,
-        build a *fresh isolated* reactor on a throwaway converter and advance it
-        with native :meth:`cantera.ReactorNet.advance` over the grid, snapshotting
-        each state into a ``SolutionArray``. This is pure data capture — it does
-        not touch the staged solve, the live network, or the result state, and
-        produces identical physics — so a live "Run Simulation" shows the real
-        trajectory instead of only the converged endpoint. Returns
-        ``{reactor_id: series}`` or ``None`` when not applicable (any failure
-        falls back to the single-point snapshot).
-        """
-        try:
-            reactors = self._unique_non_reservoir_reactors()
-            if len(reactors) != 1:
-                return None
-            rid = getattr(reactors[0], "name", "") or ""
-            times = self._transient_save_times(config)
-            if not times:
-                return None
-            node = next(
-                (n for n in (config.get("nodes") or []) if n.get("id") == rid), None
-            )
-            if node is None:
-                return None
-
-            props = node.get("properties") or {}
-            sub = DualCanteraConverter(mechanism=self.mechanism, plugins=self.plugins)
-            reactor, gas = sub.build_isolated_reactor(node)
-            net = ct.ReactorNet([reactor])
-            if props.get("use_preconditioner"):
-                try:
-                    net.preconditioner = ct.AdaptivePreconditioner()
-                except Exception:  # noqa: BLE001 — preconditioner is an optimisation
-                    pass
-
-            # Read the reactor's own phase after each advance — create_reactor_*
-            # does not necessarily reuse the `gas` handle, so `gas` would stay at
-            # the initial state.
-            phase = reactor.thermo
-            states = ct.SolutionArray(phase, extra=["t"])
-            states.append(phase.state, t=0.0)
-            for t in times:
-                net.advance(float(t))
-                states.append(reactor.thermo.state, t=float(t))
-
-            names = list(phase.species_names)
-            mole, mass = states.X, states.Y
-            return {
-                rid: {
-                    "T": [float(v) for v in states.T],
-                    "P": [float(v) for v in states.P],
-                    "X": {sp: [float(v) for v in mole[:, i]] for i, sp in enumerate(names)},
-                    "Y": {sp: [float(v) for v in mass[:, i]] for i, sp in enumerate(names)},
-                    "t": [float(v) for v in states.t],
-                    "is_residence": True,
-                }
-            }
-        except Exception as exc:  # noqa: BLE001 — never break Run Simulation
-            logger.warning("Transient trajectory capture skipped: %s", exc)
-            return None
-
     # ------------------------------------------------------------------
     # Staged solving
     # ------------------------------------------------------------------
@@ -1700,6 +1662,32 @@ class DualCanteraConverter:
 
         from .staged_solver import build_stage_graph, solve_staged
 
+        # Transient solve with no declared checkpoints: inject a default linspace
+        # grid so the recorder still yields a trajectory ("do whatever" when no
+        # required grid is given). Required checkpoints, when present, are left
+        # untouched and advanced through exactly. Config-prep only — not a solver
+        # change.
+        _settings = config.get("settings") or {}
+        _default_end = float(_settings.get("end_time") or 1.0)
+        for _group in (config.get("groups") or {}).values():
+            _solver = _group.get("solver") or {}
+            if _solver.get("kind") == "advance_grid" and not _solver.get("grid"):
+                _solver["grid"] = {
+                    "start": 0.0,
+                    "stop": _default_end,
+                    "dt": _default_end / 50.0,
+                }
+                _group["solver"] = _solver
+
+        # Install a full-state trajectory recorder so a transient (advance_grid)
+        # solve also yields the per-step T(t) — captured during the *single*
+        # staged solve via the existing record() hook, never a re-integration.
+        # Skip if a real scopes recorder is already installed (don't clobber it).
+        self._trajectory_recorder = None
+        if getattr(self, "_scope_recorder", None) is None:
+            self._scope_recorder = _TrajectoryRecorder(self)
+            self._trajectory_recorder = self._scope_recorder
+
         plan = build_stage_graph(config)
         trajectory = solve_staged(
             self,
@@ -1935,18 +1923,18 @@ class DualCanteraConverter:
                 elif self.reactor_meta.get(reactor_id, {}).get("is_psr"):
                     reactors_series[reactor_id]["is_psr"] = True
 
-            # Transient single-reactor configs: replace the converged single-point
-            # snapshot with the captured T(t) trajectory (native advance, no solver
-            # change). Reports/Sankey/code from finalize are kept; only the series
-            # is swapped. Spatial profiles (set above) are left untouched.
-            _traj = self._capture_transient_trajectory(getattr(self, "_last_config", None))
-            if _traj:
-                for _rid, _series in _traj.items():
-                    if _rid in reactors_series and not reactors_series[_rid].get(
-                        "is_spatial"
-                    ):
-                        reactors_series[_rid] = _series
-                        times[:] = _series["t"]
+            # Transient solve: replace the converged single-point snapshot with the
+            # T(t) trajectory captured *during* the (single) staged solve by the
+            # recorder. No re-integration; reports/Sankey/code from finalize are
+            # kept; only the series is swapped. Spatial profiles are left untouched.
+            _recorder = getattr(self, "_trajectory_recorder", None)
+            _traj = _recorder.series() if _recorder is not None else {}
+            for _rid, _series in _traj.items():
+                if _rid in reactors_series and not reactors_series[_rid].get(
+                    "is_spatial"
+                ):
+                    reactors_series[_rid] = _series
+                    times[:] = _series["t"]
 
             if progress_callback:
                 progress_callback(
