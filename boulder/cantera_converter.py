@@ -83,6 +83,11 @@ class BoulderPlugins:
     config_transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = field(
         default_factory=list
     )
+    #: Extra ``python`` args that run a host's scenario/sweep runner for the Run
+    #: Sweep button, invoked as ``[python, *sweep_runner, <config>, "--no-plot"]``.
+    #: e.g. ``["-m", "bloc.scenario_sweep"]``. Used when no ``run_sweep.py`` sits
+    #: next to the config. Registered by an external plugin package.
+    sweep_runner: Optional[List[str]] = None
 
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.

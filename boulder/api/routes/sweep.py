@@ -74,12 +74,25 @@ def _raw(request: Request) -> Dict[str, Any]:
     return getattr(request.app.state, "preloaded_raw", None) or {}
 
 
-def _runner_path(request: Request) -> Optional[Path]:
+def _runner_command(request: Request) -> Optional[Dict[str, Any]]:
+    """Resolve how to run the run-set: a ``run_sweep.py`` next to the config, or
+    a host-registered ``sweep_runner`` command. Returns ``{argv, cwd}`` or None."""
     cfg_path = getattr(request.app.state, "preloaded_config_path", None)
     if not cfg_path:
         return None
-    runner = Path(cfg_path).resolve().parent / _RUNNER_NAME
-    return runner if runner.is_file() else None
+    cfg = Path(cfg_path).resolve()
+    local = cfg.parent / _RUNNER_NAME
+    if local.is_file():
+        return {"argv": [sys.executable, _RUNNER_NAME, cfg.name, "--no-plot"], "cwd": str(cfg.parent)}
+    from ...cantera_converter import get_plugins  # noqa: PLC0415
+
+    runner = getattr(get_plugins(), "sweep_runner", None)
+    if runner:
+        return {
+            "argv": [sys.executable, *runner, str(cfg), "--no-plot"],
+            "cwd": str(cfg.parent),
+        }
+    return None
 
 
 @router.get("")
@@ -87,21 +100,21 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
     """Report whether a run-set (scenarios and/or sweep) can be run."""
     has = _has_run_set(request)
     n = _run_set_size(_raw(request))
-    runner = _runner_path(request)
+    cmd = _runner_command(request)
     job = getattr(request.app.state, "sweep_job", None)
     running = bool(job and job.get("status") == "running")
 
     if not has:
         reason = "No scenarios or sweep in this config"
-    elif runner is None:
-        reason = f"No {_RUNNER_NAME} next to the config"
+    elif cmd is None:
+        reason = "No scenario runner available"
     else:
         reason = f"Run {n} scenarios"
 
     return {
         "available": has,
         "n_scenarios": n,
-        "can_run": has and runner is not None,
+        "can_run": has and cmd is not None,
         "reason": reason,
         "running": running,
     }
@@ -110,15 +123,14 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
 @router.post("/run")
 async def sweep_run(request: Request) -> Dict[str, Any]:
     """Start the run-set subprocess for the preloaded config."""
-    runner = _runner_path(request)
-    if not _has_run_set(request) or runner is None:
+    cmd = _runner_command(request)
+    if not _has_run_set(request) or cmd is None:
         raise HTTPException(status_code=400, detail="No runnable run-set for this config")
 
     job = getattr(request.app.state, "sweep_job", None)
     if job and job.get("status") == "running":
         raise HTTPException(status_code=409, detail="A sweep is already running")
 
-    cfg_path = Path(str(getattr(request.app.state, "preloaded_config_path")))
     total = _run_set_size(_raw(request))
     state: Dict[str, Any] = {
         "status": "running",
@@ -132,8 +144,8 @@ async def sweep_run(request: Request) -> Dict[str, Any]:
     def _worker() -> None:
         try:
             proc = subprocess.Popen(
-                [sys.executable, runner.name, cfg_path.name, "--no-plot"],
-                cwd=str(cfg_path.parent),
+                cmd["argv"],
+                cwd=cmd["cwd"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
