@@ -17,6 +17,7 @@ from pprint import pformat
 from typing import Any, Dict, List, Optional
 
 from .config import TRANSIENT_SOLVER_KINDS
+from .reactor_energy import energy_ctor_suffix
 from .staged_solver import (
     _order_stage_nodes_for_flow,
     build_stage_graph,
@@ -253,17 +254,25 @@ class CanteraScriptEmitter:
                 f"'gas_solution': gas_{var}}}"
             )
         elif ntype == "IdealGasConstPressureMoleReactor":
+            energy_kw = energy_ctor_suffix(props)
             out.append(
-                f"{var} = ct.IdealGasConstPressureMoleReactor(gas_{var}, clone=True)"
+                f"{var} = ct.IdealGasConstPressureMoleReactor("
+                f"gas_{var}, clone=True{energy_kw})"
             )
         elif ntype == "IdealGasConstPressureReactor":
+            energy_kw = energy_ctor_suffix(props)
             out.append(
-                f"{var} = ct.IdealGasConstPressureReactor(gas_{var}, clone=True)"
+                f"{var} = ct.IdealGasConstPressureReactor("
+                f"gas_{var}, clone=True{energy_kw})"
             )
         elif ntype == "IdealGasReactor":
-            out.append(f"{var} = ct.IdealGasReactor(gas_{var}, clone=True)")
+            energy_kw = energy_ctor_suffix(props)
+            out.append(f"{var} = ct.IdealGasReactor(gas_{var}, clone=True{energy_kw})")
         elif ntype == "ConstPressureReactor":
-            out.append(f"{var} = ct.ConstPressureReactor(gas_{var}, clone=True)")
+            energy_kw = energy_ctor_suffix(props)
+            out.append(
+                f"{var} = ct.ConstPressureReactor(gas_{var}, clone=True{energy_kw})"
+            )
         else:
             out.append(
                 f'raise ValueError("Unsupported reactor type {ntype!r} in native '

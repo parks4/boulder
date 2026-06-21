@@ -20,7 +20,12 @@ from typing import (
 import cantera as ct  # type: ignore
 import numpy as np
 
-from .config import CANTERA_MECHANISM, TRANSIENT_SOLVER_KINDS
+from .reactor_energy import (
+    build_reactor_with_energy,
+    energy_ctor_suffix,
+    validate_energy_on_built_reactor,
+    validate_explicit_energy,
+)
 from .output_summary import evaluate_output_items, parse_output_block
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
@@ -757,30 +762,50 @@ class DualCanteraConverter:
         if typ in self.plugins.reactor_builders:
             reactor = self.plugins.reactor_builders[typ](self, node)
             reactor.name = rid
+            validate_energy_on_built_reactor(reactor, props, typ)
         elif typ == "IdealGasReactor":
-            reactor = ct.IdealGasReactor(gas_for_node, clone=clone)
+            reactor = build_reactor_with_energy(
+                ct.IdealGasReactor, gas_for_node, props=props, clone=clone, type_name=typ
+            )
             reactor.name = rid
         elif typ == "ConstPressureReactor":
-            _energy_val = props.get("energy", "on")
-            # Accept bool False / string "off" / string "false" (case-insensitive) as off.
-            if isinstance(_energy_val, bool):
-                energy: Literal["on", "off"] = "off" if not _energy_val else "on"
-            else:
-                energy = (
-                    "off" if str(_energy_val).lower() in ("off", "false", "0") else "on"
-                )
-            reactor = ct.ConstPressureReactor(gas_for_node, energy=energy, clone=clone)
+            reactor = build_reactor_with_energy(
+                ct.ConstPressureReactor,
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "IdealGasConstPressureReactor":
-            reactor = ct.IdealGasConstPressureReactor(gas_for_node, clone=clone)
+            reactor = build_reactor_with_energy(
+                ct.IdealGasConstPressureReactor,
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "IdealGasConstPressureMoleReactor":
-            reactor = ct.IdealGasConstPressureMoleReactor(gas_for_node, clone=clone)
+            reactor = build_reactor_with_energy(
+                ct.IdealGasConstPressureMoleReactor,
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "IdealGasMoleReactor":
-            reactor = ct.IdealGasMoleReactor(gas_for_node, clone=clone)  # type: ignore[attr-defined]
+            reactor = build_reactor_with_energy(
+                ct.IdealGasMoleReactor,  # type: ignore[arg-type]
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "Reservoir":
+            validate_explicit_energy(props, ct.Reservoir, typ)
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         elif typ == "OutletSink":
@@ -788,6 +813,7 @@ class DualCanteraConverter:
             # Prefer inter-stage stream-point diamonds (``{source}_outlet`` Reservoirs
             # populated by :func:`boulder.staged_solver._update_stream_point`).
             # Remove this branch when OutletSink is dropped from STONE v2.
+            validate_explicit_energy(props, ct.Reservoir, typ)
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         else:
@@ -996,6 +1022,75 @@ class DualCanteraConverter:
                 hook(self, config)
             except Exception as exc:
                 logger.warning("Post-build hook failed: %s", exc)
+
+    def build_isolated_reactor(
+        self, node: Dict[str, Any]
+    ) -> Tuple["ct.Reactor", "ct.Solution"]:
+        """Build a single reactor from one node, with no surrounding network.
+
+        Resolves the node's mechanism, sets the gas state from its initial
+        properties (``temperature`` / ``pressure`` / ``composition`` /
+        ``mass_composition``, either top-level or under ``initial:``), and
+        delegates to :meth:`create_reactor_from_node` so that ``energy``,
+        ``clone``, ``volume`` and any other recognised properties are honoured
+        exactly as in a full network build.  This is the single source of truth
+        for reactor construction for callers (e.g. parametric τ-sweeps) that
+        drive their own :class:`~cantera.ReactorNet` instead of the staged
+        solver.
+
+        Property values may be unit strings (``"1273.15 K"``, ``"1 bar"``) or
+        plain numbers; temperature/pressure are coerced to SI.
+
+        Parameters
+        ----------
+        node :
+            A node dict with ``id``, ``type``, and ``properties`` (the
+            normalised form; STONE ``Kind: {...}`` blocks must be converted to
+            ``type`` / ``properties`` by the caller first).
+
+        Returns
+        -------
+        (reactor, gas)
+            The constructed reactor and the :class:`~cantera.Solution` carrying
+            its initial state.
+        """
+        from .utils import coerce_unit_string  # noqa: PLC0415
+
+        rid = node.get("id", "reactor")
+        props = node.get("properties") or {}
+        node_mech = str(
+            props.get("mechanism") or node.get("mechanism") or self.mechanism
+        )
+        gas = self._get_gas_for_mech(node_mech)
+
+        initial = props.get("initial") or {}
+        temp = initial.get("temperature", props.get("temperature"))
+        pres = initial.get("pressure", props.get("pressure"))
+        compo = initial.get("composition", props.get("composition"))
+        mass_compo = initial.get("mass_composition", props.get("mass_composition"))
+
+        t_use = (
+            float(coerce_unit_string(temp, "temperature"))
+            if temp is not None
+            else float(gas.T)
+        )
+        p_use = (
+            float(coerce_unit_string(pres, "pressure"))
+            if pres is not None
+            else float(gas.P)
+        )
+        if compo is not None:
+            gas.TPX = (t_use, p_use, self.parse_composition(compo))
+        elif mass_compo is not None:
+            gas.TPY = (t_use, p_use, self.parse_composition(mass_compo))
+        else:
+            gas.TPX = (t_use, p_use, gas.X)
+
+        self.gas = gas
+        self.reactor_meta[rid] = {"mechanism": node_mech, "gas_solution": gas}
+        reactor = self.create_reactor_from_node(node, gas)
+        self.reactors[rid] = reactor
+        return reactor, gas
 
     # ------------------------------------------------------------------
     # Staged solving
