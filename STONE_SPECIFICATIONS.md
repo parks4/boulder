@@ -1192,3 +1192,64 @@ connections:
 ```
 
 Boulder rejects v1 files with an actionable error message pointing to this document.
+
+______________________________________________________________________
+
+## 13. Result serialization schema (`result.h5` / `*_scenarios.h5`)
+
+A computed result is persisted in **one** composite-HDF5 format (`boulder/payload_store.py`), shared
+by the fingerprinted result cache and the sweep scenario store. This is an on-disk contract, not part
+of the YAML a user writes — documented here alongside the config schema so tooling recognizes it.
+
+### Core encoding — three tiers (per reactor series)
+
+| Tier | When | How stored | Notes |
+|---|---|---|---|
+| `solution` | state-shaped (`T`,`P`,`X`); species ⊆ mechanism; `X` rows sum to 1 ± 1e-6 | Cantera `SolutionArray` group (`r0`,`r1`,…) | `Y` derived on load; every per-state numeric column (`t`, `x`, …) is a SolutionArray `extra` |
+| `arrays` | state-shaped but mechanism can't represent it, or `X` not normalized | binary HDF5 datasets `T`,`P` (1D), `X`/`Y` (2D), `extra__<k>` per extra column, + `species_names` attr | no `Solution` needed to read |
+| `raw` | not state-shaped (no `T`/`P` lists or no `X` dict) | verbatim in the JSON blob | lossless |
+
+A **spatial PFR profile is a state sequence** (its `x` is just another per-state column) and is stored
+natively in `solution`/`arrays` — not raw. Per-reactor fields that are *not* per-state columns — flags
+(`is_spatial`, `is_psr`, `is_residence`) and off-shape arrays (`fbs_convergence`, which is
+per-FBS-iteration) — ride in the reactor's `meta` (below) and are merged back on load, so the original
+series is reproduced exactly.
+
+### `payload_json` dataset
+
+A UTF-8 JSON string dataset (not an attribute — no ~64 KB cap) holding the rest of the
+`SimulationResults` (`times`, `reactor_reports`, `connection_reports`, `summary`, `code_str`,
+`sankey_links`, `sankey_nodes`, `updated_nodes`, `updated_connections`) plus a `reactors_index`:
+
+```jsonc
+"reactors_index": {
+  "<id>": { "kind": "solution", "group": "r0", "extra_keys": ["t"],      "meta": {"is_residence": true} },
+  "<id>": { "kind": "arrays",   "group": "r1", "extra_keys": ["t", "x"], "meta": {"is_spatial": true, "fbs_convergence": [12.0, 3.0]} },
+  "<id>": { "kind": "raw",      "series": { ... } }
+}
+```
+
+The config snapshot is **not** here — for the cache it lives in `meta.json` so a snapshot scan need
+not restore numerics.
+
+### Root attributes & versioning
+
+`schema_version` (== `payload_store.PAYLOAD_SCHEMA`), `mechanism` (resolved abs path, or bundled
+name), `mechanism_sha256` (diagnostic; the cache fingerprint is the correctness guard), `mechanism_name`.
+`result_cache.CACHE_VERSION` gates cache entries (mismatch ⇒ silent miss + recompute).
+
+### Two profiles
+
+- **Result file** `<cache>/<fp>/result.h5` — one result, reactor groups `r0…`, file-level
+  `payload_json`; `meta.json` carries `created_at`/versions/`mechanism`/`config_snapshot`.
+- **Collection file** `results/<map>_scenarios.h5` — many single-reactor results, one group per
+  scenario keyed by id (e.g. `T0_1273K`); root attrs add `reactor_id`, `reactor_mode`, `map_config`,
+  `created_at`, `cantera_version`; per-group attrs carry scenario KPIs (`t0_K`, `label`, `n_points`,
+  `final_temperature_K`, `solid_carbon_yield_pct`, `computed_at`).
+
+### Invariants
+
+- `Y` is derived for the `solution` tier (exact for Cantera-consistent states).
+- An unresolved/mismatched mechanism on read is a graceful cache miss (cache) or a clear error
+  (scenario route) — never a crash.
+- One `Solution` is cached per mechanism per process.

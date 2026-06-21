@@ -10,6 +10,8 @@ export interface ScenarioMeta {
   n_points?: number;
   final_temperature_K?: number;
   solid_carbon_yield_pct?: number;
+  /** Unix seconds when this scenario was computed (per-scenario; newer stores). */
+  computed_at?: number;
 }
 
 export interface ScenarioListResponse {
@@ -17,6 +19,8 @@ export interface ScenarioListResponse {
   store?: string;
   mechanism?: string | null;
   reactor_mode?: string | null;
+  /** Unix seconds when the store (sweep) was written (fallback for all rows). */
+  created_at?: number | null;
   scenarios: ScenarioMeta[];
 }
 

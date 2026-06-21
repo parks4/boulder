@@ -10,6 +10,8 @@ import { useSelectionStore } from "./selectionStore";
 interface ScenarioState {
   available: boolean;
   scenarios: ScenarioMeta[];
+  /** Unix seconds the store was written; drives the "computed X ago" label. */
+  createdAt?: number;
   activeId: string | null;
   loading: boolean;
   error: string | null;
@@ -33,6 +35,7 @@ export const useScenarioStore = create<ScenarioState>((set) => ({
       set({
         available: resp.available,
         scenarios: resp.scenarios ?? [],
+        createdAt: resp.created_at ?? undefined,
       });
     } catch {
       // No store / API not ready: the pane simply stays hidden.

@@ -71,41 +71,7 @@ def _solution_for(request: Request, mechanism: str) -> ct.Solution:
     return cache[mechanism]
 
 
-def _reactors_series(states: ct.SolutionArray, reactor_id: str) -> Dict[str, Any]:
-    names = list(states.species_names)
-    mole = states.X
-    mass = states.Y
-    return {
-        reactor_id: {
-            "T": [float(v) for v in states.T],
-            "P": [float(v) for v in states.P],
-            "X": {sp: [float(v) for v in mole[:, i]] for i, sp in enumerate(names)},
-            "Y": {sp: [float(v) for v in mass[:, i]] for i, sp in enumerate(names)},
-            "is_residence": True,
-            "t": [float(v) for v in states.t],
-        }
-    }
-
-
-def _gui_payload(states: ct.SolutionArray, reactor_id: str) -> Dict[str, Any]:
-    series = _reactors_series(states, reactor_id)
-    return {
-        "status": "complete",
-        "is_running": False,
-        "is_complete": True,
-        "error_message": None,
-        "times": series[reactor_id]["t"],
-        "reactors_series": series,
-        "reactor_reports": {},
-        "connection_reports": {},
-        "code_str": "",
-        "summary": [],
-        "sankey_links": None,
-        "sankey_nodes": None,
-        "elapsed_time": None,
-        "updated_nodes": None,
-        "updated_connections": None,
-    }
+from ...payload_store import gui_payload_from_solution_array as _gui_payload
 
 
 @router.get("")
@@ -120,6 +86,7 @@ async def list_scenarios(request: Request) -> Dict[str, Any]:
         "store": store.name,
         "mechanism": root.get("mechanism_name"),
         "reactor_mode": root.get("reactor_mode"),
+        "created_at": root.get("created_at"),
         "scenarios": _scenario_entries(store),
     }
 
