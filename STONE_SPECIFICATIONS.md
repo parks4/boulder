@@ -27,9 +27,13 @@ ______________________________________________________________________
 ## 2. Allowed Top-Level Keys
 
 ```
-metadata   phases   settings   stages   network   export   sweeps   scenarios
+metadata   phases   settings   stages   network   export   sweep   sweeps   scenario
 continuation   signals   bindings   scopes
 ```
+
+`scenario:` and `sweep:` declare inline run-set variations (Section 14). Boulder validates and
+passes them through; a host's reporting/expansion layer consumes them. (The legacy plural
+`scenarios:` list form is removed — use the `scenario:` mapping.)
 
 Dynamic stage block names (declared under `stages:`) are also allowed at the top level.
 
@@ -1253,3 +1257,47 @@ name), `mechanism_sha256` (diagnostic; the cache fingerprint is the correctness 
 - An unresolved/mismatched mechanism on read is a graceful cache miss (cache) or a clear error
   (scenario route) — never a crash.
 - One `Solution` is cached per mechanism per process.
+
+______________________________________________________________________
+
+## 14. Inline run-set variations — `scenario:` and `sweep:`
+
+A STONE file may declare multiple runs inline, instead of a glob of separate overlay files. Boulder
+validates and passes these blocks through; a host's expansion/reporting layer turns them into the
+run set (one config per run). They never alter the topology a single run sees — each expanded run is
+the base with its overlay/patch deep-merged, and the directives stripped.
+
+### `scenario:` — a mapping of `id → overlay`
+
+```yaml
+scenario:
+  Q600:                      # key is the scenario id
+    settings:
+      post_processing: {T_hot_out: 600}
+  QmMax_Q600:                # a full STONE subtree, deep-merged onto the base
+    stages:
+      pfr_stage: {mechanism: abf_1bar.yaml}
+    settings:
+      get_carbon_yield: {n_C_min: 9}
+```
+
+Each value is a STONE subtree (`metadata`/`stages`/`settings`/`network`/…) deep-merged onto the base
+(id-keyed `nodes`/`connections` merge by id). The **key is the scenario id**. This is the same delta a
+standalone `from:` overlay file carries — `from:` remains fully valid and is unaffected.
+
+### `sweep:` — a Cartesian parameter grid
+
+```yaml
+sweep:
+  T:  {path: "nodes[id=torch].properties.T_out", values: [2600, 2700]}
+  mdot: {path: "...", min: 1.0e-4, max: 2.0e-4, num: 3}   # or min/max/num (+ spacing: log)
+```
+
+`sweep:` may appear at the top level (expanded on the base) **or inside a `scenario:` entry**
+(expanded on that scenario only). Ids are suffixed `__<axis>=<value>`.
+
+### Run-set semantics (union)
+
+The run set is the **union**: the top-level `sweep:` points **⊎** each `scenario:` entry (each
+expanded across its *own* inner `sweep:` if present). A top-level sweep and the scenarios do **not**
+cross-multiply. (`sweep:` and `sweeps:` are accepted spellings.)

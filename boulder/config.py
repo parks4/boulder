@@ -47,7 +47,8 @@ STONE_TOP_LEVEL_KEYS: frozenset = frozenset(
         "output",
         "export",
         "sweeps",
-        "scenarios",
+        "sweep",
+        "scenario",
     }
 )
 
@@ -64,7 +65,8 @@ STONE_V2_BASE_KEYS: frozenset = frozenset(
         "output",
         "export",
         "sweeps",
-        "scenarios",
+        "sweep",
+        "scenario",
         "continuation",
         "signals",
         "bindings",
@@ -547,7 +549,8 @@ def _normalize_v2_network(raw: Dict[str, Any]) -> Dict[str, Any]:
         "output",
         "export",
         "sweeps",
-        "scenarios",
+        "sweep",
+        "scenario",
         "continuation",
         "signals",
         "bindings",
@@ -848,7 +851,8 @@ def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
         "output",
         "export",
         "sweeps",
-        "scenarios",
+        "sweep",
+        "scenario",
         "continuation",
         "signals",
         "bindings",
@@ -1955,7 +1959,7 @@ def convert_to_stone_format(config: dict) -> dict:
     if "settings" in config:
         stone_config["settings"] = config["settings"]
 
-    for passthrough in ("output", "export", "sweeps", "scenarios"):
+    for passthrough in ("output", "export", "sweeps", "sweep", "scenario"):
         if passthrough in config:
             stone_config[passthrough] = config[passthrough]
 
