@@ -1252,6 +1252,16 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
 
         plugins = get_plugins()
 
+    # Host config transforms (e.g. derive a transient solver grid from an
+    # export residence-time spec) run on the raw config before dialect detection.
+    for _transform in getattr(plugins, "config_transforms", None) or []:
+        try:
+            _result = _transform(config)
+            if isinstance(_result, dict):
+                config = _result
+        except Exception as _exc:  # noqa: BLE001 — a transform must not break load
+            logger.debug("config_transform %r skipped: %s", _transform, _exc)
+
     # --- STONE v2 detection and normalization ---
     # Detect dialect first; this raises ValueError for v1 or unknown shapes.
     dialect = _detect_stone_dialect(config)

@@ -74,6 +74,15 @@ class BoulderPlugins:
     #: Called when an inter-stage connection carries a ``mechanism_switch`` block.
     #: Registered by an external plugin package via its plugin entry point.
     mechanism_switch_fn: Optional[Callable] = None
+    #: ``(config: dict) -> dict`` transforms applied to the raw STONE config at the
+    #: start of :func:`normalize_config`, before dialect detection. Lets a host
+    #: derive recognised STONE fields from its own ``export``/``metadata`` blocks
+    #: (e.g. a transient ``settings.solver`` grid from a residence-time spec)
+    #: without editing the YAML. Each returns the (possibly new) config; a raising
+    #: transform is skipped. Registered by an external plugin package.
+    config_transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = field(
+        default_factory=list
+    )
 
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.
