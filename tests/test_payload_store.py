@@ -193,6 +193,35 @@ def test_spring_like_multireactor_mechanism_switch(tmp_path: Path):
     assert out["sankey_nodes"] == ["torch", "pfr", "C(s)"]
 
 
+def test_collection_composite_per_scenario(tmp_path: Path):
+    """Many composites in one file, namespaced by scenario id; appends don't wipe
+    siblings; a multi-reactor scenario round-trips."""
+    import h5py
+
+    p = tmp_path / "scenarios.h5"
+    s1 = _real_state_series(4, with_t=True)
+    write_payload(p, _payload({"reactor": s1}), MECH, group="T0_1273K", fresh=False)
+    # Second scenario, multi-reactor, appended — must not clobber the first.
+    s2a = _real_state_series(3, with_t=True)
+    s2b = _real_state_series(3, with_t=True)
+    write_payload(
+        p,
+        _payload({"torch": s2a, "pfr": s2b}, reactor_reports={"torch": {"q": 1}}),
+        MECH,
+        group="T0_1573K",
+        fresh=False,
+    )
+
+    with h5py.File(p, "r") as h:
+        assert "T0_1273K" in h and "T0_1573K" in h  # both scenarios present
+
+    g1 = read_payload(p, group="T0_1273K")
+    assert np.allclose(g1["reactors_series"]["reactor"]["T"], s1["T"])
+    g2 = read_payload(p, group="T0_1573K")
+    assert set(g2["reactors_series"]) == {"torch", "pfr"}
+    assert g2["reactor_reports"] == {"torch": {"q": 1}}
+
+
 def test_shared_builder(tmp_path: Path):
     gas = ct.Solution(MECH)
     n = 4

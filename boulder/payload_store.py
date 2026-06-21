@@ -257,16 +257,34 @@ def _to_str(value: Any) -> str:
 # --------------------------------------------------------------------------- #
 # Top-level write / read
 # --------------------------------------------------------------------------- #
-def write_payload(h5_path: Path, gui_payload: Dict[str, Any], mechanism: str) -> None:
+def write_payload(
+    h5_path: Path,
+    gui_payload: Dict[str, Any],
+    mechanism: str,
+    group: Optional[str] = None,
+    fresh: bool = True,
+) -> None:
     """Serialize *gui_payload* to a composite HDF5 file.
 
     Reactor series are routed to the most native tier they qualify for; the rest
-    of the payload (plus a ``reactors_index``) goes into ``payload_json``. The
-    file is written fresh. The config snapshot is the caller's concern.
+    of the payload (plus a ``reactors_index``) goes into ``payload_json``.
+
+    Parameters
+    ----------
+    group:
+        When set, the result is written under ``<group>/…`` (one composite per
+        scenario in a *collection* file). When ``None``, written at the top level
+        (a single-result *cache* file).
+    fresh:
+        When ``True`` (and no ``group``), any existing file is replaced. For a
+        collection (``group`` set) pass ``fresh=False`` to append without wiping
+        previously-written scenarios.
     """
     h5_path = Path(h5_path)
-    if h5_path.exists():
+    if fresh and group is None and h5_path.exists():
         h5_path.unlink()
+
+    prefix = f"{group}/" if group else ""
 
     # Shallow-copy the top level and pop the heavy series — never deepcopy the
     # big X arrays (P3); they are routed straight into HDF5.
@@ -283,54 +301,71 @@ def write_payload(h5_path: Path, gui_payload: Dict[str, Any], mechanism: str) ->
         if kind == "raw":
             index[rid] = {"kind": "raw", "series": _jsonify(series)}
             continue
-        group = f"r{i}"
+        rgroup = f"r{i}"  # stored relative; prefixed on disk/read
         extra_keys, meta = _split_series(series)
         index[rid] = {
             "kind": kind,
-            "group": group,
+            "group": rgroup,
             "extra_keys": extra_keys,
             "meta": _jsonify(meta),
         }
         if kind == "solution":
             solution_groups.append(
-                (group, _series_to_solution_array(gas, series, extra_keys))  # type: ignore[arg-type]
+                (rgroup, _series_to_solution_array(gas, series, extra_keys))  # type: ignore[arg-type]
             )
         else:
-            array_series.append((group, series, extra_keys))
+            array_series.append((rgroup, series, extra_keys))
 
     lean["reactors_index"] = index
     blob = json.dumps(lean, ensure_ascii=False, separators=(",", ":"))
 
     # 1) Cantera writes its SolutionArray groups first and fully, before any
     #    h5py handle touches the file (R4: no interleaved open handles).
-    for idx, (group, states) in enumerate(solution_groups):
-        states.save(str(h5_path), name=group, overwrite=(idx == 0))
+    #    overwrite=True is per-group: in a collection it only replaces this
+    #    scenario's groups, never sibling scenarios.
+    for idx, (rgroup, states) in enumerate(solution_groups):
+        states.save(str(h5_path), name=f"{prefix}{rgroup}", overwrite=(bool(group) or idx == 0))
 
     # 2) Then a single h5py session for array groups + the JSON blob + attrs.
     mode = "r+" if h5_path.exists() else "w"
     stored_mech, sha = _resolve_mechanism(mechanism)
     with h5py.File(str(h5_path), mode) as handle:
-        for group, series, extra_keys in array_series:
-            _series_to_datasets(handle.create_group(group), series, extra_keys)
-        if "payload_json" in handle:
-            del handle["payload_json"]
-        handle.create_dataset("payload_json", data=blob)
-        handle.attrs["schema_version"] = PAYLOAD_SCHEMA
-        handle.attrs["mechanism"] = stored_mech
-        handle.attrs["mechanism_sha256"] = sha
-        handle.attrs["mechanism_name"] = Path(mechanism).name if mechanism else ""
+        node = handle.require_group(group) if group else handle
+        for rgroup, series, extra_keys in array_series:
+            full = f"{prefix}{rgroup}"
+            if full in handle:
+                del handle[full]
+            _series_to_datasets(handle.create_group(full), series, extra_keys)
+        if "payload_json" in node:
+            del node["payload_json"]
+        node.create_dataset("payload_json", data=blob)
+        node.attrs["schema_version"] = PAYLOAD_SCHEMA
+        node.attrs["mechanism"] = stored_mech
+        node.attrs["mechanism_sha256"] = sha
+        node.attrs["mechanism_name"] = Path(mechanism).name if mechanism else ""
 
 
-def read_payload(h5_path: Path, mechanism_override: Optional[str] = None) -> Dict[str, Any]:
+def read_payload(
+    h5_path: Path,
+    mechanism_override: Optional[str] = None,
+    group: Optional[str] = None,
+) -> Dict[str, Any]:
     """Inverse of :func:`write_payload` → the full ``gui_payload``.
 
     Rehydrates ``reactors_series`` by tier and merges each reactor's ``meta``.
-    Raises on restore failure; callers decide miss-vs-error (R1).
+    ``group`` selects one scenario's composite from a collection file. Raises on
+    restore failure; callers decide miss-vs-error (R1).
     """
     h5_path = Path(h5_path)
+    prefix = f"{group}/" if group else ""
     with h5py.File(str(h5_path), "r") as handle:
-        raw = handle["payload_json"][()]
-        mechanism = mechanism_override or _to_str(handle.attrs.get("mechanism", ""))
+        node = handle[group] if group else handle
+        raw = node["payload_json"][()]
+        mechanism = (
+            mechanism_override
+            or _to_str(node.attrs.get("mechanism", ""))
+            or _to_str(handle.attrs.get("mechanism", ""))
+        )
     if isinstance(raw, bytes):
         raw = raw.decode("utf-8")
     gui = json.loads(raw)
@@ -350,7 +385,7 @@ def read_payload(h5_path: Path, mechanism_override: Optional[str] = None) -> Dic
             series[rid] = entry["series"]
         elif kind == "solution":
             states = ct.SolutionArray(gas)
-            states.restore(str(h5_path), name=entry["group"])
+            states.restore(str(h5_path), name=f"{prefix}{entry['group']}")
             rebuilt = _solution_array_to_series(states, entry.get("extra_keys") or [])
             rebuilt.update(entry.get("meta") or {})
             series[rid] = rebuilt
@@ -361,7 +396,7 @@ def read_payload(h5_path: Path, mechanism_override: Optional[str] = None) -> Dic
         with h5py.File(str(h5_path), "r") as handle:
             for rid, entry in array_entries:
                 rebuilt = _datasets_to_series(
-                    handle[entry["group"]], entry.get("extra_keys") or []
+                    handle[f"{prefix}{entry['group']}"], entry.get("extra_keys") or []
                 )
                 rebuilt.update(entry.get("meta") or {})
                 series[rid] = rebuilt
