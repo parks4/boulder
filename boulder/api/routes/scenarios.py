@@ -19,7 +19,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import cantera as ct
 import h5py
 from fastapi import APIRouter, HTTPException, Request
 
@@ -48,30 +47,18 @@ def _root_attrs(h5_path: Path) -> Dict[str, Any]:
 
 
 def _scenario_entries(h5_path: Path) -> List[Dict[str, Any]]:
+    """List scenario composites — top-level groups holding a ``payload_json``."""
     entries: List[Dict[str, Any]] = []
     with h5py.File(str(h5_path), "r") as handle:
         for name, node in handle.items():
-            if not isinstance(node, h5py.Group) or "t0_K" not in node.attrs:
+            if not isinstance(node, h5py.Group) or "payload_json" not in node:
                 continue
             entry = {key: _to_py(val) for key, val in node.attrs.items()}
             entry["id"] = name
             entries.append(entry)
-    entries.sort(key=lambda e: e.get("t0_K", 0.0))
+    # Sort by explicit order, else by initial temperature, else by id.
+    entries.sort(key=lambda e: (e.get("order", e.get("t0_K", 0.0)), e["id"]))
     return entries
-
-
-def _solution_for(request: Request, mechanism: str) -> ct.Solution:
-    """Return a cached empty Solution per mechanism (load paid once)."""
-    cache = getattr(request.app.state, "_scenario_solutions", None)
-    if cache is None:
-        cache = {}
-        request.app.state._scenario_solutions = cache
-    if mechanism not in cache:
-        cache[mechanism] = ct.Solution(mechanism)
-    return cache[mechanism]
-
-
-from ...payload_store import gui_payload_from_solution_array as _gui_payload
 
 
 @router.get("")
@@ -93,7 +80,7 @@ async def list_scenarios(request: Request) -> Dict[str, Any]:
 
 @router.get("/{scenario_id}")
 async def get_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
-    """Restore one scenario's SolutionArray and return it as a results payload."""
+    """Return one scenario's composite payload (multi-reactor, reports, Sankey)."""
     store = _store_path(request)
     if store is None or not store.is_file():
         raise HTTPException(status_code=404, detail="No scenario store available")
@@ -104,15 +91,12 @@ async def get_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
 
     root = _root_attrs(store)
     mechanism = str(root.get("mechanism") or root.get("mechanism_name") or "")
-    reactor_id = str(root.get("reactor_id") or "reactor")
     try:
-        gas = _solution_for(request, mechanism)
-        states = ct.SolutionArray(gas)
-        states.restore(str(store), name=scenario_id)
+        from ...payload_store import read_payload
+
+        return read_payload(store, mechanism_override=mechanism, group=scenario_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=500,
             detail=f"Failed to restore scenario {scenario_id!r}: {exc}",
         ) from exc
-
-    return _gui_payload(states, reactor_id)
