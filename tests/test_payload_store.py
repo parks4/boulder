@@ -18,7 +18,7 @@ MECH = "gri30.yaml"
 
 
 def _real_state_series(n: int, with_t: bool) -> dict:
-    """A physically-real, normalised series built by actually setting the gas."""
+    """Build a physically-real, normalised series by actually setting the gas."""
     gas = ct.Solution(MECH)
     T = [1000.0 + 50 * i for i in range(n)]
     P = [101325.0] * n
@@ -81,9 +81,13 @@ def test_solution_tier_steady_no_t(tmp_path: Path):
 
 def test_arrays_tier_off_mechanism(tmp_path: Path):
     """Species the mechanism can't represent → arrays tier, no Solution needed."""
-    s = {"T": [1200.0, 1300.0], "P": [1e5, 1e5],
-         "X": {"madeup_species": [0.4, 0.5], "other": [0.6, 0.5]},
-         "t": [0.0, 1.0], "is_psr": True}
+    s = {
+        "T": [1200.0, 1300.0],
+        "P": [1e5, 1e5],
+        "X": {"madeup_species": [0.4, 0.5], "other": [0.6, 0.5]},
+        "t": [0.0, 1.0],
+        "is_psr": True,
+    }
     p = tmp_path / "result.h5"
     write_payload(p, _payload({"r": s}), MECH)
     # No mechanism passed on read → arrays tier must not need one.
@@ -114,13 +118,15 @@ def test_raw_tier_non_state(tmp_path: Path):
 
 
 def test_spatial_series_stored_natively(tmp_path: Path):
-    """A SPRING-style spatial PFR profile (x, is_spatial, fbs_convergence) is a
-    state sequence: x rides as a per-state extra column (native, NOT raw JSON),
-    while the per-iteration fbs_convergence + flags ride in meta."""
+    """A SPRING-style spatial PFR profile is stored as a native state sequence.
+
+    x rides as a per-state extra column (native, NOT raw JSON), while the
+    per-iteration fbs_convergence + flags ride in meta.
+    """
     import h5py
 
     s = _real_state_series(4, with_t=False)
-    s["x"] = [0.0, 0.1, 0.2, 0.3]            # axial position [m], per-state
+    s["x"] = [0.0, 0.1, 0.2, 0.3]  # axial position [m], per-state
     s["is_spatial"] = True
     s["fbs_convergence"] = [12.0, 3.0, 0.5]  # per-FBS-iteration, NOT per-state
     p = tmp_path / "result.h5"
@@ -130,8 +136,8 @@ def test_spatial_series_stored_natively(tmp_path: Path):
         assert "r0" in h
     out = read_payload(p)
     rt = out["reactors_series"]["pfr"]
-    assert rt["x"] == s["x"]                  # position axis preserved as extra col
-    assert rt.get("is_spatial") is True       # flag preserved via meta
+    assert rt["x"] == s["x"]  # position axis preserved as extra col
+    assert rt.get("is_spatial") is True  # flag preserved via meta
     assert rt["fbs_convergence"] == s["fbs_convergence"]  # off-shape array via meta
 
 
@@ -169,12 +175,20 @@ def test_spring_like_multireactor_mechanism_switch(tmp_path: Path):
     on a *different* species set (the mechanism can't represent it) → arrays tier,
     restorable with NO Solution. Both round-trip; derived artifacts preserved.
     """
-    torch = _real_state_series(4, with_t=True)          # gri30 → solution tier
-    pfr = {                                              # foreign species → arrays tier
+    torch = _real_state_series(4, with_t=True)  # gri30 → solution tier
+    pfr = {  # foreign species → arrays tier
         "T": [1800.0, 1700.0, 1600.0],
         "P": [1e5, 1e5, 1e5],
-        "X": {"C2H2": [0.3, 0.35, 0.4], "H2": [0.5, 0.5, 0.5], "C(s)": [0.2, 0.15, 0.1]},
-        "Y": {"C2H2": [0.3, 0.35, 0.4], "H2": [0.4, 0.4, 0.4], "C(s)": [0.3, 0.25, 0.2]},
+        "X": {
+            "C2H2": [0.3, 0.35, 0.4],
+            "H2": [0.5, 0.5, 0.5],
+            "C(s)": [0.2, 0.15, 0.1],
+        },
+        "Y": {
+            "C2H2": [0.3, 0.35, 0.4],
+            "H2": [0.4, 0.4, 0.4],
+            "C(s)": [0.3, 0.25, 0.2],
+        },
         "t": [0.0, 0.5, 1.0],
     }
     payload = _payload(
@@ -187,15 +201,17 @@ def test_spring_like_multireactor_mechanism_switch(tmp_path: Path):
     write_payload(p, payload, MECH)
     out = read_payload(p)  # gri30 available; pfr (arrays) doesn't need it anyway
     assert np.allclose(out["reactors_series"]["torch"]["T"], torch["T"])
-    assert np.allclose(out["reactors_series"]["pfr"]["X"]["C2H2"], pfr["X"]["C2H2"])
-    assert np.allclose(out["reactors_series"]["pfr"]["Y"]["H2"], pfr["Y"]["H2"])
+    assert np.allclose(out["reactors_series"]["pfr"]["X"]["C2H2"], pfr["X"]["C2H2"])  # type: ignore[index]
+    assert np.allclose(out["reactors_series"]["pfr"]["Y"]["H2"], pfr["Y"]["H2"])  # type: ignore[index]
     assert out["reactor_reports"]["pfr"]["C_yield"] == 0.42
     assert out["sankey_nodes"] == ["torch", "pfr", "C(s)"]
 
 
 def test_collection_composite_per_scenario(tmp_path: Path):
-    """Many composites in one file, namespaced by scenario id; appends don't wipe
-    siblings; a multi-reactor scenario round-trips."""
+    """Many composites in one file, namespaced by scenario id.
+
+    Appends don't wipe siblings; a multi-reactor scenario round-trips.
+    """
     import h5py
 
     p = tmp_path / "scenarios.h5"

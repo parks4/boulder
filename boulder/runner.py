@@ -771,7 +771,7 @@ class BoulderRunner:
             # BoulderRunner.scopes is non-empty even for steady-state cases.
             # Transient step-by-step recording is handled by _run_transient_solver
             # via converter._scope_recorder when set.
-            converter._scope_recorder = self._scope_recorder  # type: ignore[attr-defined]
+            converter._scope_recorder = self._scope_recorder  # type: ignore[attr-defined, assignment]
             # Take an initial snapshot at t=0 (or the final time if a trajectory is available)
             last_t = 0.0
             for _stage_traj in trajectory.networks.values():

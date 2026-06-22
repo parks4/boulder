@@ -8,7 +8,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -21,13 +20,12 @@ import cantera as ct  # type: ignore
 import numpy as np
 
 from .config import CANTERA_MECHANISM, TRANSIENT_SOLVER_KINDS
+from .output_summary import evaluate_output_items, parse_output_block
 from .reactor_energy import (
     build_reactor_with_energy,
-    energy_ctor_suffix,
     validate_energy_on_built_reactor,
     validate_explicit_energy,
 )
-from .output_summary import evaluate_output_items, parse_output_block
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
 from .staged_solver import _order_stage_nodes_for_flow
@@ -453,14 +451,14 @@ def get_plugins() -> BoulderPlugins:
 
 
 class _TrajectoryRecorder:
-    """Full-state recorder for a transient solve, driven by the existing
-    ``_scope_recorder.record(t)`` hook in :meth:`_run_transient_solver`.
+    """Capture full reactor state at each transient grid step.
 
-    The staged ``advance_grid`` solve already steps each reactor through every
-    grid time; this captures the per-reactor state at each step so the GUI can
-    show the real ``T(t)`` trajectory. The network is therefore solved **once** —
-    no re-integration. It does not modify the solve (the ``record`` calls already
-    exist) and produces no side effects on reactor state.
+    Driven by the existing ``_scope_recorder.record(t)`` hook in
+    :meth:`_run_transient_solver`. The staged ``advance_grid`` solve already steps
+    each reactor through every grid time; this captures the per-reactor state at
+    each step so the GUI can show the real ``T(t)`` trajectory. The network is
+    therefore solved **once** — no re-integration. It does not modify the solve
+    (the ``record`` calls already exist) and produces no side effects.
     """
 
     def __init__(self, converter: "DualCanteraConverter") -> None:
@@ -477,7 +475,13 @@ class _TrajectoryRecorder:
             phase = reactor.thermo
             d = self._data.setdefault(
                 rid,
-                {"t": [], "T": [], "P": [], "X": [], "names": list(phase.species_names)},
+                {
+                    "t": [],
+                    "T": [],
+                    "P": [],
+                    "X": [],
+                    "names": list(phase.species_names),
+                },
             )
             d["t"].append(float(t))
             d["T"].append(float(phase.T))
@@ -835,7 +839,11 @@ class DualCanteraConverter:
             validate_energy_on_built_reactor(reactor, props, typ)
         elif typ == "IdealGasReactor":
             reactor = build_reactor_with_energy(
-                ct.IdealGasReactor, gas_for_node, props=props, clone=clone, type_name=typ
+                ct.IdealGasReactor,
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
             )
             reactor.name = rid
         elif typ == "ConstPressureReactor":

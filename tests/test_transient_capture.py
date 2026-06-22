@@ -7,8 +7,6 @@ GUI shows the real T(t) without any re-integration — the network is solved onc
 
 from __future__ import annotations
 
-import pytest
-
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import normalize_config
 
@@ -46,7 +44,9 @@ def _run(config: dict, sim_time: float, step: float) -> dict:
 
 def test_transient_run_yields_multipoint_trajectory():
     # Fine grid that straddles the ignition delay (ignition < 50 ms at 1400 K).
-    config = _config({"kind": "advance_grid", "grid": {"start": 0.0, "stop": 0.1, "dt": 0.002}})
+    config = _config(
+        {"kind": "advance_grid", "grid": {"start": 0.0, "stop": 0.1, "dt": 0.002}}
+    )
     results = _run(config, 0.1, 0.002)
     s = results["reactors"]["reactor"]
     assert len(s["T"]) > 5  # a real T(t), not a single converged point

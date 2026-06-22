@@ -31,10 +31,14 @@ def parse_energy_prop(props: dict[str, Any]) -> Tuple[EnergyMode | None, bool]:
 
 def supports_energy_kwarg(reactor_cls: type) -> bool:
     """Return True when *reactor_cls* accepts ``energy=`` in its constructor."""
-    return reactor_cls in _ENERGY_REACTOR_CLASSES or hasattr(reactor_cls, "energy_enabled")
+    return reactor_cls in _ENERGY_REACTOR_CLASSES or hasattr(
+        reactor_cls, "energy_enabled"
+    )
 
 
-def validate_explicit_energy(props: dict[str, Any], reactor_cls: type, type_name: str) -> None:
+def validate_explicit_energy(
+    props: dict[str, Any], reactor_cls: type, type_name: str
+) -> None:
     """Raise if ``energy`` is set explicitly on an unsupported reactor type."""
     _, explicit = parse_energy_prop(props)
     if explicit and not supports_energy_kwarg(reactor_cls):
@@ -78,8 +82,8 @@ def build_reactor_with_energy(
 
 
 def energy_ctor_suffix(props: dict[str, Any]) -> str:
-    """Return ``', energy=\"on\"'`` / ``', energy=\"off\"'`` or empty for emitters."""
+    r"""Return ``', energy=\"on\"'`` / ``', energy=\"off\"'`` or empty for emitters."""
     energy, explicit = parse_energy_prop(props)
     if not explicit or energy is None:
         return ""
-    return f', energy={energy!r}'
+    return f", energy={energy!r}"

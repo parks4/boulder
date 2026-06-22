@@ -49,5 +49,5 @@ def test_reservoir_rejects_explicit_energy():
 
 def test_emitter_energy_suffix():
     """Download emitter suffix includes explicit energy."""
-    assert energy_ctor_suffix({"energy": "off"}) == ', energy=\'off\''
+    assert energy_ctor_suffix({"energy": "off"}) == ", energy='off'"
     assert energy_ctor_suffix({}) == ""

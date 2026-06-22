@@ -13,6 +13,8 @@ import { useScenarioStore } from "@/stores/scenarioStore";
  */
 export function useScenarioFocus() {
   useEffect(() => {
+    // No EventSource in non-browser envs (jsdom/SSR) — skip cleanly.
+    if (typeof EventSource === "undefined") return;
     const source = new EventSource(SCENARIO_FOCUS_STREAM_URL);
 
     source.addEventListener("focus", (e: MessageEvent) => {

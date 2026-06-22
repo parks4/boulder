@@ -106,7 +106,7 @@ def _is_numeric_list(value: Any, n: int) -> bool:
 
 
 def _is_state_series(series: Any) -> bool:
-    """True when a series is state-shaped: T, P lists (equal len, >0) + X dict."""
+    """Return True when a series is state-shaped: T, P lists (equal len, >0) + X dict."""
     if not isinstance(series, dict):
         return False
     T, P, X = series.get("T"), series.get("P"), series.get("X")
@@ -156,8 +156,10 @@ def _can_represent(series: Dict[str, Any], gas: Optional[ct.Solution]) -> bool:
 
 
 def _x_rows_normalised(series: Dict[str, Any]) -> bool:
-    """True when every X row sums to 1 ± tol (R2: don't let Cantera silently
-    renormalise a non-normalised/diagnostic series)."""
+    """Return True when every X row sums to 1 ± tol.
+
+    R2: don't let Cantera silently renormalise a non-normalised/diagnostic series.
+    """
     cols = list(series["X"].values())
     if not cols:
         return False
@@ -188,7 +190,7 @@ def _series_to_solution_array(
     P = np.asarray(series["P"], dtype=float)
     Xmat = _x_matrix(series, gas.species_names)
     extra = {k: np.asarray(series[k], dtype=float) for k in extra_keys}
-    states = ct.SolutionArray(gas, shape=(len(T),), extra=extra or None)
+    states = ct.SolutionArray(gas, shape=(len(T),), extra=extra or None)  # type: ignore[arg-type]
     states.TPX = T, P, Xmat
     return states
 
@@ -324,7 +326,9 @@ def write_payload(
     #    overwrite=True is per-group: in a collection it only replaces this
     #    scenario's groups, never sibling scenarios.
     for idx, (rgroup, states) in enumerate(solution_groups):
-        states.save(str(h5_path), name=f"{prefix}{rgroup}", overwrite=(bool(group) or idx == 0))
+        states.save(
+            str(h5_path), name=f"{prefix}{rgroup}", overwrite=(bool(group) or idx == 0)
+        )
 
     # 2) Then a single h5py session for array groups + the JSON blob + attrs.
     mode = "r+" if h5_path.exists() else "w"
@@ -384,6 +388,7 @@ def read_payload(
         if kind == "raw":
             series[rid] = entry["series"]
         elif kind == "solution":
+            assert gas is not None  # the solution tier implies the mechanism loaded
             states = ct.SolutionArray(gas)
             states.restore(str(h5_path), name=f"{prefix}{entry['group']}")
             rebuilt = _solution_array_to_series(states, entry.get("extra_keys") or [])

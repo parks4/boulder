@@ -55,8 +55,10 @@ def _sweep_block(d: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _run_set_size(raw: Dict[str, Any]) -> int:
-    """Union run-set size (generic; mirrors expand_scenarios without importing it):
-    global sweep points ⊎ each `scenario:` entry (its inner sweep, else 1)."""
+    """Return the union run-set size (mirrors expand_scenarios without importing it).
+
+    Global sweep points ⊎ each `scenario:` entry (its inner sweep, else 1).
+    """
     scenario = raw.get("scenario") or {}
     total = _sweep_points(_sweep_block(raw))  # global sweep points (0 if none)
     for overlay in scenario.values():
@@ -75,14 +77,18 @@ def _raw(request: Request) -> Dict[str, Any]:
 
 
 def _store_path(request: Request) -> Optional[Path]:
-    """The collection store the run-set writes — declared
-    (``metadata.extra.scenario_store``) or the ``<stem>_scenarios.h5`` default
-    (must match the runner's default)."""
+    """Return the collection store the run-set writes to.
+
+    Declared via ``metadata.extra.scenario_store`` or the ``<stem>_scenarios.h5``
+    default (must match the runner's default).
+    """
     cfg_path = getattr(request.app.state, "preloaded_config_path", None)
     if not cfg_path:
         return None
     cfg = Path(cfg_path).resolve()
-    rel = ((_raw(request).get("metadata") or {}).get("extra") or {}).get("scenario_store")
+    rel = ((_raw(request).get("metadata") or {}).get("extra") or {}).get(
+        "scenario_store"
+    )
     if rel:
         p = Path(rel)
         return p if p.is_absolute() else cfg.parent / p
@@ -90,15 +96,21 @@ def _store_path(request: Request) -> Optional[Path]:
 
 
 def _runner_command(request: Request) -> Optional[Dict[str, Any]]:
-    """Resolve how to run the run-set: a ``run_sweep.py`` next to the config, or
-    a host-registered ``sweep_runner`` command. Returns ``{argv, cwd}`` or None."""
+    """Resolve how to run the run-set.
+
+    A ``run_sweep.py`` next to the config, or a host-registered ``sweep_runner``
+    command. Returns ``{argv, cwd}`` or None.
+    """
     cfg_path = getattr(request.app.state, "preloaded_config_path", None)
     if not cfg_path:
         return None
     cfg = Path(cfg_path).resolve()
     local = cfg.parent / _RUNNER_NAME
     if local.is_file():
-        return {"argv": [sys.executable, _RUNNER_NAME, cfg.name, "--no-plot"], "cwd": str(cfg.parent)}
+        return {
+            "argv": [sys.executable, _RUNNER_NAME, cfg.name, "--no-plot"],
+            "cwd": str(cfg.parent),
+        }
     from ...cantera_converter import get_plugins  # noqa: PLC0415
 
     runner = getattr(get_plugins(), "sweep_runner", None)
@@ -142,7 +154,9 @@ async def sweep_run(request: Request) -> Dict[str, Any]:
     """Start the run-set subprocess for the preloaded config."""
     cmd = _runner_command(request)
     if not _has_run_set(request) or cmd is None:
-        raise HTTPException(status_code=400, detail="No runnable run-set for this config")
+        raise HTTPException(
+            status_code=400, detail="No runnable run-set for this config"
+        )
 
     job = getattr(request.app.state, "sweep_job", None)
     if job and job.get("status") == "running":
