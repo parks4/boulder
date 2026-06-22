@@ -74,6 +74,21 @@ def _raw(request: Request) -> Dict[str, Any]:
     return getattr(request.app.state, "preloaded_raw", None) or {}
 
 
+def _store_path(request: Request) -> Optional[Path]:
+    """The collection store the run-set writes — declared
+    (``metadata.extra.scenario_store``) or the ``<stem>_scenarios.h5`` default
+    (must match the runner's default)."""
+    cfg_path = getattr(request.app.state, "preloaded_config_path", None)
+    if not cfg_path:
+        return None
+    cfg = Path(cfg_path).resolve()
+    rel = ((_raw(request).get("metadata") or {}).get("extra") or {}).get("scenario_store")
+    if rel:
+        p = Path(rel)
+        return p if p.is_absolute() else cfg.parent / p
+    return cfg.parent / f"{cfg.stem}_scenarios.h5"
+
+
 def _runner_command(request: Request) -> Optional[Dict[str, Any]]:
     """Resolve how to run the run-set: a ``run_sweep.py`` next to the config, or
     a host-registered ``sweep_runner`` command. Returns ``{argv, cwd}`` or None."""
@@ -132,6 +147,11 @@ async def sweep_run(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=409, detail="A sweep is already running")
 
     total = _run_set_size(_raw(request))
+    # Point the server at the store the run-set writes so the Scenario Pane shows
+    # the results on refresh — even when the config declares no scenario_store.
+    store = _store_path(request)
+    if store is not None:
+        request.app.state.scenario_store_path = str(store)
     state: Dict[str, Any] = {
         "status": "running",
         "current": 0,
