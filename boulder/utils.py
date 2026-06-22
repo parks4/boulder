@@ -142,6 +142,10 @@ def coerce_config_units(obj: Any, _key: str = "") -> Any:
     """
     if isinstance(obj, dict):
         for k, v in obj.items():
+            # `metadata:` is descriptive free text (title, assumptions, author, …),
+            # never unit-bearing — don't try to parse e.g. "2 torches…" as a unit.
+            if k == "metadata":
+                continue
             obj[k] = coerce_config_units(v, _key=k)
         return obj
     if isinstance(obj, list):
