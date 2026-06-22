@@ -420,6 +420,15 @@ class BoulderRunner:
             stream_reservoirs = interface_reservoirs
 
         converter = self._ensure_converter()
+        # Alias each logical inter-stage id onto its materialized inlet MFC before
+        # computing already_built, so the converter's deferred-PressureController
+        # pass can resolve masters declared by the original YAML id (mirrors
+        # solve_staged; without this the runner path leaves e.g. 'psr_to_pfr'
+        # unregistered and PCs mastered on it never build).
+        if stream_reservoirs:
+            from .staged_solver import alias_inter_connection_mfcs
+
+            alias_inter_connection_mfcs(converter, plan)
         already_built = set(converter.connections.keys()) | set(converter.walls.keys())
         if stream_reservoirs:
             for ic in plan.all_inter_connections:
