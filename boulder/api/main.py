@@ -87,6 +87,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.scenario_store_path = None
     app.state.preloaded_raw = None  # inheritance-resolved config (keeps sweeps:)
     app.state.sweep_job = None
+    # ``bloc --sweep`` (GUI): default the split button to Run Sweep.
+    app.state.sweep_default = bool(os.environ.get("BOULDER_SWEEP_MODE"))
 
     if env_config_path and env_config_path.strip():
         try:
@@ -194,9 +196,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         elif app.state.preloaded_config and app.state.preloaded_config_path:
             extra = (app.state.preloaded_config.get("metadata") or {}).get("extra") or {}
             rel = extra.get("scenario_store")
+            base = Path(app.state.preloaded_config_path).resolve().parent
             if rel:
-                base = Path(app.state.preloaded_config_path).resolve().parent
                 app.state.scenario_store_path = str((base / rel).resolve())
+            elif os.environ.get("BOULDER_SWEEP_MODE"):
+                # Sweep mode with no declared store → default next to the config,
+                # so pre-computed scenarios (if any) show in the pane.
+                stem = Path(app.state.preloaded_config_path).stem
+                app.state.scenario_store_path = str(base / f"{stem}_scenarios.h5")
         if app.state.scenario_store_path:
             logger.info(
                 "Scenario store enabled: %s", app.state.scenario_store_path

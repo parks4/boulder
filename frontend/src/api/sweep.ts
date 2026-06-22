@@ -6,6 +6,8 @@ export interface SweepInfo {
   can_run: boolean;
   reason: string;
   running: boolean;
+  /** ``bloc --sweep`` launched the GUI in sweep mode → default the button to Run Sweep. */
+  default?: boolean;
 }
 
 export interface SweepStatus {

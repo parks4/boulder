@@ -30,11 +30,19 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
     total: 0,
   });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const appliedDefault = useRef(false);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
 
   const loadSweepInfo = useCallback(() => {
     getSweepInfo()
-      .then(setSweep)
+      .then((info) => {
+        setSweep(info);
+        // `bloc --sweep` GUI mode: default the split button to Run Sweep (once).
+        if (!appliedDefault.current && info.default && info.can_run) {
+          appliedDefault.current = true;
+          setRunMode("sweep");
+        }
+      })
       .catch(() => setSweep(null));
   }, []);
 

@@ -513,10 +513,12 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
     args = parse_args(argv)
 
-    # --sweep: headless run-set runner. Boulder has no run-set concept, so it
-    # delegates to a host-registered runner command (BoulderPlugins.sweep_runner,
-    # e.g. ["-m", "bloc.scenario_sweep"]) — keeping Boulder host-agnostic.
-    if args.sweep:
+    # --sweep is "Run Sweep mode":
+    #   * with --headless → run the whole run-set now, no GUI (delegates to the
+    #     host-registered BoulderPlugins.sweep_runner; Boulder stays host-agnostic).
+    #   * without --headless → launch the GUI with Run Sweep as the default action
+    #     and the (pre-computed) scenario store shown in the pane (BOULDER_SWEEP_MODE).
+    if args.sweep and args.headless:
         if not args.config:
             print("Error: --sweep requires a config file", file=sys.stderr)
             sys.exit(2)
@@ -535,6 +537,9 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
         cmd = [sys.executable, *runner, str(_Path(args.config).resolve())]
         sys.exit(subprocess.call(cmd))
+    if args.sweep:
+        # GUI sweep mode — read by the lifespan / frontend.
+        os.environ["BOULDER_SWEEP_MODE"] = "1"
 
     # --runner flag overrides the kwarg (shell users)
     if args.runner:
