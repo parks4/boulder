@@ -74,8 +74,9 @@ def test_focus_broadcasts_to_subscribers(tmp_path: Path) -> None:
         queue: asyncio.Queue = asyncio.Queue()
         client.app.state.scenario_focus_subscribers.add(queue)
 
-        assert client.post(
-            "/api/scenarios/focus", json={"scenario_id": "s2"}
-        ).status_code == 200
+        assert (
+            client.post("/api/scenarios/focus", json={"scenario_id": "s2"}).status_code
+            == 200
+        )
 
         assert queue.get_nowait() == "s2"

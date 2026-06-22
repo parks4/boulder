@@ -122,7 +122,7 @@ class FocusRequest(BaseModel):
 
 
 def _focus_subscribers(request: Request) -> "set[asyncio.Queue]":
-    """The live set of SSE subscriber queues (created on first use)."""
+    """Return the live set of SSE subscriber queues (created on first use)."""
     subs = getattr(request.app.state, "scenario_focus_subscribers", None)
     if subs is None:
         subs = set()

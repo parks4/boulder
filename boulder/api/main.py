@@ -194,7 +194,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if store_env and store_env.strip():
             app.state.scenario_store_path = store_env.strip()
         elif app.state.preloaded_config and app.state.preloaded_config_path:
-            extra = (app.state.preloaded_config.get("metadata") or {}).get("extra") or {}
+            extra = (app.state.preloaded_config.get("metadata") or {}).get(
+                "extra"
+            ) or {}
             rel = extra.get("scenario_store")
             base = Path(app.state.preloaded_config_path).resolve().parent
             if rel:
@@ -205,9 +207,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 stem = Path(app.state.preloaded_config_path).stem
                 app.state.scenario_store_path = str(base / f"{stem}_scenarios.h5")
         if app.state.scenario_store_path:
-            logger.info(
-                "Scenario store enabled: %s", app.state.scenario_store_path
-            )
+            logger.info("Scenario store enabled: %s", app.state.scenario_store_path)
     except Exception as store_err:  # noqa: BLE001
         logger.warning("Scenario store resolution failed: %s", store_err)
         app.state.scenario_store_path = None

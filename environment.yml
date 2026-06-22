@@ -6,6 +6,7 @@ dependencies:
 - pip
 - cantera
 - numpy>=2.4.0     # np.trapz replaced with np.trapezoid
+- h5py             # composite-HDF5 result serialization (payload_store)
 - pandas
 - plotly
 - pint
