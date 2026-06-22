@@ -4,6 +4,7 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSimulationSSE } from "@/hooks/useSimulationSSE";
+import { useScenarioFocus } from "@/hooks/useScenarioFocus";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { startSimulation } from "@/api/simulations";
 import { fetchDefaultConfig, fetchPreloadedConfig } from "@/api/configs";
@@ -48,6 +49,9 @@ export function AppShell() {
 
   // Connect SSE stream
   useSimulationSSE();
+
+  // Follow scenario-focus pushes (external dashboard → load scenario live).
+  useScenarioFocus();
 
   // Ctrl/Cmd+B toggles the left sidebar (Claude-desktop convention).
   useEffect(() => {

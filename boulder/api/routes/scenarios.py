@@ -16,11 +16,15 @@ HDF5 schema is the contract between producer and GUI.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import h5py
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -100,3 +104,92 @@ async def get_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
             status_code=500,
             detail=f"Failed to restore scenario {scenario_id!r}: {exc}",
         ) from exc
+
+
+# --------------------------------------------------------------------------- #
+# Scenario-focus channel — a generic remote-control seam.
+#
+# An external process (e.g. a separate result dashboard) can ask the open GUI to
+# load and visualise a given scenario id by POSTing to ``/focus``; every browser
+# tab subscribed to ``/focus/stream`` receives the id and loads it. The push is
+# in-process (a set of asyncio queues on ``app.state``); it carries only a
+# scenario id, so it stays domain-neutral.
+# --------------------------------------------------------------------------- #
+
+
+class FocusRequest(BaseModel):
+    scenario_id: str
+
+
+def _focus_subscribers(request: Request) -> "set[asyncio.Queue]":
+    """The live set of SSE subscriber queues (created on first use)."""
+    subs = getattr(request.app.state, "scenario_focus_subscribers", None)
+    if subs is None:
+        subs = set()
+        request.app.state.scenario_focus_subscribers = subs
+    return subs
+
+
+def _focus_event(scenario_id: str) -> str:
+    """One SSE ``focus`` event carrying the scenario id."""
+    return f"event: focus\ndata: {json.dumps({'scenario_id': scenario_id})}\n\n"
+
+
+@router.post("/focus")
+async def focus_scenario(req: FocusRequest, request: Request) -> Dict[str, Any]:
+    """Tell every subscribed GUI tab to load scenario ``scenario_id`` (live)."""
+    store = _store_path(request)
+    if store is None or not store.is_file():
+        raise HTTPException(status_code=404, detail="No scenario store available")
+    known = {e["id"] for e in _scenario_entries(store)}
+    if req.scenario_id not in known:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown scenario {req.scenario_id!r}"
+        )
+
+    request.app.state.focused_scenario = req.scenario_id
+    for queue in list(_focus_subscribers(request)):
+        try:
+            queue.put_nowait(req.scenario_id)
+        except asyncio.QueueFull:  # pragma: no cover — unbounded queues
+            pass
+    return {"ok": True, "scenario_id": req.scenario_id}
+
+
+@router.get("/focus/stream")
+async def focus_stream(request: Request) -> StreamingResponse:
+    """SSE stream of scenario-focus events for the GUI to follow.
+
+    Emits the current focus (if any) immediately so a late-joining tab syncs,
+    then one ``focus`` event per :func:`focus_scenario` call; periodic comments
+    keep the connection alive.
+    """
+    subs = _focus_subscribers(request)
+    queue: asyncio.Queue = asyncio.Queue()
+    subs.add(queue)
+    current = getattr(request.app.state, "focused_scenario", None)
+
+    async def gen():
+        try:
+            if current:
+                yield _focus_event(current)
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    scenario_id = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield _focus_event(scenario_id)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"  # SSE comment — no event fired
+        finally:
+            subs.discard(queue)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

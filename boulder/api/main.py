@@ -212,6 +212,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("Scenario store resolution failed: %s", store_err)
         app.state.scenario_store_path = None
 
+    # Scenario-focus channel: external tools (e.g. a result dashboard) can drive
+    # the open GUI to load a scenario id; tabs subscribe over SSE.
+    app.state.scenario_focus_subscribers = set()
+    app.state.focused_scenario = None
+
     logger.info("Boulder API started – plugins loaded, converter ready")
     yield
     # Shutdown: nothing to clean up

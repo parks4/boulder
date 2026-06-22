@@ -33,3 +33,18 @@ export function listScenarios() {
 export function fetchScenario(id: string) {
   return apiFetch<SimulationResults>(`/scenarios/${encodeURIComponent(id)}`);
 }
+
+/**
+ * Ask every subscribed GUI tab to load scenario ``id`` (the scenario-focus
+ * remote-control channel — used by external dashboards). Returns once the
+ * backend has broadcast the focus.
+ */
+export function focusScenario(id: string) {
+  return apiFetch<{ ok: boolean; scenario_id: string }>("/scenarios/focus", {
+    method: "POST",
+    body: JSON.stringify({ scenario_id: id }),
+  });
+}
+
+/** SSE URL the GUI subscribes to for scenario-focus events. */
+export const SCENARIO_FOCUS_STREAM_URL = "/api/scenarios/focus/stream";

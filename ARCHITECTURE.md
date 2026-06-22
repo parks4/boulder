@@ -159,11 +159,27 @@ GUI renders. `CACHE_VERSION` (in `result_cache.py`) gates cache entries; `PAYLOA
 `schema_version` attr) versions the HDF5 layout. Mechanism is stored as a resolved path + sha256; an
 unresolved mechanism on read is a graceful cache miss, never a crash.
 
+#### Scenario-focus channel (remote control)
+
+`api/routes/scenarios.py` exposes a generic seam so an **external process** (e.g. a separate result
+dashboard) can drive the open GUI to load a scenario, without polling or a page reload:
+
+- `POST /api/scenarios/focus` `{scenario_id}` — validates the id against the active store and pushes it
+  onto every subscriber (an in-process set of `asyncio.Queue`s on `app.state`); also remembered as
+  `app.state.focused_scenario`.
+- `GET /api/scenarios/focus/stream` — SSE; emits the current focus on connect (late-joiner sync) then
+  one `focus` event per POST. The frontend `useScenarioFocus` hook subscribes and calls the existing
+  `scenarioStore.setActive(id)` sink, so the trajectory appears in the Plots tab in place.
+
+The push carries only a scenario id (domain-neutral). A typical use: a dashboard `POST`s a focus from a
+server-side click handler — no browser CORS involved, since the GUI's own same-origin tab is the only
+SSE subscriber.
+
 ### Frontend (`frontend/src/`)
 
 - **API** — `api/client.ts`, `configs.ts`, `simulations.ts`, `mechanisms.ts`, `plugins.ts`
 - **State** — Zustand stores (`configStore`, `simulationStore`, `selectionStore`, etc.)
-- **Graph / results** — `ReactorGraph`, `ResultsTabs`, `PluginTab`, `useSimulationSSE`
+- **Graph / results** — `ReactorGraph`, `ResultsTabs`, `PluginTab`, `useSimulationSSE`, `useScenarioFocus`
 
 Plugins: `GET /api/plugins` lists tabs; `POST /api/plugins/{id}/render` returns structured JSON (image, table, html, plotly, etc.) consumed by `PluginTab`.
 
