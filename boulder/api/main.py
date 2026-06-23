@@ -89,8 +89,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sweep_job = None
     # ``--sweep`` GUI mode (BOULDER_SWEEP_MODE): default the split button to Run Sweep.
     app.state.sweep_default = bool(os.environ.get("BOULDER_SWEEP_MODE"))
-    # ``--run`` (BOULDER_AUTORUN): frontend auto-starts the run once on load.
-    app.state.autorun = bool(os.environ.get("BOULDER_AUTORUN"))
+    # ``--run`` autorun is decided later, once the cache / scenario store is known.
+    app.state.autorun = False
 
     if env_config_path and env_config_path.strip():
         try:
@@ -139,7 +139,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 )
 
                 cache_root = cache_dir_for(str(actual_yaml_path))
-                if cache_root is not None:
+                if os.environ.get("BOULDER_NO_CACHE"):
+                    # --no-cache: don't pick up any cached result; recompute.
+                    app.state.preloaded_result = None
+                    app.state.preloaded_fingerprint = None
+                    print("[cache] disabled (--no-cache) — will recompute", flush=True)
+                elif cache_root is not None:
                     mechanism = resolve_mechanism_for_fingerprint(
                         validated, converter_class=app.state.converter_class
                     )
@@ -170,6 +175,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             app.state.preloaded_filename,
                             time.time() - created,
                             actual_fp[:12],
+                        )
+                        # Surface on the console by default (not only the logger).
+                        print(
+                            f"[cache] loaded cached result for "
+                            f"{app.state.preloaded_filename} "
+                            f"(fingerprint {actual_fp[:12]}…) — re-run skipped",
+                            flush=True,
                         )
                     elif fingerprint is not None:
                         logger.info(
@@ -213,6 +225,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as store_err:  # noqa: BLE001
         logger.warning("Scenario store resolution failed: %s", store_err)
         app.state.scenario_store_path = None
+
+    # ``--run`` (BOULDER_AUTORUN): the frontend auto-starts the run once on load —
+    # but only when there is nothing cached to pick up (``--no-cache`` forces it).
+    # Decided here, after the cache and scenario store have been resolved.
+    _no_cache = bool(os.environ.get("BOULDER_NO_CACHE"))
+    _autorun_req = bool(os.environ.get("BOULDER_AUTORUN"))
+    if app.state.sweep_default:
+        _store = getattr(app.state, "scenario_store_path", None)
+        _cache_present = bool(_store and Path(_store).is_file())
+    else:
+        _cache_present = getattr(app.state, "preloaded_result", None) is not None
+    app.state.autorun = _autorun_req and (_no_cache or not _cache_present)
+    if _autorun_req and _cache_present and not _no_cache:
+        _what = "scenario store" if app.state.sweep_default else "cached result"
+        msg = (
+            f"[cache] {_what} present — --run picks up from cache "
+            f"(use --no-cache to recompute)"
+        )
+        logger.info(msg)
+        print(msg, flush=True)
 
     # Scenario-focus channel: external tools (e.g. a result dashboard) can drive
     # the open GUI to load a scenario id; tabs subscribe over SSE.

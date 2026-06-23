@@ -169,6 +169,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help=(
+            "Ignore any cached result and recompute. By default a cached result is "
+            "picked up on startup and --run does not re-solve; --no-cache forces a "
+            "fresh run."
+        ),
+    )
+    parser.add_argument(
         "--download",
         metavar="OUTPUT_FILE",
         help="Generate Python code from YAML and save to file (requires --headless)",
@@ -552,6 +561,9 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     if args.run and not args.headless:
         # GUI auto-run on startup — read by the lifespan / frontend.
         os.environ["BOULDER_AUTORUN"] = "1"
+    if args.no_cache:
+        # Ignore cached results (read by the lifespan).
+        os.environ["BOULDER_NO_CACHE"] = "1"
 
     # --runner flag overrides the kwarg (shell users)
     if args.runner:
