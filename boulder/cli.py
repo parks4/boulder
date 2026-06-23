@@ -160,6 +160,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--run",
+        action="store_true",
+        help=(
+            "Run immediately on startup. GUI mode: auto-start the run on load "
+            "(with --sweep, the whole run-set). --headless: solve the case now "
+            "(no GUI, no codegen). --headless requires --run or --download."
+        ),
+    )
+    parser.add_argument(
         "--download",
         metavar="OUTPUT_FILE",
         help="Generate Python code from YAML and save to file (requires --headless)",
@@ -540,6 +549,9 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     if args.sweep:
         # GUI sweep mode — read by the lifespan / frontend.
         os.environ["BOULDER_SWEEP_MODE"] = "1"
+    if args.run and not args.headless:
+        # GUI auto-run on startup — read by the lifespan / frontend.
+        os.environ["BOULDER_AUTORUN"] = "1"
 
     # --runner flag overrides the kwarg (shell users)
     if args.runner:
@@ -672,26 +684,33 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
             print(f"STONE YAML written: {yaml_path}")
             return
 
-        if not args.download:
+        if not (args.run or args.download):
             print(
-                "Error: --headless requires --download (or a .py input for YAML conversion)"
+                "Error: --headless requires --run (solve the case) or --download "
+                "(generate code); a .py input is converted to YAML."
             )
             sys.exit(1)
 
-        # Run headless mode via the runner (single source of truth for this CLI
-        # and any thin wrapper that passes runner_class).
+        # Run headless via the runner (single source of truth for this CLI and any
+        # thin wrapper that passes runner_class).  --download writes code; --run
+        # solves the case (download_path=None just skips the file write).
         try:
             runner = runner_class.from_yaml(args.config)
             settings = runner.config.get("settings") or {}
             end_time_val = settings.get("end_time")
             dt_val = settings.get("dt")
+            if args.run:
+                print(f"Running {args.config} …", flush=True)
             runner.run_headless(
                 download_path=args.download,
                 simulate=True,
                 end_time=float(end_time_val) if end_time_val is not None else None,
                 dt=float(dt_val) if dt_val is not None else None,
             )
-            print(f"Python code generated: {args.download}")
+            if args.download:
+                print(f"Python code generated: {args.download}")
+            if args.run:
+                print(f"Run complete: solved {args.config}")
         except FileNotFoundError as exc:
             print(f"Error: Configuration file not found: {exc.filename}")
             sys.exit(1)

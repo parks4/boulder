@@ -8,6 +8,8 @@ export interface SweepInfo {
   running: boolean;
   /** ``--sweep`` launched the GUI in sweep mode → default the button to Run Sweep. */
   default?: boolean;
+  /** ``--run`` launched the GUI → auto-start the run once on load. */
+  autorun?: boolean;
 }
 
 export interface SweepStatus {

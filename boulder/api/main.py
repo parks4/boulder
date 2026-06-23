@@ -89,6 +89,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sweep_job = None
     # ``--sweep`` GUI mode (BOULDER_SWEEP_MODE): default the split button to Run Sweep.
     app.state.sweep_default = bool(os.environ.get("BOULDER_SWEEP_MODE"))
+    # ``--run`` (BOULDER_AUTORUN): frontend auto-starts the run once on load.
+    app.state.autorun = bool(os.environ.get("BOULDER_AUTORUN"))
 
     if env_config_path and env_config_path.strip():
         try:

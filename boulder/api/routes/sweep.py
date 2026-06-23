@@ -146,6 +146,8 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
         "running": running,
         # ``--sweep`` GUI mode → frontend defaults the split button to Run Sweep.
         "default": bool(getattr(request.app.state, "sweep_default", False)),
+        # ``--run`` → frontend auto-starts the run once on load.
+        "autorun": bool(getattr(request.app.state, "autorun", False)),
     }
 
 
@@ -176,6 +178,8 @@ async def sweep_run(request: Request) -> Dict[str, Any]:
         "returncode": None,
     }
     request.app.state.sweep_job = state
+    # Surface on the server console by default — at least that the run started.
+    print(f"[sweep] starting {total} run(s): {' '.join(cmd['argv'])}", flush=True)
 
     def _worker() -> None:
         try:
@@ -200,17 +204,22 @@ async def sweep_run(request: Request) -> Dict[str, Any]:
                 if line:
                     tail.append(line)
                     del tail[:-30]
+                    # Echo the runner's progress to the server console.
+                    print(f"[sweep] {line}", flush=True)
             proc.wait()
             state["returncode"] = proc.returncode
             if proc.returncode == 0:
                 state["status"] = "done"
                 state["message"] = "Sweep complete"
+                print(f"[sweep] complete — {state['total']} run(s)", flush=True)
             else:
                 state["status"] = "error"
                 state["message"] = "\n".join(tail[-8:]) or f"exited {proc.returncode}"
+                print(f"[sweep] FAILED (exit {proc.returncode})", flush=True)
         except Exception as exc:  # noqa: BLE001
             state["status"] = "error"
             state["message"] = str(exc)
+            print(f"[sweep] FAILED: {exc}", flush=True)
 
     threading.Thread(target=_worker, daemon=True).start()
     return {"status": "running", "total": total}
