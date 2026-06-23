@@ -15,7 +15,7 @@ asserts that the final global conservation pass now resolves every
 remaining unset MFC against the full cross-stage topology, including:
 
 (a) a two-stage linear chain,
-(b) a multi-inlet mixer shaped like SPRING_A3, and
+(b) a multi-inlet mixer, and
 (c) a staged PressureController whose master lives in an earlier stage.
 """
 
@@ -134,16 +134,15 @@ def test_staged_two_stage_inter_stage_flow_resolved() -> None:
 
 
 # ---------------------------------------------------------------------------
-# (b) multi-inlet mixer (SPRING_A3-shaped)
+# (b) multi-inlet mixer
 # ---------------------------------------------------------------------------
 
 
 def _multi_inlet_mixer() -> Dict[str, Any]:
     """Two feeds in stage 1 into a mixer in stage 2 that feeds a sink in stage 3.
 
-    Mirrors the SPRING_A3 shape: the mixer has two MFC inlets and one
-    MFC outlet with no explicit rate; the outlet must resolve to the
-    sum of the two inlet rates.
+    The mixer has two MFC inlets and one MFC outlet with no explicit rate;
+    the outlet must resolve to the sum of the two inlet rates.
     """
     return {
         "phases": {"gas": {"mechanism": "gri30.yaml"}},

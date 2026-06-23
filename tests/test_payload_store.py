@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import cantera as ct
 import numpy as np
@@ -118,7 +119,7 @@ def test_raw_tier_non_state(tmp_path: Path):
 
 
 def test_spatial_series_stored_natively(tmp_path: Path):
-    """A SPRING-style spatial PFR profile is stored as a native state sequence.
+    """A spatial reactor profile is stored as a native state sequence.
 
     x rides as a per-state extra column (native, NOT raw JSON), while the
     per-iteration fbs_convergence + flags ride in meta.
@@ -168,15 +169,15 @@ def test_unresolved_mechanism_raises(tmp_path: Path):
         read_payload(p, mechanism_override="no_such_mechanism_xyz.yaml")
 
 
-def test_spring_like_multireactor_mechanism_switch(tmp_path: Path):
-    """SPRING shape: a multi-reactor, mechanism-switch network + reports/sankey.
+def test_multireactor_mechanism_switch(tmp_path: Path):
+    """A multi-reactor, mechanism-switch network + reports/sankey.
 
     One stage on the cache mechanism (gri30) → solution tier; a downstream stage
     on a *different* species set (the mechanism can't represent it) → arrays tier,
     restorable with NO Solution. Both round-trip; derived artifacts preserved.
     """
-    torch = _real_state_series(4, with_t=True)  # gri30 → solution tier
-    pfr = {  # foreign species → arrays tier
+    upstream = _real_state_series(4, with_t=True)  # gri30 → solution tier
+    downstream: dict[str, Any] = {  # foreign species → arrays tier
         "T": [1800.0, 1700.0, 1600.0],
         "P": [1e5, 1e5, 1e5],
         "X": {
@@ -192,19 +193,26 @@ def test_spring_like_multireactor_mechanism_switch(tmp_path: Path):
         "t": [0.0, 0.5, 1.0],
     }
     payload = _payload(
-        {"torch": torch, "pfr": pfr},
-        reactor_reports={"torch": {"T_out": 2000.0}, "pfr": {"C_yield": 0.42}},
-        sankey_nodes=["torch", "pfr", "C(s)"],
+        {"upstream": upstream, "downstream": downstream},
+        reactor_reports={
+            "upstream": {"T_out": 2000.0},
+            "downstream": {"C_yield": 0.42},
+        },
+        sankey_nodes=["upstream", "downstream", "C(s)"],
         sankey_links={"source": [0, 1], "target": [1, 2], "value": [1.0, 0.4]},
     )
     p = tmp_path / "result.h5"
     write_payload(p, payload, MECH)
-    out = read_payload(p)  # gri30 available; pfr (arrays) doesn't need it anyway
-    assert np.allclose(out["reactors_series"]["torch"]["T"], torch["T"])
-    assert np.allclose(out["reactors_series"]["pfr"]["X"]["C2H2"], pfr["X"]["C2H2"])  # type: ignore[index]
-    assert np.allclose(out["reactors_series"]["pfr"]["Y"]["H2"], pfr["Y"]["H2"])  # type: ignore[index]
-    assert out["reactor_reports"]["pfr"]["C_yield"] == 0.42
-    assert out["sankey_nodes"] == ["torch", "pfr", "C(s)"]
+    out = read_payload(p)  # gri30 available; downstream (arrays) doesn't need it
+    assert np.allclose(out["reactors_series"]["upstream"]["T"], upstream["T"])
+    assert np.allclose(
+        out["reactors_series"]["downstream"]["X"]["C2H2"], downstream["X"]["C2H2"]
+    )
+    assert np.allclose(
+        out["reactors_series"]["downstream"]["Y"]["H2"], downstream["Y"]["H2"]
+    )
+    assert out["reactor_reports"]["downstream"]["C_yield"] == 0.42
+    assert out["sankey_nodes"] == ["upstream", "downstream", "C(s)"]
 
 
 def test_collection_composite_per_scenario(tmp_path: Path):
@@ -222,7 +230,9 @@ def test_collection_composite_per_scenario(tmp_path: Path):
     s2b = _real_state_series(3, with_t=True)
     write_payload(
         p,
-        _payload({"torch": s2a, "pfr": s2b}, reactor_reports={"torch": {"q": 1}}),
+        _payload(
+            {"upstream": s2a, "downstream": s2b}, reactor_reports={"upstream": {"q": 1}}
+        ),
         MECH,
         group="T0_1573K",
         fresh=False,
@@ -234,8 +244,8 @@ def test_collection_composite_per_scenario(tmp_path: Path):
     g1 = read_payload(p, group="T0_1273K")
     assert np.allclose(g1["reactors_series"]["reactor"]["T"], s1["T"])
     g2 = read_payload(p, group="T0_1573K")
-    assert set(g2["reactors_series"]) == {"torch", "pfr"}
-    assert g2["reactor_reports"] == {"torch": {"q": 1}}
+    assert set(g2["reactors_series"]) == {"upstream", "downstream"}
+    assert g2["reactor_reports"] == {"upstream": {"q": 1}}
 
 
 def test_shared_builder(tmp_path: Path):

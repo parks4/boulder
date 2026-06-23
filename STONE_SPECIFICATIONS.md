@@ -64,7 +64,7 @@ phases:
   gas:
     mechanism: gri30.yaml
   fuel:
-    mechanism: Fincke_GRC.yaml
+    mechanism: h2o2.yaml
 ```
 
 A `mechanism:` value in a stage or node may be a phase alias (`gas`, `fuel`) or a raw mechanism
@@ -1271,14 +1271,14 @@ the base with its overlay/patch deep-merged, and the directives stripped.
 
 ```yaml
 scenario:
-  Q600:                      # key is the scenario id
+  case_a:                    # key is the scenario id
     settings:
-      post_processing: {T_hot_out: 600}
-  QmMax_Q600:                # a full STONE subtree, deep-merged onto the base
+      solver: {atol: 1.0e-12}
+  case_b:                    # a full STONE subtree, deep-merged onto the base
     stages:
-      pfr_stage: {mechanism: abf_1bar.yaml}
-    settings:
-      get_carbon_yield: {n_C_min: 9}
+      stage_2: {mechanism: h2o2.yaml}
+    network:
+      - {id: reactor1, IdealGasReactor: {initial: {temperature: 1400 K}}}
 ```
 
 Each value is a STONE subtree (`metadata`/`stages`/`settings`/`network`/…) deep-merged onto the base

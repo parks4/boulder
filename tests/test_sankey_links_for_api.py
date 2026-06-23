@@ -59,7 +59,7 @@ def test_species_hex_colors_fallback_when_no_plugin():
 
 
 def test_sankey_links_for_api_species_use_registered_plugin_colors():
-    """Assert sankey_links_for_api resolves H2/CH4/Cs via the plugin slot, not bloc directly."""
+    """Assert sankey_links_for_api resolves H2/CH4/Cs via the plugin slot, not a host package directly."""
     custom = {"H2": "#aaaaaa", "CH4": "#bbbbbb", "Cs": "#cccccc"}
     plugins = BoulderPlugins()
     plugins.sankey_link_colors = custom

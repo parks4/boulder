@@ -144,7 +144,7 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
         "can_run": has and cmd is not None,
         "reason": reason,
         "running": running,
-        # ``bloc --sweep`` GUI mode → frontend defaults the split button to Run Sweep.
+        # ``--sweep`` GUI mode → frontend defaults the split button to Run Sweep.
         "default": bool(getattr(request.app.state, "sweep_default", False)),
     }
 

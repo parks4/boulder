@@ -811,7 +811,7 @@ export function ReactorGraph() {
       if (typeof anchor === "string" && anchor.trim()) nodeToAnchor.set(node.id, anchor.trim());
     }
     // When no explicit layout_lane is declared, infer the main-flow spine and
-    // branch nodes from the network topology so simple models (SPRING_A3, A4)
+    // branch nodes from the network topology so simple multi-stage models
     // get an organised layout without any YAML metadata.
     let inferredAnchors: Map<string, string> | null = null;
     if (nodeToLane.size === 0) {

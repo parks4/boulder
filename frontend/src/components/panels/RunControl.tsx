@@ -37,7 +37,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
     getSweepInfo()
       .then((info) => {
         setSweep(info);
-        // `bloc --sweep` GUI mode: default the split button to Run Sweep (once).
+        // `--sweep` GUI mode: default the split button to Run Sweep (once).
         if (!appliedDefault.current && info.default && info.can_run) {
           appliedDefault.current = true;
           setRunMode("sweep");

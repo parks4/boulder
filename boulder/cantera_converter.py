@@ -83,8 +83,8 @@ class BoulderPlugins:
     )
     #: Extra ``python`` args that run a host's scenario/sweep runner for the Run
     #: Sweep button, invoked as ``[python, *sweep_runner, <config>, "--no-plot"]``.
-    #: e.g. ``["-m", "bloc.scenario_sweep"]``. Used when no ``run_sweep.py`` sits
-    #: next to the config. Registered by an external plugin package.
+    #: e.g. ``["-m", "<host_pkg>.scenario_sweep"]``. Used when no ``run_sweep.py``
+    #: sits next to the config. Registered by an external plugin package.
     sweep_runner: Optional[List[str]] = None
 
     #: Per-source provenance for introspection (``boulder plugins list``).
@@ -1626,7 +1626,7 @@ class DualCanteraConverter:
 
         # Resolve any MFC mass flow rates that were still pending once all
         # inter-stage devices are in place.  Until now intra-stage passes only
-        # saw a sub-topology; mixers on stage boundaries (SPRING_A3 shape) or
+        # saw a sub-topology; mixers on stage boundaries or
         # inter-stage MFCs without explicit mass_flow_rate would otherwise
         # stay at 0 kg/s and make Sankey bands collapse.
         self.apply_flow_conservation()

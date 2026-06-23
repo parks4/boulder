@@ -152,7 +152,7 @@ Two **profiles** of this one encoding:
 |---|---|---|
 | File | `<cache>/<fp>/result.h5` (+ `meta.json` carries config_snapshot) | `results/<map>_scenarios.h5` |
 | Holds | one result (1..n reactors, groups `r0`,`r1`,…) | many single-reactor results, one group per scenario |
-| Producer / reader | `result_cache.save_result` / `load_result*` | `run_sweep.py` (Bloc) / `api/routes/scenarios.py` |
+| Producer / reader | `result_cache.save_result` / `load_result*` | `run_sweep.py` (host) / `api/routes/scenarios.py` |
 
 Both call `payload_store.gui_payload_from_solution_array` to rebuild the same `SimulationResults` the
 GUI renders. `CACHE_VERSION` (in `result_cache.py`) gates cache entries; `PAYLOAD_SCHEMA` (== the root

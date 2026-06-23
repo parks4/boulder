@@ -818,10 +818,9 @@ def solve_staged(
                 )
 
     logger.info("Staged solve complete – building visualization ReactorNet.")
-    # Legacy OutletSink only (deprecated — see _refresh_terminal_sinks).  Production
-    # chains (e.g. SPRING_A4 torch→PSR→PFR) use inter-stage stream-point diamonds
-    # refreshed in _update_stream_point during the stage loop; this call is a no-op
-    # for those configs.
+    # Legacy OutletSink only (deprecated — see _refresh_terminal_sinks).  Multi-stage
+    # chains use inter-stage stream-point diamonds refreshed in _update_stream_point
+    # during the stage loop; this call is a no-op for those configs.
     _refresh_terminal_sinks(converter, config)
     viz_net = converter.build_viz_network(
         all_connections=all_connections,
@@ -978,8 +977,8 @@ def _refresh_terminal_sinks(converter: Any, config: Dict[str, Any]) -> None:
     .. deprecated::
         ``OutletSink`` is being retired in favour of inter-stage stream-point
         diamonds (``{source}_outlet``), which are refreshed by
-        :func:`_update_stream_point` during :func:`solve_staged`.  Production
-        models such as SPRING_A4 (torch → PSR → PFR) never use this path.
+        :func:`_update_stream_point` during :func:`solve_staged`.  Multi-stage
+        models never use this path.
 
     This helper exists only so old single-stage YAMLs that still declare a
     terminal ``OutletSink`` (e.g. tube-furnace examples) show converged thermo

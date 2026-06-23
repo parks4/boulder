@@ -6,7 +6,7 @@ next to the loaded YAML file.  On startup, if the preloaded config
 fingerprint matches a cache entry, Boulder loads it and sends it to the
 frontend immediately so outputs are visible without re-running.
 
-Host packages (e.g. Bloc) register :class:`CacheContributorPlugin`
+Host packages register :class:`CacheContributorPlugin`
 implementations.  After each successful GUI solve, Boulder calls every
 registered contributor so they can write package-specific artifacts
 (e.g. a calc-note bundle JSON + figure PNGs) into the same cache entry.

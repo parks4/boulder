@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.scenario_store_path = None
     app.state.preloaded_raw = None  # inheritance-resolved config (keeps sweeps:)
     app.state.sweep_job = None
-    # ``bloc --sweep`` (GUI): default the split button to Run Sweep.
+    # ``--sweep`` GUI mode (BOULDER_SWEEP_MODE): default the split button to Run Sweep.
     app.state.sweep_default = bool(os.environ.get("BOULDER_SWEEP_MODE"))
 
     if env_config_path and env_config_path.strip():

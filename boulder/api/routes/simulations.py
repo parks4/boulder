@@ -357,7 +357,7 @@ async def get_cached_artifact(
 ) -> Any:
     """Serve a file from the cached artifacts directory.
 
-    Used by contributor plugins (e.g. Bloc) to fetch package-specific
+    Used by contributor plugins to fetch package-specific
     artifacts they wrote during a previous solve.
     """
     from fastapi.responses import FileResponse
