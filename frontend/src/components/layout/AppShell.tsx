@@ -4,6 +4,7 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSimulationSSE } from "@/hooks/useSimulationSSE";
+import { useScenarioFocus } from "@/hooks/useScenarioFocus";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { startSimulation } from "@/api/simulations";
 import { fetchDefaultConfig, fetchPreloadedConfig } from "@/api/configs";
@@ -11,6 +12,10 @@ import { fetchCachedResult } from "@/api/resultCache";
 import { EditNetworkCard } from "@/components/panels/EditNetworkCard";
 import { SimulateCard } from "@/components/panels/SimulateCard";
 import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
+import { ScenarioPane } from "@/components/panels/ScenarioPane";
+import { PaneToggle, PaneResizer } from "@/components/layout/paneControls";
+import { useLayoutStore } from "@/stores/layoutStore";
+import { useScenarioStore } from "@/stores/scenarioStore";
 import { ReactorGraph } from "@/components/graph/ReactorGraph";
 import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
@@ -32,9 +37,34 @@ export function AppShell() {
     );
   }, [config.settings]);
   const [showYamlEditor, setShowYamlEditor] = useState(false);
+  const { leftCollapsed, rightCollapsed, leftWidth, rightWidth, toggleLeft } =
+    useLayoutStore();
+  const scenariosAvailable = useScenarioStore((s) => s.available);
+  const refreshScenarios = useScenarioStore((s) => s.refresh);
+
+  // Discover available scenarios once so the right pane can appear.
+  useEffect(() => {
+    void refreshScenarios();
+  }, [refreshScenarios]);
 
   // Connect SSE stream
   useSimulationSSE();
+
+  // Follow scenario-focus pushes (external dashboard → load scenario live).
+  useScenarioFocus();
+
+  // Ctrl/Cmd+B toggles the left sidebar (Claude-desktop convention).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        toggleLeft();
+        requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleLeft]);
 
   // Load preloaded config if available, otherwise load default config on mount.
   // After a successful preloaded-config fetch, check for a matching cache entry
@@ -143,6 +173,7 @@ export function AppShell() {
       {/* Header */}
       <header className="border-b border-border px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
+          <PaneToggle side="left" />
           <h1 className="text-xl font-bold">{headerTitle}</h1>
           <Button
             id="config-file-name-span"
@@ -198,12 +229,14 @@ export function AppShell() {
             {solverMode}
           </span>
         </div>
-        <Button
-          onClick={toggleTheme}
-          variant="secondary"
-          size="sm"
-          title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
-        >
+        <div className="flex items-center gap-2">
+          {scenariosAvailable && <PaneToggle side="right" />}
+          <Button
+            onClick={toggleTheme}
+            variant="secondary"
+            size="sm"
+            title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+          >
           {theme === "light" ? (
             <span className="flex items-center gap-1.5">
               <svg
@@ -247,23 +280,45 @@ export function AppShell() {
               Light
             </span>
           )}
-        </Button>
+          </Button>
+        </div>
       </header>
 
-      {/* Main layout: 3-col left + 9-col right (12-col grid) */}
-      <div className="grid grid-cols-12 gap-4 p-4 max-w-[1600px] mx-auto">
-        {/* Left panel (3 cols) */}
-        <aside className="col-span-12 md:col-span-3 space-y-4">
-          <EditNetworkCard />
-          <SimulateCard />
-          <PropertiesPanel />
-        </aside>
+      {/* Main layout: collapsible + draggable left/right sidebars around a flex center. */}
+      <div className="flex w-full max-w-[1600px] mx-auto p-4 items-start">
+        {/* Left sidebar (Network / Simulate / Properties) */}
+        {!leftCollapsed && (
+          <>
+            <aside
+              style={{ width: leftWidth }}
+              className="shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-5rem)] pr-1"
+            >
+              <EditNetworkCard />
+              <SimulateCard />
+              <PropertiesPanel />
+            </aside>
+            <PaneResizer side="left" />
+          </>
+        )}
 
-        {/* Right panel (9 cols) */}
-        <main className="col-span-12 space-y-4 md:col-span-9">
+        {/* Center panel (graph + results) */}
+        <main className="flex-1 min-w-0 space-y-4 px-1">
           <ReactorGraph />
           <ResultsTabs />
         </main>
+
+        {/* Right scenario-inspector pane (hidden when no store / collapsed) */}
+        {scenariosAvailable && !rightCollapsed && (
+          <>
+            <PaneResizer side="right" />
+            <aside
+              style={{ width: rightWidth }}
+              className="shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-5rem)] pl-1"
+            >
+              <ScenarioPane />
+            </aside>
+          </>
+        )}
       </div>
 
       {/* Overlays and modals */}

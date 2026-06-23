@@ -27,9 +27,13 @@ ______________________________________________________________________
 ## 2. Allowed Top-Level Keys
 
 ```
-metadata   phases   settings   stages   network   export   sweeps   scenarios
+metadata   phases   settings   stages   network   export   sweep   sweeps   scenario
 continuation   signals   bindings   scopes
 ```
+
+`scenario:` and `sweep:` declare inline run-set variations (Section 14). Boulder validates and
+passes them through; a host's reporting/expansion layer consumes them. (The legacy plural
+`scenarios:` list form is removed — use the `scenario:` mapping.)
 
 Dynamic stage block names (declared under `stages:`) are also allowed at the top level.
 
@@ -60,7 +64,7 @@ phases:
   gas:
     mechanism: gri30.yaml
   fuel:
-    mechanism: Fincke_GRC.yaml
+    mechanism: h2o2.yaml
 ```
 
 A `mechanism:` value in a stage or node may be a phase alias (`gas`, `fuel`) or a raw mechanism
@@ -1192,3 +1196,108 @@ connections:
 ```
 
 Boulder rejects v1 files with an actionable error message pointing to this document.
+
+______________________________________________________________________
+
+## 13. Result serialization schema (`result.h5` / `*_scenarios.h5`)
+
+A computed result is persisted in **one** composite-HDF5 format (`boulder/payload_store.py`), shared
+by the fingerprinted result cache and the sweep scenario store. This is an on-disk contract, not part
+of the YAML a user writes — documented here alongside the config schema so tooling recognizes it.
+
+### Core encoding — three tiers (per reactor series)
+
+| Tier | When | How stored | Notes |
+|---|---|---|---|
+| `solution` | state-shaped (`T`,`P`,`X`); species ⊆ mechanism; `X` rows sum to 1 ± 1e-6 | Cantera `SolutionArray` group (`r0`,`r1`,…) | `Y` derived on load; every per-state numeric column (`t`, `x`, …) is a SolutionArray `extra` |
+| `arrays` | state-shaped but mechanism can't represent it, or `X` not normalized | binary HDF5 datasets `T`,`P` (1D), `X`/`Y` (2D), `extra__<k>` per extra column, + `species_names` attr | no `Solution` needed to read |
+| `raw` | not state-shaped (no `T`/`P` lists or no `X` dict) | verbatim in the JSON blob | lossless |
+
+A **spatial PFR profile is a state sequence** (its `x` is just another per-state column) and is stored
+natively in `solution`/`arrays` — not raw. Per-reactor fields that are *not* per-state columns — flags
+(`is_spatial`, `is_psr`, `is_residence`) and off-shape arrays (`fbs_convergence`, which is
+per-FBS-iteration) — ride in the reactor's `meta` (below) and are merged back on load, so the original
+series is reproduced exactly.
+
+### `payload_json` dataset
+
+A UTF-8 JSON string dataset (not an attribute — no ~64 KB cap) holding the rest of the
+`SimulationResults` (`times`, `reactor_reports`, `connection_reports`, `summary`, `code_str`,
+`sankey_links`, `sankey_nodes`, `updated_nodes`, `updated_connections`) plus a `reactors_index`:
+
+```jsonc
+"reactors_index": {
+  "<id>": { "kind": "solution", "group": "r0", "extra_keys": ["t"],      "meta": {"is_residence": true} },
+  "<id>": { "kind": "arrays",   "group": "r1", "extra_keys": ["t", "x"], "meta": {"is_spatial": true, "fbs_convergence": [12.0, 3.0]} },
+  "<id>": { "kind": "raw",      "series": { ... } }
+}
+```
+
+The config snapshot is **not** here — for the cache it lives in `meta.json` so a snapshot scan need
+not restore numerics.
+
+### Root attributes & versioning
+
+`schema_version` (== `payload_store.PAYLOAD_SCHEMA`), `mechanism` (resolved abs path, or bundled
+name), `mechanism_sha256` (diagnostic; the cache fingerprint is the correctness guard), `mechanism_name`.
+`result_cache.CACHE_VERSION` gates cache entries (mismatch ⇒ silent miss + recompute).
+
+### Two profiles
+
+- **Result file** `<cache>/<fp>/result.h5` — one result, reactor groups `r0…`, file-level
+  `payload_json`; `meta.json` carries `created_at`/versions/`mechanism`/`config_snapshot`.
+- **Collection file** `results/<map>_scenarios.h5` — many single-reactor results, one group per
+  scenario keyed by id (e.g. `T0_1273K`); root attrs add `reactor_id`, `reactor_mode`, `map_config`,
+  `created_at`, `cantera_version`; per-group attrs carry scenario KPIs (`t0_K`, `label`, `n_points`,
+  `final_temperature_K`, `solid_carbon_yield_pct`, `computed_at`).
+
+### Invariants
+
+- `Y` is derived for the `solution` tier (exact for Cantera-consistent states).
+- An unresolved/mismatched mechanism on read is a graceful cache miss (cache) or a clear error
+  (scenario route) — never a crash.
+- One `Solution` is cached per mechanism per process.
+
+______________________________________________________________________
+
+## 14. Inline run-set variations — `scenario:` and `sweep:`
+
+A STONE file may declare multiple runs inline, instead of a glob of separate overlay files. Boulder
+validates and passes these blocks through; a host's expansion/reporting layer turns them into the
+run set (one config per run). They never alter the topology a single run sees — each expanded run is
+the base with its overlay/patch deep-merged, and the directives stripped.
+
+### `scenario:` — a mapping of `id → overlay`
+
+```yaml
+scenario:
+  case_a:                    # key is the scenario id
+    settings:
+      solver: {atol: 1.0e-12}
+  case_b:                    # a full STONE subtree, deep-merged onto the base
+    stages:
+      stage_2: {mechanism: h2o2.yaml}
+    network:
+      - {id: reactor1, IdealGasReactor: {initial: {temperature: 1400 K}}}
+```
+
+Each value is a STONE subtree (`metadata`/`stages`/`settings`/`network`/…) deep-merged onto the base
+(id-keyed `nodes`/`connections` merge by id). The **key is the scenario id**. This is the same delta a
+standalone `from:` overlay file carries — `from:` remains fully valid and is unaffected.
+
+### `sweep:` — a Cartesian parameter grid
+
+```yaml
+sweep:
+  T:  {path: "nodes[id=torch].properties.T_out", values: [2600, 2700]}
+  mdot: {path: "...", min: 1.0e-4, max: 2.0e-4, num: 3}   # or min/max/num (+ spacing: log)
+```
+
+`sweep:` may appear at the top level (expanded on the base) **or inside a `scenario:` entry**
+(expanded on that scenario only). Ids are suffixed `__<axis>=<value>`.
+
+### Run-set semantics (union)
+
+The run set is the **union**: the top-level `sweep:` points **⊎** each `scenario:` entry (each
+expanded across its *own* inner `sweep:` if present). A top-level sweep and the scenarios do **not**
+cross-multiply. (`sweep:` and `sweeps:` are accepted spellings.)

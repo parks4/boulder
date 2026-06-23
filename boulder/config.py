@@ -47,7 +47,8 @@ STONE_TOP_LEVEL_KEYS: frozenset = frozenset(
         "output",
         "export",
         "sweeps",
-        "scenarios",
+        "sweep",
+        "scenario",
     }
 )
 
@@ -64,7 +65,8 @@ STONE_V2_BASE_KEYS: frozenset = frozenset(
         "output",
         "export",
         "sweeps",
-        "scenarios",
+        "sweep",
+        "scenario",
         "continuation",
         "signals",
         "bindings",
@@ -547,7 +549,8 @@ def _normalize_v2_network(raw: Dict[str, Any]) -> Dict[str, Any]:
         "output",
         "export",
         "sweeps",
-        "scenarios",
+        "sweep",
+        "scenario",
         "continuation",
         "signals",
         "bindings",
@@ -848,7 +851,8 @@ def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
         "output",
         "export",
         "sweeps",
-        "scenarios",
+        "sweep",
+        "scenario",
         "continuation",
         "signals",
         "bindings",
@@ -1247,6 +1251,16 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
         from .cantera_converter import get_plugins  # noqa: PLC0415
 
         plugins = get_plugins()
+
+    # Host config transforms (e.g. derive a transient solver grid from an
+    # export residence-time spec) run on the raw config before dialect detection.
+    for _transform in getattr(plugins, "config_transforms", None) or []:
+        try:
+            _result = _transform(config)
+            if isinstance(_result, dict):
+                config = _result
+        except Exception as _exc:  # noqa: BLE001 — a transform must not break load
+            logger.debug("config_transform %r skipped: %s", _transform, _exc)
 
     # --- STONE v2 detection and normalization ---
     # Detect dialect first; this raises ValueError for v1 or unknown shapes.
@@ -1955,7 +1969,7 @@ def convert_to_stone_format(config: dict) -> dict:
     if "settings" in config:
         stone_config["settings"] = config["settings"]
 
-    for passthrough in ("output", "export", "sweeps", "scenarios"):
+    for passthrough in ("output", "export", "sweeps", "sweep", "scenario"):
         if passthrough in config:
             stone_config[passthrough] = config[passthrough]
 

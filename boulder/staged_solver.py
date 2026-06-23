@@ -505,6 +505,29 @@ def synthesize_stream_points(
 synthesize_interface_nodes = synthesize_stream_points
 
 
+def alias_inter_connection_mfcs(
+    converter: "DualCanteraConverter", plan: "StageExecutionPlan"
+) -> None:
+    """Alias each logical inter-stage connection id onto its materialized inlet MFC.
+
+    Inter-stage connections (e.g. ``psr_to_pfr``) are not built directly; the
+    staged solver synthesizes a stream-point reservoir per source node plus a
+    real inlet MFC (``<src>_outlet_to_<tgt>``) on the downstream side.  Register
+    the original logical id as an alias pointing at that real MFC object so
+    downstream consumers that use the YAML-declared name — ``PressureController``
+    ``master`` lookups and test assertions — resolve to the real device.
+
+    Must run *before* the deferred-PressureController pass in
+    :meth:`DualCanteraConverter.build_viz_network`.  Both staged-build paths
+    (:func:`solve_staged` and :meth:`BoulderRunner.build_viz_network`) call this
+    so they cannot drift apart.
+    """
+    for ic in plan.all_inter_connections:
+        inlet_mfc = converter.connections.get(ic.inlet_mfc_id)
+        if inlet_mfc is not None:
+            converter.connections[ic.id] = inlet_mfc
+
+
 # ---------------------------------------------------------------------------
 # solve_staged
 # ---------------------------------------------------------------------------
@@ -757,10 +780,7 @@ def solve_staged(
     # consumers (e.g. PressureController master lookups and test assertions) query
     # the original YAML-declared name ("psr_to_pfr") and get the real MFC back.
     if stream_reservoirs:
-        for ic in plan.all_inter_connections:
-            inlet_mfc = converter.connections.get(ic.inlet_mfc_id)
-            if inlet_mfc is not None:
-                converter.connections[ic.id] = inlet_mfc
+        alias_inter_connection_mfcs(converter, plan)
 
     already_built = set(converter.connections.keys()) | set(converter.walls.keys())
     if stream_reservoirs:
@@ -798,10 +818,9 @@ def solve_staged(
                 )
 
     logger.info("Staged solve complete – building visualization ReactorNet.")
-    # Legacy OutletSink only (deprecated — see _refresh_terminal_sinks).  Production
-    # chains (e.g. SPRING_A4 torch→PSR→PFR) use inter-stage stream-point diamonds
-    # refreshed in _update_stream_point during the stage loop; this call is a no-op
-    # for those configs.
+    # Legacy OutletSink only (deprecated — see _refresh_terminal_sinks).  Multi-stage
+    # chains use inter-stage stream-point diamonds refreshed in _update_stream_point
+    # during the stage loop; this call is a no-op for those configs.
     _refresh_terminal_sinks(converter, config)
     viz_net = converter.build_viz_network(
         all_connections=all_connections,
@@ -958,8 +977,8 @@ def _refresh_terminal_sinks(converter: Any, config: Dict[str, Any]) -> None:
     .. deprecated::
         ``OutletSink`` is being retired in favour of inter-stage stream-point
         diamonds (``{source}_outlet``), which are refreshed by
-        :func:`_update_stream_point` during :func:`solve_staged`.  Production
-        models such as SPRING_A4 (torch → PSR → PFR) never use this path.
+        :func:`_update_stream_point` during :func:`solve_staged`.  Multi-stage
+        models never use this path.
 
     This helper exists only so old single-stage YAMLs that still declare a
     terminal ``OutletSink`` (e.g. tube-furnace examples) show converged thermo

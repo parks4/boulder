@@ -8,7 +8,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -22,6 +21,11 @@ import numpy as np
 
 from .config import CANTERA_MECHANISM, TRANSIENT_SOLVER_KINDS
 from .output_summary import evaluate_output_items, parse_output_block
+from .reactor_energy import (
+    build_reactor_with_energy,
+    validate_energy_on_built_reactor,
+    validate_explicit_energy,
+)
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
 from .staged_solver import _order_stage_nodes_for_flow
@@ -68,6 +72,20 @@ class BoulderPlugins:
     #: Called when an inter-stage connection carries a ``mechanism_switch`` block.
     #: Registered by an external plugin package via its plugin entry point.
     mechanism_switch_fn: Optional[Callable] = None
+    #: ``(config: dict) -> dict`` transforms applied to the raw STONE config at the
+    #: start of :func:`normalize_config`, before dialect detection. Lets a host
+    #: derive recognised STONE fields from its own ``export``/``metadata`` blocks
+    #: (e.g. a transient ``settings.solver`` grid from a residence-time spec)
+    #: without editing the YAML. Each returns the (possibly new) config; a raising
+    #: transform is skipped. Registered by an external plugin package.
+    config_transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = field(
+        default_factory=list
+    )
+    #: Extra ``python`` args that run a host's scenario/sweep runner for the Run
+    #: Sweep button, invoked as ``[python, *sweep_runner, <config>, "--no-plot"]``.
+    #: e.g. ``["-m", "<host_pkg>.scenario_sweep"]``. Used when no ``run_sweep.py``
+    #: sits next to the config. Registered by an external plugin package.
+    sweep_runner: Optional[List[str]] = None
 
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.
@@ -432,6 +450,67 @@ def get_plugins() -> BoulderPlugins:
     return plugins
 
 
+class _TrajectoryRecorder:
+    """Capture full reactor state at each transient grid step.
+
+    Driven by the existing ``_scope_recorder.record(t)`` hook in
+    :meth:`_run_transient_solver`. The staged ``advance_grid`` solve already steps
+    each reactor through every grid time; this captures the per-reactor state at
+    each step so the GUI can show the real ``T(t)`` trajectory. The network is
+    therefore solved **once** — no re-integration. It does not modify the solve
+    (the ``record`` calls already exist) and produces no side effects.
+    """
+
+    def __init__(self, converter: "DualCanteraConverter") -> None:
+        self._converter = converter
+        self._data: Dict[str, Dict[str, Any]] = {}
+
+    def record(self, t: float) -> None:
+        try:
+            reactors = self._converter._unique_non_reservoir_reactors()
+        except Exception:  # noqa: BLE001 — recording must never break the solve
+            return
+        for reactor in reactors:
+            rid = getattr(reactor, "name", "") or str(id(reactor))
+            phase = reactor.thermo
+            d = self._data.setdefault(
+                rid,
+                {
+                    "t": [],
+                    "T": [],
+                    "P": [],
+                    "X": [],
+                    "names": list(phase.species_names),
+                },
+            )
+            d["t"].append(float(t))
+            d["T"].append(float(phase.T))
+            d["P"].append(float(phase.P))
+            d["X"].append(phase.X.copy())
+
+    def series(self) -> Dict[str, Dict[str, Any]]:
+        """Return ``{reactor_id: series}`` for reactors with a real trajectory."""
+        import numpy as np
+
+        out: Dict[str, Dict[str, Any]] = {}
+        for rid, d in self._data.items():
+            if len(d["t"]) < 2:
+                continue
+            names = d["names"]
+            xmat = np.asarray(d["X"], dtype=float)
+            out[rid] = {
+                "T": [float(v) for v in d["T"]],
+                "P": [float(v) for v in d["P"]],
+                "X": {
+                    sp: [float(xmat[i, j]) for i in range(xmat.shape[0])]
+                    for j, sp in enumerate(names)
+                },
+                "t": [float(v) for v in d["t"]],
+                "is_residence": True,
+            }
+        return out
+
+
 # class CanteraConverter:
 #    """Former Cantera converter lived there, now fully replaced by DualCanteraConverter
 #    which generates code in parallel to solving the simulation
@@ -757,30 +836,54 @@ class DualCanteraConverter:
         if typ in self.plugins.reactor_builders:
             reactor = self.plugins.reactor_builders[typ](self, node)
             reactor.name = rid
+            validate_energy_on_built_reactor(reactor, props, typ)
         elif typ == "IdealGasReactor":
-            reactor = ct.IdealGasReactor(gas_for_node, clone=clone)
+            reactor = build_reactor_with_energy(
+                ct.IdealGasReactor,
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "ConstPressureReactor":
-            _energy_val = props.get("energy", "on")
-            # Accept bool False / string "off" / string "false" (case-insensitive) as off.
-            if isinstance(_energy_val, bool):
-                energy: Literal["on", "off"] = "off" if not _energy_val else "on"
-            else:
-                energy = (
-                    "off" if str(_energy_val).lower() in ("off", "false", "0") else "on"
-                )
-            reactor = ct.ConstPressureReactor(gas_for_node, energy=energy, clone=clone)
+            reactor = build_reactor_with_energy(
+                ct.ConstPressureReactor,
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "IdealGasConstPressureReactor":
-            reactor = ct.IdealGasConstPressureReactor(gas_for_node, clone=clone)
+            reactor = build_reactor_with_energy(
+                ct.IdealGasConstPressureReactor,
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "IdealGasConstPressureMoleReactor":
-            reactor = ct.IdealGasConstPressureMoleReactor(gas_for_node, clone=clone)
+            reactor = build_reactor_with_energy(
+                ct.IdealGasConstPressureMoleReactor,
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "IdealGasMoleReactor":
-            reactor = ct.IdealGasMoleReactor(gas_for_node, clone=clone)  # type: ignore[attr-defined]
+            reactor = build_reactor_with_energy(
+                ct.IdealGasMoleReactor,  # type: ignore[arg-type]
+                gas_for_node,
+                props=props,
+                clone=clone,
+                type_name=typ,
+            )
             reactor.name = rid
         elif typ == "Reservoir":
+            validate_explicit_energy(props, ct.Reservoir, typ)
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         elif typ == "OutletSink":
@@ -788,6 +891,7 @@ class DualCanteraConverter:
             # Prefer inter-stage stream-point diamonds (``{source}_outlet`` Reservoirs
             # populated by :func:`boulder.staged_solver._update_stream_point`).
             # Remove this branch when OutletSink is dropped from STONE v2.
+            validate_explicit_energy(props, ct.Reservoir, typ)
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         else:
@@ -996,6 +1100,75 @@ class DualCanteraConverter:
                 hook(self, config)
             except Exception as exc:
                 logger.warning("Post-build hook failed: %s", exc)
+
+    def build_isolated_reactor(
+        self, node: Dict[str, Any]
+    ) -> Tuple["ct.Reactor", "ct.Solution"]:
+        """Build a single reactor from one node, with no surrounding network.
+
+        Resolves the node's mechanism, sets the gas state from its initial
+        properties (``temperature`` / ``pressure`` / ``composition`` /
+        ``mass_composition``, either top-level or under ``initial:``), and
+        delegates to :meth:`create_reactor_from_node` so that ``energy``,
+        ``clone``, ``volume`` and any other recognised properties are honoured
+        exactly as in a full network build.  This is the single source of truth
+        for reactor construction for callers (e.g. parametric τ-sweeps) that
+        drive their own :class:`~cantera.ReactorNet` instead of the staged
+        solver.
+
+        Property values may be unit strings (``"1273.15 K"``, ``"1 bar"``) or
+        plain numbers; temperature/pressure are coerced to SI.
+
+        Parameters
+        ----------
+        node :
+            A node dict with ``id``, ``type``, and ``properties`` (the
+            normalised form; STONE ``Kind: {...}`` blocks must be converted to
+            ``type`` / ``properties`` by the caller first).
+
+        Returns
+        -------
+        (reactor, gas)
+            The constructed reactor and the :class:`~cantera.Solution` carrying
+            its initial state.
+        """
+        from .utils import coerce_unit_string  # noqa: PLC0415
+
+        rid = node.get("id", "reactor")
+        props = node.get("properties") or {}
+        node_mech = str(
+            props.get("mechanism") or node.get("mechanism") or self.mechanism
+        )
+        gas = self._get_gas_for_mech(node_mech)
+
+        initial = props.get("initial") or {}
+        temp = initial.get("temperature", props.get("temperature"))
+        pres = initial.get("pressure", props.get("pressure"))
+        compo = initial.get("composition", props.get("composition"))
+        mass_compo = initial.get("mass_composition", props.get("mass_composition"))
+
+        t_use = (
+            float(coerce_unit_string(temp, "temperature"))
+            if temp is not None
+            else float(gas.T)
+        )
+        p_use = (
+            float(coerce_unit_string(pres, "pressure"))
+            if pres is not None
+            else float(gas.P)
+        )
+        if compo is not None:
+            gas.TPX = (t_use, p_use, self.parse_composition(compo))
+        elif mass_compo is not None:
+            gas.TPY = (t_use, p_use, self.parse_composition(mass_compo))
+        else:
+            gas.TPX = (t_use, p_use, gas.X)
+
+        self.gas = gas
+        self.reactor_meta[rid] = {"mechanism": node_mech, "gas_solution": gas}
+        reactor = self.create_reactor_from_node(node, gas)
+        self.reactors[rid] = reactor
+        return reactor, gas
 
     # ------------------------------------------------------------------
     # Staged solving
@@ -1453,7 +1626,7 @@ class DualCanteraConverter:
 
         # Resolve any MFC mass flow rates that were still pending once all
         # inter-stage devices are in place.  Until now intra-stage passes only
-        # saw a sub-topology; mixers on stage boundaries (SPRING_A3 shape) or
+        # saw a sub-topology; mixers on stage boundaries or
         # inter-stage MFCs without explicit mass_flow_rate would otherwise
         # stay at 0 kg/s and make Sankey bands collapse.
         self.apply_flow_conservation()
@@ -1510,6 +1683,32 @@ class DualCanteraConverter:
         self._download_config = copy.deepcopy(config)
 
         from .staged_solver import build_stage_graph, solve_staged
+
+        # Transient solve with no declared checkpoints: inject a default linspace
+        # grid so the recorder still yields a trajectory ("do whatever" when no
+        # required grid is given). Required checkpoints, when present, are left
+        # untouched and advanced through exactly. Config-prep only — not a solver
+        # change.
+        _settings = config.get("settings") or {}
+        _default_end = float(_settings.get("end_time") or 1.0)
+        for _group in (config.get("groups") or {}).values():
+            _solver = _group.get("solver") or {}
+            if _solver.get("kind") == "advance_grid" and not _solver.get("grid"):
+                _solver["grid"] = {
+                    "start": 0.0,
+                    "stop": _default_end,
+                    "dt": _default_end / 50.0,
+                }
+                _group["solver"] = _solver
+
+        # Install a full-state trajectory recorder so a transient (advance_grid)
+        # solve also yields the per-step T(t) — captured during the *single*
+        # staged solve via the existing record() hook, never a re-integration.
+        # Skip if a real scopes recorder is already installed (don't clobber it).
+        self._trajectory_recorder = None
+        if getattr(self, "_scope_recorder", None) is None:
+            self._scope_recorder = _TrajectoryRecorder(self)
+            self._trajectory_recorder = self._scope_recorder
 
         plan = build_stage_graph(config)
         trajectory = solve_staged(
@@ -1745,6 +1944,19 @@ class DualCanteraConverter:
                 # propagate the flag so the frontend can adapt its visualisation.
                 elif self.reactor_meta.get(reactor_id, {}).get("is_psr"):
                     reactors_series[reactor_id]["is_psr"] = True
+
+            # Transient solve: replace the converged single-point snapshot with the
+            # T(t) trajectory captured *during* the (single) staged solve by the
+            # recorder. No re-integration; reports/Sankey/code from finalize are
+            # kept; only the series is swapped. Spatial profiles are left untouched.
+            _recorder = getattr(self, "_trajectory_recorder", None)
+            _traj = _recorder.series() if _recorder is not None else {}
+            for _rid, _series in _traj.items():
+                if _rid in reactors_series and not reactors_series[_rid].get(
+                    "is_spatial"
+                ):
+                    reactors_series[_rid] = _series
+                    times[:] = _series["t"]
 
             if progress_callback:
                 progress_callback(

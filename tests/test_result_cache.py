@@ -163,7 +163,7 @@ class TestSaveLoadRoundTrip:
         fingerprint = "b" * 64
         entry = _entry_dir(tmp_path, fingerprint)
         entry.mkdir(parents=True)
-        (entry / "result.json").write_text("{}", encoding="utf-8")
+        (entry / "result.h5").write_bytes(b"")  # content irrelevant: COMPLETE is absent
         (entry / "meta.json").write_text(
             json.dumps({"cache_version": CACHE_VERSION}), encoding="utf-8"
         )

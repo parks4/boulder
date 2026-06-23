@@ -126,11 +126,60 @@ series keys when copying progress snapshots, the SSE/results API forwards them u
 plot mode from the inherited series metadata (`is_spatial`, `is_psr`, etc.); they should not re-classify
 reactors by kind string.
 
+### Result serialization (`boulder/payload_store.py`)
+
+A computed result is persisted in **one** composite-HDF5 format, shared by the result cache and the
+scenario inspector — so there is a single on-disk encoding and a single payload builder. Numerics are
+stored as natively-to-Cantera as possible; everything else rides alongside as JSON.
+
+- **`solution` tier** — a state series (`T`/`P`/`X` over an index) whose species the mechanism can
+  represent (and whose `X` rows are normalized) is saved as a Cantera `SolutionArray` group. `Y` is
+  *derived* on load. **Every per-state numeric column rides along as an `extra`** — `t` (time) *and*
+  `x` (position), so a **PFR spatial profile is stored natively here** (it's a Lagrangian state
+  sequence), not dumped to JSON.
+- **`arrays` tier** — same shape but the mechanism can't represent it (mechanism-switch reactors, or
+  non-normalized `X`): binary HDF5 datasets (one per extra column too) — no `Solution` needed to read.
+- **`raw` tier** — only genuinely non-state structures land here, verbatim in the JSON blob.
+- **Non-per-state fields** — flags (`is_spatial`, `is_psr`, `is_residence`) and off-shape arrays
+  (`fbs_convergence`, which is per-FBS-iteration, not per-state) ride in each reactor's `meta` in the
+  index and are merged back on load.
+- **`payload_json` dataset** — the rest of the `SimulationResults` (Sankey, reports, summary, code,
+  node/connection overlays) plus a `reactors_index` mapping each reactor to its tier/group.
+
+Two **profiles** of this one encoding:
+
+| | Result file (cache) | Collection file (scenario store) |
+|---|---|---|
+| File | `<cache>/<fp>/result.h5` (+ `meta.json` carries config_snapshot) | `results/<map>_scenarios.h5` |
+| Holds | one result (1..n reactors, groups `r0`,`r1`,…) | many single-reactor results, one group per scenario |
+| Producer / reader | `result_cache.save_result` / `load_result*` | `run_sweep.py` (host) / `api/routes/scenarios.py` |
+
+Both call `payload_store.gui_payload_from_solution_array` to rebuild the same `SimulationResults` the
+GUI renders. `CACHE_VERSION` (in `result_cache.py`) gates cache entries; `PAYLOAD_SCHEMA` (== the root
+`schema_version` attr) versions the HDF5 layout. Mechanism is stored as a resolved path + sha256; an
+unresolved mechanism on read is a graceful cache miss, never a crash.
+
+#### Scenario-focus channel (remote control)
+
+`api/routes/scenarios.py` exposes a generic seam so an **external process** (e.g. a separate result
+dashboard) can drive the open GUI to load a scenario, without polling or a page reload:
+
+- `POST /api/scenarios/focus` `{scenario_id}` — validates the id against the active store and pushes it
+  onto every subscriber (an in-process set of `asyncio.Queue`s on `app.state`); also remembered as
+  `app.state.focused_scenario`.
+- `GET /api/scenarios/focus/stream` — SSE; emits the current focus on connect (late-joiner sync) then
+  one `focus` event per POST. The frontend `useScenarioFocus` hook subscribes and calls the existing
+  `scenarioStore.setActive(id)` sink, so the trajectory appears in the Plots tab in place.
+
+The push carries only a scenario id (domain-neutral). A typical use: a dashboard `POST`s a focus from a
+server-side click handler — no browser CORS involved, since the GUI's own same-origin tab is the only
+SSE subscriber.
+
 ### Frontend (`frontend/src/`)
 
 - **API** — `api/client.ts`, `configs.ts`, `simulations.ts`, `mechanisms.ts`, `plugins.ts`
 - **State** — Zustand stores (`configStore`, `simulationStore`, `selectionStore`, etc.)
-- **Graph / results** — `ReactorGraph`, `ResultsTabs`, `PluginTab`, `useSimulationSSE`
+- **Graph / results** — `ReactorGraph`, `ResultsTabs`, `PluginTab`, `useSimulationSSE`, `useScenarioFocus`
 
 Plugins: `GET /api/plugins` lists tabs; `POST /api/plugins/{id}/render` returns structured JSON (image, table, html, plotly, etc.) consumed by `PluginTab`.
 

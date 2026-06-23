@@ -151,6 +151,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Run without starting the web UI",
     )
     parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help=(
+            "Headless run-set runner: expand the config's scenario:/sweep: blocks, "
+            "solve every run, and serialize each into the collection store. Uses a "
+            "host-registered sweep runner (BoulderPlugins.sweep_runner). No web UI."
+        ),
+    )
+    parser.add_argument(
         "--download",
         metavar="OUTPUT_FILE",
         help="Generate Python code from YAML and save to file (requires --headless)",
@@ -503,6 +512,34 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
         sys.exit(rc)
 
     args = parse_args(argv)
+
+    # --sweep is "Run Sweep mode":
+    #   * with --headless → run the whole run-set now, no GUI (delegates to the
+    #     host-registered BoulderPlugins.sweep_runner; Boulder stays host-agnostic).
+    #   * without --headless → launch the GUI with Run Sweep as the default action
+    #     and the (pre-computed) scenario store shown in the pane (BOULDER_SWEEP_MODE).
+    if args.sweep and args.headless:
+        if not args.config:
+            print("Error: --sweep requires a config file", file=sys.stderr)
+            sys.exit(2)
+        from .cantera_converter import get_plugins
+
+        runner = getattr(get_plugins(), "sweep_runner", None)
+        if not runner:
+            print(
+                "Error: no sweep runner registered (BoulderPlugins.sweep_runner). "
+                "Install a host plugin that provides one.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        import subprocess
+        from pathlib import Path as _Path
+
+        cmd = [sys.executable, *runner, str(_Path(args.config).resolve())]
+        sys.exit(subprocess.call(cmd))
+    if args.sweep:
+        # GUI sweep mode — read by the lifespan / frontend.
+        os.environ["BOULDER_SWEEP_MODE"] = "1"
 
     # --runner flag overrides the kwarg (shell users)
     if args.runner:

@@ -450,8 +450,8 @@ class NormalizedConfigModel(BaseModel):
 def warn_flow_device_conventions(config: Dict[str, Any]) -> List[str]:
     """Return non-fatal notes about ``MassFlowController`` values that are often legacies.
 
-    A declared ``mass_flow_rate: 0.0`` is valid for a intentionally closed
-    side feed (e.g. ``feed_secondary`` in SPRING) but is also the obsolete
+    A declared ``mass_flow_rate: 0.0`` is valid for an intentionally closed
+    side feed but is also the obsolete
     placeholder for a tube-furnace outlet; :func:`warn_flow_device_conventions`
     nudges authors toward :func:`boulder.config.expand_port_shortcuts` or
     omitting the rate.  Call from ``boulder validate`` only — not from every

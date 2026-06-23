@@ -1146,7 +1146,7 @@ class TestInterfaceReservoirSolve:
 def test_refresh_terminal_outlet_sink_copies_upstream_state():
     """Legacy OutletSink shim: _refresh_terminal_sinks copies upstream reactor phase.
 
-    Remove with OutletSink deprecation.  SPRING_A4-style chains use inter-stage
+    Remove with OutletSink deprecation.  Multi-stage chains use inter-stage
     stream-point diamonds (_update_stream_point) instead and do not hit this path.
     """
     from boulder.staged_solver import _refresh_terminal_sinks
@@ -1196,8 +1196,8 @@ def test_refresh_terminal_outlet_sink_copies_upstream_state():
 def test_terminal_outlet_sink_matches_upstream_reactor_after_solve():
     """Legacy OutletSink: terminal sink thermo matches upstream after staged solve.
 
-    Remove with OutletSink deprecation.  Not exercised by SPRING_A4 (psr_outlet
-    stream-point diamond is refreshed via _update_stream_point).
+    Remove with OutletSink deprecation.  Not exercised by multi-stage chains
+    (the stream-point diamond is refreshed via _update_stream_point).
     """
     cfg = normalize_config(
         {

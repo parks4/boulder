@@ -6,7 +6,7 @@ next to the loaded YAML file.  On startup, if the preloaded config
 fingerprint matches a cache entry, Boulder loads it and sends it to the
 frontend immediately so outputs are visible without re-running.
 
-Host packages (e.g. Bloc) register :class:`CacheContributorPlugin`
+Host packages register :class:`CacheContributorPlugin`
 implementations.  After each successful GUI solve, Boulder calls every
 registered contributor so they can write package-specific artifacts
 (e.g. a calc-note bundle JSON + figure PNGs) into the same cache entry.
@@ -19,8 +19,8 @@ Cache layout
 
     <yaml_dir>/.boulder-cache/         (or $BOULDER_CACHE_DIR)
         <fingerprint>/
-            result.json                GUI payload + config snapshot
-            meta.json                  created_at, versions, fingerprint inputs
+            result.h5                  GUI payload (composite HDF5, see payload_store)
+            meta.json                  created_at, versions, mechanism, config_snapshot
             COMPLETE                   marker written last (atomic write guard)
             artifacts/                 contributor-written files
 
@@ -36,7 +36,7 @@ SHA-256 hex of canonical sorted-key JSON of:
 * ``BOULDER_PLUGINS`` env var
 * ``CACHE_VERSION`` integer
 
-:data:`CACHE_VERSION` must be bumped whenever the ``result.json``
+:data:`CACHE_VERSION` must be bumped whenever the ``result.h5``
 or ``meta.json`` schema changes.
 """
 
@@ -58,8 +58,10 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Bump when result.json / meta.json schema changes to auto-invalidate old entries.
-CACHE_VERSION: int = 1
+#: Bump when the payload (result.h5) / meta.json schema changes to auto-invalidate
+#: old entries. v2: payload moved from result.json → composite result.h5
+#: (native SolutionArray + JSON blob); see :mod:`boulder.payload_store`.
+CACHE_VERSION: int = 2
 
 #: Keep at most this many cache entries per cache directory (oldest pruned first).
 MAX_CACHE_ENTRIES: int = 5
@@ -435,9 +437,9 @@ def save_result(
 ) -> Path:
     """Atomically persist the GUI payload and config snapshot to disk.
 
-    Creates ``<cache_root>/<fingerprint>/result.json``,
-    ``meta.json``, and the ``COMPLETE`` marker.  Prunes old entries to keep
-    at most :data:`MAX_CACHE_ENTRIES`.
+    Creates ``<cache_root>/<fingerprint>/result.h5`` (composite payload),
+    ``meta.json`` (incl. ``config_snapshot``), and the ``COMPLETE`` marker.
+    Prunes old entries to keep at most :data:`MAX_CACHE_ENTRIES`.
 
     Parameters
     ----------
@@ -468,12 +470,14 @@ def save_result(
     try:
         (tmp_dir / "artifacts").mkdir()
 
-        result_data = {
-            "gui_payload": _coerce(gui_payload),
-            "config_snapshot": _coerce(config_snapshot),
-        }
-        _write_json(tmp_dir / "result.json", result_data)
+        from .payload_store import write_payload
 
+        # Composite HDF5: heavy reactor series as native SolutionArrays / binary
+        # datasets, everything else (sankey, reports, summary) as a JSON blob.
+        write_payload(tmp_dir / "result.h5", _coerce(gui_payload), mechanism or "")
+
+        # config_snapshot lives in meta.json (P1) so a snapshot scan never has
+        # to restore the numeric HDF5.
         meta: Dict[str, Any] = {
             "fingerprint": fingerprint,
             "cache_version": CACHE_VERSION,
@@ -481,6 +485,7 @@ def save_result(
             "boulder_version": _package_version("boulder"),
             "cantera_version": _package_version("cantera"),
             "mechanism": mechanism or "",
+            "config_snapshot": _coerce(config_snapshot),
         }
         if meta_extra:
             meta.update(_coerce(meta_extra))
@@ -539,20 +544,31 @@ def load_result(
     if not (entry / "COMPLETE").exists():
         return None
     try:
-        result_data = json.loads((entry / "result.json").read_text(encoding="utf-8"))
         meta = json.loads((entry / "meta.json").read_text(encoding="utf-8"))
         if meta.get("cache_version") != CACHE_VERSION:
             logger.debug("Cache entry version mismatch, ignoring: %s", fingerprint[:12])
             return None
+        from .payload_store import read_payload
+
+        gui_payload = read_payload(
+            entry / "result.h5", mechanism_override=meta.get("mechanism") or None
+        )
         return {
             "fingerprint": fingerprint,
-            "gui_payload": result_data.get("gui_payload", {}),
-            "config_snapshot": result_data.get("config_snapshot", {}),
+            "gui_payload": gui_payload,
+            "config_snapshot": meta.get("config_snapshot", {}),
             "meta": meta,
             "artifacts_dir": entry / "artifacts",
         }
     except (OSError, json.JSONDecodeError, KeyError) as exc:
         logger.debug("Failed to load cache entry %s: %s", fingerprint[:12], exc)
+        return None
+    except Exception as exc:  # noqa: BLE001 — restore failure ⇒ treat as cache miss
+        logger.warning(
+            "Cache entry %s payload restore failed, ignoring: %s",
+            fingerprint[:12],
+            exc,
+        )
         return None
 
 
@@ -653,24 +669,18 @@ def find_result_by_config_snapshot(
         if not (entry_dir / "COMPLETE").exists():
             continue
         try:
-            result_data = json.loads(
-                (entry_dir / "result.json").read_text(encoding="utf-8")
-            )
+            # Read config_snapshot from meta.json only — never restore the
+            # numeric HDF5 just to compare snapshots (P1).
             meta = json.loads((entry_dir / "meta.json").read_text(encoding="utf-8"))
             if meta.get("cache_version") != CACHE_VERSION:
                 continue
-            snapshot = result_data.get("config_snapshot") or {}
+            snapshot = meta.get("config_snapshot") or {}
             if not snapshot:
                 continue
             snapshot_fp = compute_fingerprint(snapshot, mechanism=mechanism)
             if snapshot_fp == fingerprint:
-                return {
-                    "fingerprint": entry_dir.name,
-                    "gui_payload": result_data.get("gui_payload", {}),
-                    "config_snapshot": snapshot,
-                    "meta": meta,
-                    "artifacts_dir": entry_dir / "artifacts",
-                }
+                # Match — now restore the payload for this one entry.
+                return load_result(cache_root, entry_dir.name)
         except (OSError, json.JSONDecodeError, KeyError):
             continue
     return None

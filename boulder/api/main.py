@@ -31,7 +31,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .routes import configs, graph, gui_actions, mechanisms, plugins, simulations
+from .routes import (
+    configs,
+    graph,
+    gui_actions,
+    mechanisms,
+    plugins,
+    scenarios,
+    simulations,
+    sweep,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +84,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.preloaded_config_path = None  # full path for script generation
     app.state.preloaded_result = None
     app.state.preloaded_fingerprint = None
+    app.state.scenario_store_path = None
+    app.state.preloaded_raw = None  # inheritance-resolved config (keeps sweeps:)
+    app.state.sweep_job = None
+    # ``--sweep`` GUI mode (BOULDER_SWEEP_MODE): default the split button to Run Sweep.
+    app.state.sweep_default = bool(os.environ.get("BOULDER_SWEEP_MODE"))
 
     if env_config_path and env_config_path.strip():
         try:
@@ -93,6 +107,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # plain Boulder use.
             runner_cls = _runner_class or BoulderRunner
             config = runner_cls.load(cleaned)
+            # Keep the inheritance-resolved config before normalize strips
+            # ``sweeps:`` — the Run Sweep button needs to see it.
+            app.state.preloaded_raw = config
 
             # Keep the original YAML string for the editor panel.  For inheritance
             # overlays the "original" shown is the leaf file (what the user opened),
@@ -169,6 +186,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.error(f"Failed to load preloaded configuration: {e}")
 
+    # Resolve the scenario-inspector store (HDF5): explicit env override wins,
+    # else the preloaded config's ``metadata.extra.scenario_store`` resolved
+    # relative to the YAML's directory. Enables the GUI Scenario Pane.
+    try:
+        store_env = os.environ.get("BOULDER_SCENARIO_STORE")
+        if store_env and store_env.strip():
+            app.state.scenario_store_path = store_env.strip()
+        elif app.state.preloaded_config and app.state.preloaded_config_path:
+            extra = (app.state.preloaded_config.get("metadata") or {}).get(
+                "extra"
+            ) or {}
+            rel = extra.get("scenario_store")
+            base = Path(app.state.preloaded_config_path).resolve().parent
+            if rel:
+                app.state.scenario_store_path = str((base / rel).resolve())
+            elif os.environ.get("BOULDER_SWEEP_MODE"):
+                # Sweep mode with no declared store → default next to the config,
+                # so pre-computed scenarios (if any) show in the pane.
+                stem = Path(app.state.preloaded_config_path).stem
+                app.state.scenario_store_path = str(base / f"{stem}_scenarios.h5")
+        if app.state.scenario_store_path:
+            logger.info("Scenario store enabled: %s", app.state.scenario_store_path)
+    except Exception as store_err:  # noqa: BLE001
+        logger.warning("Scenario store resolution failed: %s", store_err)
+        app.state.scenario_store_path = None
+
+    # Scenario-focus channel: external tools (e.g. a result dashboard) can drive
+    # the open GUI to load a scenario id; tabs subscribe over SSE.
+    app.state.scenario_focus_subscribers = set()
+    app.state.focused_scenario = None
+
     logger.info("Boulder API started – plugins loaded, converter ready")
     yield
     # Shutdown: nothing to clean up
@@ -209,6 +257,8 @@ def create_app() -> FastAPI:
     app.include_router(
         gui_actions.router, prefix="/api/gui-actions", tags=["gui-actions"]
     )
+    app.include_router(scenarios.router, prefix="/api/scenarios", tags=["scenarios"])
+    app.include_router(sweep.router, prefix="/api/sweep", tags=["sweep"])
 
     # Health check
     @app.get("/api/health")

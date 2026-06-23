@@ -149,9 +149,17 @@ async def start_simulation(
             existing_kind = solver_block.get("kind", "")
             if existing_kind not in TRANSIENT_SOLVER_KINDS:
                 solver_block.setdefault("kind", "advance_grid")
-            grid = solver_block.setdefault("grid", {})
-            grid["stop"] = simulation_time
-            grid["dt"] = time_step
+            # Respect an already-declared grid (e.g. an explicit list of save
+            # times, or a {start,stop,dt} dict) — it is authoritative. Only
+            # synthesize a {stop,dt} grid from the time/step overrides when none
+            # exists yet (avoids indexing a list grid as a dict).
+            existing_grid = solver_block.get("grid")
+            if isinstance(existing_grid, dict):
+                existing_grid["stop"] = simulation_time
+                existing_grid["dt"] = time_step
+            elif existing_grid is None:
+                solver_block["grid"] = {"stop": simulation_time, "dt": time_step}
+            # else: explicit list grid — leave it untouched.
 
         # Create a fresh worker for this simulation.
         # Pass app.state so the worker can update preloaded_result after the
@@ -349,7 +357,7 @@ async def get_cached_artifact(
 ) -> Any:
     """Serve a file from the cached artifacts directory.
 
-    Used by contributor plugins (e.g. Bloc) to fetch package-specific
+    Used by contributor plugins to fetch package-specific
     artifacts they wrote during a previous solve.
     """
     from fastapi.responses import FileResponse
