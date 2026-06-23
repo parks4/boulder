@@ -164,6 +164,12 @@ export function AppShell() {
     return "Boulder";
   }, [config.metadata]);
 
+  // Optional app version shown next to the title (host sets metadata.gui_app_version).
+  const headerVersion = useMemo(() => {
+    const raw = config.metadata?.gui_app_version;
+    return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+  }, [config.metadata]);
+
   useEffect(() => {
     document.title = headerTitle;
   }, [headerTitle]);
@@ -175,6 +181,14 @@ export function AppShell() {
         <div className="flex items-center gap-3">
           <PaneToggle side="left" />
           <h1 className="text-xl font-bold">{headerTitle}</h1>
+          {headerVersion && (
+            <span
+              className="text-xs text-muted-foreground"
+              title={`version ${headerVersion}`}
+            >
+              v{headerVersion}
+            </span>
+          )}
           <Button
             id="config-file-name-span"
             onClick={() => setShowYamlEditor(true)}
