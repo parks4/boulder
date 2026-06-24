@@ -40,6 +40,7 @@ from .routes import (
     scenarios,
     simulations,
     sweep,
+    ui,
 )
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sweep_default = bool(os.environ.get("BOULDER_SWEEP_MODE"))
     # ``--run`` autorun is decided later, once the cache / scenario store is known.
     app.state.autorun = False
+    # Theme the GUI publishes (POST /api/ui/theme) for external tools to mirror.
+    app.state.ui_theme = None
 
     if env_config_path and env_config_path.strip():
         try:
@@ -293,6 +296,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(scenarios.router, prefix="/api/scenarios", tags=["scenarios"])
     app.include_router(sweep.router, prefix="/api/sweep", tags=["sweep"])
+    app.include_router(ui.router, prefix="/api/ui", tags=["ui"])
 
     # Health check
     @app.get("/api/health")

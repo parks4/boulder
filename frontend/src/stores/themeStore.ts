@@ -31,6 +31,17 @@ function saveTheme(theme: Theme) {
   localStorage.setItem(STORAGE_KEY, theme);
 }
 
+function publishTheme(theme: Theme) {
+  // Publish to the backend (fire-and-forget) so external local tools — e.g. the
+  // Trajectory Dashboard — can mirror the GUI's current light/dark setting.
+  if (typeof fetch === "undefined") return;
+  void fetch("/api/ui/theme", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ theme }),
+  }).catch(() => {});
+}
+
 function applyTheme(theme: Theme) {
   if (typeof document === "undefined") return;
   document.documentElement.classList.toggle("dark", theme === "dark");
@@ -38,14 +49,16 @@ function applyTheme(theme: Theme) {
 
 export const useThemeStore = create<ThemeState>((set) => {
   const initial = loadTheme();
-  // Apply on creation
+  // Apply + publish on creation.
   applyTheme(initial);
+  publishTheme(initial);
 
   return {
     theme: initial,
     setTheme: (theme) => {
       applyTheme(theme);
       saveTheme(theme);
+      publishTheme(theme);
       set({ theme });
     },
     toggleTheme: () =>
@@ -53,6 +66,7 @@ export const useThemeStore = create<ThemeState>((set) => {
         const next: Theme = state.theme === "light" ? "dark" : "light";
         applyTheme(next);
         saveTheme(next);
+        publishTheme(next);
         return { theme: next };
       }),
   };
