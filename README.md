@@ -29,7 +29,25 @@ A web-based tool for visually constructing and simulating Cantera ReactorNet sys
 
 ## Installation
 
-Clone the repository and create an isolated environment:
+### As a user (recommended)
+
+Released wheels ship with the React frontend prebuilt, so **no Node/npm is
+required** — just install into any Python (e.g. conda) environment:
+
+```bash
+pip install boulder            # from PyPI
+```
+
+> **Note:** installing straight from a source checkout
+> (`pip install git+https://github.com/parks4/boulder.git@main`) does **not**
+> include the GUI: the frontend is only built and bundled when a release wheel
+> is produced. Use the PyPI release (or a wheel from the
+> [Releases page](https://github.com/parks4/boulder/releases)) to get the
+> interface without building it yourself.
+
+### As a developer (from source)
+
+Clone the repository, create an isolated environment, and build the frontend:
 
 ```bash
 git clone https://github.com/parks4/boulder.git
@@ -38,7 +56,7 @@ conda env create -n boulder -f environment.yml
 conda activate boulder
 pip install -e .         # install in editable mode
 
-# Build the React frontend
+# Build the React frontend (emits into boulder/_frontend)
 cd frontend
 npm install
 npm run build

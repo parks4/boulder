@@ -47,6 +47,10 @@ tramp
 .cask/
 dist/
 
+# Prebuilt frontend, emitted by `npm run build` and bundled into wheels in CI.
+# Never commit it; it is a build artifact.
+boulder/_frontend/
+
 # Flycheck
 flycheck_*.el
 

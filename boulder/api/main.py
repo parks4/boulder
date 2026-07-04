@@ -303,8 +303,17 @@ def create_app() -> FastAPI:
     async def health() -> dict:
         return {"status": "ok"}
 
-    # Serve React static build in production (if dist/ exists)
-    frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+    # Serve React static build in production (if a build exists).
+    #
+    # Two layouts are supported, in priority order:
+    #   1. ``boulder/_frontend`` — the bundled build shipped as package data in
+    #      released wheels (vite emits here; see frontend/vite.config.ts).
+    #   2. ``<repo>/frontend/dist`` — a local dev build sitting next to the
+    #      source tree (editable installs / running from a checkout).
+    _pkg_root = Path(__file__).resolve().parent.parent  # .../boulder
+    bundled_frontend = _pkg_root / "_frontend"
+    dev_frontend = _pkg_root.parent / "frontend" / "dist"
+    frontend_dist = bundled_frontend if bundled_frontend.is_dir() else dev_frontend
     if frontend_dist.is_dir():
         from fastapi import HTTPException
         from fastapi.responses import FileResponse

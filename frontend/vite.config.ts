@@ -5,6 +5,13 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Emit the production build *inside* the Python package so that it ships as
+  // package data in the wheel and is found at runtime regardless of where
+  // Boulder is installed (see boulder/api/main.py).
+  build: {
+    outDir: path.resolve(__dirname, "../boulder/_frontend"),
+    emptyOutDir: true,
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
