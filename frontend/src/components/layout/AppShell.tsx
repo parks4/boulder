@@ -155,7 +155,7 @@ export function AppShell() {
 
   useKeyboardShortcuts(handleRunSimulation);
 
-  // Host branding published by a Boulder plugin (e.g. {name: "Rizer", version: "1.2"}).
+  // Host branding published by a Boulder plugin (e.g. {name: "MyApp", version: "1.2"}).
   const [branding, setBranding] = useState<{ name?: string; version?: string } | null>(
     null,
   );

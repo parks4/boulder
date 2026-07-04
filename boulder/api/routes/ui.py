@@ -38,7 +38,7 @@ async def get_branding() -> Dict[str, Any]:
     """Return the host branding set by a plugin (name/version), if any.
 
     The header shows ``Boulder`` alone when no plugin declares branding, and
-    ``Boulder · <name> <version>`` when a host package (e.g. rizer) does.
+    the host name and version when a host package does.
     """
     from ...cantera_converter import get_plugins
 
