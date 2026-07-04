@@ -31,3 +31,19 @@ async def set_theme(body: ThemeBody, request: Request) -> Dict[str, Any]:
     theme = body.theme if body.theme in ("light", "dark") else None
     request.app.state.ui_theme = theme
     return {"theme": theme}
+
+
+@router.get("/branding")
+async def get_branding() -> Dict[str, Any]:
+    """Return the host branding set by a plugin (name/version), if any.
+
+    The header shows ``Boulder`` alone when no plugin declares branding, and
+    ``Boulder · <name> <version>`` when a host package (e.g. rizer) does.
+    """
+    from ...cantera_converter import get_plugins
+
+    try:
+        branding = get_plugins().branding
+    except Exception:  # noqa: BLE001 - branding must never break the UI
+        branding = None
+    return {"branding": branding}

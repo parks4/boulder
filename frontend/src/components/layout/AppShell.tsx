@@ -155,20 +155,34 @@ export function AppShell() {
 
   useKeyboardShortcuts(handleRunSimulation);
 
+  // Host branding published by a Boulder plugin (e.g. {name: "Rizer", version: "1.2"}).
+  const [branding, setBranding] = useState<{ name?: string; version?: string } | null>(
+    null,
+  );
+  useEffect(() => {
+    fetch("/api/ui/branding")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setBranding(data?.branding ?? null))
+      .catch(() => setBranding(null));
+  }, []);
+
+  // Title priority: per-config metadata > plugin branding > "Boulder".
   const headerTitle = useMemo(() => {
     const raw = config.metadata?.gui_app_title;
     if (typeof raw === "string") {
       const t = raw.trim();
       if (t) return t;
     }
+    if (branding?.name?.trim()) return branding.name.trim();
     return "Boulder";
-  }, [config.metadata]);
+  }, [config.metadata, branding]);
 
-  // Optional app version shown next to the title (host sets metadata.gui_app_version).
+  // Version shown next to the title (metadata.gui_app_version > plugin branding).
   const headerVersion = useMemo(() => {
     const raw = config.metadata?.gui_app_version;
-    return typeof raw === "string" && raw.trim() ? raw.trim() : null;
-  }, [config.metadata]);
+    if (typeof raw === "string" && raw.trim()) return raw.trim();
+    return branding?.version?.trim() || null;
+  }, [config.metadata, branding]);
 
   useEffect(() => {
     document.title = headerTitle;

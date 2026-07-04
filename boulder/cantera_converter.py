@@ -87,6 +87,11 @@ class BoulderPlugins:
     #: sits next to the config. Registered by an external plugin package.
     sweep_runner: Optional[List[str]] = None
 
+    #: GUI branding set by a host plugin: ``{"name": "Rizer", "version": "1.2"}``.
+    #: When set, the frontend header shows the host name and version next to
+    #: the Boulder title.
+    branding: Optional[Dict[str, str]] = None
+
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.
     sources: Dict[str, List[Any]] = field(
