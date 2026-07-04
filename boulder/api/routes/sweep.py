@@ -67,9 +67,23 @@ def _run_set_size(raw: Dict[str, Any]) -> int:
     return total
 
 
+def _local_runner_path(request: Request) -> Optional[Path]:
+    """Return the ``run_sweep.py`` next to the preloaded config, if present."""
+    cfg_path = getattr(request.app.state, "preloaded_config_path", None)
+    if not cfg_path:
+        return None
+    local = Path(cfg_path).resolve().parent / _RUNNER_NAME
+    return local if local.is_file() else None
+
+
 def _has_run_set(request: Request) -> bool:
     raw = getattr(request.app.state, "preloaded_raw", None) or {}
-    return bool(raw.get("scenario") or _sweep_block(raw))
+    if raw.get("scenario") or _sweep_block(raw):
+        return True
+    # A run_sweep.py next to the config is a host-defined run-set: the runner
+    # script decides the cases (e.g. adaptive/bisection sweeps that a static
+    # `sweep:` block cannot express).
+    return _local_runner_path(request) is not None
 
 
 def _raw(request: Request) -> Dict[str, Any]:
@@ -135,8 +149,11 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
         reason = "No scenarios or sweep in this config"
     elif cmd is None:
         reason = "No scenario runner available"
-    else:
+    elif n > 0:
         reason = f"Run {n} scenarios"
+    else:
+        # Host-defined run-set (run_sweep.py decides the cases).
+        reason = f"Run the scenario sweep ({_RUNNER_NAME})"
 
     return {
         "available": has,

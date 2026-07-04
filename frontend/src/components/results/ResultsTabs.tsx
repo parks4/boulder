@@ -41,6 +41,16 @@ export function ResultsTabs() {
   const loadingRef = useRef<Record<string, boolean>>({});
   const fetchedKeyRef = useRef<Record<string, string>>({});
 
+  // Version counter bumped whenever the results OBJECT changes (new run,
+  // scenario selected, cache restore) so plugin tabs re-render their content —
+  // a plain `!!results` presence check would keep stale plugin output.
+  const resultsVersionRef = useRef(0);
+  const lastResultsRef = useRef<unknown>(null);
+  if (results !== lastResultsRef.current) {
+    lastResultsRef.current = results;
+    resultsVersionRef.current += 1;
+  }
+
   // Fetch available plugins when simulation results arrive
   useEffect(() => {
     if (!results && !progress) return;
@@ -78,14 +88,14 @@ export function ResultsTabs() {
 
     const pluginId = activePlugin.id;
 
-    // Build a cache key from the inputs this plugin depends on.
-    // Selection-independent plugins ignore selectedElement entirely.
+    // Build a cache key from the inputs this plugin depends on. The selection
+    // is always part of the key: even selection-optional plugins may narrow
+    // their content to the selected element (only the active tab fetches, so
+    // the extra render calls are negligible).
     const cacheKey = JSON.stringify({
-      results: !!results,  // only care about presence, not reference
+      results: resultsVersionRef.current,  // bumps on every new results object
       theme,
-      ...(activePlugin.requires_selection
-        ? { sel: selectedElement }
-        : {}),
+      sel: selectedElement,
     });
 
     // Already fetched with the same context — nothing to do.

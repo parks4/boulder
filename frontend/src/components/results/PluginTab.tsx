@@ -91,6 +91,12 @@ function RenderContent({ item }: { item: PluginContentItem }) {
           ax.zerolinecolor ??= gridcolor;
         }
       }
+      // Give the container an explicit CSS height matching the figure height:
+      // without it a pane-toggle resize can collapse stacked grid items onto
+      // each other (the plot div's height would derive from plotly's own
+      // absolute-positioned children).
+      const figureHeight =
+        typeof mergedLayout.height === "number" ? mergedLayout.height : 350;
       return (
         <Plot
           data={(figure.data ?? []) as Plotly.Data[]}
@@ -98,6 +104,7 @@ function RenderContent({ item }: { item: PluginContentItem }) {
           config={{ responsive: true, displayModeBar: false }}
           useResizeHandler
           className="w-full"
+          style={{ width: "100%", height: figureHeight, minHeight: figureHeight }}
         />
       );
     }
