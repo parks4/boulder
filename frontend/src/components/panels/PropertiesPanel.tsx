@@ -178,7 +178,9 @@ export function PropertiesPanel() {
                     ? `${kelvinToCelsius(value).toFixed(2)} °C`
                     : typeof value === "number"
                       ? formatNumber(value)
-                      : String(value ?? "")}
+                      : typeof value === "object" && value !== null
+                        ? JSON.stringify(value)
+                        : String(value ?? "")}
                 </span>
               )}
             </div>
