@@ -21,7 +21,12 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import h5py
+try:
+    import h5py
+except ImportError:  # pragma: no cover - environment-dependent
+    # Scenario stores are HDF5 files; without a working h5py the routes report
+    # "no scenarios" instead of preventing the whole API from importing.
+    h5py = None  # type: ignore[assignment]
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -69,7 +74,7 @@ def _scenario_entries(h5_path: Path) -> List[Dict[str, Any]]:
 async def list_scenarios(request: Request) -> Dict[str, Any]:
     """List the scenarios in the active store (fast — reads attrs only)."""
     store = _store_path(request)
-    if store is None or not store.is_file():
+    if h5py is None or store is None or not store.is_file():
         return {"available": False, "scenarios": []}
     root = _root_attrs(store)
     return {
@@ -85,6 +90,8 @@ async def list_scenarios(request: Request) -> Dict[str, Any]:
 @router.get("/{scenario_id}")
 async def get_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
     """Return one scenario's composite payload (multi-reactor, reports, Sankey)."""
+    if h5py is None:
+        raise HTTPException(status_code=503, detail="h5py unavailable")
     store = _store_path(request)
     if store is None or not store.is_file():
         raise HTTPException(status_code=404, detail="No scenario store available")
@@ -138,6 +145,8 @@ def _focus_event(scenario_id: str) -> str:
 @router.post("/focus")
 async def focus_scenario(req: FocusRequest, request: Request) -> Dict[str, Any]:
     """Tell every subscribed GUI tab to load scenario ``scenario_id`` (live)."""
+    if h5py is None:
+        raise HTTPException(status_code=503, detail="h5py unavailable")
     store = _store_path(request)
     if store is None or not store.is_file():
         raise HTTPException(status_code=404, detail="No scenario store available")

@@ -5,6 +5,8 @@ export interface PluginMeta {
   icon?: string | null;
   requires_selection: boolean;
   supported_element_types: string[];
+  /** Reactor kinds the plugin applies to (null/absent = any). */
+  supported_node_types?: string[] | null;
 }
 
 /** A single content descriptor returned by a plugin. */

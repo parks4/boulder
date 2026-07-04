@@ -63,6 +63,16 @@ class OutputPanePlugin(ABC):
         """List of element types this plugin supports."""
         return ["reactor"]
 
+    @property
+    def supported_node_types(self) -> Optional[List[str]]:
+        """Reactor kinds this plugin applies to (None = any).
+
+        When set (and ``requires_selection`` is True), the GUI only shows the
+        plugin's tab while a node of one of these STONE kinds is selected
+        (e.g. ``["PlasmaReactor2T"]``).
+        """
+        return None
+
     def is_available(self, context: OutputPaneContext) -> bool:
         """Check if this plugin should be available given the current context.
 
