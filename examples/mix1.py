@@ -83,8 +83,9 @@ sim = ct.ReactorNet([mixer])
 # Since the mixer is a reactor, we need to integrate in time to reach steady state.
 sim.advance_to_steady_state()
 
-# view the state of the gas in the mixer
-print(mixer.thermo.report())
+# view the state of the gas in the mixer (Cantera >= 4: Reactor.phase)
+mixer_phase = getattr(mixer, "thermo", None) or mixer.phase
+print(mixer_phase.report())
 
 # %%
 # Show the network structure

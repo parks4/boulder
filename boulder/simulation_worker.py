@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import cantera as ct  # type: ignore
 
+from .utils import reactor_phase
 from .verbose_utils import get_verbose_logger
 
 logger = get_verbose_logger(__name__)
@@ -513,27 +514,28 @@ class SimulationWorker:
         try:
             # Generate reports for each reactor
             for reactor_id, reactor in converter.reactors.items():
+                phase = reactor_phase(reactor)
                 if isinstance(reactor, ct.Reservoir):
                     # Handle Reservoirs - they maintain fixed thermodynamic conditions
-                    current_T = reactor.thermo.T
-                    current_P = reactor.thermo.P
+                    current_T = phase.T
+                    current_P = phase.P
                     current_T_c = current_T - 273.15
 
                     reactor_reports[reactor_id] = {
                         "T": current_T,
                         "P": current_P,
                         "X": {
-                            name: reactor.thermo.X[i]
-                            for i, name in enumerate(reactor.thermo.species_names)
+                            name: phase.X[i]
+                            for i, name in enumerate(phase.species_names)
                         },
-                        "species_names": reactor.thermo.species_names,
-                        "molecular_weights": reactor.thermo.molecular_weights,
-                        "mass_fractions": reactor.thermo.Y.copy(),
+                        "species_names": phase.species_names,
+                        "molecular_weights": phase.molecular_weights,
+                        "mass_fractions": phase.Y.copy(),
                         # Generate formatted reports for UI display
                         "reactor_report": f"Temperature: {current_T_c:.2f} °C (Fixed)\nPressure: "
                         f"{current_P:.2e} Pa (Fixed)\nType: Reservoir (Infinite Capacity)",
-                        # Use the reactor's own thermo to ensure mechanism matches reactor
-                        "thermo_report": reactor.thermo.report(),
+                        # Use the reactor's own phase to ensure mechanism matches reactor
+                        "thermo_report": phase.report(),
                     }
                     continue
 
@@ -554,14 +556,14 @@ class SimulationWorker:
                             "T": final_T,
                             "P": final_P,
                             "X": final_X,
-                            "species_names": reactor.thermo.species_names,
-                            "molecular_weights": reactor.thermo.molecular_weights,
-                            "mass_fractions": reactor.thermo.Y.copy(),
+                            "species_names": phase.species_names,
+                            "molecular_weights": phase.molecular_weights,
+                            "mass_fractions": phase.Y.copy(),
                             # Generate formatted reports for UI display
                             "reactor_report": f"Temperature: {final_T_c:.2f} °C\nPressure: "
                             f"{final_P:.2e} Pa\nVolume: {reactor.volume:.2e} m³",
-                            # Use the reactor's own thermo to ensure mechanism matches reactor
-                            "thermo_report": reactor.thermo.report(),
+                            # Use the reactor's own phase to ensure mechanism matches reactor
+                            "thermo_report": phase.report(),
                         }
 
         except Exception as e:
@@ -585,7 +587,7 @@ class SimulationWorker:
                 if not isinstance(device, ct.MassFlowController):
                     continue
                 upstream = device.upstream
-                thermo = upstream.thermo
+                thermo = reactor_phase(upstream)
                 T = float(thermo.T)
                 P = float(thermo.P)
                 # Cantera molecular_weights in kg/kmol; X is mole fractions

@@ -20,6 +20,7 @@ import cantera as ct  # type: ignore
 
 from .config import CANTERA_MECHANISM, yaml_to_string_with_comments
 from .ctutils import collect_all_reactors_and_reservoirs
+from .utils import reactor_phase
 
 
 def _parse_python_comments(source_file: str) -> Dict[str, Any]:
@@ -440,19 +441,20 @@ def sim_to_internal_config(
         # Capture mechanism override if present on reactor object (set by builder)
         mech_override = getattr(r, "_boulder_mechanism", None)
 
+        phase = reactor_phase(r)
         if isinstance(r, ct.Reservoir):
             # Reservoirs are boundary conditions; capture T, P, and composition so
             # STONE v2 and DualCanteraConverter agree (Reservoir requires explicit P).
             props: Dict[str, Any] = {
-                "temperature": float(r.thermo.T),
-                "pressure": float(r.thermo.P),
-                "composition": _composition_to_string(r.thermo),
+                "temperature": float(phase.T),
+                "pressure": float(phase.P),
+                "composition": _composition_to_string(phase),
             }
         else:
             props = {
-                "temperature": float(r.thermo.T),
-                "pressure": float(r.thermo.P),
-                "composition": _composition_to_string(r.thermo),
+                "temperature": float(phase.T),
+                "pressure": float(phase.P),
+                "composition": _composition_to_string(phase),
             }
 
             # Volume (Reservoirs have infinite / undefined volume)

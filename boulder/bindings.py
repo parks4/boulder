@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import cantera as ct
 
+from .utils import reactor_phase
+
 if TYPE_CHECKING:
     from boulder.cantera_converter import DualCanteraConverter  # noqa: F401
 
@@ -240,7 +242,7 @@ def apply_binding(
                 f"Binding target '{target_path}': node '{node_id}' not found in the "
                 f"built network. Available nodes: {sorted(converter.reactors)}."
             )
-        phase = reactor.thermo  # the Solution / PlasmaPhase attached to the reactor
+        phase = reactor_phase(reactor)  # the Solution / PlasmaPhase of the reactor
 
         def _ref_callback(
             net: ct.ReactorNet,

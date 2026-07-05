@@ -70,6 +70,7 @@ def _require_h5py() -> None:
             f"(import error: {_H5PY_IMPORT_ERROR})"
         )
 
+
 #: Bump when the HDF5 layout changes incompatibly (== root ``schema_version``).
 PAYLOAD_SCHEMA = 1
 
