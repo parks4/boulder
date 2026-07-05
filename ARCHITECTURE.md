@@ -336,10 +336,42 @@ def register_plugins(plugins):
 
 **3. Enable discovery** — `BOULDER_PLUGINS` and/or `boulder.plugins` entry points (see above).
 
+**Selection-scoped tabs.** A pane with `requires_selection = True` only surfaces
+its tab while something is selected in the graph. The optional
+`supported_node_types` property (list of STONE reactor kinds, e.g.
+`["MyReactorKind"]`) narrows this further: the tab appears only while a node of
+one of those kinds is selected, and disappears (falling back to a base tab)
+when the selection changes. Panes with `requires_selection = False` are always
+listed once results exist — appropriate for stage-group-level views.
+
+**Content types.** `create_content_data` may return `text`, `html`, `image`
+(base64 data URI), `table` (`headers` + `rows`), **`plotly`**
+(`{"figure": {"data": [...], "layout": {...}}}` rendered as a native
+interactive react-plotly widget; theme-aware fonts, background and grid colors
+are injected client-side unless the figure sets its own), and **`grid`**
+(`{"columns": n, "items": [...]}`, recursive). Multi-panel plotly figures can
+lock their x-axes together with `xaxis2: {matches: "x"}` for synchronized
+zooming.
+
+**Host branding.** A plugin package may set
+`plugins.branding = {"name": ..., "version": ...}` in its registrar; the GUI
+header then shows the host application name and version instead of the plain
+Boulder title (config `metadata.gui_app_title/-version` still takes
+precedence). Exposed at `GET /api/ui/branding`.
+
+**Custom connection kinds.** `plugins.connection_builders["MyEdgeKind"]`
+registers a builder `(converter, conn_dict) -> device` dispatched before the
+built-in flow devices. The returned object need not be a Cantera flow device —
+non-flow edges (e.g. electrical wiring between plugin blocks) are tolerated
+throughout reporting, letting hosts express Simulink-style signal connections
+as first-class STONE edges.
+
 ### HTTP API for plugins
 
-- `GET /api/plugins` — metadata (`boulder/api/routes/plugins.py`)
+- `GET /api/plugins` — metadata incl. `requires_selection`,
+  `supported_element_types`, `supported_node_types` (`boulder/api/routes/plugins.py`)
 - `POST /api/plugins/{plugin_id}/render` — body maps to `OutputPaneContext`; returns `{available, data}`
+- `GET /api/ui/branding` — host branding declared by a plugin package
 
 ### Optional spatial-style output pane (downstream plugin)
 

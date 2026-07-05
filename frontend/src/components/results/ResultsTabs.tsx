@@ -41,6 +41,16 @@ export function ResultsTabs() {
   const loadingRef = useRef<Record<string, boolean>>({});
   const fetchedKeyRef = useRef<Record<string, string>>({});
 
+  // Version counter bumped whenever the results OBJECT changes (new run,
+  // scenario selected, cache restore) so plugin tabs re-render their content —
+  // a plain `!!results` presence check would keep stale plugin output.
+  const resultsVersionRef = useRef(0);
+  const lastResultsRef = useRef<unknown>(null);
+  if (results !== lastResultsRef.current) {
+    lastResultsRef.current = results;
+    resultsVersionRef.current += 1;
+  }
+
   // Fetch available plugins when simulation results arrive
   useEffect(() => {
     if (!results && !progress) return;
@@ -54,23 +64,38 @@ export function ResultsTabs() {
     if (!error && activeTab === ERROR_TAB_LABEL) setActiveTab("Plots");
   }, [error, activeTab]);
 
+  // Selection-scoped plugins only surface while a matching element is
+  // selected: any selection for plain requires_selection plugins, a node of a
+  // listed reactor kind when supported_node_types is set.
+  const visiblePlugins = plugins.filter((p) => {
+    if (!p.requires_selection) return true;
+    if (!selectedElement) return false;
+    if (p.supported_node_types && p.supported_node_types.length > 0) {
+      return (
+        selectedElement.type === "node" &&
+        p.supported_node_types.includes(String(selectedElement.data.type))
+      );
+    }
+    return true;
+  });
+
   // Load plugin content when a plugin tab is active.
   // Uses a cache key per plugin so we only re-fetch when something the
   // plugin actually cares about has changed.
-  const activePlugin = plugins.find((p) => p.label === activeTab);
+  const activePlugin = visiblePlugins.find((p) => p.label === activeTab);
   useEffect(() => {
     if (!activePlugin) return;
 
     const pluginId = activePlugin.id;
 
-    // Build a cache key from the inputs this plugin depends on.
-    // Selection-independent plugins ignore selectedElement entirely.
+    // Build a cache key from the inputs this plugin depends on. The selection
+    // is always part of the key: even selection-optional plugins may narrow
+    // their content to the selected element (only the active tab fetches, so
+    // the extra render calls are negligible).
     const cacheKey = JSON.stringify({
-      results: !!results,  // only care about presence, not reference
+      results: resultsVersionRef.current,  // bumps on every new results object
       theme,
-      ...(activePlugin.requires_selection
-        ? { sel: selectedElement }
-        : {}),
+      sel: selectedElement,
     });
 
     // Already fetched with the same context — nothing to do.
@@ -112,12 +137,19 @@ export function ResultsTabs() {
   const data = results ?? progress;
   if (!data && !error) return null;
 
-  const pluginTabs = plugins.map((p) => p.label);
+  const pluginTabs = visiblePlugins.map((p) => p.label);
   const tabs: Tab[] = [
     ...BASE_TABS,
     ...pluginTabs,
     ...(error ? [ERROR_TAB_LABEL] : []),
   ];
+  // If the active tab just disappeared (its plugin's selection was cleared),
+  // fall back to a safe base tab instead of rendering an empty pane.
+  const safeTab: Tab = tabs.includes(displayTab)
+    ? displayTab
+    : results
+      ? "Sankey"
+      : "Plots";
 
   return (
     <div id="simulation-results-card" className="rounded-lg border border-border bg-card">
@@ -128,7 +160,7 @@ export function ResultsTabs() {
             onClick={() => setActiveTab(tab)}
             variant="tab"
             size="tab"
-            data-active={displayTab === tab}
+            data-active={safeTab === tab}
           >
             {tab}
           </Button>
@@ -136,24 +168,24 @@ export function ResultsTabs() {
       </div>
 
       <div className="p-4">
-        {displayTab === "Plots" && data && <PlotsTab data={data} />}
-        {displayTab === "Convergence" && data && <ConvergenceTab data={data} />}
-        {displayTab === "Sankey" && results && (
+        {safeTab === "Plots" && data && <PlotsTab data={data} />}
+        {safeTab === "Convergence" && data && <ConvergenceTab data={data} />}
+        {safeTab === "Sankey" && results && (
           <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
             <SankeyTab results={results} />
           </Suspense>
         )}
-        {displayTab === "Thermo" && results && (
+        {safeTab === "Thermo" && results && (
           <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
             <ThermoReportTab results={results} />
           </Suspense>
         )}
-        {displayTab === "Summary" && results && <SummaryTab results={results} />}
-        {displayTab === ERROR_TAB_LABEL && <ErrorTab error={error} />}
+        {safeTab === "Summary" && results && <SummaryTab results={results} />}
+        {safeTab === ERROR_TAB_LABEL && <ErrorTab error={error} />}
 
         {/* Dynamic plugin tabs */}
-        {plugins.map((plugin) => {
-          if (displayTab !== plugin.label) return null;
+        {visiblePlugins.map((plugin) => {
+          if (safeTab !== plugin.label) return null;
           const pData = pluginData[plugin.id];
           const loading = pluginLoading[plugin.id];
           if (loading) {

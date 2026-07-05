@@ -116,6 +116,7 @@ METADATA_OPTIONAL_KEYS: frozenset = frozenset(
         "scenario_id",
         "title",
         "gui_app_title",
+        "gui_app_version",
         "name",
         "scenario_name",
         "architecture",
@@ -180,6 +181,8 @@ class MetadataModel(BaseModel):
     title: Optional[str] = None
     #: Short label for the web UI header (e.g. ``MyApp``); omitted defaults to "Boulder".
     gui_app_title: Optional[str] = None
+    #: Optional app version shown next to the header title (e.g. ``1.2.3``).
+    gui_app_version: Optional[str] = None
     name: Optional[str] = None
     scenario_name: Optional[str] = None
     architecture: Optional[str] = None

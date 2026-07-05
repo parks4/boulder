@@ -29,6 +29,7 @@ from .reactor_energy import (
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
 from .staged_solver import _order_stage_nodes_for_flow
+from .utils import reactor_phase
 from .verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
@@ -86,6 +87,11 @@ class BoulderPlugins:
     #: e.g. ``["-m", "<host_pkg>.scenario_sweep"]``. Used when no ``run_sweep.py``
     #: sits next to the config. Registered by an external plugin package.
     sweep_runner: Optional[List[str]] = None
+
+    #: GUI branding set by a host plugin: ``{"name": "MyApp", "version": "1.2"}``.
+    #: When set, the frontend header shows the host name and version next to
+    #: the Boulder title.
+    branding: Optional[Dict[str, str]] = None
 
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.
@@ -472,7 +478,7 @@ class _TrajectoryRecorder:
             return
         for reactor in reactors:
             rid = getattr(reactor, "name", "") or str(id(reactor))
-            phase = reactor.thermo
+            phase = reactor_phase(reactor)
             d = self._data.setdefault(
                 rid,
                 {
@@ -781,7 +787,7 @@ class DualCanteraConverter:
             src_r = self.reactors[src_id]
             if not isinstance(src_r, ct.Reservoir):
                 continue
-            sol = src_r.thermo
+            sol = reactor_phase(src_r)
             return float(sol.T), float(sol.P), sol.Y.copy()
         return None
 
@@ -1439,6 +1445,9 @@ class DualCanteraConverter:
             )
 
         stage_reactors = {rid: self.reactors[rid] for rid in stage_reactor_ids}
+        # Remember the most recent solver network: build_viz_network falls back
+        # to it on Cantera >= 4, where a reactor cannot join a second ReactorNet.
+        self.last_network = network
         return network, stage_reactors
 
     def _run_transient_solver(
@@ -1480,7 +1489,7 @@ class DualCanteraConverter:
                 start = float(grid_spec.get("start", 0.0))
                 stop = float(grid_spec["stop"])
                 dt = float(grid_spec["dt"])
-                times = list(np.arange(start + dt, stop + dt / 2, dt))
+                times = [float(t) for t in np.arange(start + dt, stop + dt / 2, dt)]
             else:
                 times = [float(t) for t in grid_spec]
             for t in times:
@@ -1632,8 +1641,21 @@ class DualCanteraConverter:
         self.apply_flow_conservation()
 
         non_res = self._unique_non_reservoir_reactors()
-        viz_net = ct.ReactorNet(cast(Sequence[ct.Reactor], non_res))
-        viz_net.advance(0.0)
+        try:
+            viz_net = ct.ReactorNet(cast(Sequence[ct.Reactor], non_res))
+            viz_net.advance(0.0)
+        except ct.CanteraError:
+            # Cantera >= 4 forbids adding a reactor to a second ReactorNet (the
+            # per-stage solver network still owns it).  Reuse the most recent
+            # stage network for visualization instead of rebuilding one; for
+            # multi-stage configs only the last stage is then drawn.
+            if self.last_network is None:
+                raise
+            logger.info(
+                "Viz network: reactors already belong to a stage ReactorNet "
+                "(Cantera >= 4); reusing the last stage network."
+            )
+            viz_net = self.last_network
         self.network = viz_net
         self.last_network = viz_net
         return viz_net

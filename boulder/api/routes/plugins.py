@@ -37,6 +37,9 @@ async def list_plugins() -> List[Dict[str, Any]]:
                     "supported_element_types": getattr(
                         plugin, "supported_element_types", ["reactor"]
                     ),
+                    "supported_node_types": getattr(
+                        plugin, "supported_node_types", None
+                    ),
                 }
             )
         return result

@@ -40,6 +40,7 @@ from .routes import (
     scenarios,
     simulations,
     sweep,
+    ui,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sweep_job = None
     # ``--sweep`` GUI mode (BOULDER_SWEEP_MODE): default the split button to Run Sweep.
     app.state.sweep_default = bool(os.environ.get("BOULDER_SWEEP_MODE"))
+    # ``--run`` autorun is decided later, once the cache / scenario store is known.
+    app.state.autorun = False
+    # Theme the GUI publishes (POST /api/ui/theme) for external tools to mirror.
+    app.state.ui_theme = None
 
     if env_config_path and env_config_path.strip():
         try:
@@ -137,7 +142,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 )
 
                 cache_root = cache_dir_for(str(actual_yaml_path))
-                if cache_root is not None:
+                if os.environ.get("BOULDER_NO_CACHE"):
+                    # --no-cache: don't pick up any cached result; recompute.
+                    app.state.preloaded_result = None
+                    app.state.preloaded_fingerprint = None
+                    print("[cache] disabled (--no-cache) — will recompute", flush=True)
+                elif cache_root is not None:
                     mechanism = resolve_mechanism_for_fingerprint(
                         validated, converter_class=app.state.converter_class
                     )
@@ -168,6 +178,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             app.state.preloaded_filename,
                             time.time() - created,
                             actual_fp[:12],
+                        )
+                        # Surface on the console by default (not only the logger).
+                        print(
+                            f"[cache] loaded cached result for "
+                            f"{app.state.preloaded_filename} "
+                            f"(fingerprint {actual_fp[:12]}…) — re-run skipped",
+                            flush=True,
                         )
                     elif fingerprint is not None:
                         logger.info(
@@ -211,6 +228,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as store_err:  # noqa: BLE001
         logger.warning("Scenario store resolution failed: %s", store_err)
         app.state.scenario_store_path = None
+
+    # ``--run`` (BOULDER_AUTORUN): the frontend auto-starts the run once on load —
+    # but only when there is nothing cached to pick up (``--no-cache`` forces it).
+    # Decided here, after the cache and scenario store have been resolved.
+    _no_cache = bool(os.environ.get("BOULDER_NO_CACHE"))
+    _autorun_req = bool(os.environ.get("BOULDER_AUTORUN"))
+    if app.state.sweep_default:
+        _store = getattr(app.state, "scenario_store_path", None)
+        _cache_present = bool(_store and Path(_store).is_file())
+    else:
+        _cache_present = getattr(app.state, "preloaded_result", None) is not None
+    app.state.autorun = _autorun_req and (_no_cache or not _cache_present)
+    if _autorun_req and _cache_present and not _no_cache:
+        _what = "scenario store" if app.state.sweep_default else "cached result"
+        msg = (
+            f"[cache] {_what} present — --run picks up from cache "
+            f"(use --no-cache to recompute)"
+        )
+        logger.info(msg)
+        print(msg, flush=True)
 
     # Scenario-focus channel: external tools (e.g. a result dashboard) can drive
     # the open GUI to load a scenario id; tabs subscribe over SSE.
@@ -259,14 +296,24 @@ def create_app() -> FastAPI:
     )
     app.include_router(scenarios.router, prefix="/api/scenarios", tags=["scenarios"])
     app.include_router(sweep.router, prefix="/api/sweep", tags=["sweep"])
+    app.include_router(ui.router, prefix="/api/ui", tags=["ui"])
 
     # Health check
     @app.get("/api/health")
     async def health() -> dict:
         return {"status": "ok"}
 
-    # Serve React static build in production (if dist/ exists)
-    frontend_dist = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+    # Serve React static build in production (if a build exists).
+    #
+    # Two layouts are supported, in priority order:
+    #   1. ``boulder/_frontend`` — the bundled build shipped as package data in
+    #      released wheels (vite emits here; see frontend/vite.config.ts).
+    #   2. ``<repo>/frontend/dist`` — a local dev build sitting next to the
+    #      source tree (editable installs / running from a checkout).
+    _pkg_root = Path(__file__).resolve().parent.parent  # .../boulder
+    bundled_frontend = _pkg_root / "_frontend"
+    dev_frontend = _pkg_root.parent / "frontend" / "dist"
+    frontend_dist = bundled_frontend if bundled_frontend.is_dir() else dev_frontend
     if frontend_dist.is_dir():
         from fastapi import HTTPException
         from fastapi.responses import FileResponse

@@ -134,9 +134,9 @@ class TestCLIHeadless:
         1. Missing config file with --headless:
            - Command returns exit code 1 (failure)
            - Error message contains "Error: --headless requires a config file"
-        2. Missing --download argument with --headless:
+        2. Missing --run/--download argument with --headless:
            - Command returns exit code 1 (failure)
-           - Error message contains "Error: --headless requires --download"
+           - Error message contains "Error: --headless requires --run"
         3. Using --download without --headless:
            - Command returns exit code 1 (failure)
            - Error message contains "Error: --download requires --headless"
@@ -171,7 +171,9 @@ class TestCLIHeadless:
             errors="replace",
         )
         assert result.returncode == 1
-        assert "Error: --headless requires --download" in (result.stdout or "")
+        assert "Error: --headless requires --run (solve the case) or --download" in (
+            result.stdout or ""
+        )
 
         # Test download without headless
         result = subprocess.run(

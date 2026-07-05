@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=64", "setuptools_scm[toml]>=6.2"]
 
 [project]
 classifiers = [
@@ -94,6 +94,12 @@ convention = "numpy"
 
 [tool.setuptools]
 packages = ["boulder"]
+
+[tool.setuptools.package-data]
+# Ship the prebuilt React frontend (emitted by `npm run build` into
+# boulder/_frontend) inside the wheel so the GUI works on a plain
+# `pip install` without Node/npm. The frontend is built in CI on release.
+boulder = ["_frontend/**/*"]
 
 [tool.setuptools_scm]
 write_to = "boulder/version.py"

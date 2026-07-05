@@ -73,7 +73,30 @@ function RenderContent({ item }: { item: PluginContentItem }) {
         margin: { t: 40, b: 60, l: 70, r: 30 },
         height: 350,
       };
-      const mergedLayout = { ...layoutDefaults, ...(figure.layout ?? {}) };
+      const mergedLayout: Record<string, unknown> = {
+        ...layoutDefaults,
+        ...(figure.layout ?? {}),
+      };
+      // Theme-aware grid on every axis (same convention as the built-in
+      // Plots/Convergence tabs), unless the plugin set its own colors.
+      const gridcolor = theme === "dark" ? "#333" : "#e0e0e0";
+      if (!("xaxis" in mergedLayout)) mergedLayout.xaxis = {};
+      if (!("yaxis" in mergedLayout)) mergedLayout.yaxis = {};
+      for (const key of Object.keys(mergedLayout)) {
+        if (!/^[xy]axis\d*$/.test(key)) continue;
+        const axis = mergedLayout[key];
+        if (axis && typeof axis === "object") {
+          const ax = axis as Record<string, unknown>;
+          ax.gridcolor ??= gridcolor;
+          ax.zerolinecolor ??= gridcolor;
+        }
+      }
+      // Give the container an explicit CSS height matching the figure height:
+      // without it a pane-toggle resize can collapse stacked grid items onto
+      // each other (the plot div's height would derive from plotly's own
+      // absolute-positioned children).
+      const figureHeight =
+        typeof mergedLayout.height === "number" ? mergedLayout.height : 350;
       return (
         <Plot
           data={(figure.data ?? []) as Plotly.Data[]}
@@ -81,6 +104,7 @@ function RenderContent({ item }: { item: PluginContentItem }) {
           config={{ responsive: true, displayModeBar: false }}
           useResizeHandler
           className="w-full"
+          style={{ width: "100%", height: figureHeight, minHeight: figureHeight }}
         />
       );
     }

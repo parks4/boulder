@@ -47,8 +47,29 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import cantera as ct
-import h5py
+
+try:
+    import h5py
+except ImportError as _h5py_exc:  # pragma: no cover - environment-dependent
+    # h5py can fail to import in environments with mismatched HDF5 DLLs (e.g.
+    # a pip-wheel Cantera inside a conda env).  The payload store is a
+    # best-effort cache: degrade to "no persistence" instead of failing to
+    # import (which would prevent the server from starting).
+    h5py = None  # type: ignore[assignment]
+    _H5PY_IMPORT_ERROR: Optional[BaseException] = _h5py_exc
+else:
+    _H5PY_IMPORT_ERROR = None
 import numpy as np
+
+
+def _require_h5py() -> None:
+    """Raise a clear error when the HDF5 backend is unavailable."""
+    if h5py is None:
+        raise RuntimeError(
+            f"h5py is unavailable, result payload persistence is disabled "
+            f"(import error: {_H5PY_IMPORT_ERROR})"
+        )
+
 
 #: Bump when the HDF5 layout changes incompatibly (== root ``schema_version``).
 PAYLOAD_SCHEMA = 1
@@ -282,6 +303,7 @@ def write_payload(
         collection (``group`` set) pass ``fresh=False`` to append without wiping
         previously-written scenarios.
     """
+    _require_h5py()
     h5_path = Path(h5_path)
     if fresh and group is None and h5_path.exists():
         h5_path.unlink()
@@ -360,6 +382,7 @@ def read_payload(
     ``group`` selects one scenario's composite from a collection file. Raises on
     restore failure; callers decide miss-vs-error (R1).
     """
+    _require_h5py()
     h5_path = Path(h5_path)
     prefix = f"{group}/" if group else ""
     with h5py.File(str(h5_path), "r") as handle:

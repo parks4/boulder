@@ -18,8 +18,14 @@ export function kelvinToCelsius(kelvin: number): number {
 
 /**
  * Format a number with appropriate precision and thousands separators.
+ * Very small or very large magnitudes fall back to scientific notation so
+ * SI-stored values (e.g. 5e-4 m, 1e19 m^-3) stay readable.
  */
 export function formatNumber(value: number, decimals: number = 2): string {
+  const abs = Math.abs(value);
+  if (value !== 0 && (abs < 0.01 || abs >= 1e6)) {
+    return value.toExponential(3);
+  }
   return value.toLocaleString("en-US", {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -42,6 +48,34 @@ const PROPERTY_DISPLAY_UNIT: Record<string, string> = {
   end_time: "s",
   max_time: "s",
   electric_power_kW: "kW",
+  // Generic geometric / electrical / timing keys (SI storage).
+  radius: "m",
+  initial_radius: "m",
+  gap: "m",
+  length: "m",
+  gas_temperature: "K",
+  electron_temperature: "K",
+  ambient_temperature: "K",
+  electrode_temperature: "K",
+  ambient_pressure: "Pa",
+  external_pressure: "Pa",
+  electron_density: "m⁻³",
+  voltage: "V",
+  off_voltage: "V",
+  internal_resistance: "Ω",
+  impedance: "Ω",
+  wire_resistance: "Ω",
+  wire_inductance: "H",
+  initial_current: "A",
+  wave_speed: "m/s",
+  pulse_energy: "J",
+  rise_time: "s",
+  on_time: "s",
+  fall_time: "s",
+  t_start: "s",
+  t_end: "s",
+  output_interval: "s",
+  tau_transition: "s",
 };
 
 /**

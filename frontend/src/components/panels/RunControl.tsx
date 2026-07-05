@@ -31,6 +31,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appliedDefault = useRef(false);
+  const appliedAutorun = useRef(false);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
 
   const loadSweepInfo = useCallback(() => {
@@ -90,6 +91,29 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
         toast.error(e instanceof Error ? e.message : String(e));
       });
   }, [sweep, refreshScenarios, loadSweepInfo]);
+
+  // `--run`: auto-start the run once, as soon as it is actually runnable.
+  useEffect(() => {
+    if (!sweep?.autorun || appliedAutorun.current) return;
+    if (effectiveMode === "sweep") {
+      if (!canSweep || sweeping || isRunning) return;
+      appliedAutorun.current = true;
+      handleRunSweep();
+    } else {
+      if (runDisabled) return; // wait until the config is loaded and idle
+      appliedAutorun.current = true;
+      onRunSimulation();
+    }
+  }, [
+    sweep,
+    effectiveMode,
+    canSweep,
+    sweeping,
+    isRunning,
+    runDisabled,
+    handleRunSweep,
+    onRunSimulation,
+  ]);
 
   const primaryLabel =
     effectiveMode === "sweep"
