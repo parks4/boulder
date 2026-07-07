@@ -64,6 +64,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     converter_cls = _converter_class or DualCanteraConverter
     # Store converter class so simulation routes can instantiate their own.
     app.state.converter_class = converter_cls
+    # Store runner class so routes can use its normalize/validate pipeline.
+    from ..runner import BoulderRunner as _BoulderRunner
+
+    app.state.runner_class = _runner_class or _BoulderRunner
     # Store a shared converter on the app state for routes to access
     # Handle potential Unicode issues on Windows by creating with a safe default
     try:

@@ -56,10 +56,20 @@ class ConfigSyncRequest(BaseModel):
 
 
 @router.get("/default")
-async def get_default_config() -> Dict[str, Any]:
-    """Return the default reactor network configuration with original YAML."""
+async def get_default_config(request: Request) -> Dict[str, Any]:
+    """Return the default reactor network configuration with original YAML.
+
+    The runner class registered by the CLI (stored on ``app.state.runner_class``)
+    is used to normalise the config so that host-specific defaults (e.g. an
+    application title injected by a custom runner) are applied even when no
+    config file was preloaded.
+    """
     try:
         config, original_yaml = get_initial_config_with_comments()
+        runner_cls = getattr(request.app.state, "runner_class", None)
+        if runner_cls is not None:
+            config = runner_cls.normalize(config)
+            config = runner_cls.validate(config)
         return {"config": config, "yaml": original_yaml}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -87,8 +97,12 @@ async def get_preloaded_config(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/parse")
-async def parse_yaml(body: YAMLParseRequest) -> Dict[str, Any]:
+async def parse_yaml(request: Request, body: YAMLParseRequest) -> Dict[str, Any]:
     """Parse a YAML string, normalise and validate it.
+
+    Uses the runner class registered by the CLI (``app.state.runner_class``) so
+    that host-specific normalisation (e.g. custom metadata defaults) is applied
+    consistently whether a config is preloaded or uploaded through the editor.
 
     Returns the validated internal-format config dict.
     """
@@ -96,8 +110,13 @@ async def parse_yaml(body: YAMLParseRequest) -> Dict[str, Any]:
         data = load_yaml_string_with_comments(body.yaml)
         # Convert ruamel CommentedMap to plain dict for normalisation
         plain = _to_plain_dict(data)
-        normalized = normalize_config(plain)
-        validated = validate_config(normalized)
+        runner_cls = getattr(request.app.state, "runner_class", None)
+        if runner_cls is not None:
+            normalized = runner_cls.normalize(plain)
+            validated = runner_cls.validate(normalized)
+        else:
+            normalized = normalize_config(plain)
+            validated = validate_config(normalized)
 
         return {"config": validated, "yaml": body.yaml}
     except Exception as exc:
@@ -155,11 +174,18 @@ async def sync_config(body: ConfigSyncRequest) -> Dict[str, Any]:
 
 
 @router.post("/upload")
-async def upload_config(file: UploadFile = File(...)) -> Dict[str, Any]:
+async def upload_config(
+    request: Request, file: UploadFile = File(...)
+) -> Dict[str, Any]:
     """Upload a YAML or Python config file and return the validated config.
 
     Supported extensions: ``.yaml``, ``.yml``, ``.py``.
     Python files are automatically converted to YAML via sim2stone.
+
+    Uses the runner class registered by the CLI (``app.state.runner_class``),
+    same as ``/parse``, so host-specific normalisation (e.g. custom metadata
+    defaults) is applied consistently whether a config is preloaded, parsed,
+    or uploaded through the editor.
     """
     if file.filename is None:
         raise HTTPException(status_code=400, detail="No filename provided")
@@ -203,8 +229,13 @@ async def upload_config(file: UploadFile = File(...)) -> Dict[str, Any]:
 
         data = load_yaml_string_with_comments(yaml_str)
         plain = _to_plain_dict(data)
-        normalized = normalize_config(plain)
-        validated = validate_config(normalized)
+        runner_cls = getattr(request.app.state, "runner_class", None)
+        if runner_cls is not None:
+            normalized = runner_cls.normalize(plain)
+            validated = runner_cls.validate(normalized)
+        else:
+            normalized = normalize_config(plain)
+            validated = validate_config(normalized)
 
         return {
             "config": validated,
