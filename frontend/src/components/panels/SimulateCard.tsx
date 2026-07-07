@@ -82,7 +82,12 @@ export function SimulateCard() {
     let cancelled = false;
 
     const doFetch = () =>
-      fetchGuiActions()
+      fetchGuiActions({
+        config: config as unknown as Record<string, unknown>,
+        config_yaml: originalYaml || null,
+        filename: fileName,
+        simulation_id: simulationId,
+      })
         .then((actions) => {
           if (!cancelled) setGuiActions(actions);
         })

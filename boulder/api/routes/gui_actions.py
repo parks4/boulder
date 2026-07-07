@@ -85,18 +85,13 @@ def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None)
     )
 
 
-@router.get("")
-async def list_actions(request: Request) -> list[Dict[str, Any]]:
-    """Return metadata for GUI actions available in the current context.
-
-    Each entry includes ``is_available`` so the frontend can disable the
-    button when the server knows the action cannot run yet (e.g. no cache
-    and no completed simulation).
-    """
+def _list_actions_response(
+    request: Request, body: Optional[GuiActionRunRequest]
+) -> list[Dict[str, Any]]:
     from ...gui_actions import get_gui_action_registry
 
     registry = get_gui_action_registry()
-    context = _build_context(request)
+    context = _build_context(request, body)
     return [
         {
             "id": action.action_id,
@@ -106,6 +101,35 @@ async def list_actions(request: Request) -> list[Dict[str, Any]]:
         }
         for action in registry.get_listed_actions(context)
     ]
+
+
+@router.get("")
+async def list_actions(request: Request) -> list[Dict[str, Any]]:
+    """Return metadata for GUI actions available in the *startup-preloaded* context.
+
+    Kept for backward compatibility with callers that have no live config to
+    report (e.g. a first paint before the frontend has fetched its own state).
+    Each entry includes ``is_available`` so the frontend can disable the
+    button when the server knows the action cannot run yet (e.g. no cache
+    and no completed simulation).  Prefer :func:`list_actions_for_context`
+    (``POST``) once a config is loaded in the browser, since a config edited
+    or uploaded client-side is invisible to this endpoint.
+    """
+    return _list_actions_response(request, None)
+
+
+@router.post("")
+async def list_actions_for_context(
+    body: GuiActionRunRequest,
+    request: Request,
+) -> list[Dict[str, Any]]:
+    """Return GUI action metadata for the *currently loaded* browser config.
+
+    Unlike ``GET /api/gui-actions``, this reflects ``body.config`` /
+    ``body.config_yaml`` — the config the user has uploaded or edited in the
+    browser — rather than only the config the server preloaded at startup.
+    """
+    return _list_actions_response(request, body)
 
 
 @router.post("/{action_id}/run")

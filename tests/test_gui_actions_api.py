@@ -89,6 +89,55 @@ class TestGuiActionsApi:
         assert echo["label"] == "Echo Export"
         assert echo["requires_simulation"] is False
 
+    def test_list_actions_for_context_reflects_uploaded_config(self):
+        """POST /api/gui-actions lists actions for a browser-uploaded config.
+
+        Asserts that an action gated on a config key (here ``export:``, via
+        a custom ``is_listed``) is listed when that key is present in
+        ``body.config``, even though the server's startup preload has no
+        config at all (``app.state.preloaded_config`` stays ``None``) —
+        reproducing the "Upload Config" flow where the server was launched
+        without a YAML argument.
+        """
+
+        class _ExportGatedAction(GuiActionPlugin):
+            @property
+            def action_id(self) -> str:
+                return "test_export_gated_action"
+
+            @property
+            def label(self) -> str:
+                return "Gated Export"
+
+            def is_listed(self, context: GuiActionContext) -> bool:
+                return bool(
+                    isinstance(context.config, dict) and "export" in context.config
+                )
+
+            def run(self, context: GuiActionContext) -> GuiActionResult:
+                return GuiActionResult(content=b"ok", filename="out.txt")
+
+        register_gui_action(_ExportGatedAction())
+        app = create_app()
+        with TestClient(app) as client:
+            assert app.state.preloaded_config is None
+
+            # GET (no context) must not see the gated action.
+            get_resp = client.get("/api/gui-actions")
+            assert get_resp.status_code == 200
+            assert all(
+                item["id"] != "test_export_gated_action" for item in get_resp.json()
+            )
+
+            # POST with the uploaded config must see it.
+            post_resp = client.post(
+                "/api/gui-actions",
+                json={"config": {"export": {"calc_note": "x.xlsx"}}},
+            )
+            assert post_resp.status_code == 200
+            listed_ids = [item["id"] for item in post_resp.json()]
+            assert "test_export_gated_action" in listed_ids
+
     def test_run_action(self, echo_action_client: TestClient):
         """POST /api/gui-actions/{id}/run returns attachment with filename."""
         resp = echo_action_client.post(
