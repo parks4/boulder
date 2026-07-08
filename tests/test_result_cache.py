@@ -13,12 +13,14 @@ Asserts:
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import FastAPI
 
 from boulder.result_cache import (
     CACHE_VERSION,
@@ -270,6 +272,27 @@ class TestPruning:
             d for d in tmp_path.iterdir() if d.is_dir() and (d / "COMPLETE").exists()
         ]
         assert len(complete_entries) == MAX_CACHE_ENTRIES
+
+    def test_env_raises_max_entries(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """BOULDER_CACHE_MAX_ENTRIES lifts the cap (batch/sweep runners need it)."""
+        from boulder.result_cache import MAX_CACHE_ENTRIES
+
+        n = MAX_CACHE_ENTRIES + 4
+        monkeypatch.setenv("BOULDER_CACHE_MAX_ENTRIES", str(n + 10))
+        for i in range(n):
+            save_result(
+                cache_root=tmp_path,
+                fingerprint=f"{i:064x}",
+                gui_payload=SIMPLE_PAYLOAD,
+                config_snapshot=SIMPLE_CONFIG,
+            )
+        complete_entries = [
+            d for d in tmp_path.iterdir() if d.is_dir() and (d / "COMPLETE").exists()
+        ]
+        # All kept: the raised cap exceeds the number of entries written.
+        assert len(complete_entries) == n
 
 
 class TestSourceIdentity:
@@ -552,3 +575,57 @@ class TestCachedEndpoint:
         resp = client_with_cache.get("/api/simulations/cached/artifacts/test.txt")
         assert resp.status_code == 200
         assert b"hello" in resp.content
+
+    @staticmethod
+    def _capture_boulder_log() -> "tuple[logging.Handler, list[str]]":
+        """Return a handler for the ``boulder`` logger (propagate=False; caplog is blind)."""
+        messages: list[str] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                messages.append(record.getMessage())
+
+        handler = _Capture(level=logging.INFO)
+        return handler, messages
+
+    def test_check_cache_logs_hit(self, client_with_cache: TestClient, tmp_path: Path):
+        """POST /check-cache announces a HIT clearly (the re-run cache message)."""
+        cfg = tmp_path / "case.yaml"
+        cfg.write_text("x: 1", encoding="utf-8")
+        cast(FastAPI, client_with_cache.app).state.preloaded_config_path = str(cfg)
+        pkg = logging.getLogger("boulder")
+        handler, messages = self._capture_boulder_log()
+        pkg.addHandler(handler)
+        try:
+            resp = client_with_cache.post(
+                "/api/simulations/check-cache", json={"config": SIMPLE_CONFIG}
+            )
+        finally:
+            pkg.removeHandler(handler)
+        assert resp.status_code == 200
+        assert resp.json()["cached"] is True
+        assert any("Cache HIT" in m for m in messages), messages
+
+    def test_check_cache_logs_miss(self, client_with_cache: TestClient, tmp_path: Path):
+        """POST /check-cache announces a MISS when the config differs."""
+        cfg = tmp_path / "case.yaml"
+        cfg.write_text("x: 1", encoding="utf-8")
+        cast(FastAPI, client_with_cache.app).state.preloaded_config_path = str(cfg)
+        other = {
+            **SIMPLE_CONFIG,
+            "nodes": [
+                {"id": "r1", "type": "IdealGasReactor", "properties": {"T": 2000}}
+            ],
+        }
+        pkg = logging.getLogger("boulder")
+        handler, messages = self._capture_boulder_log()
+        pkg.addHandler(handler)
+        try:
+            resp = client_with_cache.post(
+                "/api/simulations/check-cache", json={"config": other}
+            )
+        finally:
+            pkg.removeHandler(handler)
+        assert resp.status_code == 200
+        assert resp.json()["cached"] is False
+        assert any("Cache MISS" in m for m in messages), messages

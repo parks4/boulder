@@ -6,6 +6,7 @@ Cantera reactor network simulations.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Any, Dict, Optional
@@ -18,6 +19,8 @@ from ...cantera_converter import DualCanteraConverter
 from ...config import TRANSIENT_SOLVER_KINDS, synthesize_default_group
 from ...simulation_worker import SimulationWorker
 from ..sse import simulation_event_stream
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -304,6 +307,7 @@ async def check_simulation_cache(
     config_path = getattr(request.app.state, "preloaded_config_path", None)
     cache_root = cache_dir_for(config_path)
     if cache_root is None:
+        logger.info("Result cache disabled (no config path); running a fresh solve.")
         return {"cached": False}
 
     preloaded = getattr(request.app.state, "preloaded_result", None)
@@ -313,10 +317,19 @@ async def check_simulation_cache(
         mechanism=mechanism,
         preloaded_result=preloaded,
     )
+    # cache_root is set (guarded above), so the fingerprint is always computed.
+    assert fingerprint is not None
 
     if cached is None:
+        logger.info(
+            "Cache MISS (fingerprint %s): running a fresh solve.", fingerprint[:12]
+        )
         return {"cached": False}
 
+    logger.info(
+        "Cache HIT (fingerprint %s): retrieving result from cache, skipping solve.",
+        fingerprint[:12],
+    )
     meta = cached.get("meta", {})
     return {
         "cached": True,

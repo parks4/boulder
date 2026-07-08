@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 
 import cantera as ct  # type: ignore
 
-from .utils import reactor_phase
 from .verbose_utils import get_verbose_logger
 
 logger = get_verbose_logger(__name__)
@@ -514,7 +513,7 @@ class SimulationWorker:
         try:
             # Generate reports for each reactor
             for reactor_id, reactor in converter.reactors.items():
-                phase = reactor_phase(reactor)
+                phase = reactor.phase
                 if isinstance(reactor, ct.Reservoir):
                     # Handle Reservoirs - they maintain fixed thermodynamic conditions
                     current_T = phase.T
@@ -587,7 +586,7 @@ class SimulationWorker:
                 if not isinstance(device, ct.MassFlowController):
                     continue
                 upstream = device.upstream
-                thermo = reactor_phase(upstream)
+                thermo = upstream.phase
                 T = float(thermo.T)
                 P = float(thermo.P)
                 # Cantera molecular_weights in kg/kmol; X is mole fractions

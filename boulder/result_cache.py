@@ -64,7 +64,20 @@ logger = logging.getLogger(__name__)
 CACHE_VERSION: int = 2
 
 #: Keep at most this many cache entries per cache directory (oldest pruned first).
+#: Overridable via ``$BOULDER_CACHE_MAX_ENTRIES`` — batch/sweep runners raise it
+#: so a whole run-set fits (the default is tuned for interactive single runs).
 MAX_CACHE_ENTRIES: int = 5
+
+
+def _max_cache_entries() -> int:
+    """Cache-entry cap: ``$BOULDER_CACHE_MAX_ENTRIES`` if set, else the default."""
+    raw = os.environ.get("BOULDER_CACHE_MAX_ENTRIES", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return MAX_CACHE_ENTRIES
 
 
 # ---------------------------------------------------------------------------
@@ -711,15 +724,16 @@ def _prune_orphan_aliases(cache_root: Path) -> None:
 
 
 def _prune_cache(cache_root: Path) -> None:
-    """Remove oldest cache entries when count exceeds :data:`MAX_CACHE_ENTRIES`."""
+    """Remove oldest cache entries when count exceeds the cache-entry cap."""
+    limit = _max_cache_entries()
     entries = [
         d
         for d in cache_root.iterdir()
         if d.is_dir() and not d.name.startswith("_tmp_") and (d / "COMPLETE").exists()
     ]
-    if len(entries) > MAX_CACHE_ENTRIES:
+    if len(entries) > limit:
         entries.sort(key=lambda d: (d / "COMPLETE").stat().st_mtime)
-        for old in entries[: len(entries) - MAX_CACHE_ENTRIES]:
+        for old in entries[: len(entries) - limit]:
             shutil.rmtree(old, ignore_errors=True)
             logger.debug("Pruned cache entry: %s", old.name[:12])
     _prune_orphan_aliases(cache_root)
