@@ -29,7 +29,6 @@ from .reactor_energy import (
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
 from .staged_solver import _order_stage_nodes_for_flow
-from .utils import reactor_phase
 from .verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
@@ -478,7 +477,7 @@ class _TrajectoryRecorder:
             return
         for reactor in reactors:
             rid = getattr(reactor, "name", "") or str(id(reactor))
-            phase = reactor_phase(reactor)
+            phase = reactor.phase
             d = self._data.setdefault(
                 rid,
                 {
@@ -787,7 +786,7 @@ class DualCanteraConverter:
             src_r = self.reactors[src_id]
             if not isinstance(src_r, ct.Reservoir):
                 continue
-            sol = reactor_phase(src_r)
+            sol = src_r.phase
             return float(sol.T), float(sol.P), sol.Y.copy()
         return None
 

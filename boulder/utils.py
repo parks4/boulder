@@ -4,18 +4,6 @@ import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
-
-def reactor_phase(reactor: Any) -> Any:
-    """Contents phase of a reactor/reservoir, across Cantera versions.
-
-    Cantera >= 4 renamed ``ReactorBase.thermo`` to ``ReactorBase.phase``.
-    """
-    phase = getattr(reactor, "thermo", None)
-    if phase is None:
-        phase = reactor.phase
-    return phase
-
-
 # ---------------------------------------------------------------------------
 # Unit coercion helpers
 # ---------------------------------------------------------------------------
