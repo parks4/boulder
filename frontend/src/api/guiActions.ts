@@ -17,8 +17,22 @@ async function parseApiError(res: Response): Promise<string> {
   }
 }
 
-export async function fetchGuiActions(): Promise<GuiActionMeta[]> {
-  const res = await fetch("/api/gui-actions");
+/**
+ * Fetch GUI action metadata for the currently loaded browser config.
+ *
+ * Sends the live config/config_yaml/filename/simulation_id (same shape as
+ * {@link runGuiAction}) so the server can list actions based on what's
+ * actually loaded in the browser — e.g. after "Upload Config" — rather than
+ * only the config the server happened to preload at startup.
+ */
+export async function fetchGuiActions(
+  payload: GuiActionRunPayload = {},
+): Promise<GuiActionMeta[]> {
+  const res = await fetch("/api/gui-actions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${await parseApiError(res)}`);
   }

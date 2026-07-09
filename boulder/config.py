@@ -544,7 +544,9 @@ def _normalize_v2_network(raw: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     # Build internal format
-    result = {k: raw[k] for k in ("metadata", "phases", "settings") if k in raw}
+    result: Dict[str, Any] = {
+        k: raw[k] for k in ("metadata", "phases", "settings") if k in raw
+    }
     for k in (
         "output",
         "export",
@@ -846,7 +848,9 @@ def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
         }
         groups[sid] = group_entry
 
-    result = {k: raw[k] for k in ("metadata", "phases", "settings") if k in raw}
+    result: Dict[str, Any] = {
+        k: raw[k] for k in ("metadata", "phases", "settings") if k in raw
+    }
     for k in (
         "output",
         "export",
