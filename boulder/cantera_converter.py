@@ -242,6 +242,65 @@ def _select_network_class_for_stage(
     return resolved, net_kw
 
 
+def _series_from_stage_states(
+    states: Any, scalars: Optional[Dict[str, Any]] = None
+) -> Optional[Dict[str, Any]]:
+    """Flatten a stage network's ``.states`` SolutionArray into a GUI series.
+
+    A :class:`~boulder.stage_network.CustomStageNetwork` that integrates its
+    whole stage internally (its own macro-grid, a single ``advance`` call)
+    records the real trajectory in :attr:`~boulder.stage_network.CustomStageNetwork.states`.
+    The per-step trajectory recorder cannot see such a solve (it observes only
+    the outer reactor state at each grid step), so this surfaces the recorded
+    profile as the reactor's time series for the plots and output panes.
+
+    Returns ``None`` when there is no usable (>= 2 point) trajectory. Any extra
+    SolutionArray columns (e.g. plugin-specific ``T_e``/``n_e``) and the
+    network's JSON-serialisable ``scalars`` are carried through verbatim so
+    downstream panes can consume them.
+    """
+    if states is None:
+        return None
+    try:
+        t_col = [float(v) for v in states.t]
+    except Exception:  # noqa: BLE001 — any non-conforming states object: skip
+        return None
+    if len(t_col) < 2:
+        return None
+
+    # Core state variables come straight from the array; ``to_pandas`` is used
+    # only to enumerate the plugin-specific extra columns (``T_e``, ``n_e``, ...)
+    # since their names are not known ahead of time.
+    series: Dict[str, Any] = {
+        "t": t_col,
+        "T": [float(v) for v in states.T],
+        "P": [float(v) for v in states.P],
+    }
+    try:
+        names = list(states.species_names)
+        x_mat = np.atleast_2d(np.asarray(states.X, dtype=float))
+        if x_mat.shape[0] == len(t_col):
+            series["X"] = {
+                sp: [float(x_mat[i, j]) for i in range(x_mat.shape[0])]
+                for j, sp in enumerate(names)
+            }
+    except Exception:  # noqa: BLE001 — species optional; core variables suffice
+        pass
+    try:
+        frame = states.to_pandas()
+    except Exception:  # noqa: BLE001 — extras optional
+        frame = None
+    if frame is not None:
+        for col in frame.columns:
+            if col in series or col in ("density", "D") or col.startswith(("X_", "Y_")):
+                continue
+            series[col] = [float(v) for v in frame[col].tolist()]
+
+    for key, value in (scalars or {}).items():
+        series.setdefault(key, value)
+    return series
+
+
 def resolve_unset_flow_rates(
     mfc_topology: Dict[str, Tuple[str, str]],
     flow_rates: Dict[str, float],
@@ -1978,6 +2037,41 @@ class DualCanteraConverter:
                 ):
                     reactors_series[_rid] = _series
                     times[:] = _series["t"]
+
+            # CustomStageNetwork trajectory: a stage network that integrates its
+            # whole stage internally (one ``advance`` call over its own grid)
+            # records the real profile in ``.states`` — the per-step recorder
+            # above cannot capture it. Surface it as the reactor series so the
+            # built-in plots and plugin panes show the full trajectory.
+            _staged = getattr(self, "_staged_trajectory", None)
+            for _net in getattr(_staged, "networks", {}).values() if _staged else ():
+                _net_states = getattr(_net, "states", None)
+                _flat = _series_from_stage_states(
+                    _net_states, getattr(_net, "scalars", None)
+                )
+                if _flat is None:
+                    continue
+                _states_species = list(getattr(_net_states, "species_names", []))
+                for _r in getattr(_net, "reactors", []):
+                    if isinstance(_r, ct.Reservoir):
+                        continue
+                    # The stage records ONE profile: attach it only to the
+                    # reactor(s) whose phase it describes (matched by species
+                    # set), never to co-staged reactors on other mechanisms.
+                    _r_species = list(
+                        getattr(getattr(_r, "phase", None), "species_names", [])
+                    )
+                    if _states_species and _r_species != _states_species:
+                        continue
+                    _rid = getattr(_r, "name", "") or str(id(_r))
+                    _existing = reactors_series.get(_rid)
+                    if _existing is not None and _existing.get("is_spatial"):
+                        continue
+                    _cur_len = len((_existing or {}).get("t", []) or [])
+                    if len(_flat["t"]) > _cur_len:
+                        reactors_series[_rid] = _flat
+                        if len(_flat["t"]) > len(times):
+                            times[:] = _flat["t"]
 
             if progress_callback:
                 progress_callback(
