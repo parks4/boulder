@@ -1422,6 +1422,24 @@ class DualCanteraConverter:
             except AttributeError:
                 pass  # custom ReactorNet subclass may not support this
 
+        # Optional sparse preconditioner (opt-in via solver.use_preconditioner).
+        # Large-mechanism mole reactors integrated over long, near-inert horizons
+        # otherwise collapse into a stiff dense-Jacobian regime where the CVODES
+        # step underflows (t + h == t) and the solve stalls.  An
+        # AdaptivePreconditioner switches CVODES to a sparse iterative linear
+        # solver and makes those solves both fast and stable.  Guarded: reactor
+        # kinds that do not support preconditioning fall back to the dense solve.
+        if solver.get("use_preconditioner"):
+            try:
+                network.preconditioner = ct.AdaptivePreconditioner()
+            except Exception as exc:  # noqa: BLE001 — never block the solve on this
+                logger.warning(
+                    "Stage '%s': could not enable AdaptivePreconditioner (%s); "
+                    "falling back to the dense solver.",
+                    stage_id,
+                    exc,
+                )
+
         # Dispatch to the right integrator
         kind = str(solver.get("kind", "advance_to_steady_state"))
         if kind == "advance_to_steady_state":
