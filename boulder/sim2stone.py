@@ -237,6 +237,10 @@ def _mechanism_from_thermo(thermo: ct.ThermoPhase) -> Optional[str]:
         val = getattr(thermo, attr, None)
         if not isinstance(val, str) or not val:
             continue
+        if val == "<unknown>":
+            # Cantera's placeholder for Solutions created in memory (from
+            # species lists / other phases): there is no input file to name.
+            continue
         p = Path(val)
         parts = p.parts
         parts_lower = tuple(x.lower() for x in parts)
@@ -259,7 +263,7 @@ def _composition_to_string(thermo: ct.ThermoPhase, min_fraction: float = 1e-12) 
     Parameters
     ----------
     thermo
-        A Cantera ThermoPhase (e.g., ``reactor.thermo``).
+        A Cantera ThermoPhase (e.g., ``reactor.phase``).
     min_fraction
         Species with mole fraction below this threshold are omitted to keep the
         output readable.
@@ -481,7 +485,7 @@ def sim_to_internal_config(
             if isinstance(mech_override, str) and mech_override:
                 props["mechanism"] = mech_override
             else:
-                guessed = _mechanism_from_thermo(r.thermo)
+                guessed = _mechanism_from_thermo(r.phase)
                 if guessed:
                     props["mechanism"] = guessed
 

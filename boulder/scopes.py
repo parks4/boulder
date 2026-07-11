@@ -87,8 +87,8 @@ def resolve_scope_variable(
 
             def _read_mole_fraction(_r=reactor, _s=species) -> float:
                 try:
-                    idx = _r.thermo.species_index(_s)
-                    return float(_r.thermo.X[idx])
+                    idx = _r.phase.species_index(_s)
+                    return float(_r.phase.X[idx])
                 except Exception:
                     return float("nan")
 
@@ -99,8 +99,8 @@ def resolve_scope_variable(
 
             def _read_mass_fraction(_r=reactor, _s=species) -> float:
                 try:
-                    idx = _r.thermo.species_index(_s)
-                    return float(_r.thermo.Y[idx])
+                    idx = _r.phase.species_index(_s)
+                    return float(_r.phase.Y[idx])
                 except Exception:
                     return float("nan")
 
@@ -109,7 +109,7 @@ def resolve_scope_variable(
         # Scalar reactor attributes
         _REACTOR_ATTRS = {
             "T": lambda r: float(r.T),
-            "P": lambda r: float(r.thermo.P),
+            "P": lambda r: float(r.phase.P),
             "V": lambda r: float(r.volume) if hasattr(r, "volume") else float("nan"),
             "mass": lambda r: float(r.mass) if hasattr(r, "mass") else float("nan"),
         }
