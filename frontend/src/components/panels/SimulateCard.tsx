@@ -197,26 +197,30 @@ export function SimulateCard() {
 
     // Check whether a cached result already exists for the current config.
     // This avoids re-running the full simulation when nothing has changed.
-    // Only applies to steady-state mode; transient runs always execute fresh.
-    if (mode === "steady") {
-      try {
-        const cfgRaw = config as unknown as Record<string, unknown>;
-        const phases = cfgRaw.phases as Record<string, unknown> | undefined;
-        const gas = phases?.gas as Record<string, unknown> | undefined;
-        const mechStr = (gas?.mechanism as string | undefined) ?? null;
+    // Transient runs pass their time/step overrides so the server-side
+    // fingerprint matches what an actual run would have saved.
+    try {
+      const cfgRaw = config as unknown as Record<string, unknown>;
+      const phases = cfgRaw.phases as Record<string, unknown> | undefined;
+      const gas = phases?.gas as Record<string, unknown> | undefined;
+      const mechStr = (gas?.mechanism as string | undefined) ?? null;
 
-        const cacheResp = await checkSimulationCache(cfgRaw, mechStr);
-        if (cacheResp.cached) {
-          setResults(cacheResp.result);
-          const created = cacheResp.meta.created_at;
-          const ageMin = Math.round((Date.now() / 1000 - created) / 60);
-          const ageStr = ageMin < 2 ? "just now" : `${ageMin} min ago`;
-          toast.success(`Loaded cached results from ${ageStr}. Re-run skipped.`);
-          return;
-        }
-      } catch {
-        // Cache check failed (no config path, network error, etc.) — proceed normally.
+      const cacheResp = await checkSimulationCache(
+        cfgRaw,
+        mechStr,
+        mode === "transient" ? parseFloat(simTime) : undefined,
+        mode === "transient" ? parseFloat(timeStep) : undefined,
+      );
+      if (cacheResp.cached) {
+        setResults(cacheResp.result);
+        const created = cacheResp.meta.created_at;
+        const ageMin = Math.round((Date.now() / 1000 - created) / 60);
+        const ageStr = ageMin < 2 ? "just now" : `${ageMin} min ago`;
+        toast.success(`Loaded cached results from ${ageStr}. Re-run skipped.`);
+        return;
       }
+    } catch {
+      // Cache check failed (no config path, network error, etc.) — proceed normally.
     }
 
     beginSimulationRun();

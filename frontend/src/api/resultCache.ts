@@ -39,10 +39,20 @@ export function fetchCachedResult() {
 export function checkSimulationCache(
   config: Record<string, unknown>,
   mechanism?: string | null,
+  simulationTime?: number,
+  timeStep?: number,
 ): Promise<CacheCheckResponse> {
   return apiFetch<CacheCheckResponse>("/simulations/check-cache", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ config, mechanism: mechanism ?? null }),
+    body: JSON.stringify({
+      config,
+      mechanism: mechanism ?? null,
+      // Transient run overrides: the server injects these into
+      // settings.solver exactly like a run would, so the fingerprint
+      // matches what the worker saved.
+      simulation_time: simulationTime ?? null,
+      time_step: timeStep ?? null,
+    }),
   });
 }

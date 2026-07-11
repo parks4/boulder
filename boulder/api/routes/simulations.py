@@ -74,6 +74,56 @@ def _require_positive(value: float, name: str) -> None:
         raise HTTPException(status_code=422, detail=f"{name} must be > 0")
 
 
+def _resolve_run_grid(
+    config: Dict[str, Any],
+    body_simulation_time: Optional[float],
+    body_time_step: Optional[float],
+) -> tuple[float, float]:
+    """Resolve the run time/step and inject explicit overrides into the config.
+
+    Request-body overrides write into ``settings.solver.grid`` (in place) so
+    the normaliser / staged solver see them directly. This is the single
+    normalization both the run path and the cache check use: the cache
+    fingerprint is computed from the pre-build config, so a cache lookup must
+    transform the submitted config exactly like a run would.
+    """
+    settings = config.get("settings", {}) or {}
+    settings_simulation_time = float(
+        settings.get("end_time", settings.get("max_time", 10.0))
+    )
+    settings_time_step = float(settings.get("dt", settings.get("time_step", 1.0)))
+    simulation_time = (
+        body_simulation_time
+        if body_simulation_time is not None
+        else settings_simulation_time
+    )
+    time_step = body_time_step if body_time_step is not None else settings_time_step
+    _require_positive(time_step, "time_step")
+
+    # When the caller passes explicit time/step overrides, propagate them
+    # into settings.solver.grid so the new kind-dispatcher picks them up.
+    if body_simulation_time is not None or body_time_step is not None:
+        if not isinstance(config.get("settings"), dict):
+            config["settings"] = {}
+        solver_block = config["settings"].setdefault("solver", {})
+        # Only inject grid defaults when no transient kind already specified.
+        existing_kind = solver_block.get("kind", "")
+        if existing_kind not in TRANSIENT_SOLVER_KINDS:
+            solver_block.setdefault("kind", "advance_grid")
+        # Respect an already-declared grid (e.g. an explicit list of save
+        # times, or a {start,stop,dt} dict) — it is authoritative. Only
+        # synthesize a {stop,dt} grid from the time/step overrides when none
+        # exists yet (avoids indexing a list grid as a dict).
+        existing_grid = solver_block.get("grid")
+        if isinstance(existing_grid, dict):
+            existing_grid["stop"] = simulation_time
+            existing_grid["dt"] = time_step
+        elif existing_grid is None:
+            solver_block["grid"] = {"stop": simulation_time, "dt": time_step}
+        # else: explicit list grid — leave it untouched.
+    return simulation_time, time_step
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -127,42 +177,12 @@ async def start_simulation(
         if config_path is not None:
             converter._download_config_path = config_path
 
-        # Extract simulation parameters.  Request-body overrides write into
-        # settings.solver so the normaliser / staged solver see them directly.
-        settings = config.get("settings", {}) or {}
-        settings_simulation_time = float(
-            settings.get("end_time", settings.get("max_time", 10.0))
+        # Extract simulation parameters and inject explicit overrides into
+        # settings.solver (shared with the cache check, which must fingerprint
+        # the exact config a run would save).
+        simulation_time, time_step = _resolve_run_grid(
+            config, body.simulation_time, body.time_step
         )
-        settings_time_step = float(settings.get("dt", settings.get("time_step", 1.0)))
-        simulation_time = (
-            body.simulation_time
-            if body.simulation_time is not None
-            else settings_simulation_time
-        )
-        time_step = body.time_step if body.time_step is not None else settings_time_step
-        _require_positive(time_step, "time_step")
-
-        # When the caller passes explicit time/step overrides, propagate them
-        # into settings.solver.grid so the new kind-dispatcher picks them up.
-        if body.simulation_time is not None or body.time_step is not None:
-            if not isinstance(config.get("settings"), dict):
-                config["settings"] = {}
-            solver_block = config["settings"].setdefault("solver", {})
-            # Only inject grid defaults when no transient kind already specified.
-            existing_kind = solver_block.get("kind", "")
-            if existing_kind not in TRANSIENT_SOLVER_KINDS:
-                solver_block.setdefault("kind", "advance_grid")
-            # Respect an already-declared grid (e.g. an explicit list of save
-            # times, or a {start,stop,dt} dict) — it is authoritative. Only
-            # synthesize a {stop,dt} grid from the time/step overrides when none
-            # exists yet (avoids indexing a list grid as a dict).
-            existing_grid = solver_block.get("grid")
-            if isinstance(existing_grid, dict):
-                existing_grid["stop"] = simulation_time
-                existing_grid["dt"] = time_step
-            elif existing_grid is None:
-                solver_block["grid"] = {"stop": simulation_time, "dt": time_step}
-            # else: explicit list grid — leave it untouched.
 
         # Create a fresh worker for this simulation.
         # Pass app.state so the worker can update preloaded_result after the
@@ -296,7 +316,13 @@ async def check_simulation_cache(
         resolve_mechanism_for_fingerprint,
     )
 
+    # Normalize exactly like a run would: the worker fingerprints the
+    # pre-build config AFTER default-group synthesis and after any explicit
+    # time/step overrides were injected into settings.solver.grid — so the
+    # lookup must apply the same transforms (transient re-runs included).
     config = dict(body.config)
+    synthesize_default_group(config)
+    _resolve_run_grid(config, body.simulation_time, body.time_step)
     converter_cls = getattr(request.app.state, "converter_class", None)
     mechanism = resolve_mechanism_for_fingerprint(
         config,
