@@ -24,6 +24,14 @@ export interface ReactorSeries {
    * time [s] on the x-axis in the Plots tab.
    */
   is_residence?: boolean;
+  /**
+   * Composite / staged stage solvers may report which internal model was
+   * active when: the ordered model names, plus the switch times [s] between
+   * consecutive models (length = model_sequence.length - 1). Shown as the
+   * model timeline in the Convergence tab.
+   */
+  model_sequence?: string[];
+  switch_times_s?: number[];
 }
 
 /** Connection (e.g. MFC) report from backend: mass and volumetric flow rates. */

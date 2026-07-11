@@ -256,10 +256,106 @@ export function ConvergenceTab({ data }: Props) {
     );
   }
 
+  // --- Composite / staged stage solvers: model timeline ---
+  // A stage solver that switches between internal models reports the ordered
+  // model names and the switch times; show when each model was active and
+  // mark the switches on the temperature trend.
+  if (series?.model_sequence && series.model_sequence.length > 0) {
+    const times = series.t ?? data.times;
+    const sw = series.switch_times_s ?? [];
+    const tEnd = times.length > 0 ? times[times.length - 1] : undefined;
+    const rows = series.model_sequence.map((model, i) => ({
+      model,
+      from: i === 0 ? 0 : sw[i - 1],
+      to: i < sw.length ? sw[i] : tEnd,
+    }));
+    const switchShapes = sw.map((t) => ({
+      type: "line" as const,
+      x0: t,
+      x1: t,
+      yref: "paper" as const,
+      y0: 0,
+      y1: 1,
+      line: { dash: "dot" as const, width: 1 },
+    }));
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Staged solve: the stage solver switched between internal models at
+          the times below (dotted lines on the trend).
+        </p>
+        <table className="w-full max-w-md text-sm">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="pr-6 font-medium">#</th>
+              <th className="pr-6 font-medium">Model</th>
+              <th className="pr-6 font-medium">From</th>
+              <th className="font-medium">To</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={`${r.model}-${i}`}>
+                <td className="pr-6">{i + 1}</td>
+                <td className="pr-6 font-mono">{r.model}</td>
+                <td className="pr-6">{fmtSeconds(r.from)}</td>
+                <td>{fmtSeconds(r.to)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Plot
+          data={[
+            {
+              // Log time axis: drop t = 0 so the ns-to-ms span stays legible.
+              x: times.map((t) => (t > 0 ? t : null)),
+              y: series.T ?? [],
+              type: "scatter",
+              mode: "lines",
+              name: selectedReactorId ?? "T",
+              line: { width: 2 },
+            },
+          ]}
+          layout={{
+            ...layoutDefaults,
+            title: {
+              text: "Temperature trend with model switches",
+              font: { size: 14 },
+            },
+            shapes: switchShapes,
+            xaxis: {
+              title: { text: "Time (s)", font: { size: 12 } },
+              type: "log",
+              gridcolor,
+            },
+            yaxis: {
+              title: { text: "Temperature (K)", font: { size: 12 } },
+              gridcolor,
+            },
+          }}
+          config={{ responsive: true, displayModeBar: false }}
+          useResizeHandler
+          className="w-full"
+        />
+      </div>
+    );
+  }
+
   // --- All other reactor types ---
   return (
     <p className="text-sm text-muted-foreground">
       No convergence data available for this reactor type.
     </p>
   );
+}
+
+/** Human-readable seconds with an engineering unit (ns / µs / ms / s). */
+function fmtSeconds(t?: number): string {
+  if (t === undefined || !Number.isFinite(t)) return "—";
+  if (t === 0) return "0 s";
+  const a = Math.abs(t);
+  if (a < 1e-6) return `${(t * 1e9).toPrecision(3)} ns`;
+  if (a < 1e-3) return `${(t * 1e6).toPrecision(3)} µs`;
+  if (a < 1) return `${(t * 1e3).toPrecision(3)} ms`;
+  return `${t.toPrecision(3)} s`;
 }
