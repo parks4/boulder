@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Plot from "react-plotly.js";
 import { coerceNumericSeries, pressureYAxis } from "@/lib/plotAxis";
 import { useSelectionStore } from "@/stores/selectionStore";
@@ -16,6 +16,27 @@ function traceModeForSamples(sampleCount: number): "lines" | "lines+markers" {
 export function PlotsTab({ data }: Props) {
   const selectedElement = useSelectionStore((s) => s.selectedElement);
   const theme = useThemeStore((s) => s.theme);
+
+  // Shared x-range: zoom/pan on any plot synchronizes all of them
+  // (double-click autoscale resets the whole set).
+  const [xRange, setXRange] = useState<[number, number] | null>(null);
+  const syncXRelayout = useCallback((event: unknown) => {
+    const e = event as Record<string, unknown>;
+    if (e["xaxis.autorange"]) {
+      setXRange(null);
+    } else if (
+      e["xaxis.range[0]"] !== undefined &&
+      e["xaxis.range[1]"] !== undefined
+    ) {
+      setXRange([Number(e["xaxis.range[0]"]), Number(e["xaxis.range[1]"])]);
+    } else if (Array.isArray(e["xaxis.range"])) {
+      const r = e["xaxis.range"] as [unknown, unknown];
+      setXRange([Number(r[0]), Number(r[1])]);
+    }
+  }, []);
+  const xRangeProps = xRange
+    ? { range: [xRange[0], xRange[1]], autorange: false as const }
+    : {};
 
   // Determine which reactor to plot (selected only)
   const selectedReactorId = useMemo(() => {
@@ -132,10 +153,11 @@ export function PlotsTab({ data }: Props) {
             layout={{
               ...layoutDefaults,
               title: { text: `Temperature vs ${coordLabel}`, font: { size: 14 } },
-              xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },
+              xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor, ...xRangeProps },
               yaxis: { title: { text: "Temperature (°C)", font: { size: 12 } }, gridcolor },
             }}
             config={{ responsive: true, displayModeBar: false }}
+            onRelayout={syncXRelayout}
             useResizeHandler
             className="w-full"
           />
@@ -157,10 +179,11 @@ export function PlotsTab({ data }: Props) {
             layout={{
               ...layoutDefaults,
               title: { text: `Pressure vs ${coordLabel}`, font: { size: 14 } },
-              xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },
+              xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor, ...xRangeProps },
               yaxis: pressureYAxis(gridcolor),
             }}
             config={{ responsive: true, displayModeBar: false }}
+            onRelayout={syncXRelayout}
             useResizeHandler
             className="w-full"
           />
@@ -177,7 +200,7 @@ export function PlotsTab({ data }: Props) {
                   text: `Mole fraction vs ${coordLabel} (main species)`,
                   font: { size: 14 },
                 },
-                xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },
+                xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor, ...xRangeProps },
                 yaxis: {
                   title: { text: "Mole fraction", font: { size: 12 } },
                   gridcolor,
@@ -185,6 +208,7 @@ export function PlotsTab({ data }: Props) {
                 },
               }}
               config={{ responsive: true, displayModeBar: false }}
+              onRelayout={syncXRelayout}
               useResizeHandler
               className="w-full"
             />
@@ -202,7 +226,7 @@ export function PlotsTab({ data }: Props) {
                   text: `Mass fraction vs ${coordLabel} (main species)`,
                   font: { size: 14 },
                 },
-                xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor },
+                xaxis: { title: { text: xLabel, font: { size: 12 } }, gridcolor, ...xRangeProps },
                 yaxis: {
                   title: { text: "Mass fraction", font: { size: 12 } },
                   gridcolor,
@@ -210,6 +234,7 @@ export function PlotsTab({ data }: Props) {
                 },
               }}
               config={{ responsive: true, displayModeBar: false }}
+              onRelayout={syncXRelayout}
               useResizeHandler
               className="w-full"
             />
@@ -285,6 +310,7 @@ export function PlotsTab({ data }: Props) {
               showlegend: false,
             }}
             config={{ responsive: true, displayModeBar: false }}
+            onRelayout={syncXRelayout}
             useResizeHandler
             className="w-full"
           />
@@ -307,6 +333,7 @@ export function PlotsTab({ data }: Props) {
               showlegend: false,
             }}
             config={{ responsive: true, displayModeBar: false }}
+            onRelayout={syncXRelayout}
             useResizeHandler
             className="w-full"
           />
@@ -361,6 +388,7 @@ export function PlotsTab({ data }: Props) {
             xaxis: {
               title: { text: "Time (s)", font: { size: 12 } },
               gridcolor,
+              ...xRangeProps,
             },
             yaxis: {
               title: { text: "Temperature (°C)", font: { size: 12 } },
@@ -368,6 +396,7 @@ export function PlotsTab({ data }: Props) {
             },
           }}
           config={{ responsive: true, displayModeBar: false }}
+          onRelayout={syncXRelayout}
           useResizeHandler
           className="w-full"
         />
@@ -392,10 +421,12 @@ export function PlotsTab({ data }: Props) {
             xaxis: {
               title: { text: "Time (s)", font: { size: 12 } },
               gridcolor,
+              ...xRangeProps,
             },
             yaxis: pressureYAxis(gridcolor),
           }}
           config={{ responsive: true, displayModeBar: false }}
+          onRelayout={syncXRelayout}
           useResizeHandler
           className="w-full"
         />
@@ -415,6 +446,7 @@ export function PlotsTab({ data }: Props) {
               xaxis: {
                 title: { text: "Time (s)", font: { size: 12 } },
                 gridcolor,
+                ...xRangeProps,
               },
               yaxis: {
                 title: { text: "Mole fraction", font: { size: 12 } },
@@ -423,6 +455,7 @@ export function PlotsTab({ data }: Props) {
               },
             }}
             config={{ responsive: true, displayModeBar: false }}
+            onRelayout={syncXRelayout}
             useResizeHandler
             className="w-full"
           />
@@ -443,6 +476,7 @@ export function PlotsTab({ data }: Props) {
               xaxis: {
                 title: { text: "Time (s)", font: { size: 12 } },
                 gridcolor,
+                ...xRangeProps,
               },
               yaxis: {
                 title: { text: "Mass fraction", font: { size: 12 } },
@@ -451,6 +485,7 @@ export function PlotsTab({ data }: Props) {
               },
             }}
             config={{ responsive: true, displayModeBar: false }}
+            onRelayout={syncXRelayout}
             useResizeHandler
             className="w-full"
           />
