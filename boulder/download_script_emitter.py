@@ -268,6 +268,11 @@ class CanteraScriptEmitter:
         elif ntype == "IdealGasReactor":
             energy_kw = energy_ctor_suffix(props)
             out.append(f"{var} = ct.IdealGasReactor(gas_{var}, clone=True{energy_kw})")
+        elif ntype == "IdealGasMoleReactor":
+            energy_kw = energy_ctor_suffix(props)
+            out.append(
+                f"{var} = ct.IdealGasMoleReactor(gas_{var}, clone=True{energy_kw})"
+            )
         elif ntype == "ConstPressureReactor":
             energy_kw = energy_ctor_suffix(props)
             out.append(
@@ -621,10 +626,25 @@ class CanteraScriptEmitter:
             "inlet_states = {}",
             "",
             "def _parse_composition(comp_str):",
-            "    return {",
-            "        sp.strip(): float(val)",
-            "        for sp, val in (pair.split(':') for pair in comp_str.split(','))",
-            "    }",
+            "    # Some mechanisms (e.g. n-heptane-NUIG-2016.yaml) have species",
+            "    # names that themselves contain a ',' (e.g. 'C6H101-3,3'), so",
+            "    # splitting on every ',' before every ':' would misparse them.",
+            "    # Values are always plain floats, so a comma-separated fragment",
+            "    # is only a complete entry once the text after its last ':'",
+            "    # parses as one.",
+            "    comp = {}",
+            "    buf = None",
+            "    for fragment in comp_str.split(','):",
+            "        buf = fragment if buf is None else f'{buf},{fragment}'",
+            "        if ':' not in buf:",
+            "            continue",
+            "        name, _, value = buf.rpartition(':')",
+            "        try:",
+            "            comp[name.strip()] = float(value.strip())",
+            "        except ValueError:",
+            "            continue",
+            "        buf = None",
+            "    return comp",
             "",
             "def _apply_flow_conservation():",
             "    pending = set(_unresolved_mfc_ids)",

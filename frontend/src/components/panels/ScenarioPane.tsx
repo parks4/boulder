@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { SweepResultsPlot } from "./SweepResultsPlot";
 
 /** Compact relative-time label, e.g. "just now", "2 min ago", "3 h ago". */
 function timeAgo(tsSeconds: number | undefined, nowMs: number): string {
@@ -84,7 +85,9 @@ export function ScenarioPane() {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+    <div className="space-y-3">
+      <SweepResultsPlot scenarios={scenarios} />
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-sm text-foreground">Scenarios</h3>
         <span className="text-xs text-muted-foreground">{scenarios.length}</span>
@@ -140,6 +143,7 @@ export function ScenarioPane() {
           );
         })}
       </ul>
+      </div>
     </div>
   );
 }

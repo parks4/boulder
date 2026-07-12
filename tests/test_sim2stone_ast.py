@@ -274,6 +274,40 @@ class TestDetectSolverHint:
         assert solver is not None
         assert solver.kind == "micro_step"
 
+    def test_while_step_loop_advance_grid(self) -> None:
+        """while t < max_simulation_time: t = net.step() -> advance_grid.
+
+        Regression: continuous_reactor.py (and other upstream scripts) march
+        to a fixed end time via net.step() (adaptive internal steps), not
+        net.advance(t) — previously undetected, silently falling through to
+        no solver hint (defaulting to advance_to_steady_state, a different
+        algorithm than the source actually used).
+        """
+        src = """
+        max_simulation_time = 50.0
+        t = 0.0
+        while t < max_simulation_time:
+            t = reactor_network.step()
+        """
+        tree = _parse(src)
+        solver = _detect_solver_hint(tree)
+        assert solver is not None
+        assert solver.kind == "advance_grid"
+        assert solver.params["t_end"] == pytest.approx(50.0)
+
+    def test_while_step_loop_threshold_from_bare_name(self) -> None:
+        """The loop's own `x < threshold` comparator resolves the stop time
+        regardless of what the loop variable/threshold are named."""
+        src = """
+        t_stop_value = 12.5
+        while t < t_stop_value:
+            t = net.step()
+        """
+        tree = _parse(src)
+        solver = _detect_solver_hint(tree)
+        assert solver is not None
+        assert solver.params["t_end"] == pytest.approx(12.5)
+
     def test_advance_timing_extracted(self) -> None:
         """n_steps and step_size (from for loop AugAssign) are detected."""
         src = """

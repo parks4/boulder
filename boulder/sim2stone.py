@@ -468,18 +468,20 @@ def sim_to_internal_config(
             except (AttributeError, ValueError, TypeError):
                 pass
 
-            if isinstance(r, ct.ConstPressureReactor):
+            if hasattr(r, "energy_enabled"):
+                # Every Cantera reactor kind (not just ConstPressureReactor)
+                # exposes energy_enabled; emit it whenever it reads False so an
+                # isothermal (energy="off") reactor round-trips through STONE.
                 # Use quoted strings so YAML parsers can't coerce "on"/"off" to booleans.
                 from ruamel.yaml.scalarstring import (
                     DoubleQuotedScalarString,  # noqa: PLC0415
                 )
 
                 try:
-                    props["energy"] = DoubleQuotedScalarString(
-                        "on" if r.energy_enabled else "off"
-                    )
+                    if not r.energy_enabled:
+                        props["energy"] = DoubleQuotedScalarString("off")
                 except Exception:
-                    props["energy"] = DoubleQuotedScalarString("on")
+                    pass
 
             # Mechanism: node-level override first, then infer from thermo
             if isinstance(mech_override, str) and mech_override:
@@ -828,6 +830,14 @@ def _solver_kind_from_ast(
             return kind, {
                 "grid": {"start": 0.0, "stop": float(t_end), "dt": float(step_size)}
             }
+        if t_end is not None:
+            # No explicit step_size: the source used an adaptive-step loop
+            # (e.g. ``while t < t_end: t = sim.step()``) with no fixed dt of
+            # its own. Emit a fixed-dt grid that integrates to the same end
+            # time (and thus the same physical end state) at reasonable
+            # output resolution.
+            dt = float(t_end) / 500.0
+            return kind, {"grid": {"start": 0.0, "stop": float(t_end), "dt": dt}}
         if step_size is not None:
             # No n_steps but we have step_size; emit partial grid
             return kind, {"grid": {"start": 0.0, "dt": float(step_size)}}

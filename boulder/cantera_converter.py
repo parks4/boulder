@@ -658,10 +658,29 @@ class DualCanteraConverter:
         self._schedule_callbacks: List[Callable] = []
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
-        comp_dict = {}
-        for pair in comp_str.split(","):
-            species, value = pair.split(":")
-            comp_dict[species.strip()] = float(value)
+        """Parse a ``"species:value,species:value,..."`` composition string.
+
+        A handful of real mechanisms (e.g. ``n-heptane-NUIG-2016.yaml``) have
+        species names that themselves contain a literal comma (``C6H101-3,3``),
+        so naively splitting on every ``,`` before every ``:`` misparses them.
+        Values are always plain floats, so a fragment is only a complete entry
+        once the text after its last ``:`` parses as one; until then the next
+        comma-separated fragment is folded into the same (comma-bearing) name.
+        """
+        comp_dict: Dict[str, float] = {}
+        buf: Optional[str] = None
+        for fragment in comp_str.split(","):
+            buf = fragment if buf is None else f"{buf},{fragment}"
+            if ":" not in buf:
+                continue
+            name, _, value = buf.rpartition(":")
+            try:
+                comp_dict[name.strip()] = float(value.strip())
+            except ValueError:
+                continue  # value isn't numeric yet; more of the name follows
+            buf = None
+        if buf is not None:
+            raise ValueError(f"Malformed composition string: {comp_str!r}")
         return comp_dict
 
     # ------------------------------------------------------------------
