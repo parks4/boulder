@@ -7,6 +7,8 @@ export interface PluginMeta {
   supported_element_types: string[];
   /** Reactor kinds the plugin applies to (null/absent = any). */
   supported_node_types?: string[] | null;
+  /** Open this pane by default after a run (auto-selecting a node). */
+  preferred?: boolean;
 }
 
 /** A single content descriptor returned by a plugin. */

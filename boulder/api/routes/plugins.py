@@ -40,6 +40,7 @@ async def list_plugins() -> List[Dict[str, Any]]:
                     "supported_node_types": getattr(
                         plugin, "supported_node_types", None
                     ),
+                    "preferred": getattr(plugin, "preferred", False),
                 }
             )
         return result

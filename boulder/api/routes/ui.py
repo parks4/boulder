@@ -33,6 +33,23 @@ async def set_theme(body: ThemeBody, request: Request) -> Dict[str, Any]:
     return {"theme": theme}
 
 
+@router.get("/kind-schema/{kind}")
+async def get_kind_schema(kind: str) -> Dict[str, Any]:
+    """JSON schema for a node or connection kind (``schema: null`` if none).
+
+    Serves the declarative Pydantic schemas plugins register for their
+    kinds; the property panel uses it for field descriptions (tooltips),
+    enum options (dropdowns) and conditional visibility.
+    """
+    from ...schema_registry import get_kind_schema_json
+
+    try:
+        schema = get_kind_schema_json(kind)
+    except Exception:  # noqa: BLE001 - introspection must never break the UI
+        schema = None
+    return {"kind": kind, "schema": schema}
+
+
 @router.get("/branding")
 async def get_branding() -> Dict[str, Any]:
     """Return the host branding set by a plugin (name/version), if any.

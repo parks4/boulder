@@ -59,6 +59,36 @@ export function ResultsTabs() {
       .catch(() => setPlugins([]));
   }, [results, progress]);
 
+  // After a run completes with nothing selected and no explicit tab choice,
+  // open a plugin pane flagged `preferred` instead of the generic default —
+  // auto-selecting the first node the pane supports so it has content.
+  const setSelectedElement = useSelectionStore((s) => s.setSelectedElement);
+  const autoOpenedForRef = useRef(0);
+  useEffect(() => {
+    if (!results || activeTab !== null || selectedElement) return;
+    if (autoOpenedForRef.current === resultsVersionRef.current) return;
+    const pref = plugins.find((p) => p.preferred);
+    if (!pref) return;
+    const kinds = pref.supported_node_types ?? null;
+    const node = config.nodes.find(
+      (n) => !kinds || kinds.includes(String(n.type)),
+    );
+    if (!node && pref.requires_selection) return;
+    autoOpenedForRef.current = resultsVersionRef.current;
+    if (node) {
+      setSelectedElement({ type: "node", data: { id: node.id, type: node.type } });
+    }
+    setActiveTab(pref.label);
+  }, [
+    results,
+    plugins,
+    activeTab,
+    selectedElement,
+    config.nodes,
+    setActiveTab,
+    setSelectedElement,
+  ]);
+
   // If the error clears while viewing the Error tab, move back to a safe tab.
   useEffect(() => {
     if (!error && activeTab === ERROR_TAB_LABEL) setActiveTab("Plots");

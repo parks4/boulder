@@ -233,6 +233,34 @@ def get_schema_entry(kind: str) -> Optional[ReactorSchemaEntry]:
     return _SCHEMA_REGISTRY.get(kind)
 
 
+_CONNECTION_SCHEMAS: Dict[str, Type[Any]] = {}
+
+
+def register_connection_schema(kind: str, schema: Type[Any]) -> None:
+    """Register a Pydantic schema describing a *connection* kind's properties.
+
+    Connections (edges) have no :class:`ReactorSchemaEntry`; this lighter
+    registry lets plugins document their edge kinds so the GUI property
+    panel can render field descriptions, enum options and conditional
+    visibility (``json_schema_extra={"visible_when": {field: value}}``).
+    """
+    _CONNECTION_SCHEMAS[kind] = schema
+
+
+def get_kind_schema_json(kind: str) -> Optional[Dict[str, Any]]:
+    """JSON schema of a node *or* connection kind (None when unknown).
+
+    The single lookup the GUI needs: reactor kinds resolve through the
+    :class:`ReactorSchemaEntry` registry, connection kinds through
+    :func:`register_connection_schema`.
+    """
+    entry = _SCHEMA_REGISTRY.get(kind)
+    schema = entry.schema if entry is not None else _CONNECTION_SCHEMAS.get(kind)
+    if schema is None or not hasattr(schema, "model_json_schema"):
+        return None
+    return schema.model_json_schema()
+
+
 def registered_kinds() -> List[str]:
     """Return the list of reactor kinds that have a registered schema entry."""
     return sorted(_SCHEMA_REGISTRY.keys())
