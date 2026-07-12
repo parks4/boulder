@@ -6,6 +6,7 @@ Cantera reactor network simulations.
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
 import uuid
@@ -122,6 +123,25 @@ def _resolve_run_grid(
             solver_block["grid"] = {"stop": simulation_time, "dt": time_step}
         # else: explicit list grid — leave it untouched.
     return simulation_time, time_step
+
+
+def normalize_config_for_fingerprint(
+    config: Dict[str, Any],
+    simulation_time: Optional[float] = None,
+    time_step: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Copy of ``config`` transformed exactly as a run fingerprints it.
+
+    The worker fingerprints the pre-build config AFTER default-group
+    synthesis and after any explicit time/step overrides were injected into
+    ``settings.solver.grid`` — every cache lookup must apply the same
+    transforms or identical configs hash differently. The input is left
+    untouched.
+    """
+    normalized = copy.deepcopy(config)
+    synthesize_default_group(normalized)
+    _resolve_run_grid(normalized, simulation_time, time_step)
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -316,13 +336,10 @@ async def check_simulation_cache(
         resolve_mechanism_for_fingerprint,
     )
 
-    # Normalize exactly like a run would: the worker fingerprints the
-    # pre-build config AFTER default-group synthesis and after any explicit
-    # time/step overrides were injected into settings.solver.grid — so the
-    # lookup must apply the same transforms (transient re-runs included).
-    config = dict(body.config)
-    synthesize_default_group(config)
-    _resolve_run_grid(config, body.simulation_time, body.time_step)
+    # Normalize exactly like a run would (transient re-runs included).
+    config = normalize_config_for_fingerprint(
+        body.config, body.simulation_time, body.time_step
+    )
     converter_cls = getattr(request.app.state, "converter_class", None)
     mechanism = resolve_mechanism_for_fingerprint(
         config,

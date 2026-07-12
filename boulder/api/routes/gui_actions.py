@@ -59,14 +59,19 @@ def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None)
     cache_fingerprint = preloaded_fingerprint
 
     if body is not None and body.config is not None and isinstance(config, dict):
+        from .simulations import normalize_config_for_fingerprint
+
         converter_cls = getattr(request.app.state, "converter_class", None)
         mechanism = resolve_mechanism_for_fingerprint(
             config, converter_class=converter_cls
         )
         cache_root = cache_dir_for(preloaded_config_path)
+        # Fingerprint the config exactly as check-cache and the run do —
+        # a raw-config lookup would disagree with them for any config the
+        # normalization transforms.
         fingerprint, cached = lookup_cached_result(
             cache_root,
-            dict(config),
+            normalize_config_for_fingerprint(config),
             mechanism=mechanism,
             preloaded_result=preloaded_result,
         )
