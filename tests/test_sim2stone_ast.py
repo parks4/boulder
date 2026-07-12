@@ -275,7 +275,7 @@ class TestDetectSolverHint:
         assert solver.kind == "micro_step"
 
     def test_while_step_loop_advance_grid(self) -> None:
-        """while t < max_simulation_time: t = net.step() -> advance_grid.
+        """While t < max_simulation_time: t = net.step() -> advance_grid.
 
         Regression: continuous_reactor.py (and other upstream scripts) march
         to a fixed end time via net.step() (adaptive internal steps), not
@@ -296,8 +296,11 @@ class TestDetectSolverHint:
         assert solver.params["t_end"] == pytest.approx(50.0)
 
     def test_while_step_loop_threshold_from_bare_name(self) -> None:
-        """The loop's own `x < threshold` comparator resolves the stop time
-        regardless of what the loop variable/threshold are named."""
+        """The loop's own threshold resolves the stop time.
+
+        Matches ``x < threshold`` regardless of what the loop variable and
+        the threshold are named.
+        """
         src = """
         t_stop_value = 12.5
         while t < t_stop_value:
@@ -429,7 +432,7 @@ class TestExtractFromVendoredScripts:
         assert result.bindings == []
 
     def test_while_time_lt_tend_advance_grid(self, tmp_path) -> None:
-        """while sim.time < t_end with dt_max emits advance_grid timing params."""
+        """While sim.time < t_end with dt_max emits advance_grid timing params."""
         script = tmp_path / "reactor1_like.py"
         script.write_text(
             "dt_max = 1e-5\n"

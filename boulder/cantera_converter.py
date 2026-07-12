@@ -611,7 +611,9 @@ class DualCanteraConverter:
             mech_path, mech_phase = parse_mechanism_spec(self.mechanism)
             resolved_mechanism = self.resolve_mechanism(mech_path)
             cache_key = (
-                f"{resolved_mechanism}#{mech_phase}" if mech_phase else resolved_mechanism
+                f"{resolved_mechanism}#{mech_phase}"
+                if mech_phase
+                else resolved_mechanism
             )
             spec = (
                 f"{resolved_mechanism}#{mech_phase}"

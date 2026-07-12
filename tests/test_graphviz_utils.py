@@ -22,7 +22,9 @@ def test_ensure_graphviz_on_path_restores_dot_from_env_prefix():
     old_path = os.environ.get("PATH")
     old_prefix = os.environ.get("CONDA_PREFIX")
     os.environ["PATH"] = os.pathsep.join(
-        p for p in (old_path or "").split(os.pathsep) if "miniconda3" not in p and "conda" not in p
+        p
+        for p in (old_path or "").split(os.pathsep)
+        if "conda" not in p and "mamba" not in p
     )
     os.environ["CONDA_PREFIX"] = conda_prefix
     try:
@@ -54,7 +56,9 @@ def test_network_diagram_works_after_path_restore():
     old_path = os.environ.get("PATH")
     old_prefix = os.environ.get("CONDA_PREFIX")
     os.environ["PATH"] = os.pathsep.join(
-        p for p in (old_path or "").split(os.pathsep) if "miniconda3" not in p and "conda" not in p
+        p
+        for p in (old_path or "").split(os.pathsep)
+        if "conda" not in p and "mamba" not in p
     )
     os.environ["CONDA_PREFIX"] = conda_prefix
     try:

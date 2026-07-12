@@ -596,9 +596,7 @@ def _detect_continuation(tree: ast.AST) -> Optional[DetectedContinuation]:
 # ---------------------------------------------------------------------------
 
 
-def _loop_stop_threshold(
-    loop: ast.While, env: Dict[str, float]
-) -> Optional[float]:
+def _loop_stop_threshold(loop: ast.While, env: Dict[str, float]) -> Optional[float]:
     """Resolve a ``while <x> < <threshold>:`` loop's threshold to a float.
 
     Matches both ``while t < max_simulation_time:`` and
@@ -690,17 +688,16 @@ def _detect_solver_hint(tree: ast.AST) -> Optional[DetectedSolver]:
         if not isinstance(node, ast.Expr):
             continue
         call = node.value
-        if not (
-            isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Attribute)
-        ):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
             continue
         if call.func.attr == "advance_to_steady_state":
             return DetectedSolver(
                 kind="advance_to_steady_state", params={}, derived_via="ast_match"
             )
         if call.func.attr == "solve_steady":
-            return DetectedSolver(kind="solve_steady", params={}, derived_via="ast_match")
+            return DetectedSolver(
+                kind="solve_steady", params={}, derived_via="ast_match"
+            )
 
     return None
 
@@ -711,7 +708,7 @@ def _detect_advance_timing(tree: ast.AST) -> Dict[str, Any]:
     Looks for:
     - Named assignments: ``t_total``, ``t_end``, ``dt_max``, ``dt_chunk``, ``n_steps``, ``dt``
     - AugAssign increments inside For loops: ``time += 4e-4`` → ``step_size``
-  """
+    """
     timing: Dict[str, Any] = {}
     env: Dict[str, float] = {}
     tracked = ("t_total", "t_end", "dt_max", "dt_chunk", "n_steps", "step_size", "dt")
@@ -730,10 +727,10 @@ def _detect_advance_timing(tree: ast.AST) -> Dict[str, Any]:
                 timing[vname] = float(v)
 
     # Detect ``time += dt_value`` inside For loops
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.For):
+    for for_node in ast.walk(tree):
+        if not isinstance(for_node, ast.For):
             continue
-        for stmt in ast.walk(node):
+        for stmt in ast.walk(for_node):
             if not isinstance(stmt, ast.AugAssign):
                 continue
             if not isinstance(stmt.op, ast.Add):

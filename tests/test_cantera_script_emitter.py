@@ -133,8 +133,11 @@ class TestIdealGasMoleReactorEmission:
     """
 
     def test_emits_ideal_gas_mole_reactor_constructor(self):
-        """Exercise ``_emit_reactor`` directly (the ``emit()`` wrapper only
-        emits real reactor code when given a pre-built stage plan)."""
+        """Exercise ``_emit_reactor`` directly.
+
+        The ``emit()`` wrapper only emits real reactor code when given a
+        pre-built stage plan.
+        """
         from types import SimpleNamespace
 
         from boulder.download_script_emitter import CanteraScriptEmitter
