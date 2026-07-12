@@ -652,31 +652,55 @@ def sim_to_internal_config(
         else:
             cid = cid_raw
 
-        # Convert current heat rate to an equivalent electric power in kW (best effort)
         try:
-            q_watts = float(getattr(w, "heat_rate"))
+            heat_transfer_coeff = float(getattr(w, "heat_transfer_coeff"))
         except Exception:
-            q_watts = 0.0
-        # If heat flows from right to left (negative), invert orientation and use positive magnitude
-        if q_watts < 0:
-            electric_power_kW = (-q_watts) / 1e3
-            l_id, r_id = r_id, l_id
-        else:
-            electric_power_kW = q_watts / 1e3
+            heat_transfer_coeff = 0.0
 
-        # Create wall connection dictionary
-        wall_dict = {
-            "id": cid,
-            "type": "Wall",
-            "properties": {
-                "electric_power_kW": electric_power_kW,
-                # Efficiency unknown; preserve neutral defaults used by builder
-                "torch_eff": 1.0,
-                "gen_eff": 1.0,
-            },
-            "source": l_id,
-            "target": r_id,
-        }
+        if heat_transfer_coeff != 0.0:
+            # Passive heat-conduction wall (Q = U*A*(T_left - T_right), evaluated
+            # dynamically every step). Snapshotting heat_rate instead — the
+            # branch below — would freeze the flux at whatever it happens to be
+            # at conversion time (often ~0, since both sides usually start at
+            # the same temperature), silently discarding the U/A coupling.
+            wall_dict = {
+                "id": cid,
+                "type": "Wall",
+                "properties": {
+                    "heat_transfer_coeff": heat_transfer_coeff,
+                    "area": float(getattr(w, "area", 1.0)),
+                },
+                "source": l_id,
+                "target": r_id,
+            }
+        else:
+            # Convert current heat rate to an equivalent electric power in kW
+            # (best effort) — appropriate for torch-style walls whose Q is set
+            # via an explicit function rather than a U/A coefficient.
+            try:
+                q_watts = float(getattr(w, "heat_rate"))
+            except Exception:
+                q_watts = 0.0
+            # If heat flows from right to left (negative), invert orientation
+            # and use positive magnitude.
+            if q_watts < 0:
+                electric_power_kW = (-q_watts) / 1e3
+                l_id, r_id = r_id, l_id
+            else:
+                electric_power_kW = q_watts / 1e3
+
+            wall_dict = {
+                "id": cid,
+                "type": "Wall",
+                "properties": {
+                    "electric_power_kW": electric_power_kW,
+                    # Efficiency unknown; preserve neutral defaults used by builder
+                    "torch_eff": 1.0,
+                    "gen_eff": 1.0,
+                },
+                "source": l_id,
+                "target": r_id,
+            }
 
         # Add description from smart comment extraction if available
         if cid in object_comments:

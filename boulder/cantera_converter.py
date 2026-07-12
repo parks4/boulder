@@ -1130,7 +1130,19 @@ class DualCanteraConverter:
             pc.pressure_coeff = coeff  # type: ignore[attr-defined]
             self.connections[cid] = pc
         elif typ == "Wall":
-            if "electric_power_kW" in props:
+            if "heat_transfer_coeff" in props:
+                # Passive heat-conduction wall: Q = U*A*(T_left - T_right),
+                # recomputed every step from the two reactors' live temperatures
+                # (unlike electric_power_kW below, which is a fixed Q).
+                area = float(props.get("area", 1.0))
+                wall = ct.Wall(
+                    self.reactors[src],
+                    self.reactors[tgt],
+                    A=area,
+                    U=float(props["heat_transfer_coeff"]),
+                    name=cid,  # type: ignore[arg-type]
+                )
+            elif "electric_power_kW" in props:
                 # Torch-style wall: constant power delivered via electric heating.
                 torch_eff = float(props.get("torch_eff", 1.0))
                 gen_eff = float(props.get("gen_eff", 1.0))
