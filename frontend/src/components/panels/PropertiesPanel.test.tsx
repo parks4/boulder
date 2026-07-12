@@ -169,7 +169,7 @@ describe("PropertiesPanel delete confirmation", () => {
     render(<PropertiesPanel />);
 
     expect(screen.getByText("727.85 °C")).toBeInTheDocument();
-    expect(screen.getByText("101325")).toBeInTheDocument();
+    expect(screen.getByText("101,325.00")).toBeInTheDocument();
     expect(screen.getByText("H2:2,O2:1,N2:4")).toBeInTheDocument();
     expect(screen.queryByText("initial")).not.toBeInTheDocument();
   });
