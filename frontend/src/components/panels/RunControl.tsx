@@ -5,10 +5,10 @@ import { Button } from "@/components/ui/Button";
 import { getSweepInfo, getSweepStatus, startSweep, type SweepInfo } from "@/api/sweep";
 import { useScenarioStore } from "@/stores/scenarioStore";
 
-type RunMode = "sim" | "sweep";
+type RunMode = "sim" | "force_sim" | "sweep";
 
 interface RunControlProps {
-  onRunSimulation: () => void;
+  onRunSimulation: (force?: boolean) => void;
   isRunning: boolean;
   runDisabled: boolean;
 }
@@ -55,8 +55,13 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   }, [loadSweepInfo]);
 
   const canSweep = Boolean(sweep?.can_run);
-  // If the chosen mode is no longer valid, fall back to simulation.
-  const effectiveMode: RunMode = runMode === "sweep" && canSweep ? "sweep" : "sim";
+  // If sweep is unavailable, fall back to simulation (force_sim is kept as-is).
+  const effectiveMode: RunMode =
+    runMode === "sweep" && canSweep
+      ? "sweep"
+      : runMode === "force_sim"
+        ? "force_sim"
+        : "sim";
 
   const handleRunSweep = useCallback(() => {
     setSweeping(true);
@@ -99,10 +104,14 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
       if (!canSweep || sweeping || isRunning) return;
       appliedAutorun.current = true;
       handleRunSweep();
+    } else if (effectiveMode === "force_sim") {
+      if (runDisabled) return;
+      appliedAutorun.current = true;
+      onRunSimulation(true);
     } else {
       if (runDisabled) return; // wait until the config is loaded and idle
       appliedAutorun.current = true;
-      onRunSimulation();
+      onRunSimulation(false);
     }
   }, [
     sweep,
@@ -120,9 +129,13 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
       ? sweeping
         ? `Sweeping… ${progress.current}/${progress.total}`
         : `Run Sweep (${sweep?.n_scenarios ?? 0} scenarios)`
-      : isRunning
-        ? "Running…"
-        : "Run Simulation (Ctrl+Enter)";
+      : effectiveMode === "force_sim"
+        ? isRunning
+          ? "Running…"
+          : "Force Run"
+        : isRunning
+          ? "Running…"
+          : "Run Simulation (Ctrl+Enter)";
 
   const primaryDisabled =
     effectiveMode === "sweep" ? sweeping || isRunning || !canSweep : runDisabled;
@@ -130,7 +143,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
 
   const onPrimary = () => {
     if (effectiveMode === "sweep") handleRunSweep();
-    else onRunSimulation();
+    else onRunSimulation(effectiveMode === "force_sim");
   };
 
   return (
@@ -172,6 +185,15 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
               description="Solve the single reactor as configured."
               onClick={() => {
                 setRunMode("sim");
+                setMenuOpen(false);
+              }}
+            />
+            <RunModeItem
+              active={effectiveMode === "force_sim"}
+              title="Force Run"
+              description="Solve ignoring cache"
+              onClick={() => {
+                setRunMode("force_sim");
                 setMenuOpen(false);
               }}
             />

@@ -56,6 +56,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from ..verbose_utils import ensure_boulder_console_logging
 
     ensure_boulder_console_logging()
+    from ..graphviz_utils import ensure_graphviz_on_path
+
+    ensure_graphviz_on_path()
 
     # Startup: register built-in plugins and create global converter
     from ..cantera_converter import DualCanteraConverter

@@ -651,19 +651,22 @@ def _detect_solver_hint(tree: ast.AST) -> Optional[DetectedSolver]:
                 kind="advance_grid", params={}, derived_via="ast_match"
             )
 
-    # Top-level advance_to_steady_state
+    # Top-level steady solvers
     for node in ast.walk(tree):
         if not isinstance(node, ast.Expr):
             continue
         call = node.value
-        if (
+        if not (
             isinstance(call, ast.Call)
             and isinstance(call.func, ast.Attribute)
-            and call.func.attr == "advance_to_steady_state"
         ):
+            continue
+        if call.func.attr == "advance_to_steady_state":
             return DetectedSolver(
                 kind="advance_to_steady_state", params={}, derived_via="ast_match"
             )
+        if call.func.attr == "solve_steady":
+            return DetectedSolver(kind="solve_steady", params={}, derived_via="ast_match")
 
     return None
 
@@ -672,20 +675,25 @@ def _detect_advance_timing(tree: ast.AST) -> Dict[str, Any]:
     """Extract timing scalars from module-level assignments and for-loop increments.
 
     Looks for:
-    - Named assignments: ``t_total``, ``dt_max``, ``dt_chunk``, ``n_steps``, ``dt``
+    - Named assignments: ``t_total``, ``t_end``, ``dt_max``, ``dt_chunk``, ``n_steps``, ``dt``
     - AugAssign increments inside For loops: ``time += 4e-4`` → ``step_size``
-    """
+  """
     timing: Dict[str, Any] = {}
-    for node in ast.walk(tree):
+    env: Dict[str, float] = {}
+    tracked = ("t_total", "t_end", "dt_max", "dt_chunk", "n_steps", "step_size", "dt")
+
+    body = tree.body if isinstance(tree, ast.Module) else []
+    for node in body:
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
             continue
         vname = node.targets[0].id
-        if vname in ("t_total", "dt_max", "dt_chunk", "n_steps", "step_size", "dt"):
-            v = _eval_const(node.value)
-            if v is not None:
-                timing[vname] = v
+        v = _eval_const_extended(node.value, env)
+        if v is not None and isinstance(v, (int, float)):
+            env[vname] = float(v)
+            if vname in tracked:
+                timing[vname] = float(v)
 
     # Detect ``time += dt_value`` inside For loops
     for node in ast.walk(tree):

@@ -732,11 +732,14 @@ def _build_signals_bindings_blocks(
 
     # --- signals from AST-detected Func1 assignments ---
     for det_sig in ast_result.signals:
-        block: Dict[str, Any] = {"id": det_sig.signal_id, "kind": det_sig.kind}
-        for k, v in det_sig.params.items():
-            if not k.startswith("_"):
-                block[k] = v
-        block["_derived_via"] = det_sig.derived_via
+        params = {
+            k: v for k, v in det_sig.params.items() if not k.startswith("_")
+        }
+        block: Dict[str, Any] = {
+            "id": det_sig.signal_id,
+            det_sig.kind: params,
+            "_derived_via": det_sig.derived_via,
+        }
         signals.append(block)
 
     # --- bindings from AST-detected reduced_electric_field assignments ---
@@ -816,10 +819,15 @@ def _solver_kind_from_ast(
 
     if kind == "advance_grid":
         n_steps = params.get("n_steps")
-        step_size = params.get("step_size")
+        step_size = params.get("step_size") or params.get("dt_max") or params.get("dt")
+        t_end = params.get("t_end") or params.get("t_total")
         if n_steps is not None and step_size is not None:
             stop = float(n_steps) * float(step_size)
             return kind, {"grid": {"start": 0.0, "stop": stop, "dt": float(step_size)}}
+        if t_end is not None and step_size is not None:
+            return kind, {
+                "grid": {"start": 0.0, "stop": float(t_end), "dt": float(step_size)}
+            }
         if step_size is not None:
             # No n_steps but we have step_size; emit partial grid
             return kind, {"grid": {"start": 0.0, "dt": float(step_size)}}

@@ -394,6 +394,23 @@ class TestExtractFromVendoredScripts:
         assert result.signals == []
         assert result.bindings == []
 
+    def test_while_time_lt_tend_advance_grid(self, tmp_path) -> None:
+        """while sim.time < t_end with dt_max emits advance_grid timing params."""
+        script = tmp_path / "reactor1_like.py"
+        script.write_text(
+            "dt_max = 1e-5\n"
+            "t_end = 100 * dt_max\n"
+            "sim = object()\n"
+            "while sim.time < t_end:\n"
+            "    sim.advance(sim.time + dt_max)\n",
+            encoding="utf-8",
+        )
+        result = extract_from_source(str(script))
+        assert result.solver is not None
+        assert result.solver.kind == "advance_grid"
+        assert result.solver.params["dt_max"] == pytest.approx(1e-5)
+        assert result.solver.params["t_end"] == pytest.approx(1e-3)
+
     def test_nonexistent_file_returns_empty(self) -> None:
         """extract_from_source on a missing file returns empty result."""
         result = extract_from_source("/does/not/exist.py")
