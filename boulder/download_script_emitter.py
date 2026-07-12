@@ -363,7 +363,13 @@ class CanteraScriptEmitter:
             out.append(f"_mfc_topology[{cid!r}] = ({src!r}, {tgt!r})")
         elif ctype == "Wall":
             area = float(props.get("area", 1.0))
-            if "electric_power_kW" in props:
+            if "heat_transfer_coeff" in props:
+                u_coeff = float(props["heat_transfer_coeff"])
+                out.append(
+                    f"{cref} = ct.Wall({sv}, {tv}, A={area}, "
+                    f"U={u_coeff!r}, name={cid!r})"
+                )
+            elif "electric_power_kW" in props:
                 q_w = (
                     float(props["electric_power_kW"])
                     * 1e3
