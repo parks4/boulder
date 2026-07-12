@@ -73,6 +73,16 @@ class OutputPanePlugin(ABC):
         """
         return None
 
+    @property
+    def preferred(self) -> bool:
+        """Open this pane by default when a run completes.
+
+        When True and the user has neither picked a results tab nor selected
+        an element, the GUI auto-selects the first node this plugin supports
+        and activates its tab instead of the generic default.
+        """
+        return False
+
     def is_available(self, context: OutputPaneContext) -> bool:
         """Check if this plugin should be available given the current context.
 

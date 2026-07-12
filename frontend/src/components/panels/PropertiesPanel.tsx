@@ -1,7 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
+import { useKindSchema } from "@/hooks/useKindSchema";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteNodeModal } from "@/components/modals/ConfirmDeleteNodeModal";
 import { toast } from "sonner";
@@ -17,6 +18,15 @@ export function PropertiesPanel() {
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Field metadata from the kind's registered schema (descriptions, enum
+  // options, conditional visibility). Fetched before any early return so
+  // the hook order stays stable.
+  const schemaKind =
+    selectedElement && !selectedElement.data.isGroup
+      ? String(selectedElement.data.type ?? "")
+      : "";
+  const schemaMeta = useKindSchema(schemaKind);
 
   if (!selectedElement) {
     return (
@@ -72,6 +82,29 @@ export function PropertiesPanel() {
   const isStreamPoint = isNode && Boolean(properties.stream_point);
   const isTerminalSink = isNode && Boolean(properties.terminal_sink);
   const isComputedStream = isStreamPoint || isTerminalSink;
+
+  // A field with visible_when metadata is shown only while every referenced
+  // sibling holds the required value (e.g. nb_reflections only for the
+  // "series" reflection model). Evaluated against the live edit values while
+  // editing so toggling the controlling field reveals its dependents.
+  const isFieldVisible = (key: string): boolean => {
+    const cond = schemaMeta?.[key]?.visibleWhen;
+    if (!cond) return true;
+    return Object.entries(cond).every(([dep, expected]) => {
+      const current = isEditing ? editValues[dep] : properties[dep];
+      return String(current ?? "") === String(expected);
+    });
+  };
+
+  // Tooltip text: the schema description, plus the enum options if any.
+  const fieldTooltip = (key: string): string | undefined => {
+    const meta = schemaMeta?.[key];
+    if (!meta) return undefined;
+    const parts: string[] = [];
+    if (meta.description) parts.push(meta.description);
+    if (meta.options) parts.push(`Options: ${meta.options.join(" | ")}`);
+    return parts.length ? parts.join("\n") : undefined;
+  };
 
   // Start editing
   const handleEdit = () => {
@@ -159,19 +192,42 @@ export function PropertiesPanel() {
         <div className="border-t border-border pt-2 mt-1">
           <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
           <div className="divide-y divide-border">
-            {Object.entries(properties).map(([key, value]) => (
+            {Object.entries(properties)
+              .filter(([key]) => isFieldVisible(key))
+              .map(([key, value]) => (
             <div key={key} className="py-1.5 flex items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground truncate">
+              <span
+                className={`text-xs text-muted-foreground truncate ${
+                  fieldTooltip(key) ? "cursor-help underline decoration-dotted" : ""
+                }`}
+                title={fieldTooltip(key)}
+              >
                 {labelWithUnit(key)}
               </span>
               {isEditing ? (
-                <input
-                  value={editValues[key] ?? ""}
-                  onChange={(e) =>
-                    setEditValues((prev) => ({ ...prev, [key]: e.target.value }))
-                  }
-                  className="w-28 text-xs px-1.5 py-1 rounded bg-input border border-border text-foreground"
-                />
+                schemaMeta?.[key]?.options ? (
+                  <select
+                    value={editValues[key] ?? ""}
+                    onChange={(e) =>
+                      setEditValues((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                    className="w-28 text-xs px-1.5 py-1 rounded bg-input border border-border text-foreground"
+                  >
+                    {schemaMeta[key].options!.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={editValues[key] ?? ""}
+                    onChange={(e) =>
+                      setEditValues((prev) => ({ ...prev, [key]: e.target.value }))
+                    }
+                    className="w-28 text-xs px-1.5 py-1 rounded bg-input border border-border text-foreground"
+                  />
+                )
               ) : (
                 <span className="text-xs font-mono text-foreground">
                   {key === "temperature" && typeof value === "number"

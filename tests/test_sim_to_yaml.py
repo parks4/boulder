@@ -40,10 +40,10 @@ def _build_test_network():
 
     # Flow devices
     mfc1 = ct.MassFlowController(
-        res_a, mixer, mdot=res_a.thermo.density * 2.5 / 0.21, name="Air Inlet"
+        res_a, mixer, mdot=res_a.phase.density * 2.5 / 0.21, name="Air Inlet"
     )
     mfc2 = ct.MassFlowController(
-        res_b, mixer, mdot=res_b.thermo.density * 1.0, name="Fuel Inlet"
+        res_b, mixer, mdot=res_b.phase.density * 1.0, name="Fuel Inlet"
     )
     valve = ct.Valve(mixer, downstream, K=10.0, name="Valve")
 

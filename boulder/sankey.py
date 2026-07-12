@@ -107,7 +107,7 @@ def _get_available_species_for_sankey_from_sim(sim) -> List[str]:
         all_available_species = set()
         for reactor in all_reactors:
             try:
-                reactor_species = set(reactor.thermo.species_names)
+                reactor_species = set(reactor.phase.species_names)
                 all_available_species.update(reactor_species)
             except Exception as e:
                 logger.debug(f"Could not get species from reactor {reactor.name}: {e}")
@@ -362,7 +362,7 @@ def generate_sankey_input_from_sim(
                 )  # kg/s0 - convert to Python float
                 if flow_type == "enthalpy":
                     upstream_enthalpy = float(
-                        outlet.upstream.thermo.enthalpy_mass
+                        outlet.upstream.phase.enthalpy_mass
                     )  # J/kg
                     energy_rate = flow_rate * upstream_enthalpy  # J/s = W
                     assert energy_rate > 0
@@ -377,7 +377,7 @@ def generate_sankey_input_from_sim(
                     from .ctutils import heating_values
 
                     lhv, hhv = heating_values(
-                        outlet.upstream.thermo, mechanism=mechanism
+                        outlet.upstream.phase, mechanism=mechanism
                     )  # J/kg
                     # TODO define temperature reference when computing HHV
                     # (and make it consistent with the one used in sensible enthalpy)
@@ -406,7 +406,7 @@ def generate_sankey_input_from_sim(
                             raise NotImplementedError(f"{s} not implemented yet")
 
                         # Check if species exists in the upstream reactor
-                        if s not in outlet.upstream.thermo.species_names:
+                        if s not in outlet.upstream.phase.species_names:
                             if if_no_species == "ignore":
                                 # Skip this species silently
                                 continue
@@ -423,9 +423,9 @@ def generate_sankey_input_from_sim(
                                 # Default to ignore for unknown options
                                 continue
 
-                        species_index = outlet.upstream.thermo.species_index(s)
+                        species_index = outlet.upstream.phase.species_index(s)
                         energy_rate_s = float(
-                            flow_rate * outlet.upstream.thermo.Y[species_index] * hhv_s
+                            flow_rate * outlet.upstream.phase.Y[species_index] * hhv_s
                         )  # J/s = W - convert to Python float
                         # remove energy rate of this species from the remaining energy rate:
                         energy_rate -= energy_rate_s
@@ -444,9 +444,9 @@ def generate_sankey_input_from_sim(
                     # ----------------------------------------
                     from .ctutils import get_STP_properties_IUPAC
 
-                    _, enthalpy_STP = get_STP_properties_IUPAC(outlet.upstream.thermo)
+                    _, enthalpy_STP = get_STP_properties_IUPAC(outlet.upstream.phase)
                     sensible_enthalpy = float(
-                        outlet.upstream.thermo.enthalpy_mass - enthalpy_STP
+                        outlet.upstream.phase.enthalpy_mass - enthalpy_STP
                     )  # J/kg
 
                     sensible_energy_rate = flow_rate * sensible_enthalpy  # J/s = W

@@ -166,7 +166,7 @@ class CanteraScriptEmitter:
             if src_node.get("type") in _RESERVOIR_TYPES:
                 sv = self._vn(str(src_id))
                 return [
-                    f"_up = {sv}.thermo",
+                    f"_up = {sv}.phase",
                     f"gas_{var}.TPY = _up.T, _up.P, _up.Y",
                 ]
         return []

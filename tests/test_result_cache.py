@@ -12,6 +12,7 @@ Asserts:
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import time
@@ -529,13 +530,20 @@ class TestCachedEndpoint:
         We set app.state inside the TestClient context manager (after lifespan
         startup) so that the lifespan reset does not overwrite our value.
         """
+        from boulder.config import synthesize_default_group
+
         fingerprint = "j" * 64
         artifacts_dir = tmp_path / "artifacts"
         artifacts_dir.mkdir()
+        # Real cache entries snapshot the config the worker received — i.e.
+        # AFTER default-group synthesis — and /check-cache normalizes the
+        # submitted config the same way before fingerprinting.
+        snapshot = copy.deepcopy(SIMPLE_CONFIG)
+        synthesize_default_group(snapshot)
         cache_data = {
             "fingerprint": fingerprint,
             "gui_payload": SIMPLE_PAYLOAD,
-            "config_snapshot": SIMPLE_CONFIG,
+            "config_snapshot": snapshot,
             "meta": {"cache_version": CACHE_VERSION, "created_at": time.time()},
             "artifacts_dir": artifacts_dir,
         }
@@ -605,6 +613,61 @@ class TestCachedEndpoint:
         assert resp.status_code == 200
         assert resp.json()["cached"] is True
         assert any("Cache HIT" in m for m in messages), messages
+
+    def test_check_cache_matches_transient_overrides(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Transient re-runs hit: the check injects time/step like a run would.
+
+        A worker that ran with explicit ``simulation_time``/``time_step``
+        saved a snapshot whose ``settings.solver.grid`` carries them; a
+        /check-cache call with the same overrides must produce the same
+        fingerprint (and a different ``simulation_time`` must not).
+        """
+        from boulder.api.routes.simulations import _resolve_run_grid
+        from boulder.config import synthesize_default_group
+
+        snapshot = copy.deepcopy(SIMPLE_CONFIG)
+        synthesize_default_group(snapshot)
+        _resolve_run_grid(snapshot, 5.0, 0.5)
+
+        fingerprint = "k" * 64
+        artifacts_dir = tmp_path / "artifacts2"
+        artifacts_dir.mkdir()
+        app = create_app()
+        with TestClient(app) as client:
+            app.state.preloaded_result = {
+                "fingerprint": fingerprint,
+                "gui_payload": SIMPLE_PAYLOAD,
+                "config_snapshot": snapshot,
+                "meta": {"cache_version": CACHE_VERSION, "created_at": time.time()},
+                "artifacts_dir": artifacts_dir,
+            }
+            cfg = tmp_path / "case2.yaml"
+            cfg.write_text("x: 1", encoding="utf-8")
+            app.state.preloaded_config_path = str(cfg)
+
+            hit = client.post(
+                "/api/simulations/check-cache",
+                json={
+                    "config": SIMPLE_CONFIG,
+                    "simulation_time": 5.0,
+                    "time_step": 0.5,
+                },
+            )
+            assert hit.status_code == 200
+            assert hit.json()["cached"] is True
+
+            miss = client.post(
+                "/api/simulations/check-cache",
+                json={
+                    "config": SIMPLE_CONFIG,
+                    "simulation_time": 7.0,
+                    "time_step": 0.5,
+                },
+            )
+            assert miss.status_code == 200
+            assert miss.json()["cached"] is False
 
     def test_check_cache_logs_miss(self, client_with_cache: TestClient, tmp_path: Path):
         """POST /check-cache announces a MISS when the config differs."""

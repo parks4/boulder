@@ -18,8 +18,10 @@ def test_sim2stone_preserves_per_node_mechanisms() -> None:
     gas_air.TPX = 300.0, ct.one_atm, "N2:0.78,O2:0.21,AR:0.01"
     gas_gri.TPX = 300.0, ct.one_atm, "CH4:1"
 
-    r1 = ct.IdealGasReactor(gas_air, name="R1")
-    r2 = ct.IdealGasReactor(gas_gri, name="R2")
+    # clone=False: Cantera 4 clones the contents by default, and a cloned
+    # Solution loses its `source` (the serializer's mechanism inference).
+    r1 = ct.IdealGasReactor(gas_air, name="R1", clone=False)
+    r2 = ct.IdealGasReactor(gas_gri, name="R2", clone=False)
 
     # Hint serializer if supported
     try:
