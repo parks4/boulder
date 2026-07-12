@@ -122,6 +122,45 @@ class TestBackwardCompatWrapper:
         assert isinstance(lines, list)
 
 
+class TestIdealGasMoleReactorEmission:
+    """IdealGasMoleReactor must emit like the other reactor kinds, not raise.
+
+    Regression: the runtime solve path (create_reactor_from_node) has
+    supported IdealGasMoleReactor since it gained an ``energy`` kwarg, but
+    the --download code emitter's _emit_reactor had no matching branch and
+    fell through to "Unsupported reactor type" for any config using it (e.g.
+    the continuous_reactor CSTR example, which needs energy="off").
+    """
+
+    def test_emits_ideal_gas_mole_reactor_constructor(self):
+        """Exercise ``_emit_reactor`` directly.
+
+        The ``emit()`` wrapper only emits real reactor code when given a
+        pre-built stage plan.
+        """
+        from types import SimpleNamespace
+
+        from boulder.download_script_emitter import CanteraScriptEmitter
+
+        node: Dict[str, Any] = {
+            "id": "r1",
+            "type": "IdealGasMoleReactor",
+            "properties": {
+                "temperature": 925,
+                "pressure": 101325,
+                "composition": "CH4:0.1, O2:0.2, N2:0.7",
+                "energy": "off",
+                "volume": 1.0,
+            },
+        }
+        stage = SimpleNamespace(mechanism="gri30.yaml")
+
+        lines = CanteraScriptEmitter()._emit_reactor(node, stage, conns=[])
+        joined = "\n".join(lines)
+        assert "ct.IdealGasMoleReactor(" in joined
+        assert "Unsupported reactor type" not in joined
+
+
 class TestScriptLinesForRunner:
     """Verify script_lines_for_runner is importable as a module-level function."""
 

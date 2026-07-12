@@ -1309,11 +1309,11 @@ def _collect_stage_states(
     # Resolve mechanism and create template
     mech = stage.mechanism
     try:
-        mech = converter.resolve_mechanism(mech)
-    except Exception:
-        pass
-    try:
-        gas_template = ct.Solution(mech)
+        from .ctutils import create_solution_from_spec
+
+        gas_template = create_solution_from_spec(
+            mech, resolver=converter.resolve_mechanism
+        )
     except Exception as exc:
         raise RuntimeError(
             f"Cannot create Solution for stage '{stage.id}' mechanism '{mech}': {exc}"
@@ -1411,11 +1411,9 @@ def _extract_gas_state(
     converter: "DualCanteraConverter",
 ) -> ct.Solution:
     """Return a new ``ct.Solution`` carrying the reactor's current thermo state."""
-    try:
-        mechanism = converter.resolve_mechanism(mechanism)
-    except Exception:
-        pass
-    gas = ct.Solution(mechanism)
+    from .ctutils import create_solution_from_spec
+
+    gas = create_solution_from_spec(mechanism, resolver=converter.resolve_mechanism)
     gas.TPY = reactor.phase.T, reactor.phase.P, reactor.phase.Y
     return gas
 

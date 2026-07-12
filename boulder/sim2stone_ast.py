@@ -596,28 +596,57 @@ def _detect_continuation(tree: ast.AST) -> Optional[DetectedContinuation]:
 # ---------------------------------------------------------------------------
 
 
+def _loop_stop_threshold(loop: ast.While, env: Dict[str, float]) -> Optional[float]:
+    """Resolve a ``while <x> < <threshold>:`` loop's threshold to a float.
+
+    Matches both ``while t < max_simulation_time:`` and
+    ``while reactor_network.time < max_simulation_time:`` — the left side
+    (name or attribute access) is unconstrained, only the threshold matters.
+    """
+    test = loop.test
+    if (
+        isinstance(test, ast.Compare)
+        and len(test.ops) == 1
+        and isinstance(test.ops[0], (ast.Lt, ast.LtE))
+    ):
+        return _eval_const_extended(test.comparators[0], env)
+    return None
+
+
 def _detect_solver_hint(tree: ast.AST) -> Optional[DetectedSolver]:
     """Derive solver hint from the main simulation loop.
 
     Patterns:
     - ``while t < t_total: ... sim.advance(sim.time + dt) ...``
       → ``advance_grid`` or ``micro_step``
+    - ``while t < max_simulation_time: t = sim.step() ...``
+      → ``advance_grid`` (adaptive-step transient march to a fixed end time;
+      Cantera's own step size varies, so sim2stone emits a fixed-``dt``
+      grid that integrates to the same end time and physical end state)
     - ``for n in range(n_steps): ... sim.advance(time) ...``
       → ``advance_grid``
     - ``sim.advance_to_steady_state()`` or ``sim.solve_steady()`` at top level
       → ``solve_steady`` (but solve_steady in a while loop → handled by
       continuation detection)
     """
+    scalar_env = _collect_scalar_assignments(tree)
+
     # Walk over all While loops to find transient advance loops
     for node in ast.walk(tree):
         if not isinstance(node, ast.While):
             continue
-        # Check for sim.advance call (not solve_steady)
+        # Check for sim.advance / sim.step calls (not solve_steady)
         has_advance = any(
             isinstance(s, ast.Expr)
             and isinstance(s.value, ast.Call)
             and isinstance(s.value.func, ast.Attribute)
             and s.value.func.attr == "advance"
+            for s in ast.walk(node)
+        )
+        has_step = any(
+            isinstance(s, ast.Call)
+            and isinstance(s.func, ast.Attribute)
+            and s.func.attr == "step"
             for s in ast.walk(node)
         )
         has_reinitialize = any(
@@ -627,12 +656,15 @@ def _detect_solver_hint(tree: ast.AST) -> Optional[DetectedSolver]:
             and s.value.func.attr == "reinitialize"
             for s in ast.walk(node)
         )
-        if has_advance:
+        if has_advance or has_step:
             # Micro-step if there is also a reinitialize (chunk-boundary update)
             kind = "micro_step" if has_reinitialize else "advance_grid"
             extra: Dict[str, Any] = {}
             if has_reinitialize:
                 extra["reinitialize_between_chunks"] = True
+            stop = _loop_stop_threshold(node, scalar_env)
+            if stop is not None:
+                extra.setdefault("t_end", stop)
             return DetectedSolver(kind=kind, params=extra, derived_via="ast_match")
 
     # Walk over For loops (for n in range(n_steps))
@@ -651,18 +683,20 @@ def _detect_solver_hint(tree: ast.AST) -> Optional[DetectedSolver]:
                 kind="advance_grid", params={}, derived_via="ast_match"
             )
 
-    # Top-level advance_to_steady_state
+    # Top-level steady solvers
     for node in ast.walk(tree):
         if not isinstance(node, ast.Expr):
             continue
         call = node.value
-        if (
-            isinstance(call, ast.Call)
-            and isinstance(call.func, ast.Attribute)
-            and call.func.attr == "advance_to_steady_state"
-        ):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
+            continue
+        if call.func.attr == "advance_to_steady_state":
             return DetectedSolver(
                 kind="advance_to_steady_state", params={}, derived_via="ast_match"
+            )
+        if call.func.attr == "solve_steady":
+            return DetectedSolver(
+                kind="solve_steady", params={}, derived_via="ast_match"
             )
 
     return None
@@ -672,26 +706,31 @@ def _detect_advance_timing(tree: ast.AST) -> Dict[str, Any]:
     """Extract timing scalars from module-level assignments and for-loop increments.
 
     Looks for:
-    - Named assignments: ``t_total``, ``dt_max``, ``dt_chunk``, ``n_steps``, ``dt``
+    - Named assignments: ``t_total``, ``t_end``, ``dt_max``, ``dt_chunk``, ``n_steps``, ``dt``
     - AugAssign increments inside For loops: ``time += 4e-4`` → ``step_size``
     """
     timing: Dict[str, Any] = {}
-    for node in ast.walk(tree):
+    env: Dict[str, float] = {}
+    tracked = ("t_total", "t_end", "dt_max", "dt_chunk", "n_steps", "step_size", "dt")
+
+    body = tree.body if isinstance(tree, ast.Module) else []
+    for node in body:
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
             continue
         vname = node.targets[0].id
-        if vname in ("t_total", "dt_max", "dt_chunk", "n_steps", "step_size", "dt"):
-            v = _eval_const(node.value)
-            if v is not None:
-                timing[vname] = v
+        v = _eval_const_extended(node.value, env)
+        if v is not None and isinstance(v, (int, float)):
+            env[vname] = float(v)
+            if vname in tracked:
+                timing[vname] = float(v)
 
     # Detect ``time += dt_value`` inside For loops
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.For):
+    for for_node in ast.walk(tree):
+        if not isinstance(for_node, ast.For):
             continue
-        for stmt in ast.walk(node):
+        for stmt in ast.walk(for_node):
             if not isinstance(stmt, ast.AugAssign):
                 continue
             if not isinstance(stmt.op, ast.Add):

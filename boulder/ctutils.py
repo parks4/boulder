@@ -2,10 +2,33 @@
 
 import inspect
 from pathlib import Path
+from typing import Callable, Optional
 
 import cantera as ct
 import numpy as np
 import pandas as pd
+
+
+def parse_mechanism_spec(name: str) -> tuple[str, Optional[str]]:
+    """Split ``mechanism.yaml#phase_name`` into file path and optional phase."""
+    if "#" in name:
+        path, phase = name.split("#", 1)
+        return path, phase or None
+    return name, None
+
+
+def create_solution_from_spec(
+    name: str,
+    *,
+    resolver: Optional[Callable[[str], str]] = None,
+) -> ct.Solution:
+    """Create a :class:`~cantera.Solution`, honoring an optional ``#phase`` suffix."""
+    path, phase = parse_mechanism_spec(name)
+    if resolver is not None:
+        path = resolver(path)
+    if phase:
+        return ct.Solution(path, phase)
+    return ct.Solution(path)
 
 
 def get_mechanism_path(mechanism_str) -> str:
@@ -153,10 +176,16 @@ def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg"):
         return np.nan, np.nan
 
     # complete combustion products
+    def _elem_frac(symbol: str) -> float:
+        try:
+            return float(gas.elemental_mole_fraction(symbol))
+        except ct.CanteraError:
+            return 0.0
+
     X_products = {
-        "CO2": gas.elemental_mole_fraction("C"),
-        "H2O": 0.5 * gas.elemental_mole_fraction("H"),
-        "N2": 0.5 * gas.elemental_mole_fraction("N"),
+        "CO2": _elem_frac("C"),
+        "H2O": 0.5 * _elem_frac("H"),
+        "N2": 0.5 * _elem_frac("N"),
     }
 
     # Get water properties (to compute HHV)

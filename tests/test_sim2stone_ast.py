@@ -274,6 +274,43 @@ class TestDetectSolverHint:
         assert solver is not None
         assert solver.kind == "micro_step"
 
+    def test_while_step_loop_advance_grid(self) -> None:
+        """While t < max_simulation_time: t = net.step() -> advance_grid.
+
+        Regression: continuous_reactor.py (and other upstream scripts) march
+        to a fixed end time via net.step() (adaptive internal steps), not
+        net.advance(t) — previously undetected, silently falling through to
+        no solver hint (defaulting to advance_to_steady_state, a different
+        algorithm than the source actually used).
+        """
+        src = """
+        max_simulation_time = 50.0
+        t = 0.0
+        while t < max_simulation_time:
+            t = reactor_network.step()
+        """
+        tree = _parse(src)
+        solver = _detect_solver_hint(tree)
+        assert solver is not None
+        assert solver.kind == "advance_grid"
+        assert solver.params["t_end"] == pytest.approx(50.0)
+
+    def test_while_step_loop_threshold_from_bare_name(self) -> None:
+        """The loop's own threshold resolves the stop time.
+
+        Matches ``x < threshold`` regardless of what the loop variable and
+        the threshold are named.
+        """
+        src = """
+        t_stop_value = 12.5
+        while t < t_stop_value:
+            t = net.step()
+        """
+        tree = _parse(src)
+        solver = _detect_solver_hint(tree)
+        assert solver is not None
+        assert solver.params["t_end"] == pytest.approx(12.5)
+
     def test_advance_timing_extracted(self) -> None:
         """n_steps and step_size (from for loop AugAssign) are detected."""
         src = """
@@ -393,6 +430,23 @@ class TestExtractFromVendoredScripts:
         result = extract_from_source(str(_EXAMPLES_DIR / "reactor2.py"))
         assert result.signals == []
         assert result.bindings == []
+
+    def test_while_time_lt_tend_advance_grid(self, tmp_path) -> None:
+        """While sim.time < t_end with dt_max emits advance_grid timing params."""
+        script = tmp_path / "reactor1_like.py"
+        script.write_text(
+            "dt_max = 1e-5\n"
+            "t_end = 100 * dt_max\n"
+            "sim = object()\n"
+            "while sim.time < t_end:\n"
+            "    sim.advance(sim.time + dt_max)\n",
+            encoding="utf-8",
+        )
+        result = extract_from_source(str(script))
+        assert result.solver is not None
+        assert result.solver.kind == "advance_grid"
+        assert result.solver.params["dt_max"] == pytest.approx(1e-5)
+        assert result.solver.params["t_end"] == pytest.approx(1e-3)
 
     def test_nonexistent_file_returns_empty(self) -> None:
         """extract_from_source on a missing file returns empty result."""

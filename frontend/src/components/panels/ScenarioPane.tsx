@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { SweepResultsPlot } from "./SweepResultsPlot";
 
 /** Compact relative-time label, e.g. "just now", "2 min ago", "3 h ago". */
 function timeAgo(tsSeconds: number | undefined, nowMs: number): string {
@@ -84,62 +85,65 @@ export function ScenarioPane() {
   };
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm text-foreground">Scenarios</h3>
-        <span className="text-xs text-muted-foreground">{scenarios.length}</span>
-      </div>
-      {error && <p className="text-xs text-red-500">{error}</p>}
-      <ul
-        onKeyDown={onKeyDown}
-        className={`space-y-1 max-h-[70vh] overflow-y-auto pr-1${
-          bump ? " animate-[scenarioBump_0.6s_ease-out]" : ""
-        }`}
-      >
-        {scenarios.map((s) => {
-          const isActive = s.id === activeId;
-          const ago = timeAgo(s.computed_at ?? createdAt, now);
-          return (
-            <li key={s.id}>
-              <button
-                id={`scenario-${s.id}`}
-                type="button"
-                onClick={() => void setActive(s.id)}
-                aria-busy={loading && isActive}
-                title={
-                  s.final_temperature_K != null
-                    ? `T_final ≈ ${Math.round(s.final_temperature_K)} K` +
-                      (s.solid_carbon_yield_pct != null
-                        ? ` · C(s) ${s.solid_carbon_yield_pct.toFixed(1)}%`
-                        : "")
-                    : undefined
-                }
-                className={[
-                  "w-full text-left rounded-md px-2 py-1.5 text-xs transition-colors border",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400",
-                  isActive
-                    ? "border-blue-500 bg-blue-500/20 text-foreground"
-                    : "border-transparent hover:bg-muted text-foreground",
-                ].join(" ")}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium truncate">{s.label}</span>
-                  {ago && (
-                    <span className="shrink-0 text-[10px] text-muted-foreground">
-                      {ago}
-                    </span>
-                  )}
-                </div>
-                {s.reactor_mode && (
-                  <div className="text-[10px] text-muted-foreground">
-                    {s.reactor_mode}
+    <div className="space-y-3">
+      <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-sm text-foreground">Scenarios</h3>
+          <span className="text-xs text-muted-foreground">{scenarios.length}</span>
+        </div>
+        {error && <p className="text-xs text-red-500">{error}</p>}
+        <ul
+          onKeyDown={onKeyDown}
+          className={`space-y-1 max-h-[70vh] overflow-y-auto pr-1${
+            bump ? " animate-[scenarioBump_0.6s_ease-out]" : ""
+          }`}
+        >
+          {scenarios.map((s) => {
+            const isActive = s.id === activeId;
+            const ago = timeAgo(s.computed_at ?? createdAt, now);
+            return (
+              <li key={s.id}>
+                <button
+                  id={`scenario-${s.id}`}
+                  type="button"
+                  onClick={() => void setActive(s.id)}
+                  aria-busy={loading && isActive}
+                  title={
+                    s.final_temperature_K != null
+                      ? `T_final ≈ ${Math.round(s.final_temperature_K)} K` +
+                        (s.solid_carbon_yield_pct != null
+                          ? ` · C(s) ${s.solid_carbon_yield_pct.toFixed(1)}%`
+                          : "")
+                      : undefined
+                  }
+                  className={[
+                    "w-full text-left rounded-md px-2 py-1.5 text-xs transition-colors border",
+                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400",
+                    isActive
+                      ? "border-blue-500 bg-blue-500/20 text-foreground"
+                      : "border-transparent hover:bg-muted text-foreground",
+                  ].join(" ")}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium truncate">{s.label}</span>
+                    {ago && (
+                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                        {ago}
+                      </span>
+                    )}
                   </div>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                  {s.reactor_mode && (
+                    <div className="text-[10px] text-muted-foreground">
+                      {s.reactor_mode}
+                    </div>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <SweepResultsPlot scenarios={scenarios} />
     </div>
   );
 }

@@ -29,7 +29,18 @@ vi.mock("@/api/simulations", () => ({
   startSimulation: vi.fn().mockResolvedValue({ simulation_id: "test-123" }),
 }));
 
+vi.mock("@/api/resultCache", () => ({
+  checkSimulationCache: vi.fn().mockResolvedValue({
+    cached: true,
+    result: { time: [0], reactors: {} },
+    meta: { created_at: Date.now() / 1000 },
+  }),
+}));
+
 const mockStartSimulation = startSimulation as ReturnType<typeof vi.fn>;
+
+import { checkSimulationCache } from "@/api/resultCache";
+const mockCheckSimulationCache = checkSimulationCache as ReturnType<typeof vi.fn>;
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -252,5 +263,17 @@ describe("SimulateCard", () => {
     const [, simTime, timeStep] = mockStartSimulation.mock.calls[0];
     expect(typeof simTime).toBe("number");
     expect(typeof timeStep).toBe("number");
+  });
+
+  it("Force Run skips cache lookup and starts a fresh simulation", async () => {
+    mockConfig = { nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }], connections: [] };
+    render(<SimulateCard />);
+    fireEvent.click(screen.getByLabelText("Choose run action"));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /force run/i }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Force Run" }));
+    });
+    expect(mockCheckSimulationCache).not.toHaveBeenCalled();
+    expect(mockStartSimulation).toHaveBeenCalledOnce();
   });
 });

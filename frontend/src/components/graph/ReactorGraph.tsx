@@ -540,7 +540,9 @@ export function ReactorGraph() {
   //      config.connections (same _outlet alias collapsing as alignLayoutLanes).
   //   2. Find the longest source-to-sink path (DP on topo order).  Tie-break:
   //      prefer reactor-type nodes (non-Reservoir / non-OutletSink) over boundary
-  //      nodes; then stable declaration order.  This path becomes "main_flow".
+  //      nodes; then stable declaration order.  Feed Reservoirs on that path are
+  //      demoted to branches so parallel inlets (e.g. air + fuel → mixer) do not
+  //      share the horizontal spine.
   //   3. All other nodes are "auto_branch".  Each branch node is anchored to its
   //      closest spine neighbor: prefer the spine node it connects INTO; fall back
   //      to the spine node that connects INTO it.
@@ -728,10 +730,13 @@ export function ReactorGraph() {
         cur = pathPrev.get(cur) ?? null;
       }
 
-      // Assign lanes.
+      // Assign lanes.  Feed reservoirs never sit on the main-flow spine even when
+      // they appear on the longest path (parallel MFC inlets anchor as branches).
       const lanes = new Map<string, string>();
       for (const id of candidateIds) {
-        lanes.set(id, spineSet.has(id) ? LAYOUT_LANE_MAIN : "auto_branch");
+        const t = cy.getElementById(id).data("type") as string | undefined;
+        const onSpine = spineSet.has(id) && t !== "Reservoir";
+        lanes.set(id, onSpine ? LAYOUT_LANE_MAIN : "auto_branch");
       }
 
       // Assign anchors: for each branch node, find the closest spine neighbor.
@@ -809,6 +814,30 @@ export function ReactorGraph() {
       if (typeof ord === "number" && Number.isFinite(ord)) nodeToOrder.set(node.id, ord);
       const anchor = node.metadata?.layout_anchor;
       if (typeof anchor === "string" && anchor.trim()) nodeToAnchor.set(node.id, anchor.trim());
+    }
+    // Parallel feed reservoirs should not share the main-flow spine: only the
+    // first (lowest layout_order) stays on main_flow; extras anchor above/below
+    // their downstream reactor so inlet edges do not cross sibling feeds.
+    const mainFeedReservoirs: string[] = [];
+    for (const node of config.nodes) {
+      if (node.metadata?.skip_viz) continue;
+      if (nodeToLane.get(node.id) !== LAYOUT_LANE_MAIN) continue;
+      if (node.type !== "Reservoir") continue;
+      const feedsMain = config.connections.some(
+        (conn) =>
+          conn.source === node.id &&
+          nodeToLane.get(conn.target) === LAYOUT_LANE_MAIN,
+      );
+      if (feedsMain) mainFeedReservoirs.push(node.id);
+    }
+    if (mainFeedReservoirs.length > 1) {
+      mainFeedReservoirs.sort(
+        (a, b) => (nodeToOrder.get(a) ?? Infinity) - (nodeToOrder.get(b) ?? Infinity),
+      );
+      for (const id of mainFeedReservoirs.slice(1)) {
+        nodeToLane.set(id, `feed_${id}`);
+        if (!nodeToYOffset.has(id)) nodeToYOffset.set(id, 160);
+      }
     }
     // When no explicit layout_lane is declared, infer the main-flow spine and
     // branch nodes from the network topology so simple multi-stage models
@@ -1078,6 +1107,34 @@ export function ReactorGraph() {
         }
       }
     }
+    // Stagger parallel branch nodes that share the same anchor when no explicit
+    // layout_y_offset is set (e.g. two feed reservoirs into one mixer).
+    const declOrder = new Map<string, number>();
+    config.nodes.forEach((node, i) => declOrder.set(node.id, i));
+    const branchesByAnchor = new Map<string, string[]>();
+    cy.nodes().forEach((n) => {
+      if (n.data("isGroup") || n.data("stream_point")) return;
+      const id = n.id();
+      const lane = nodeToLane.get(id);
+      if (lane === LAYOUT_LANE_MAIN) return;
+      if (!lane && !nodeToYOffset.has(id)) return;
+      if (nodeToYOffset.has(id)) return;
+      const anchorId = nonMainToTarget.get(id);
+      if (!anchorId) return;
+      if (!branchesByAnchor.has(anchorId)) branchesByAnchor.set(anchorId, []);
+      branchesByAnchor.get(anchorId)!.push(id);
+    });
+    const staggeredYOffset = new Map<string, number>();
+    const STAGGER_STEP = Math.abs(LAYOUT_LANE_DEFAULT_OFFSET);
+    branchesByAnchor.forEach((ids) => {
+      if (ids.length < 2) return;
+      ids.sort((a, b) => (declOrder.get(a) ?? 999) - (declOrder.get(b) ?? 999));
+      ids.forEach((branchId, idx) => {
+        const sign = idx % 2 === 0 ? -1 : 1;
+        const tier = Math.floor(idx / 2) + 1;
+        staggeredYOffset.set(branchId, sign * STAGGER_STEP * tier);
+      });
+    });
     cy.nodes().forEach((n) => {
       if (n.data("isGroup")) return;
       const id = n.id();
@@ -1088,7 +1145,9 @@ export function ReactorGraph() {
       if (!lane && !hasYOffset) return;
       if (n.data("stream_point")) return; // stream-point outlets handled in Step 3.6
 
-      const yOffset = nodeToYOffset.has(id) ? nodeToYOffset.get(id)! : LAYOUT_LANE_DEFAULT_OFFSET;
+      const yOffset = nodeToYOffset.has(id)
+        ? nodeToYOffset.get(id)!
+        : (staggeredYOffset.get(id) ?? LAYOUT_LANE_DEFAULT_OFFSET);
       const xOffset = nodeToXOffset.get(id) ?? 0;
       const targetId = nonMainToTarget.get(id);
       const targetX = targetId
@@ -1218,6 +1277,12 @@ export function ReactorGraph() {
       userPanningEnabled: true,
       userZoomingEnabled: true,
     });
+
+    // Test/tooling hook only (e.g. scripts/capture_screenshots.py driving
+    // node selection via cy.$id(id).trigger("tap") instead of guessing pixel
+    // coordinates on the canvas, whose layout varies per network). Not read
+    // anywhere in application code.
+    (window as unknown as { __boulderCy?: typeof cy }).__boulderCy = cy;
 
     cy.on("tap", "node", (e: EventObject) => {
       const data = e.target.data();

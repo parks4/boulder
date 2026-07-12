@@ -7,6 +7,22 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteNodeModal } from "@/components/modals/ConfirmDeleteNodeModal";
 import { toast } from "sonner";
 
+function unfoldInitialConditions(
+  properties: Record<string, unknown>,
+): Record<string, unknown> {
+  const flat = { ...properties };
+  const initial = flat.initial;
+  if (initial && typeof initial === "object" && !Array.isArray(initial)) {
+    delete flat.initial;
+    for (const [key, value] of Object.entries(initial as Record<string, unknown>)) {
+      if (!(key in flat)) {
+        flat[key] = value;
+      }
+    }
+  }
+  return flat;
+}
+
 export function PropertiesPanel() {
   const selectedElement = useSelectionStore((s) => s.selectedElement);
   const config = useConfigStore((s) => s.config);
@@ -75,6 +91,7 @@ export function PropertiesPanel() {
     : config.connections.find((c) => c.id === id);
 
   const properties = entity ? (entity.properties as Record<string, unknown>) : {};
+  const displayProperties = unfoldInitialConditions(properties);
 
   // Stream-point nodes (inter-stage diamonds) and legacy terminal OutletSink nodes
   // are computed from upstream reactors.  OutletSink + terminal_sink is deprecated;
@@ -109,7 +126,7 @@ export function PropertiesPanel() {
   // Start editing
   const handleEdit = () => {
     const vals: Record<string, string> = {};
-    for (const [key, value] of Object.entries(properties)) {
+    for (const [key, value] of Object.entries(displayProperties)) {
       if (key === "temperature" && typeof value === "number") {
         vals[key] = String(kelvinToCelsius(value).toFixed(2));
       } else {
@@ -192,7 +209,7 @@ export function PropertiesPanel() {
         <div className="border-t border-border pt-2 mt-1">
           <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
           <div className="divide-y divide-border">
-            {Object.entries(properties)
+            {Object.entries(displayProperties)
               .filter(([key]) => isFieldVisible(key))
               .map(([key, value]) => (
             <div key={key} className="py-1.5 flex items-center justify-between gap-2">
@@ -241,7 +258,7 @@ export function PropertiesPanel() {
               )}
             </div>
           ))}
-          {Object.keys(properties).length === 0 && (
+          {Object.keys(displayProperties).length === 0 && (
             <p className="text-xs text-muted-foreground py-1 italic">No properties</p>
           )}
           </div>

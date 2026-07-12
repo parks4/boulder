@@ -26,6 +26,10 @@ try:
 except ImportError:
     pass
 
+from boulder.graphviz_utils import ensure_graphviz_on_path
+
+ensure_graphviz_on_path()
+
 
 def is_port_in_use(host: str, port: int) -> bool:
     """Check if a port is already in use."""

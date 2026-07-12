@@ -11,7 +11,8 @@ dependencies:
 - plotly
 - pint
 - pydantic
-- python-graphviz   # installs Python package as well as the graphviz & dot commands
+- graphviz          # dot, neato, … (Graphviz system binaries)
+- python-graphviz   # Python bindings; uses dot from graphviz package above
 - nodejs            # for the React frontend build (includes npm)
 - pip:
   - fastapi>=0.110.0

@@ -12,6 +12,8 @@ export interface ScenarioMeta {
   solid_carbon_yield_pct?: number;
   /** Unix seconds when this scenario was computed (per-scenario; newer stores). */
   computed_at?: number;
+  /** Extra numeric KPI attrs a sweep runner may attach (e.g. "final_X_CO"). */
+  [key: string]: unknown;
 }
 
 export interface ScenarioListResponse {

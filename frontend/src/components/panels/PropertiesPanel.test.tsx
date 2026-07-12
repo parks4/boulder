@@ -24,7 +24,7 @@ let mockSelectedElement: {
   type: "node" | "edge";
   data: Record<string, unknown>;
 } | null = null;
-let mockConfig = {
+let mockConfig: Record<string, unknown> = {
   nodes: [
     {
       id: "reactor_1",
@@ -141,5 +141,36 @@ describe("PropertiesPanel delete confirmation", () => {
     expect(screen.queryByText("Delete node?")).not.toBeInTheDocument();
     expect(mockRemoveConnection).toHaveBeenCalledWith("mfc_1");
     expect(mockClearSelection).toHaveBeenCalled();
+  });
+
+  it("unfolds nested initial conditions for display", () => {
+    mockConfig = {
+      nodes: [
+        {
+          id: "cpr_0",
+          type: "IdealGasConstPressureReactor",
+          properties: {
+            volume: 2.35,
+            initial: {
+              temperature: 1001.0,
+              pressure: 101325.0,
+              composition: "H2:2,O2:1,N2:4",
+            },
+          },
+        },
+      ],
+      connections: [],
+    } as Record<string, unknown>;
+    mockSelectedElement = {
+      type: "node",
+      data: { id: "cpr_0", type: "IdealGasConstPressureReactor" },
+    };
+
+    render(<PropertiesPanel />);
+
+    expect(screen.getByText("727.85 °C")).toBeInTheDocument();
+    expect(screen.getByText("101,325.00")).toBeInTheDocument();
+    expect(screen.getByText("H2:2,O2:1,N2:4")).toBeInTheDocument();
+    expect(screen.queryByText("initial")).not.toBeInTheDocument();
   });
 });

@@ -606,12 +606,25 @@ class DualCanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         self.plugins = plugins or get_plugins()
         try:
-            resolved_mechanism = self.resolve_mechanism(self.mechanism)
-            self.gas = ct.Solution(resolved_mechanism)
+            from .ctutils import create_solution_from_spec, parse_mechanism_spec
+
+            mech_path, mech_phase = parse_mechanism_spec(self.mechanism)
+            resolved_mechanism = self.resolve_mechanism(mech_path)
+            cache_key = (
+                f"{resolved_mechanism}#{mech_phase}"
+                if mech_phase
+                else resolved_mechanism
+            )
+            spec = (
+                f"{resolved_mechanism}#{mech_phase}"
+                if mech_phase
+                else resolved_mechanism
+            )
+            self.gas = create_solution_from_spec(spec, resolver=lambda path: path)
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         # Cache of mechanisms -> Solution to support per-node overrides
-        self._gases_by_mech: Dict[str, ct.Solution] = {resolved_mechanism: self.gas}
+        self._gases_by_mech: Dict[str, ct.Solution] = {cache_key: self.gas}
         self.reactors: Dict[str, ct.ReactorBase] = {}
         self.reactor_meta: Dict[str, Dict[str, Any]] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
@@ -647,10 +660,29 @@ class DualCanteraConverter:
         self._schedule_callbacks: List[Callable] = []
 
     def parse_composition(self, comp_str: str) -> Dict[str, float]:
-        comp_dict = {}
-        for pair in comp_str.split(","):
-            species, value = pair.split(":")
-            comp_dict[species.strip()] = float(value)
+        """Parse a ``"species:value,species:value,..."`` composition string.
+
+        A handful of real mechanisms (e.g. ``n-heptane-NUIG-2016.yaml``) have
+        species names that themselves contain a literal comma (``C6H101-3,3``),
+        so naively splitting on every ``,`` before every ``:`` misparses them.
+        Values are always plain floats, so a fragment is only a complete entry
+        once the text after its last ``:`` parses as one; until then the next
+        comma-separated fragment is folded into the same (comma-bearing) name.
+        """
+        comp_dict: Dict[str, float] = {}
+        buf: Optional[str] = None
+        for fragment in comp_str.split(","):
+            buf = fragment if buf is None else f"{buf},{fragment}"
+            if ":" not in buf:
+                continue
+            name, _, value = buf.rpartition(":")
+            try:
+                comp_dict[name.strip()] = float(value.strip())
+            except ValueError:
+                continue  # value isn't numeric yet; more of the name follows
+            buf = None
+        if buf is not None:
+            raise ValueError(f"Malformed composition string: {comp_str!r}")
         return comp_dict
 
     # ------------------------------------------------------------------
@@ -814,12 +846,25 @@ class DualCanteraConverter:
 
         Uses ``resolve_mechanism`` so subclass overrides are honored for both
         the top-level mechanism and per-node mechanism switches.
+
+        Mechanism names may include an optional phase suffix after ``#``, e.g.
+        ``nDodecane_Reitz.yaml#nDodecane_IG``.
         """
+        from .ctutils import create_solution_from_spec, parse_mechanism_spec
+
         resolved = self.resolve_mechanism(mech_name)
         if resolved in self._gases_by_mech:
             return self._gases_by_mech[resolved]
-        gas_obj = ct.Solution(resolved)
-        self._gases_by_mech[resolved] = gas_obj
+        mech_path, phase = parse_mechanism_spec(resolved)
+        mech_path = self.resolve_mechanism(mech_path)
+        cache_key = f"{mech_path}#{phase}" if phase else mech_path
+        if cache_key in self._gases_by_mech:
+            return self._gases_by_mech[cache_key]
+        gas_obj = create_solution_from_spec(
+            f"{mech_path}#{phase}" if phase else mech_path,
+            resolver=lambda path: path,
+        )
+        self._gases_by_mech[cache_key] = gas_obj
         return gas_obj
 
     def _upstream_reservoir_tpy(
@@ -1016,6 +1061,8 @@ class DualCanteraConverter:
             self._mfc_topology[cid] = (src, tgt)
             mfc = ct.MassFlowController(self.reactors[src], self.reactors[tgt])
             mfr_spec = props.get("mass_flow_rate")
+            if mfr_spec is None and props.get("closure"):
+                mfr_spec = props
             if mfr_spec is not None:
                 if isinstance(mfr_spec, dict):
                     if "closure" in mfr_spec:
@@ -2283,6 +2330,7 @@ class DualCanteraConverter:
                     self.last_network,
                     show_species=available_species,
                     verbose=False,
+                    mechanism=self.mechanism,
                     if_no_species="ignore",
                 )
 
@@ -2303,15 +2351,7 @@ class DualCanteraConverter:
             logger.error(f"Traceback: {traceback.format_exc()}")
             results["sankey_links"] = None
             results["sankey_nodes"] = None
-
-            # Propagate Sankey errors to the UI error system
-            sankey_error_msg = f"Sankey diagram generation failed: {str(e)}"
-            if "error_message" in results:
-                results["error_message"] = (
-                    f"{results['error_message']}\n\n{sankey_error_msg}"
-                )
-            else:
-                results["error_message"] = sankey_error_msg
+            # Sankey is optional post-processing; do not fail an otherwise successful solve.
 
         # Evaluate custom output summary if configured
         try:

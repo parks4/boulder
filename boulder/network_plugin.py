@@ -7,6 +7,7 @@ structure using the network.draw() method.
 import base64
 from typing import Any, Dict, List, Optional
 
+from .graphviz_utils import ensure_graphviz_on_path
 from .live_simulation import get_live_simulation
 from .output_pane_plugins import OutputPaneContext, OutputPanePlugin
 
@@ -109,6 +110,14 @@ class NetworkPlugin(OutputPanePlugin):
         """
         try:
             import graphviz  # noqa: F401
+
+            dot_path = ensure_graphviz_on_path()
+            if dot_path is None:
+                return (
+                    None,
+                    "Graphviz 'dot' executable not found. Install graphviz in the "
+                    "active environment (conda: graphviz and python-graphviz).",
+                )
 
             if theme == "dark":
                 graph_attr = {"rankdir": "LR", "bgcolor": "#020817"}
