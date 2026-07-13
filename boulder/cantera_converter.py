@@ -259,11 +259,18 @@ def _series_from_stage_states(
     network's JSON-serialisable ``scalars`` are carried through verbatim so
     downstream panes can consume them.
     """
+    # Errors expected from a SolutionArray/phase that doesn't support a given
+    # accessor (missing attribute, wrong shape/dtype, or a Cantera-native
+    # rejection e.g. for a phase type without the requested property) -- never
+    # a bare `except Exception`, so a genuine bug elsewhere still surfaces.
+    _states_errors = (AttributeError, ValueError, TypeError, ct.CanteraError)
+
     if states is None:
         return None
     try:
         t_col = [float(v) for v in states.t]
-    except Exception:  # noqa: BLE001 — any non-conforming states object: skip
+    except _states_errors as exc:
+        logger.debug("Stage states have no usable time column: %s", exc)
         return None
     if len(t_col) < 2:
         return None
@@ -276,29 +283,37 @@ def _series_from_stage_states(
         "T": [float(v) for v in states.T],
         "P": [float(v) for v in states.P],
     }
+    # Species composition is optional: a phase with no species, or one whose
+    # composition Cantera can't expose here (e.g. some incompressible/pure-fluid
+    # phases), must not stop the core T/P/t series from being returned.
     try:
         names = list(states.species_names)
-        x_mat = np.atleast_2d(np.asarray(states.X, dtype=float))
-        if x_mat.shape[0] == len(t_col):
-            series["X"] = {
-                sp: [float(x_mat[i, j]) for i in range(x_mat.shape[0])]
-                for j, sp in enumerate(names)
-            }
-    except Exception:  # noqa: BLE001 — species optional; core variables suffice
-        pass
-    try:
-        names = list(states.species_names)
-        y_mat = np.atleast_2d(np.asarray(states.Y, dtype=float))
-        if y_mat.shape[0] == len(t_col):
-            series["Y"] = {
-                sp: [float(y_mat[i, j]) for i in range(y_mat.shape[0])]
-                for j, sp in enumerate(names)
-            }
-    except Exception:  # noqa: BLE001 — species optional; core variables suffice
-        pass
+    except _states_errors as exc:
+        logger.debug("Stage states expose no species composition: %s", exc)
+        names = []
+    if names:
+        try:
+            x_mat = np.atleast_2d(np.asarray(states.X, dtype=float))
+            if x_mat.shape[0] == len(t_col):
+                series["X"] = {
+                    sp: [float(x_mat[i, j]) for i in range(x_mat.shape[0])]
+                    for j, sp in enumerate(names)
+                }
+        except _states_errors as exc:
+            logger.debug("Could not read mole fractions from stage states: %s", exc)
+        try:
+            y_mat = np.atleast_2d(np.asarray(states.Y, dtype=float))
+            if y_mat.shape[0] == len(t_col):
+                series["Y"] = {
+                    sp: [float(y_mat[i, j]) for i in range(y_mat.shape[0])]
+                    for j, sp in enumerate(names)
+                }
+        except _states_errors as exc:
+            logger.debug("Could not read mass fractions from stage states: %s", exc)
     try:
         frame = states.to_pandas()
-    except Exception:  # noqa: BLE001 — extras optional
+    except _states_errors as exc:
+        logger.debug("Could not read extra columns from stage states: %s", exc)
         frame = None
     if frame is not None:
         for col in frame.columns:
