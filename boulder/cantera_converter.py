@@ -1023,7 +1023,12 @@ class DualCanteraConverter:
             if ref_field_spec is not None:
                 # Build a Func1 representing E/N(t) and register it as a callback.
                 ref_func = self._build_func1_from_spec(ref_field_spec)
-                phase = gas_for_node  # shared Solution for clone=False reactors
+                # reactor.phase (not gas_for_node) is whichever Solution the
+                # reactor actually integrates -- gas_for_node is only correct
+                # when clone=False; with the (now default) clone=True, the
+                # reactor gets an independent copy, and mutating gas_for_node
+                # would silently update a phase object nothing reads from.
+                phase = reactor.phase
 
                 def _ref_callback(net, t0, t1, _phase=phase, _f=ref_func):
                     t_mid = (t0 + t1) / 2.0

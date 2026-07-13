@@ -199,6 +199,46 @@ class TestRunTransientSolver:
         assert len(fired_chunks) == 3
 
 
+class TestScheduleReducedElectricFieldTargetsLivePhase:
+    """create_reactor_from_node's inline schedule: must target reactor.phase.
+
+    Regression test: the registered callback used to close over gas_for_node
+    (the pre-construction Solution), which is only the phase the reactor
+    actually integrates when clone=False. With the default clone=True, the
+    reactor gets an independent copy and the callback would silently mutate
+    an orphaned object nothing reads from.
+    """
+
+    def test_callback_targets_reactor_phase_not_gas_for_node(self):
+        from boulder.cantera_converter import DualCanteraConverter
+
+        converter = DualCanteraConverter(mechanism="gri30.yaml")
+        gas = converter.gas
+        gas.TPX = 1200.0, 101325.0, "N2:1"
+
+        node = {
+            "id": "batch",
+            "type": "IdealGasReactor",
+            "properties": {
+                "temperature": 1200.0,
+                "pressure": 101325.0,
+                "composition": "N2:1",
+                # clone defaults to True -- reactor.phase must differ from gas.
+                "schedule": {"reduced_electric_field": 5.0},
+            },
+        }
+        reactor = converter.create_reactor_from_node(node, gas)
+
+        assert reactor.phase is not gas  # confirms clone=True actually cloned
+        assert len(converter._schedule_callbacks) == 1
+        cb = converter._schedule_callbacks[0]
+        # _phase/_f are bound as default parameter values, not closure cells.
+        param_names = cb.__code__.co_varnames[: cb.__code__.co_argcount]
+        defaults = dict(zip(param_names[-len(cb.__defaults__) :], cb.__defaults__))
+        assert defaults["_phase"] is reactor.phase
+        assert defaults["_phase"] is not gas
+
+
 # ---------------------------------------------------------------------------
 # Integration test: advance_grid on a real (inert) Cantera network
 # ---------------------------------------------------------------------------
