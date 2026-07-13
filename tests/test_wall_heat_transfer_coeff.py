@@ -125,3 +125,93 @@ def test_download_script_emits_u_kwarg_for_heat_transfer_coeff() -> None:
     joined = "\n".join(lines)
     assert "U=0.02" in joined
     assert "Q=lambda" not in joined
+
+
+def test_sim2stone_preserves_expansion_rate_coeff() -> None:
+    """A moving piston wall (K=) emits expansion_rate_coeff alongside U/area.
+
+    Without K, Cantera's Wall/Reactor ODE system never moves the piston, so a
+    two-reactor network driven mainly by piston-compression (e.g. upstream's
+    reactor2.py) loses that dynamic almost entirely -- the reactors only
+    exchange heat, not volume.
+    """
+    gas = ct.Solution("h2o2.yaml")
+    gas.TPX = 1000.0, 20.0 * ct.one_atm, "H2:1"
+    r1 = ct.IdealGasReactor(gas, name="left")
+    gas.TPX = 500.0, 0.2 * ct.one_atm, "O2:1"
+    r2 = ct.IdealGasReactor(gas, name="right")
+    ct.Wall(r2, r1, A=1.0, K=0.5e-4, U=100.0, name="piston")
+    sim = ct.ReactorNet([r1, r2])
+
+    yaml_str = sim_to_stone_yaml(sim, default_mechanism="h2o2.yaml")
+    normalized = normalize_config(load_yaml_string_with_comments(yaml_str))
+
+    (wall,) = [c for c in normalized["connections"] if c["id"] == "piston"]
+    assert wall["properties"].get("expansion_rate_coeff") == pytest.approx(0.5e-4)
+    assert wall["properties"].get("heat_transfer_coeff") == pytest.approx(100.0)
+
+
+def test_cantera_converter_builds_moving_wall_from_expansion_rate_coeff() -> None:
+    """build_connection passes K through so Cantera moves the piston itself."""
+    converter = DualCanteraConverter(mechanism="h2o2.yaml")
+
+    nodes = [
+        {
+            "id": "left",
+            "type": "IdealGasReactor",
+            "properties": {
+                "temperature": 1000.0,
+                "pressure": 20.0 * 101325.0,
+                "composition": "H2:1",
+                "volume": 1.0,
+            },
+        },
+        {
+            "id": "right",
+            "type": "IdealGasReactor",
+            "properties": {
+                "temperature": 500.0,
+                "pressure": 0.2 * 101325.0,
+                "composition": "O2:1",
+                "volume": 1.0,
+            },
+        },
+    ]
+    conn = {
+        "id": "piston",
+        "type": "Wall",
+        "source": "right",
+        "target": "left",
+        "properties": {
+            "heat_transfer_coeff": 100.0,
+            "expansion_rate_coeff": 0.5e-4,
+            "area": 1.0,
+        },
+    }
+    for node in nodes:
+        converter.build_isolated_reactor(node)
+    converter.build_connection(conn)
+
+    wall = converter.walls["piston"]
+    assert wall.expansion_rate_coeff == pytest.approx(0.5e-4)
+    assert wall.heat_transfer_coeff == pytest.approx(100.0)
+
+
+def test_download_script_emits_k_kwarg_for_expansion_rate_coeff() -> None:
+    """The --download script constructs ct.Wall(..., K=...) for a piston."""
+    conn = {
+        "id": "piston",
+        "type": "Wall",
+        "source": "right",
+        "target": "left",
+        "properties": {
+            "heat_transfer_coeff": 100.0,
+            "expansion_rate_coeff": 0.5e-4,
+            "area": 1.0,
+        },
+    }
+    emitter = CanteraScriptEmitter()
+    lines = emitter._emit_connection(conn, "_conn_piston", "_conn_piston_spec")
+    joined = "\n".join(lines)
+    assert "K=5e-05" in joined
+    assert "U=100.0" in joined

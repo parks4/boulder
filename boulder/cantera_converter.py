@@ -1133,17 +1133,32 @@ class DualCanteraConverter:
             pc.pressure_coeff = coeff  # type: ignore[attr-defined]
             self.connections[cid] = pc
         elif typ == "Wall":
+            # expansion_rate_coeff (K) makes this a moving piston wall: Cantera
+            # moves it at K*(P_left - P_right) every step, transferring volume
+            # between the two reactors -- native Wall/Reactor ODE physics that
+            # only needs K passed through, not computed here. Independent of
+            # (and combinable with) heat_transfer_coeff/electric_power_kW below.
+            expansion_rate_coeff = (
+                float(props["expansion_rate_coeff"])
+                if "expansion_rate_coeff" in props
+                else None
+            )
             if "heat_transfer_coeff" in props:
                 # Passive heat-conduction wall: Q = U*A*(T_left - T_right),
                 # recomputed every step from the two reactors' live temperatures
                 # (unlike electric_power_kW below, which is a fixed Q).
                 area = float(props.get("area", 1.0))
+                wall_kwargs: Dict[str, Any] = {
+                    "A": area,
+                    "U": float(props["heat_transfer_coeff"]),
+                    "name": cid,
+                }
+                if expansion_rate_coeff is not None:
+                    wall_kwargs["K"] = expansion_rate_coeff
                 wall = ct.Wall(
                     self.reactors[src],
                     self.reactors[tgt],
-                    A=area,
-                    U=float(props["heat_transfer_coeff"]),
-                    name=cid,  # type: ignore[arg-type]
+                    **wall_kwargs,  # type: ignore[arg-type]
                 )
             elif "electric_power_kW" in props:
                 # Torch-style wall: constant power delivered via electric heating.
@@ -1160,12 +1175,16 @@ class DualCanteraConverter:
                 )
             else:
                 # Generic passive wall: heat_flux=0 by default, settable post-build.
+                # Still honours a standalone expansion_rate_coeff (a purely
+                # mechanical piston with no heat exchange).
                 area = float(props.get("area", 1.0))
+                wall_kwargs = {"A": area, "name": cid}
+                if expansion_rate_coeff is not None:
+                    wall_kwargs["K"] = expansion_rate_coeff
                 wall = ct.Wall(
                     self.reactors[src],
                     self.reactors[tgt],
-                    A=area,
-                    name=cid,  # type: ignore[arg-type]
+                    **wall_kwargs,  # type: ignore[arg-type]
                 )
                 if "heat_flux" in props:
                     wall.heat_flux = float(props["heat_flux"])
