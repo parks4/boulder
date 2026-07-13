@@ -9,7 +9,15 @@ qa:
 	pre-commit run --all-files
 
 unit-tests:
-	python -m pytest -vv --cov=. --cov-report=$(COV_REPORT) --doctest-glob="*.md" --doctest-glob="*.rst"
+	python -m pytest -vv --cov=. --cov-report=$(COV_REPORT) --doctest-glob="*.md" --doctest-glob="*.rst" --ignore=tests/test_sim2stone/test_verification_upstream_physics.py
+
+# Systematic verification: convert vendored Cantera example scripts through
+# sim2stone + Boulder's runtime, then check the result against the *true*
+# upstream script's own physics (not just "did the download run without
+# crashing" -- see test_verification_upstream_physics.py's module docstring
+# for the class of bug this catches that unit-tests alone missed).
+verification-tests:
+	python -m pytest -vv tests/test_sim2stone/test_verification_upstream_physics.py
 
 type-check:
 	python -m mypy . --exclude docs/cantera_examples

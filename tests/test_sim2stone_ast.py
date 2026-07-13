@@ -262,6 +262,25 @@ class TestDetectSolverHint:
         assert solver is not None
         assert solver.kind == "advance_grid"
 
+    def test_while_advance_grid_assignment_form(self) -> None:
+        """While tnow < tfinal: tnow = sim.advance(tnow + dt) -> advance_grid.
+
+        Regression: upstream examples also assign the .advance() return value
+        (e.g. fuel_injection.py's `tnow = sim.advance(tnow + dt)`), not just
+        call it bare — previously only the bare-statement form was detected,
+        silently falling through to no solver hint.
+        """
+        src = """
+        tnow = 0.0
+        dt = 0.01
+        while tnow < tfinal:
+            tnow = sim.advance(tnow + dt)
+        """
+        tree = _parse(src)
+        solver = _detect_solver_hint(tree)
+        assert solver is not None
+        assert solver.kind == "advance_grid"
+
     def test_while_micro_step(self) -> None:
         """While t < t_total: sim.advance(...) + sim.reinitialize() → micro_step."""
         src = """

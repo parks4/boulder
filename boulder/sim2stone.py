@@ -224,6 +224,23 @@ def _smart_extract_object_comments(
     return object_comments
 
 
+def _with_phase_suffix(mech_path: str, source_val: str, thermo: ct.ThermoPhase) -> str:
+    """Append ``#<phase_name>`` to *mech_path* if it's not the file's default phase.
+
+    Otherwise return *mech_path* unchanged.
+    """
+    phase_name = getattr(thermo, "name", None)
+    if not isinstance(phase_name, str) or not phase_name:
+        return mech_path
+    try:
+        default_name = ct.Solution(source_val).name
+    except Exception:
+        return mech_path
+    if phase_name == default_name:
+        return mech_path
+    return f"{mech_path}#{phase_name}"
+
+
 def _mechanism_from_thermo(thermo: ct.ThermoPhase) -> Optional[str]:
     """Read mechanism path from the ThermoPhase for STONE ``mechanism:`` fields.
 
@@ -232,6 +249,13 @@ def _mechanism_from_thermo(thermo: ct.ThermoPhase) -> Optional[str]:
     reduce to a bare filename when *val* is already a single path component or
     when an absolute install path is trimmed to the relative tail after the
     ``data`` directory (matching how ``ct.Solution('gri30.yaml')`` is stored).
+
+    Appends a ``#<phase_name>`` suffix when *thermo* was constructed from a
+    non-default phase in a multi-phase file (e.g.
+    ``ct.Solution("nDodecane_Reitz.yaml", "nDodecane_IG")``, which has a
+    Redlich-Kwong phase as its file-order default): without the suffix,
+    ``ct.Solution(mechanism_path)`` at rebuild time silently picks the wrong
+    phase, and a reactor expecting an ideal-gas phase fails outright.
     """
     for attr in ("source", "input_name"):
         val = getattr(thermo, attr, None)
@@ -248,12 +272,12 @@ def _mechanism_from_thermo(thermo: ct.ThermoPhase) -> Optional[str]:
             try:
                 idx = parts_lower.index("data")
             except ValueError:
-                return p.name
+                return _with_phase_suffix(p.name, val, thermo)
             tail = Path(*parts[idx + 1 :])
-            return tail.as_posix()
+            return _with_phase_suffix(tail.as_posix(), val, thermo)
         if len(parts) > 1:
-            return p.as_posix()
-        return p.name
+            return _with_phase_suffix(p.as_posix(), val, thermo)
+        return _with_phase_suffix(p.name, val, thermo)
     return None
 
 
