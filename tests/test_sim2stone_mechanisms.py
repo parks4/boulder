@@ -54,3 +54,31 @@ def test_sim2stone_preserves_per_node_mechanisms() -> None:
 
     # R2 uses gri30, so mechanism override must be present at node level after normalization
     assert mech_by_id.get("R2") == "gri30.yaml"
+
+
+def test_sim2stone_preserves_non_default_phase_name() -> None:
+    """A reactor built from a non-default named phase gets a '#phase' suffix.
+
+    Regression: nDodecane_Reitz.yaml's file-order-default phase uses a
+    Redlich-Kwong equation of state; the ideal-gas phase used by
+    fuel_injection.py-style examples is a *named* phase ("nDodecane_IG").
+    _mechanism_from_thermo previously read only the file path, silently
+    dropping the phase name -- rebuilding from the emitted YAML picked
+    Redlich-Kwong by default and IdealGasReactor construction failed
+    outright ("Incompatible phase type 'Redlich-Kwong' provided").
+    """
+    gas = ct.Solution("nDodecane_Reitz.yaml", "nDodecane_IG", transport_model=None)
+    gas.TPX = 300.0, ct.one_atm, "c12h26:1"
+    r = ct.IdealGasReactor(gas, name="R1", clone=False)
+    sim = ct.ReactorNet([r])
+
+    # Pass the bare file name as default_mechanism (no #phase suffix) --
+    # matching how upstream callers that don't already know the phase name
+    # invoke sim2stone.
+    yaml_str = sim_to_stone_yaml(sim, default_mechanism="nDodecane_Reitz.yaml")
+    normalized = normalize_config(load_yaml_string_with_comments(yaml_str))
+
+    mech_by_id = {
+        node["id"]: node["properties"].get("mechanism") for node in normalized["nodes"]
+    }
+    assert mech_by_id.get("R1") == "nDodecane_Reitz.yaml#nDodecane_IG"

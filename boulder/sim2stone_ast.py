@@ -635,12 +635,14 @@ def _detect_solver_hint(tree: ast.AST) -> Optional[DetectedSolver]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.While):
             continue
-        # Check for sim.advance / sim.step calls (not solve_steady)
+        # Check for sim.advance / sim.step calls (not solve_steady). Matches
+        # both bare-statement (`network.advance(t)`) and assignment
+        # (`tnow = sim.advance(tnow + dt)`) forms -- upstream examples use
+        # both (e.g. fuel_injection.py's `tnow = sim.advance(tnow + dt)`).
         has_advance = any(
-            isinstance(s, ast.Expr)
-            and isinstance(s.value, ast.Call)
-            and isinstance(s.value.func, ast.Attribute)
-            and s.value.func.attr == "advance"
+            isinstance(s, ast.Call)
+            and isinstance(s.func, ast.Attribute)
+            and s.func.attr == "advance"
             for s in ast.walk(node)
         )
         has_step = any(
