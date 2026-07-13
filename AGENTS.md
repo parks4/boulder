@@ -154,6 +154,16 @@ Recipe for verifying a YAML against a running Boulder API without using the brow
 - **Do not commit** unless the user or maintainer explicitly asks (team rule for agents).
 - GitHub Releases: workflow [.github/workflows/release.yml](.github/workflows/release.yml) builds wheel and sdist with full git history (`setuptools_scm`).
 
+## Pull requests
+
+- **Disclose AI involvement.** Every PR written or substantially assisted by an AI coding
+  agent must say so in the PR description, naming the model, e.g.:
+
+  > *Extensive AI use — code & PR fully written by Claude Sonnet 5*
+
+  Use whatever phrasing fits the actual level of involvement (e.g. "AI-assisted" vs. "fully
+  written by") but always name the model.
+
 ## License
 
 This project is licensed under the MIT License; see the [LICENSE](LICENSE) file in the repository root.
