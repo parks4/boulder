@@ -1074,7 +1074,9 @@ def sim_to_stone_yaml(
     # introspected, discarding the pulse shape entirely. Below, a
     # single-MFC/single-unclaimed-Gaussian-signal network gets the AST's
     # recovered peak/center/fwhm substituted back in as a real schedule.
-    _bound_signal_ids = {b.signal_id for b in (ast_result.bindings if ast_result else [])}
+    _bound_signal_ids = {
+        b.signal_id for b in (ast_result.bindings if ast_result else [])
+    }
     gaussian_signals = [
         s
         for s in (ast_result.signals if ast_result else [])
