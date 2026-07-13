@@ -394,6 +394,20 @@ class TestBuildFunc1FromSpec:
         f = DualCanteraConverter._build_func1_from_spec(3)
         assert f(0.0) == pytest.approx(3.0)
 
+    def test_gaussian_func_spec_builds_working_func1(self):
+        """{func: Gaussian, args: [peak, center, fwhm]} builds a real pulse.
+
+        Regression test: ct.Func1(name, *args) raises "Invalid arguments" for
+        multi-coefficient kinds like Gaussian, which require a single list
+        argument -- ct.Func1(name, [peak, center, fwhm]).
+        """
+        from boulder.cantera_converter import DualCanteraConverter
+
+        spec = {"func": "Gaussian", "args": [100.0, 2.0, 0.4]}
+        f = DualCanteraConverter._build_func1_from_spec(spec)
+        assert f(2.0) == pytest.approx(100.0, rel=1e-6)
+        assert f(0.0) < f(2.0)
+
     def test_tabulated_piecewise_linear_interpolation(self):
         """Profile piecewise_linear interpolates between points."""
         from boulder.cantera_converter import DualCanteraConverter

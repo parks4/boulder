@@ -729,7 +729,10 @@ class DualCanteraConverter:
             args = spec.get("args", [])
             if not isinstance(args, (list, tuple)):
                 args = [args]
-            return ct.Func1(func_name, *[float(a) for a in args])
+            # Cantera's Func1 constructor wants a single list argument for
+            # multi-coefficient kinds (e.g. Gaussian: [peak, center, fwhm]) --
+            # unpacking into separate positional args raises "Invalid arguments".
+            return ct.Func1(func_name, [float(a) for a in args])
         if "profile" in spec or "tabulated" in spec:
             pts_key = "points" if "points" in spec else "tabulated"
             points = spec[pts_key] if pts_key in spec else spec.get("profile")

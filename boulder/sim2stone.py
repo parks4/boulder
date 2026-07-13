@@ -1064,6 +1064,25 @@ def sim_to_stone_yaml(
         for cl in ast_result.closures:
             closure_map[cl.mfc_var] = cl
 
+    # AST-detected Gaussian Func1 signals not already consumed by another
+    # binding (e.g. a plasma reduced_electric_field pulse). A live Func1
+    # object exposes no way to recover its coefficients (Cantera's
+    # Func1.write() only returns a generic label, and mfc.mass_flow_rate
+    # always reads back as the evaluated float at the network's current
+    # time, never the Func1 itself) -- so the MFC-building pass above can
+    # only snapshot mass_flow_rate at whatever instant the object is
+    # introspected, discarding the pulse shape entirely. Below, a
+    # single-MFC/single-unclaimed-Gaussian-signal network gets the AST's
+    # recovered peak/center/fwhm substituted back in as a real schedule.
+    _bound_signal_ids = {
+        b.signal_id for b in (ast_result.bindings if ast_result else [])
+    }
+    gaussian_signals = [
+        s
+        for s in (ast_result.signals if ast_result else [])
+        if s.kind == "Gaussian" and s.source_var not in _bound_signal_ids
+    ]
+
     for node in internal.get("nodes", []):
         node_cm = CommentedMap()
         node_cm["id"] = node["id"]
@@ -1135,6 +1154,34 @@ def sim_to_stone_yaml(
                 conn_props["closure"] = "residence_time"
                 conn_props["tau_s"] = f"{{{{{apply_closure.tau_var}}}}}"
                 conn_props.pop("mass_flow_rate", None)
+                conn_props.pop("_comment", None)
+
+        # Substitute a real Gaussian schedule for an MFC whose mass_flow_rate
+        # was snapshotted from a live Func1 (see gaussian_signals comment
+        # above). Same single-MFC/single-signal heuristic as the closure
+        # case: with exactly one candidate on each side, the match is
+        # unambiguous. (Not gated on apply_closure being None: a network
+        # can't have both a residence-time closure and an unclaimed Gaussian
+        # matching the same lone MFC in practice, but if it somehow did, the
+        # closure branch above already cleared mass_flow_rate/_comment, and
+        # this would then set a real schedule instead of leaving it unset --
+        # still strictly better than the stale snapshot.)
+        if conn_is_mfc and len(gaussian_signals) == 1:
+            mfc_connections_all = [
+                c
+                for c in internal.get("connections", [])
+                if c.get("type") == "MassFlowController"
+            ]
+            if len(mfc_connections_all) == 1:
+                sig = gaussian_signals[0]
+                conn_props["mass_flow_rate"] = {
+                    "func": "Gaussian",
+                    "args": [
+                        sig.params["peak"],
+                        sig.params["center"],
+                        sig.params["fwhm"],
+                    ],
+                }
                 conn_props.pop("_comment", None)
 
         conn_cm[conn["type"]] = conn_props if conn_props else None
