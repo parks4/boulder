@@ -363,11 +363,16 @@ class CanteraScriptEmitter:
             out.append(f"_mfc_topology[{cid!r}] = ({src!r}, {tgt!r})")
         elif ctype == "Wall":
             area = float(props.get("area", 1.0))
+            k_coeff = (
+                f", K={float(props['expansion_rate_coeff'])!r}"
+                if "expansion_rate_coeff" in props
+                else ""
+            )
             if "heat_transfer_coeff" in props:
                 u_coeff = float(props["heat_transfer_coeff"])
                 out.append(
                     f"{cref} = ct.Wall({sv}, {tv}, A={area}, "
-                    f"U={u_coeff!r}, name={cid!r})"
+                    f"U={u_coeff!r}{k_coeff}, name={cid!r})"
                 )
             elif "electric_power_kW" in props:
                 q_w = (
@@ -381,7 +386,9 @@ class CanteraScriptEmitter:
                     f"Q=lambda t: {q_w!r}, name={cid!r})"
                 )
             else:
-                out.append(f"{cref} = ct.Wall({sv}, {tv}, A={area}, name={cid!r})")
+                out.append(
+                    f"{cref} = ct.Wall({sv}, {tv}, A={area}{k_coeff}, name={cid!r})"
+                )
             out.append(f"walls[{cid!r}] = {cref}")
         elif ctype == "Valve":
             coeff = float(props.get("valve_coeff", 1.0))

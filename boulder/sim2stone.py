@@ -657,19 +657,32 @@ def sim_to_internal_config(
         except Exception:
             heat_transfer_coeff = 0.0
 
-        if heat_transfer_coeff != 0.0:
+        try:
+            expansion_rate_coeff = float(getattr(w, "expansion_rate_coeff"))
+        except Exception:
+            expansion_rate_coeff = 0.0
+
+        if heat_transfer_coeff != 0.0 or expansion_rate_coeff != 0.0:
             # Passive heat-conduction wall (Q = U*A*(T_left - T_right), evaluated
             # dynamically every step). Snapshotting heat_rate instead — the
             # branch below — would freeze the flux at whatever it happens to be
             # at conversion time (often ~0, since both sides usually start at
             # the same temperature), silently discarding the U/A coupling.
+            #
+            # expansion_rate_coeff (K) makes this a moving piston wall: Cantera
+            # moves it at K*(P_left - P_right), transferring volume between the
+            # two reactors every step -- this is native Wall/Reactor ODE
+            # physics, not something Boulder computes itself; it only needs to
+            # pass K through so Cantera's own equations do the rest.
+            wall_props: Dict[str, Any] = {"area": float(getattr(w, "area", 1.0))}
+            if heat_transfer_coeff != 0.0:
+                wall_props["heat_transfer_coeff"] = heat_transfer_coeff
+            if expansion_rate_coeff != 0.0:
+                wall_props["expansion_rate_coeff"] = expansion_rate_coeff
             wall_dict = {
                 "id": cid,
                 "type": "Wall",
-                "properties": {
-                    "heat_transfer_coeff": heat_transfer_coeff,
-                    "area": float(getattr(w, "area", 1.0)),
-                },
+                "properties": wall_props,
                 "source": l_id,
                 "target": r_id,
             }

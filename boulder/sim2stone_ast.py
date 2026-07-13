@@ -713,8 +713,12 @@ def _detect_advance_timing(tree: ast.AST) -> Dict[str, Any]:
     env: Dict[str, float] = {}
     tracked = ("t_total", "t_end", "dt_max", "dt_chunk", "n_steps", "step_size", "dt")
 
-    body = tree.body if isinstance(tree, ast.Module) else []
-    for node in body:
+    # Walk the whole tree (not just module top-level statements) so adapters
+    # that keep a stepping pattern under an `if False:` guard purely for AST
+    # extraction (to avoid actually re-running the transient at conversion
+    # time -- see e.g. adapters/reactor2.py) still resolve. Matches
+    # _collect_scalar_assignments's depth-unrestricted approach.
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
