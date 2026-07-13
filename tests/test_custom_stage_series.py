@@ -37,6 +37,9 @@ def test_flattens_states_and_extras_and_scalars():
     assert series["T_e"][0] == 2000.0 and len(series["T_e"]) == 5
     # Species mole fractions are reshaped to a {species: [...]} mapping.
     assert "H2" in series["X"] and len(series["X"]["H2"]) == 5
+    # Mass fractions likewise (regression: only X used to be captured, so the
+    # frontend's "Mass fraction" plot silently had nothing to render).
+    assert "H2" in series["Y"] and len(series["Y"]["H2"]) == 5
     # Scalars are merged verbatim (panes key off e.g. ``model_sequence``).
     assert series["model_sequence"] == ["a", "b"]
     assert series["n"] == 2

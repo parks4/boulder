@@ -287,6 +287,16 @@ def _series_from_stage_states(
     except Exception:  # noqa: BLE001 — species optional; core variables suffice
         pass
     try:
+        names = list(states.species_names)
+        y_mat = np.atleast_2d(np.asarray(states.Y, dtype=float))
+        if y_mat.shape[0] == len(t_col):
+            series["Y"] = {
+                sp: [float(y_mat[i, j]) for i in range(y_mat.shape[0])]
+                for j, sp in enumerate(names)
+            }
+    except Exception:  # noqa: BLE001 — species optional; core variables suffice
+        pass
+    try:
         frame = states.to_pandas()
     except Exception:  # noqa: BLE001 — extras optional
         frame = None
@@ -544,6 +554,7 @@ class _TrajectoryRecorder:
                     "T": [],
                     "P": [],
                     "X": [],
+                    "Y": [],
                     "names": list(phase.species_names),
                 },
             )
@@ -551,6 +562,7 @@ class _TrajectoryRecorder:
             d["T"].append(float(phase.T))
             d["P"].append(float(phase.P))
             d["X"].append(phase.X.copy())
+            d["Y"].append(phase.Y.copy())
 
     def series(self) -> Dict[str, Dict[str, Any]]:
         """Return ``{reactor_id: series}`` for reactors with a real trajectory."""
@@ -562,11 +574,16 @@ class _TrajectoryRecorder:
                 continue
             names = d["names"]
             xmat = np.asarray(d["X"], dtype=float)
+            ymat = np.asarray(d["Y"], dtype=float)
             out[rid] = {
                 "T": [float(v) for v in d["T"]],
                 "P": [float(v) for v in d["P"]],
                 "X": {
                     sp: [float(xmat[i, j]) for i in range(xmat.shape[0])]
+                    for j, sp in enumerate(names)
+                },
+                "Y": {
+                    sp: [float(ymat[i, j]) for i in range(ymat.shape[0])]
                     for j, sp in enumerate(names)
                 },
                 "t": [float(v) for v in d["t"]],

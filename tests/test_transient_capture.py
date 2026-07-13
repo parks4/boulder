@@ -56,6 +56,13 @@ def test_transient_run_yields_multipoint_trajectory():
     assert max(s["T"]) - min(s["T"]) > 100.0
     assert max(s["T"]) > 2000.0  # reacted
 
+    # Mass fractions must be captured alongside mole fractions (regression:
+    # the recorder used to only track X, so the frontend's "Mass fraction"
+    # plot silently had nothing to render for any residence-time trajectory).
+    assert "Y" in s
+    assert len(s["Y"]["CH4"]) == len(s["T"])
+    assert max(s["Y"]["CH4"]) > min(s["Y"]["CH4"])  # fuel is consumed
+
 
 def test_steady_run_stays_single_point():
     config = _config({"kind": "advance_to_steady_state"})
