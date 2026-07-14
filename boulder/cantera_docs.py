@@ -16,7 +16,11 @@ from __future__ import annotations
 
 from typing import Dict, Optional, TypedDict
 
-_ZERODIM = "https://cantera.org/3.1/python/zerodim.html"
+#: Boulder supports a range of Cantera versions (pyproject.toml pins
+#: ``cantera>=3.0.0``, no upper bound), so link to the version-agnostic
+#: "stable" docs alias rather than a pinned version — the same convention
+#: docs/cantera_examples/combustor.py already uses for its own citation.
+_ZERODIM = "https://cantera.org/stable/python/zerodim.html"
 
 
 class KindDoc(TypedDict):

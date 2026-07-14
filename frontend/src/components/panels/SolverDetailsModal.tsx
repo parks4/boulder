@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { Button } from "@/components/ui/Button";
+import { Tooltip } from "@/components/ui/Tooltip";
 import {
+  KIND_DOC_URLS,
   KIND_LABELS,
   type SolverKind,
   type SolverMode,
@@ -92,18 +94,42 @@ export function SolverDetailsModal({
           )}
           <label className="block text-xs text-muted-foreground">
             Kind
-            <select
-              data-testid="solver-kind-select"
-              value={kind}
-              onChange={(e) => onKindChange(e.target.value as SolverKind)}
-              className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
-            >
-              {kinds.map((k) => (
-                <option key={k} value={k}>
-                  {KIND_LABELS[k]}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1.5 mt-1">
+              <select
+                data-testid="solver-kind-select"
+                value={kind}
+                onChange={(e) => onKindChange(e.target.value as SolverKind)}
+                className="block w-full px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
+              >
+                {kinds.map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_LABELS[k]}
+                  </option>
+                ))}
+              </select>
+              <Tooltip
+                content={
+                  <span className="block space-y-1">
+                    <span className="block">{KIND_DOC_URLS[kind].description}</span>
+                    <a
+                      href={KIND_DOC_URLS[kind].docUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline text-primary"
+                    >
+                      Cantera docs
+                    </a>
+                  </span>
+                }
+              >
+                <span
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground cursor-help"
+                  aria-label={`About ${KIND_LABELS[kind]}`}
+                >
+                  ⓘ
+                </span>
+              </Tooltip>
+            </div>
           </label>
 
           {mode === "steady" && (
