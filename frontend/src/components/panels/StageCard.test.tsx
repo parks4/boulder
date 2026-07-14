@@ -206,4 +206,29 @@ describe("StageCard", () => {
     openSolverDetails();
     expect(screen.queryByTestId("stage-override-banner")).not.toBeInTheDocument();
   });
+
+  it("notes when this stage's own YAML solver differs from the global default the toggle edits", () => {
+    mockConfig = {
+      ...mockConfig,
+      groups: {
+        torch_stage: { stage_order: 1, mechanism: "gri30.yaml", solver: { kind: "advance_grid" } },
+        psr_stage: { stage_order: 2, mechanism: "gri30.yaml", solver: { kind: "advance_to_steady_state" } },
+      },
+    };
+    render(<StageCard stageId="torch_stage" />);
+    const note = screen.getByTestId("stage-own-kind-note");
+    expect(note).toHaveTextContent("advance_grid");
+  });
+
+  it("shows no override note when this stage's own solver matches the global default", () => {
+    mockConfig = {
+      ...mockConfig,
+      groups: {
+        torch_stage: { stage_order: 1, mechanism: "gri30.yaml", solver: { kind: "advance_to_steady_state" } },
+        psr_stage: { stage_order: 2, mechanism: "gri30.yaml", solver: { kind: "advance_to_steady_state" } },
+      },
+    };
+    render(<StageCard stageId="torch_stage" />);
+    expect(screen.queryByTestId("stage-own-kind-note")).not.toBeInTheDocument();
+  });
 });

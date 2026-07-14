@@ -147,6 +147,21 @@ export function StageCard({ stageId }: Props) {
 
   const kinds = mode === "steady" ? STEADY_KINDS : TRANSIENT_KINDS;
 
+  // This stage's own resolved solver, as Boulder actually runs it — distinct
+  // from `kind` above, which is the global default the toggle below edits.
+  // Boulder fully supports per-stage solver overrides (a YAML stage can set
+  // its own solver: block; different stages can even mix steady and
+  // transient in one run — see tests/test_stone_v2_fixtures.py); the GUI
+  // just doesn't yet have an editor for that override, only the default
+  // every stage without one falls back to.
+  const stageOwnKind = useMemo(() => {
+    const groups = (config as unknown as Record<string, unknown>).groups as
+      | Record<string, { solver?: { kind?: string } }>
+      | undefined;
+    return groups?.[stageId]?.solver?.kind as SolverKind | undefined;
+  }, [config, stageId]);
+  const stageHasOwnOverride = Boolean(stageOwnKind) && stageOwnKind !== kind;
+
   return (
     <div id="stage-card" className="rounded-lg border border-border bg-card p-4 space-y-3">
       <div>
@@ -228,6 +243,14 @@ export function StageCard({ stageId }: Props) {
             </button>
           </Tooltip>
         </div>
+
+        {stageHasOwnOverride && stageOwnKind && (
+          <p data-testid="stage-own-kind-note" className="text-xs text-amber-600 dark:text-amber-400">
+            This stage's YAML sets its own solver:{" "}
+            <span className="font-mono">{KIND_LABELS[stageOwnKind]}</span>. The toggle
+            below edits the network's default, which this stage doesn't use.
+          </p>
+        )}
 
         <div className="flex items-center gap-2">
           <p
