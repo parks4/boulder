@@ -368,11 +368,46 @@ class CanteraScriptEmitter:
                 if "expansion_rate_coeff" in props
                 else ""
             )
+            velocity_spec = props.get("velocity")
+            velocity_kwarg = ""
+            if velocity_spec is not None:
+                if isinstance(velocity_spec, dict) and "closure" in velocity_spec:
+                    closure_kind = str(velocity_spec["closure"])
+                    if closure_kind == "pressure_proportional":
+                        coeff = float(velocity_spec.get("coeff", 0.0))
+                        start_time = float(velocity_spec.get("start_time", 0.0))
+                        fn = f"_velocity_{cref}"
+                        out.append(
+                            f"def {fn}(t, _src={src!r}, _tgt={tgt!r}, "
+                            f"_coeff={coeff!r}, _start={start_time!r}):"
+                        )
+                        out.append("    if t < _start:")
+                        out.append("        return 0.0")
+                        out.append("    r_src = reactors.get(_src)")
+                        out.append("    r_tgt = reactors.get(_tgt)")
+                        out.append("    if r_src is None or r_tgt is None:")
+                        out.append("        return 0.0")
+                        out.append(
+                            "    return _coeff * (r_src.phase.P - r_tgt.phase.P)"
+                        )
+                        velocity_kwarg = f", velocity=ct.Func1({fn})"
+                    else:
+                        out.append(
+                            f'raise ValueError("Wall {cid!r}: unsupported velocity '
+                            f'closure {closure_kind!r}")'
+                        )
+                elif isinstance(velocity_spec, (int, float)):
+                    velocity_kwarg = f", velocity={float(velocity_spec)!r}"
+                else:
+                    out.append(
+                        f'raise ValueError("Wall {cid!r}: Func1 velocity schedule '
+                        f'specs not supported in native download script")'
+                    )
             if "heat_transfer_coeff" in props:
                 u_coeff = float(props["heat_transfer_coeff"])
                 out.append(
                     f"{cref} = ct.Wall({sv}, {tv}, A={area}, "
-                    f"U={u_coeff!r}{k_coeff}, name={cid!r})"
+                    f"U={u_coeff!r}{k_coeff}{velocity_kwarg}, name={cid!r})"
                 )
             elif "electric_power_kW" in props:
                 q_w = (
@@ -387,7 +422,8 @@ class CanteraScriptEmitter:
                 )
             else:
                 out.append(
-                    f"{cref} = ct.Wall({sv}, {tv}, A={area}{k_coeff}, name={cid!r})"
+                    f"{cref} = ct.Wall({sv}, {tv}, A={area}{k_coeff}"
+                    f"{velocity_kwarg}, name={cid!r})"
                 )
             out.append(f"walls[{cid!r}] = {cref}")
         elif ctype == "Valve":

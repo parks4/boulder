@@ -780,6 +780,60 @@ class DualCanteraConverter:
             "Expected 'func' or 'profile'/'tabulated'."
         )
 
+    def _build_wall_velocity(self, spec: Any, src: str, tgt: str) -> Any:
+        """Build a ``ct.Wall`` ``velocity`` Func1/callable from a STONE spec.
+
+        Supported forms
+        ---------------
+        Scalar / ``{func:, args:}`` / ``{profile:/tabulated:, points:}``:
+            Delegated to :meth:`_build_func1_from_spec`.
+        ``{closure: pressure_proportional, coeff:, start_time:}``:
+            A wall held fixed until ``start_time`` (default 0), then moving at
+            ``coeff * (P_src - P_tgt)`` -- the same proportional-control
+            behaviour as ``expansion_rate_coeff``, but with an optional delay
+            and evaluated as a live callable rather than a bare coefficient
+            (matches upstream Cantera's ``piston.py`` example, where the wall
+            is released only after ``t >= 0.1``).
+
+        Parameters
+        ----------
+        spec:
+            Raw value from the STONE ``velocity`` property.
+        src, tgt:
+            Node ids of the two reactors the wall connects, resolved against
+            ``self.reactors`` at call time (not at build time), so the
+            closure always reads the reactors' live pressures.
+
+        Returns
+        -------
+        ct.Func1
+            A Cantera Func1 object ready to assign to a Wall's ``velocity``.
+        """
+        if isinstance(spec, dict) and "closure" in spec:
+            closure_kind = str(spec["closure"])
+            if closure_kind != "pressure_proportional":
+                raise ValueError(
+                    f"Wall velocity: unsupported closure '{closure_kind}'. "
+                    "Only 'pressure_proportional' is supported."
+                )
+            coeff = float(spec.get("coeff", 0.0))
+            start_time = float(spec.get("start_time", 0.0))
+
+            def _velocity_closure(t: float, _src: str = src, _tgt: str = tgt) -> float:
+                if t < start_time:
+                    return 0.0
+                r_src = self.reactors.get(_src)
+                r_tgt = self.reactors.get(_tgt)
+                if r_src is None or r_tgt is None:
+                    return 0.0
+                try:
+                    return coeff * (r_src.phase.P - r_tgt.phase.P)
+                except (AttributeError, ct.CanteraError):
+                    return 0.0
+
+            return ct.Func1(_velocity_closure)
+        return self._build_func1_from_spec(spec)
+
     # ------------------------------------------------------------------
     # Low-level helpers shared by build_network / build_sub_network
     # ------------------------------------------------------------------
@@ -1180,6 +1234,15 @@ class DualCanteraConverter:
                 if "expansion_rate_coeff" in props
                 else None
             )
+            # velocity is Cantera's other (additive) piston-motion input: a
+            # constant, a Func1 schedule, or a proportional-control closure --
+            # unlike expansion_rate_coeff (a bare coefficient), this can express
+            # e.g. a piston held fixed until some start_time.
+            velocity_signal = (
+                self._build_wall_velocity(props["velocity"], src, tgt)
+                if "velocity" in props
+                else None
+            )
             if "heat_transfer_coeff" in props:
                 # Passive heat-conduction wall: Q = U*A*(T_left - T_right),
                 # recomputed every step from the two reactors' live temperatures
@@ -1192,6 +1255,8 @@ class DualCanteraConverter:
                 }
                 if expansion_rate_coeff is not None:
                     wall_kwargs["K"] = expansion_rate_coeff
+                if velocity_signal is not None:
+                    wall_kwargs["velocity"] = velocity_signal
                 wall = ct.Wall(
                     self.reactors[src],
                     self.reactors[tgt],
@@ -1212,12 +1277,14 @@ class DualCanteraConverter:
                 )
             else:
                 # Generic passive wall: heat_flux=0 by default, settable post-build.
-                # Still honours a standalone expansion_rate_coeff (a purely
-                # mechanical piston with no heat exchange).
+                # Still honours a standalone expansion_rate_coeff and/or velocity
+                # (a purely mechanical piston with no heat exchange).
                 area = float(props.get("area", 1.0))
                 wall_kwargs = {"A": area, "name": cid}
                 if expansion_rate_coeff is not None:
                     wall_kwargs["K"] = expansion_rate_coeff
+                if velocity_signal is not None:
+                    wall_kwargs["velocity"] = velocity_signal
                 wall = ct.Wall(
                     self.reactors[src],
                     self.reactors[tgt],
