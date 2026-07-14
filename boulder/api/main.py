@@ -211,25 +211,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.error(f"Failed to load preloaded configuration: {e}")
 
     # Resolve the scenario-inspector store (HDF5): explicit env override wins,
-    # else the preloaded config's ``metadata.extra.scenario_store`` resolved
-    # relative to the YAML's directory. Enables the GUI Scenario Pane.
+    # else the preloaded config's ``metadata.extra.scenario_store`` (or the
+    # ``<stem>_scenarios.h5`` default) whenever there is a run-set to show —
+    # declared inline (``scenario:``/``sweep:``/``sweeps:``), a host
+    # ``run_sweep.py`` next to the config, or ``--sweep`` (BOULDER_SWEEP_MODE).
+    # Reuses the same detection the Run Sweep button uses (routes.sweep) so a
+    # config with a run-set shows its precomputed Scenario Pane on plain
+    # ``bloc config.yaml`` — no flag required.
     try:
         store_env = os.environ.get("BOULDER_SCENARIO_STORE")
         if store_env and store_env.strip():
             app.state.scenario_store_path = store_env.strip()
         elif app.state.preloaded_config and app.state.preloaded_config_path:
-            extra = (app.state.preloaded_config.get("metadata") or {}).get(
-                "extra"
-            ) or {}
-            rel = extra.get("scenario_store")
-            base = Path(app.state.preloaded_config_path).resolve().parent
-            if rel:
-                app.state.scenario_store_path = str((base / rel).resolve())
-            elif os.environ.get("BOULDER_SWEEP_MODE"):
-                # Sweep mode with no declared store → default next to the config,
-                # so pre-computed scenarios (if any) show in the pane.
-                stem = Path(app.state.preloaded_config_path).stem
-                app.state.scenario_store_path = str(base / f"{stem}_scenarios.h5")
+            from .routes.sweep import has_run_set, resolve_store_path
+
+            raw = app.state.preloaded_raw or {}
+            cfg_path = app.state.preloaded_config_path
+            if os.environ.get("BOULDER_SWEEP_MODE") or has_run_set(raw, cfg_path):
+                store = resolve_store_path(raw, cfg_path)
+                if store is not None:
+                    app.state.scenario_store_path = str(store)
         if app.state.scenario_store_path:
             logger.info("Scenario store enabled: %s", app.state.scenario_store_path)
     except Exception as store_err:  # noqa: BLE001

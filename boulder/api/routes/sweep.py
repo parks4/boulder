@@ -67,23 +67,59 @@ def _run_set_size(raw: Dict[str, Any]) -> int:
     return total
 
 
-def _local_runner_path(request: Request) -> Optional[Path]:
-    """Return the ``run_sweep.py`` next to the preloaded config, if present."""
-    cfg_path = getattr(request.app.state, "preloaded_config_path", None)
-    if not cfg_path:
+def _local_runner_path_for(config_path: Optional[str]) -> Optional[Path]:
+    """Return the ``run_sweep.py`` next to *config_path*, if present."""
+    if not config_path:
         return None
-    local = Path(cfg_path).resolve().parent / _RUNNER_NAME
+    local = Path(config_path).resolve().parent / _RUNNER_NAME
     return local if local.is_file() else None
 
 
-def _has_run_set(request: Request) -> bool:
-    raw = getattr(request.app.state, "preloaded_raw", None) or {}
+def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
+    """Does *raw* (the inheritance-resolved config) declare a run-set?
+
+    True when it has an inline ``scenario:``/``sweep:``/``sweeps:`` block, or a
+    ``run_sweep.py`` sits next to the config (a host-defined run-set: the runner
+    script decides the cases — e.g. adaptive/bisection sweeps a static ``sweep:``
+    block can't express). Pure function of ``(raw, config_path)`` so both the
+    request-scoped sweep routes and the app-startup lifespan can share one
+    detection rule instead of re-deciding "is this a sweep config?" twice.
+    """
     if raw.get("scenario") or _sweep_block(raw):
         return True
-    # A run_sweep.py next to the config is a host-defined run-set: the runner
-    # script decides the cases (e.g. adaptive/bisection sweeps that a static
-    # `sweep:` block cannot express).
-    return _local_runner_path(request) is not None
+    return _local_runner_path_for(config_path) is not None
+
+
+def resolve_store_path(
+    raw: Dict[str, Any], config_path: Optional[str]
+) -> Optional[Path]:
+    """Return the collection store a run-set writes to, or ``None``.
+
+    Declared via ``metadata.extra.scenario_store`` or the ``<stem>_scenarios.h5``
+    default (must match the runner's default). ``None`` when *config_path* is
+    unset — there is no config to resolve a default against.
+    """
+    if not config_path:
+        return None
+    cfg = Path(config_path).resolve()
+    rel = ((raw.get("metadata") or {}).get("extra") or {}).get("scenario_store")
+    if rel:
+        p = Path(rel)
+        return p if p.is_absolute() else cfg.parent / p
+    return cfg.parent / f"{cfg.stem}_scenarios.h5"
+
+
+def _local_runner_path(request: Request) -> Optional[Path]:
+    """Return the ``run_sweep.py`` next to the preloaded config, if present."""
+    return _local_runner_path_for(
+        getattr(request.app.state, "preloaded_config_path", None)
+    )
+
+
+def _has_run_set(request: Request) -> bool:
+    return has_run_set(
+        _raw(request), getattr(request.app.state, "preloaded_config_path", None)
+    )
 
 
 def _raw(request: Request) -> Dict[str, Any]:
@@ -91,22 +127,10 @@ def _raw(request: Request) -> Dict[str, Any]:
 
 
 def _store_path(request: Request) -> Optional[Path]:
-    """Return the collection store the run-set writes to.
-
-    Declared via ``metadata.extra.scenario_store`` or the ``<stem>_scenarios.h5``
-    default (must match the runner's default).
-    """
-    cfg_path = getattr(request.app.state, "preloaded_config_path", None)
-    if not cfg_path:
-        return None
-    cfg = Path(cfg_path).resolve()
-    rel = ((_raw(request).get("metadata") or {}).get("extra") or {}).get(
-        "scenario_store"
+    """Return the collection store the run-set writes to (request-scoped wrapper)."""
+    return resolve_store_path(
+        _raw(request), getattr(request.app.state, "preloaded_config_path", None)
     )
-    if rel:
-        p = Path(rel)
-        return p if p.is_absolute() else cfg.parent / p
-    return cfg.parent / f"{cfg.stem}_scenarios.h5"
 
 
 def _runner_command(request: Request) -> Optional[Dict[str, Any]]:

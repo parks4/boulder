@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { getSweepInfo, getSweepStatus, startSweep, type SweepInfo } from "@/api/sweep";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
+import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 
 type RunMode = "sim" | "force_sim" | "sweep";
 
@@ -33,6 +35,8 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   const appliedDefault = useRef(false);
   const appliedAutorun = useRef(false);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
+  const [addScenarioOpen, setAddScenarioOpen] = useState(false);
+  const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
 
   const loadSweepInfo = useCallback(() => {
     getSweepInfo()
@@ -208,9 +212,42 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
                 setMenuOpen(false);
               }}
             />
+            <div className="border-t border-border" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                setAddScenarioOpen(true);
+              }}
+              className="w-full text-left px-3 py-2.5 flex gap-2 hover:bg-muted cursor-pointer"
+            >
+              <span className="w-4 shrink-0 pt-0.5 text-primary">
+                <Plus size={14} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-foreground">
+                  Add Scenario…
+                </span>
+                <span className="block text-xs text-muted-foreground">
+                  Create a new scenario overlay and edit its YAML.
+                </span>
+              </span>
+            </button>
           </div>
         </>
       )}
+
+      <AddScenarioModal
+        open={addScenarioOpen}
+        onClose={() => setAddScenarioOpen(false)}
+        onCreated={(id) => setEditingScenarioId(id)}
+      />
+      <ScenarioYamlEditorModal
+        scenarioId={editingScenarioId}
+        onClose={() => setEditingScenarioId(null)}
+        onSaved={() => void refreshScenarios()}
+      />
     </div>
   );
 }

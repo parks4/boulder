@@ -114,6 +114,145 @@ async def get_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Scenario authoring — create/edit/delete a ``scenario:`` overlay on disk.
+#
+# Unlike the read routes above (which serve precomputed HDF5 trajectories),
+# these operate on the *source* config file (``app.state.preloaded_config_path``)
+# so a newly created or edited scenario is picked up by the next Run Sweep.
+# Only that scenario's subtree is touched on disk.
+# --------------------------------------------------------------------------- #
+
+
+class CreateScenarioRequest(BaseModel):
+    scenario_id: str
+    base_scenario_id: Optional[str] = None
+
+
+class UpdateScenarioRequest(BaseModel):
+    yaml: str
+
+
+class RenameScenarioRequest(BaseModel):
+    new_id: str
+
+
+def _config_path(request: Request) -> Optional[Path]:
+    raw = getattr(request.app.state, "preloaded_config_path", None)
+    return Path(raw) if raw else None
+
+
+def _require_config_path(request: Request) -> Path:
+    cfg_path = _config_path(request)
+    if cfg_path is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No configuration file loaded — scenarios can only be "
+            "authored against a config Boulder was started with (a file path, "
+            "not an uploaded/pasted config).",
+        )
+    return cfg_path
+
+
+def _reload_preloaded_state(request: Request, cfg_path: Path) -> None:
+    """Refresh the in-memory preloaded config after an on-disk scenario edit.
+
+    Mirrors the subset of the app's startup load that Run Sweep and the config
+    endpoints read (``preloaded_raw`` keeps ``scenario:``/``sweep:`` for the
+    Run Sweep button; ``preloaded_config``/``preloaded_yaml`` back the editor
+    panel). Cached simulation results are untouched — editing a scenario
+    doesn't invalidate the base config's last solve.
+    """
+    from ...runner import BoulderRunner
+
+    runner_cls = getattr(request.app.state, "runner_class", None) or BoulderRunner
+    raw = runner_cls.load(str(cfg_path))
+    request.app.state.preloaded_raw = raw
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        request.app.state.preloaded_yaml = f.read()
+    normalized = runner_cls.normalize(raw)
+    request.app.state.preloaded_config = runner_cls.validate(normalized)
+
+
+@router.get("/{scenario_id}/source")
+async def get_scenario_source(scenario_id: str, request: Request) -> Dict[str, Any]:
+    """Return one scenario overlay's raw YAML text (for the scoped editor)."""
+    cfg_path = _require_config_path(request)
+    try:
+        from ...scenario_editor import ScenarioEditError, read_scenario
+
+        yaml_text = read_scenario(cfg_path, scenario_id)
+    except ScenarioEditError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"scenario_id": scenario_id, "yaml": yaml_text}
+
+
+@router.post("")
+async def create_scenario(
+    body: CreateScenarioRequest, request: Request
+) -> Dict[str, Any]:
+    """Create a new scenario overlay — blank, or cloned from an existing one."""
+    cfg_path = _require_config_path(request)
+    try:
+        from ...scenario_editor import ScenarioEditError
+        from ...scenario_editor import create_scenario as _create
+
+        yaml_text = _create(cfg_path, body.scenario_id, body.base_scenario_id)
+    except ScenarioEditError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _reload_preloaded_state(request, cfg_path)
+    return {"scenario_id": body.scenario_id, "yaml": yaml_text}
+
+
+@router.patch("/{scenario_id}")
+async def update_scenario(
+    scenario_id: str, body: UpdateScenarioRequest, request: Request
+) -> Dict[str, Any]:
+    """Save edits to a scenario overlay's YAML text."""
+    cfg_path = _require_config_path(request)
+    try:
+        from ...scenario_editor import ScenarioEditError
+        from ...scenario_editor import update_scenario as _update
+
+        yaml_text = _update(cfg_path, scenario_id, body.yaml)
+    except ScenarioEditError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _reload_preloaded_state(request, cfg_path)
+    return {"scenario_id": scenario_id, "yaml": yaml_text}
+
+
+@router.patch("/{scenario_id}/rename")
+async def rename_scenario(
+    scenario_id: str, body: RenameScenarioRequest, request: Request
+) -> Dict[str, Any]:
+    """Rename a scenario's id (its ``scenario:`` mapping key)."""
+    cfg_path = _require_config_path(request)
+    try:
+        from ...scenario_editor import ScenarioEditError
+        from ...scenario_editor import rename_scenario as _rename
+
+        _rename(cfg_path, scenario_id, body.new_id)
+    except ScenarioEditError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _reload_preloaded_state(request, cfg_path)
+    return {"ok": True, "scenario_id": body.new_id}
+
+
+@router.delete("/{scenario_id}")
+async def delete_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
+    """Delete a scenario overlay. The next Run Sweep prunes its stale HDF5 group."""
+    cfg_path = _require_config_path(request)
+    try:
+        from ...scenario_editor import ScenarioEditError
+        from ...scenario_editor import delete_scenario as _delete
+
+        _delete(cfg_path, scenario_id)
+    except ScenarioEditError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    _reload_preloaded_state(request, cfg_path)
+    return {"ok": True, "scenario_id": scenario_id}
+
+
+# --------------------------------------------------------------------------- #
 # Scenario-focus channel — a generic remote-control seam.
 #
 # An external process (e.g. a separate result dashboard) can ask the open GUI to
