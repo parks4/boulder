@@ -26,15 +26,18 @@ interface SolverState {
 }
 
 /**
- * Solver mode/kind/tolerances editing state.
+ * Solver mode/kind/tolerances editing state for the network-wide default
+ * (config.settings.solver).
  *
- * Edited from the Stage panel (StageCard), read by SimulateCard's Run
- * Simulation button (mode/simTime/timeStep decide whether — and how — a
- * transient run is issued). A shared store rather than either component
- * owning it, since both need it and neither is a parent of the other.
+ * Edited from the Stage panel (StageCard) for single-stage configs, read by
+ * SimulateCard's Run Simulation button (mode/simTime/timeStep decide
+ * whether — and how — a transient run is issued). A shared store rather
+ * than either component owning it, since both need it and neither is a
+ * parent of the other.
  *
- * config.settings.solver is still a single, global setting, not truly
- * per-stage — see the hasStageOverride banner in SolverDetailsModal.
+ * Multi-stage configs edit each stage's own solver override
+ * (config.groups[stageId].solver) via local state in StageCard instead —
+ * this store isn't used for that case.
  */
 export const useSolverStore = create<SolverState>((set, get) => ({
   detailsOpen: false,

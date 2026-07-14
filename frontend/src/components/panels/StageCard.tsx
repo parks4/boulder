@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useConfigStore } from "@/stores/configStore";
 import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 import { useSolverStore } from "@/stores/solverStore";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { SolverDetailsModal } from "./SolverDetailsModal";
 import {
+  deriveMode,
   KIND_LABELS,
   KIND_TO_MODE,
   STEADY_KINDS,
@@ -18,6 +19,19 @@ interface Props {
   stageId: string;
 }
 
+function deriveLocalSolverState(solver: Record<string, unknown> | undefined) {
+  const grid = solver?.grid as Record<string, unknown> | undefined;
+  return {
+    mode: (solver?.mode as SolverMode) ?? deriveMode(solver?.kind as string | undefined),
+    kind: (solver?.kind as SolverKind) ?? "advance_to_steady_state",
+    rtol: solver?.rtol != null ? String(solver.rtol) : "1e-9",
+    atol: solver?.atol != null ? String(solver.atol) : "1e-15",
+    maxSteps: solver?.max_steps != null ? String(solver.max_steps) : "10000",
+    simTime: String(grid?.stop ?? solver?.advance_time ?? "10"),
+    timeStep: String(grid?.dt ?? "1"),
+  };
+}
+
 /**
  * Shown in place of the properties panel when a stage (Cytoscape compound
  * group box) is selected — or by default when nothing else is selected and
@@ -25,9 +39,14 @@ interface Props {
  * reactors/connections directly into this stage and edit the solver that
  * applies to it.
  *
- * Boulder's solver settings (config.settings.solver) are a single global
- * setting, not truly per-stage — see the hasStageOverride banner in
- * SolverDetailsModal for configs whose YAML does override it per stage.
+ * Boulder supports genuine per-stage solver overrides: a stage's YAML can
+ * set its own `solver:` block (config.groups[stageId].solver), distinct
+ * from the network-wide default (config.settings.solver) a stage falls
+ * back to when it has none. For a multi-stage config, this card edits that
+ * stage's own override directly. For a single-stage config there's only
+ * one implicit stage, so editing it IS editing the network default — the
+ * shared solverStore (also read by SimulateCard's Run button) covers that
+ * case.
  */
 export function StageCard({ stageId }: Props) {
   const nodes = useConfigStore((s) => s.config.nodes);
@@ -39,31 +58,93 @@ export function StageCard({ stageId }: Props) {
 
   const detailsOpen = useSolverStore((s) => s.detailsOpen);
   const setDetailsOpen = useSolverStore((s) => s.setDetailsOpen);
-  const mode = useSolverStore((s) => s.mode);
-  const setMode = useSolverStore((s) => s.setMode);
-  const kind = useSolverStore((s) => s.kind);
-  const setKind = useSolverStore((s) => s.setKind);
-  const rtol = useSolverStore((s) => s.rtol);
-  const setRtol = useSolverStore((s) => s.setRtol);
-  const atol = useSolverStore((s) => s.atol);
-  const setAtol = useSolverStore((s) => s.setAtol);
-  const maxSteps = useSolverStore((s) => s.maxSteps);
-  const setMaxSteps = useSolverStore((s) => s.setMaxSteps);
-  const simTime = useSolverStore((s) => s.simTime);
-  const setSimTime = useSolverStore((s) => s.setSimTime);
-  const timeStep = useSolverStore((s) => s.timeStep);
-  const setTimeStep = useSolverStore((s) => s.setTimeStep);
+  const globalMode = useSolverStore((s) => s.mode);
+  const globalKind = useSolverStore((s) => s.kind);
+  const globalRtol = useSolverStore((s) => s.rtol);
+  const globalAtol = useSolverStore((s) => s.atol);
+  const globalMaxSteps = useSolverStore((s) => s.maxSteps);
+  const globalSimTime = useSolverStore((s) => s.simTime);
+  const globalTimeStep = useSolverStore((s) => s.timeStep);
+  const setGlobalMode = useSolverStore((s) => s.setMode);
+  const setGlobalKind = useSolverStore((s) => s.setKind);
+  const setGlobalRtol = useSolverStore((s) => s.setRtol);
+  const setGlobalAtol = useSolverStore((s) => s.setAtol);
+  const setGlobalMaxSteps = useSolverStore((s) => s.setMaxSteps);
+  const setGlobalSimTime = useSolverStore((s) => s.setSimTime);
+  const setGlobalTimeStep = useSolverStore((s) => s.setTimeStep);
+
+  const isMultiStage = Object.keys(config.groups ?? {}).length > 1;
 
   const childNodes = useMemo(
     () => nodes.filter((n) => n.group === stageId),
     [nodes, stageId],
   );
 
+  // --- Local, per-stage-scoped solver state (multi-stage configs only) ---
+  const stageSolver = config.groups?.[stageId]?.solver;
+  const [localState, setLocalState] = useState(() => deriveLocalSolverState(stageSolver));
+  const { mode: localMode, kind: localKind, rtol: localRtol, atol: localAtol, maxSteps: localMaxSteps, simTime: localSimTime, timeStep: localTimeStep } = localState;
+  const setLocalMode = (v: SolverMode) => setLocalState((s) => ({ ...s, mode: v }));
+  const setLocalKind = (v: SolverKind) => setLocalState((s) => ({ ...s, kind: v }));
+  const setLocalRtol = (v: string) => setLocalState((s) => ({ ...s, rtol: v }));
+  const setLocalAtol = (v: string) => setLocalState((s) => ({ ...s, atol: v }));
+  const setLocalMaxSteps = (v: string) => setLocalState((s) => ({ ...s, maxSteps: v }));
+  const setLocalSimTime = (v: string) => setLocalState((s) => ({ ...s, simTime: v }));
+  const setLocalTimeStep = (v: string) => setLocalState((s) => ({ ...s, timeStep: v }));
+
+  // Re-sync local per-stage state whenever the selected stage changes, e.g.
+  // switching which stage's panel is open — following React's "adjust state
+  // during render" pattern (not an effect) so this doesn't trigger an extra
+  // commit. `fileName` is included so re-opening the same stage id in a
+  // freshly-loaded config also re-syncs.
+  const resetKey = `${fileName ?? ""}:${stageId}`;
+  const [lastResetKey, setLastResetKey] = useState(resetKey);
+  if (isMultiStage && resetKey !== lastResetKey) {
+    setLastResetKey(resetKey);
+    setLocalState(deriveLocalSolverState(stageSolver));
+  }
+
+  // Active values: whichever source (this stage's own override, or the
+  // network default) this stage's panel is currently editing.
+  const mode = isMultiStage ? localMode : globalMode;
+  const kind = isMultiStage ? localKind : globalKind;
+  const rtol = isMultiStage ? localRtol : globalRtol;
+  const atol = isMultiStage ? localAtol : globalAtol;
+  const maxSteps = isMultiStage ? localMaxSteps : globalMaxSteps;
+  const simTime = isMultiStage ? localSimTime : globalSimTime;
+  const timeStep = isMultiStage ? localTimeStep : globalTimeStep;
+  const onRtolChange = isMultiStage ? setLocalRtol : setGlobalRtol;
+  const onAtolChange = isMultiStage ? setLocalAtol : setGlobalAtol;
+  const onMaxStepsChange = isMultiStage ? setLocalMaxSteps : setGlobalMaxSteps;
+  const onSimTimeChange = isMultiStage ? setLocalSimTime : setGlobalSimTime;
+  const onTimeStepChange = isMultiStage ? setLocalTimeStep : setGlobalTimeStep;
+
   const handleModeChange = useCallback(
     (newMode: SolverMode) => {
-      setMode(newMode);
       const newKind = newMode === "steady" ? STEADY_KINDS[0] : TRANSIENT_KINDS[0];
-      setKind(newKind);
+      if (isMultiStage) {
+        setLocalMode(newMode);
+        setLocalKind(newKind);
+        const currentGroups = config.groups ?? {};
+        const currentGroup = currentGroups[stageId] ?? {};
+        const currentSolver = currentGroup.solver ?? {};
+        setConfig(
+          {
+            ...config,
+            groups: {
+              ...currentGroups,
+              [stageId]: {
+                ...currentGroup,
+                solver: { ...currentSolver, mode: newMode, kind: newKind },
+              },
+            },
+          },
+          fileName,
+        );
+        return;
+      }
+      setGlobalMode(newMode);
+      setGlobalKind(newKind);
       const currentSettings = (config.settings as Record<string, unknown>) ?? {};
       const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
       setConfig(
@@ -77,12 +158,33 @@ export function StageCard({ stageId }: Props) {
         fileName,
       );
     },
-    [config, fileName, setConfig, setMode, setKind],
+    [config, fileName, isMultiStage, stageId, setConfig, setGlobalMode, setGlobalKind],
   );
 
   const handleKindChange = useCallback(
     (newKind: SolverKind) => {
-      setKind(newKind);
+      const newMode = KIND_TO_MODE[newKind];
+      if (isMultiStage) {
+        setLocalKind(newKind);
+        const currentGroups = config.groups ?? {};
+        const currentGroup = currentGroups[stageId] ?? {};
+        const currentSolver = currentGroup.solver ?? {};
+        setConfig(
+          {
+            ...config,
+            groups: {
+              ...currentGroups,
+              [stageId]: {
+                ...currentGroup,
+                solver: { ...currentSolver, mode: newMode, kind: newKind },
+              },
+            },
+          },
+          fileName,
+        );
+        return;
+      }
+      setGlobalKind(newKind);
       const currentSettings = (config.settings as Record<string, unknown>) ?? {};
       const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
       setConfig(
@@ -90,77 +192,71 @@ export function StageCard({ stageId }: Props) {
           ...config,
           settings: {
             ...currentSettings,
-            solver: { ...currentSolver, mode: KIND_TO_MODE[newKind], kind: newKind },
+            solver: { ...currentSolver, mode: newMode, kind: newKind },
           },
         },
         fileName,
       );
     },
-    [config, fileName, setConfig, setKind],
+    [config, fileName, isMultiStage, stageId, setConfig, setGlobalKind],
   );
 
   // Persists tolerance and transient-grid values from the modal into
-  // config.settings.solver so the backend (and Ctrl+Enter) always see them.
+  // whichever solver block this stage's panel is editing.
   const handleSolverDetailsDone = useCallback(() => {
-    const currentSettings = (config.settings as Record<string, unknown>) ?? {};
-    const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
     const rtolNum = parseFloat(rtol);
     const atolNum = parseFloat(atol);
     const maxStepsNum = parseInt(maxSteps, 10);
-    const updatedSolver: Record<string, unknown> = {
-      ...currentSolver,
+    const extra: Record<string, unknown> = {
       ...(Number.isFinite(rtolNum) ? { rtol: rtolNum } : {}),
       ...(Number.isFinite(atolNum) ? { atol: atolNum } : {}),
       ...(Number.isFinite(maxStepsNum) ? { max_steps: maxStepsNum } : {}),
       ...(mode === "transient"
-        ? {
-            grid: {
-              stop: parseFloat(simTime),
-              dt: parseFloat(timeStep),
-            },
-          }
+        ? { grid: { stop: parseFloat(simTime), dt: parseFloat(timeStep) } }
         : {}),
     };
-    setConfig(
-      {
-        ...config,
-        settings: { ...currentSettings, solver: updatedSolver },
-      },
-      fileName,
-    );
+    if (isMultiStage) {
+      const currentGroups = config.groups ?? {};
+      const currentGroup = currentGroups[stageId] ?? {};
+      const currentSolver = currentGroup.solver ?? {};
+      setConfig(
+        {
+          ...config,
+          groups: {
+            ...currentGroups,
+            [stageId]: { ...currentGroup, solver: { ...currentSolver, ...extra } },
+          },
+        },
+        fileName,
+      );
+    } else {
+      const currentSettings = (config.settings as Record<string, unknown>) ?? {};
+      const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
+      setConfig(
+        {
+          ...config,
+          settings: { ...currentSettings, solver: { ...currentSolver, ...extra } },
+        },
+        fileName,
+      );
+    }
     setDetailsOpen(false);
-  }, [config, fileName, rtol, atol, maxSteps, mode, simTime, timeStep, setConfig, setDetailsOpen]);
-
-  // True when the config has more than one stage. The backend always
-  // materializes a groups.<stage>.solver block (even for a single implicit
-  // stage — checking for its mere presence is always true and was the bug
-  // behind this banner showing for every config, not just genuine
-  // multi-stage overrides). With 2+ stages, this card's single global
-  // toggle can't represent every stage's actual solver, so the warning is
-  // meaningful; with exactly one stage there is nothing to override.
-  const hasStageOverride = useMemo(() => {
-    const groups = (config as unknown as Record<string, unknown>).groups as
-      | Record<string, unknown>
-      | undefined;
-    return Object.keys(groups ?? {}).length > 1;
-  }, [config]);
+  }, [
+    config,
+    fileName,
+    rtol,
+    atol,
+    maxSteps,
+    mode,
+    simTime,
+    timeStep,
+    isMultiStage,
+    stageId,
+    setConfig,
+    setDetailsOpen,
+  ]);
 
   const kinds = mode === "steady" ? STEADY_KINDS : TRANSIENT_KINDS;
-
-  // This stage's own resolved solver, as Boulder actually runs it — distinct
-  // from `kind` above, which is the global default the toggle below edits.
-  // Boulder fully supports per-stage solver overrides (a YAML stage can set
-  // its own solver: block; different stages can even mix steady and
-  // transient in one run — see tests/test_stone_v2_fixtures.py); the GUI
-  // just doesn't yet have an editor for that override, only the default
-  // every stage without one falls back to.
-  const stageOwnKind = useMemo(() => {
-    const groups = (config as unknown as Record<string, unknown>).groups as
-      | Record<string, { solver?: { kind?: string } }>
-      | undefined;
-    return groups?.[stageId]?.solver?.kind as SolverKind | undefined;
-  }, [config, stageId]);
-  const stageHasOwnOverride = Boolean(stageOwnKind) && stageOwnKind !== kind;
 
   return (
     <div id="stage-card" className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -204,6 +300,9 @@ export function StageCard({ stageId }: Props) {
       </div>
 
       <div className="border-t border-border pt-2 mt-1 space-y-2">
+        <p className="text-xs text-muted-foreground">
+          {isMultiStage ? "This stage's own solver" : "Solver"}
+        </p>
         <div
           data-testid="solver-mode-toggle"
           className="flex rounded-md overflow-hidden border border-border text-xs font-medium"
@@ -244,14 +343,6 @@ export function StageCard({ stageId }: Props) {
           </Tooltip>
         </div>
 
-        {stageHasOwnOverride && stageOwnKind && (
-          <p data-testid="stage-own-kind-note" className="text-xs text-amber-600 dark:text-amber-400">
-            This stage's YAML sets its own solver:{" "}
-            <span className="font-mono">{KIND_LABELS[stageOwnKind]}</span>. The toggle
-            below edits the network's default, which this stage doesn't use.
-          </p>
-        )}
-
         <div className="flex items-center gap-2">
           <p
             className="text-xs text-muted-foreground truncate flex-1 min-w-0"
@@ -280,17 +371,16 @@ export function StageCard({ stageId }: Props) {
         kind={kind}
         kinds={kinds}
         onKindChange={handleKindChange}
-        hasStageOverride={hasStageOverride}
         rtol={rtol}
-        onRtolChange={setRtol}
+        onRtolChange={onRtolChange}
         atol={atol}
-        onAtolChange={setAtol}
+        onAtolChange={onAtolChange}
         maxSteps={maxSteps}
-        onMaxStepsChange={setMaxSteps}
+        onMaxStepsChange={onMaxStepsChange}
         simTime={simTime}
-        onSimTimeChange={setSimTime}
+        onSimTimeChange={onSimTimeChange}
         timeStep={timeStep}
-        onTimeStepChange={setTimeStep}
+        onTimeStepChange={onTimeStepChange}
       />
     </div>
   );

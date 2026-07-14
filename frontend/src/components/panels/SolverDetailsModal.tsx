@@ -15,8 +15,6 @@ interface SolverDetailsModalProps {
   kind: SolverKind;
   kinds: SolverKind[];
   onKindChange: (newKind: SolverKind) => void;
-  /** When true, the config has per-stage solver blocks that override settings.solver. */
-  hasStageOverride?: boolean;
   rtol: string;
   onRtolChange: (v: string) => void;
   atol: string;
@@ -36,7 +34,6 @@ export function SolverDetailsModal({
   kind,
   kinds,
   onKindChange,
-  hasStageOverride = false,
   rtol,
   onRtolChange,
   atol,
@@ -82,16 +79,6 @@ export function SolverDetailsModal({
         </div>
 
         <div className="p-4 space-y-3 overflow-y-auto">
-          {hasStageOverride && (
-            <div
-              data-testid="stage-override-banner"
-              className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
-            >
-              This config has per-stage solver overrides. The global kind set
-              here applies as a default only — individual stage solvers take
-              precedence. Edit the YAML directly to change a specific stage.
-            </div>
-          )}
           <label className="block text-xs text-muted-foreground">
             Kind
             <div className="flex items-center gap-1.5 mt-1">
