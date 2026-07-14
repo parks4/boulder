@@ -428,6 +428,31 @@ def _unique_walls(all_reactors: Set[ct.Reactor]) -> Set[ct.Wall]:
     return walls
 
 
+def _flow_device_sort_key(dev: ct.FlowDevice) -> Tuple[str, str, str, str]:
+    """Deterministic sort key for a flow device, stable across process runs.
+
+    Iterating a ``Set[ct.FlowDevice]`` has an order that depends on Python's
+    default object hash (derived from ``id()``, i.e. a memory address), so it
+    varies between processes. Sorting on names/ids instead of ``id(dev)``
+    keeps the emitted connection order identical run-to-run.
+    """
+    cid, conn_type, src_id, tgt_id = _stone_flow_connection_ids(dev)
+    return (conn_type, src_id, tgt_id, cid)
+
+
+def _wall_sort_key(w: ct.Wall) -> Tuple[str, str, str]:
+    """Deterministic sort key for a wall, stable across process runs.
+
+    See :func:`_flow_device_sort_key` for why sorting on ``id()`` is unsafe.
+    """
+    left = w.left_reactor
+    right = w.right_reactor
+    l_id = getattr(left, "name", None) or ""
+    r_id = getattr(right, "name", None) or ""
+    w_id = getattr(w, "name", None) or ""
+    return (l_id, r_id, w_id)
+
+
 def sim_to_internal_config(
     sim: ct.ReactorNet,
     default_mechanism: Optional[str] = None,
@@ -542,9 +567,7 @@ def sim_to_internal_config(
 
     # Flow devices (MassFlowController, Valve, PressureController, etc.)
     devices = _unique_flow_devices(set(all_reactors))
-    devices_sorted = sorted(
-        list(devices), key=lambda d: (_infer_connection_type(d), id(d))
-    )
+    devices_sorted = sorted(list(devices), key=_flow_device_sort_key)
     # Map Python object id -> STONE connection id so PressureController can reference
     # its master MassFlowController by id.
     flow_dev_id_to_cid: Dict[int, str] = {}
@@ -662,9 +685,7 @@ def sim_to_internal_config(
 
     # Walls (energy links)
     walls = _unique_walls(set(all_reactors))
-    for w in sorted(
-        list(walls), key=lambda w: (id(w.left_reactor), id(w.right_reactor))
-    ):
+    for w in sorted(list(walls), key=_wall_sort_key):
         left = w.left_reactor
         right = w.right_reactor
         l_id = getattr(left, "name", None) or f"reactor_{id(left)}"
