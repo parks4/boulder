@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
 import { getSweepInfo, getSweepStatus, startSweep, type SweepInfo } from "@/api/sweep";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { useShortcutNudge } from "@/hooks/useShortcutNudge";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 
@@ -37,6 +38,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   const refreshScenarios = useScenarioStore((s) => s.refresh);
   const [addScenarioOpen, setAddScenarioOpen] = useState(false);
   const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
+  const notifyShortcutUsage = useShortcutNudge();
 
   const loadSweepInfo = useCallback(() => {
     getSweepInfo()
@@ -147,7 +149,13 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
 
   const onPrimary = () => {
     if (effectiveMode === "sweep") handleRunSweep();
-    else onRunSimulation(effectiveMode === "force_sim");
+    else {
+      // Ctrl+Enter (see useKeyboardShortcuts) always runs the plain "sim"
+      // action regardless of the split button's mode — only nudge when a
+      // click here does the exact same thing the shortcut would.
+      if (effectiveMode === "sim") notifyShortcutUsage("run-simulation", "Ctrl+Enter");
+      onRunSimulation(effectiveMode === "force_sim");
+    }
   };
 
   return (

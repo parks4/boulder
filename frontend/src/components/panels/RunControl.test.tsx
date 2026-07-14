@@ -13,8 +13,9 @@ vi.mock("@/api/sweep", () => ({
   startSweep: vi.fn(),
 }));
 
+const mockToastInfo = vi.fn();
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), info: (...args: unknown[]) => mockToastInfo(...args) },
 }));
 
 vi.mock("@/stores/scenarioStore", () => ({
@@ -75,5 +76,43 @@ describe("RunControl", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
     expect(onRunSimulation).toHaveBeenCalledWith(false);
+  });
+
+  it("nudges toward Ctrl+Enter after repeatedly clicking Run Simulation by mouse", () => {
+    render(
+      <RunControl
+        onRunSimulation={onRunSimulation}
+        isRunning={false}
+        runDisabled={false}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: /run simulation/i });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(mockToastInfo).not.toHaveBeenCalled();
+
+    fireEvent.click(button);
+    expect(mockToastInfo).toHaveBeenCalledOnce();
+    expect(mockToastInfo).toHaveBeenCalledWith(expect.stringContaining("Ctrl+Enter"));
+  });
+
+  it("does not nudge while in Force Run mode, since Ctrl+Enter doesn't do the same thing", () => {
+    render(
+      <RunControl
+        onRunSimulation={onRunSimulation}
+        isRunning={false}
+        runDisabled={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText("Choose run action"));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /force run/i }));
+    const button = screen.getByRole("button", { name: "Force Run" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(mockToastInfo).not.toHaveBeenCalled();
   });
 });
