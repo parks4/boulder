@@ -37,14 +37,13 @@ class ScenarioEditError(ValueError):
 def _validate_id(scenario_id: str) -> None:
     if not scenario_id or not _ID_RE.match(scenario_id):
         raise ScenarioEditError(
-            f"Invalid scenario id {scenario_id!r}: use letters, digits, "
-            "'_' or '-' only"
+            f"Invalid scenario id {scenario_id!r}: use letters, digits, '_' or '-' only"
         )
 
 
 def _load(cfg_path: Path) -> CommentedMap:
     data = load_config_file_with_comments(str(cfg_path))
-    if not isinstance(data, dict):
+    if not isinstance(data, CommentedMap):
         raise ScenarioEditError(f"{cfg_path} does not contain a YAML mapping")
     return data
 
@@ -56,7 +55,9 @@ def _save(cfg_path: Path, data: CommentedMap) -> None:
 
 
 def _overlay_yaml_text(overlay: Any) -> str:
-    return yaml_to_string_with_comments(overlay if overlay is not None else CommentedMap())
+    return yaml_to_string_with_comments(
+        overlay if overlay is not None else CommentedMap()
+    )
 
 
 def list_scenario_ids(cfg_path: Path) -> List[str]:

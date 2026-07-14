@@ -76,7 +76,7 @@ def _local_runner_path_for(config_path: Optional[str]) -> Optional[Path]:
 
 
 def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
-    """Does *raw* (the inheritance-resolved config) declare a run-set?
+    """Return whether *raw* (the inheritance-resolved config) declares a run-set.
 
     True when it has an inline ``scenario:``/``sweep:``/``sweeps:`` block, or a
     ``run_sweep.py`` sits next to the config (a host-defined run-set: the runner

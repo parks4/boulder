@@ -166,9 +166,12 @@ def test_update_scenario(tmp_path: Path) -> None:
         assert resp.status_code == 200, resp.text
         assert "Updated" in resp.json()["yaml"]
         assert "350.0" in cfg.read_text(encoding="utf-8")
-        assert app.state.preloaded_raw["scenario"]["base_case"]["metadata"][
-            "scenario_name"
-        ] == "Updated"
+        assert (
+            app.state.preloaded_raw["scenario"]["base_case"]["metadata"][
+                "scenario_name"
+            ]
+            == "Updated"
+        )
     finally:
         client.__exit__(None, None, None)
 

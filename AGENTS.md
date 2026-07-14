@@ -49,7 +49,14 @@ Deep-dive architecture: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Verification (what to run before a PR)
 
-From the repo root **with conda `boulder` active**:
+**Before every commit**, run at minimum:
+
+```bash
+make qa           # pre-commit on all files
+make type-check   # mypy strict
+```
+
+From the repo root **with conda `boulder` active**, the fuller pre-PR pass:
 
 ```bash
 make unit-tests COV_REPORT=xml   # or html locally
