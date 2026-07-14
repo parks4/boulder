@@ -77,7 +77,7 @@ GUI check:
 
 - The graph is a **Cytoscape `<canvas>`** — node ids are **not** exposed to `browser_search`.
 - **Single click** on a node → selects it (Properties + Thermo).
-- **Double click** on a node within ~300 ms → also switches to **Thermo** tab.
+- **Double click** on a node within ~300 ms → selects it and opens **Initial conditions** in edit mode (Properties panel).
 - **Single click** on a **MassFlowController** edge → selects it and opens **Thermo** (shows source reactor T/P/X and mdot).
 
 **Reliable click pattern (cursor-ide-browser):**

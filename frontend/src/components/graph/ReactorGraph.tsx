@@ -1302,13 +1302,14 @@ export function ReactorGraph() {
       const nodeId = String(data.id);
       const now = Date.now();
       const last = lastTappedRef.current;
+      let editInitialConditions = false;
       if (last?.nodeId === nodeId && now - last.time < DBLTAP_MS) {
         if (tapTimeoutRef.current) {
           clearTimeout(tapTimeoutRef.current);
           tapTimeoutRef.current = null;
         }
         lastTappedRef.current = null;
-        setActiveTab("Thermo");
+        editInitialConditions = true;
       } else {
         lastTappedRef.current = { nodeId, time: now };
         if (tapTimeoutRef.current) clearTimeout(tapTimeoutRef.current);
@@ -1317,7 +1318,10 @@ export function ReactorGraph() {
           tapTimeoutRef.current = null;
         }, DBLTAP_MS);
       }
-      setSelectedElement({ type: "node", data });
+      setSelectedElement(
+        { type: "node", data },
+        editInitialConditions ? { editInitialConditions: true } : undefined,
+      );
     });
 
     cy.on("tap", "edge", (e: EventObject) => {

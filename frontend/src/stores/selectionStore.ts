@@ -5,14 +5,30 @@ export interface SelectedElement {
   data: Record<string, unknown>;
 }
 
+export interface SetSelectedElementOptions {
+  editInitialConditions?: boolean;
+}
+
 interface SelectionState {
   selectedElement: SelectedElement | null;
-  setSelectedElement: (element: SelectedElement | null) => void;
+  /** Incremented when a graph double-click requests initial-conditions edit. */
+  initialConditionsEditNonce: number;
+  setSelectedElement: (
+    element: SelectedElement | null,
+    options?: SetSelectedElementOptions,
+  ) => void;
   clearSelection: () => void;
 }
 
 export const useSelectionStore = create<SelectionState>((set) => ({
   selectedElement: null,
-  setSelectedElement: (element) => set({ selectedElement: element }),
+  initialConditionsEditNonce: 0,
+  setSelectedElement: (element, options) =>
+    set((state) => ({
+      selectedElement: element,
+      initialConditionsEditNonce: options?.editInitialConditions
+        ? state.initialConditionsEditNonce + 1
+        : state.initialConditionsEditNonce,
+    })),
   clearSelection: () => set({ selectedElement: null }),
 }));
