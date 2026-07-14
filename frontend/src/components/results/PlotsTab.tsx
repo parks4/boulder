@@ -1,9 +1,22 @@
 import { useCallback, useMemo, useState } from "react";
 import Plot from "react-plotly.js";
 import { coerceNumericSeries, pressureYAxis } from "@/lib/plotAxis";
+import { useConfigStore } from "@/stores/configStore";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useThemeStore } from "@/stores/themeStore";
 import type { SimulationProgress } from "@/types/simulation";
+
+interface NodePlotConfig {
+  hideSpecies: Set<string>;
+  showSpecies: string[];
+}
+
+function traceVisibility(
+  species: string,
+  hideSpecies: Set<string>,
+): true | "legendonly" {
+  return hideSpecies.has(species) ? "legendonly" : true;
+}
 
 interface Props {
   data: SimulationProgress;
@@ -16,6 +29,7 @@ function traceModeForSamples(sampleCount: number): "lines" | "lines+markers" {
 export function PlotsTab({ data }: Props) {
   const selectedElement = useSelectionStore((s) => s.selectedElement);
   const theme = useThemeStore((s) => s.theme);
+  const configNodes = useConfigStore((s) => s.config.nodes);
 
   // Shared x-range: zoom/pan on any plot synchronizes all of them
   // (double-click autoscale resets the whole set).
@@ -64,12 +78,32 @@ export function PlotsTab({ data }: Props) {
     ? data.reactors_series[selectedReactorId]
     : undefined;
 
+  // Per-node `plot_options: {hide_species, show_species}` (STONE node
+  // property) lets an example author hide dominant/uninteresting species
+  // (e.g. N2, O2) and force minor-but-relevant ones (e.g. reaction
+  // intermediates that never crack the top-12-by-magnitude heuristic below)
+  // into the chart by default -- the user can still click a hidden trace's
+  // legend entry to reveal it.
+  const plotConfig: NodePlotConfig = useMemo(() => {
+    const node = selectedReactorId
+      ? configNodes.find((n) => n.id === selectedReactorId)
+      : undefined;
+    const raw = (node?.properties?.plot_options ?? {}) as {
+      hide_species?: string[];
+      show_species?: string[];
+    };
+    return {
+      hideSpecies: new Set(raw.hide_species ?? []),
+      showSpecies: raw.show_species ?? [],
+    };
+  }, [configNodes, selectedReactorId]);
+
   const MAIN_SPECIES_MIN_FRACTION = 1e-4;
   const MAIN_SPECIES_MAX_COUNT = 12;
 
   const mainSpeciesMole = useMemo(() => {
     const X = reactorSeries?.X ?? {};
-    return Object.entries(X)
+    const ranked = Object.entries(X)
       .map(([name, arr]) => ({
         name,
         max: Math.max(...(arr ?? []), 0),
@@ -78,11 +112,15 @@ export function PlotsTab({ data }: Props) {
       .sort((a, b) => b.max - a.max)
       .slice(0, MAIN_SPECIES_MAX_COUNT)
       .map((s) => s.name);
-  }, [reactorSeries?.X]);
+    const forced = plotConfig.showSpecies.filter(
+      (name) => name in X && !ranked.includes(name),
+    );
+    return [...ranked, ...forced];
+  }, [reactorSeries?.X, plotConfig.showSpecies]);
 
   const mainSpeciesMass = useMemo(() => {
     const Y = reactorSeries?.Y ?? {};
-    return Object.entries(Y)
+    const ranked = Object.entries(Y)
       .map(([name, arr]) => ({
         name,
         max: Math.max(...(arr ?? []), 0),
@@ -91,7 +129,11 @@ export function PlotsTab({ data }: Props) {
       .sort((a, b) => b.max - a.max)
       .slice(0, MAIN_SPECIES_MAX_COUNT)
       .map((s) => s.name);
-  }, [reactorSeries?.Y]);
+    const forced = plotConfig.showSpecies.filter(
+      (name) => name in Y && !ranked.includes(name),
+    );
+    return [...ranked, ...forced];
+  }, [reactorSeries?.Y, plotConfig.showSpecies]);
 
   if (!data.times.length && !reactorSeries?.is_spatial && !reactorSeries?.is_residence) {
     return <p className="text-sm text-muted-foreground">No data yet.</p>;
@@ -124,6 +166,7 @@ export function PlotsTab({ data }: Props) {
       mode: profileTraceMode,
       name: species,
       line: { width: 2 },
+      visible: traceVisibility(species, plotConfig.hideSpecies),
     }));
 
     const massFractionTraces = mainSpeciesMass.map((species) => ({
@@ -133,6 +176,7 @@ export function PlotsTab({ data }: Props) {
       mode: profileTraceMode,
       name: species,
       line: { width: 2 },
+      visible: traceVisibility(species, plotConfig.hideSpecies),
     }));
 
     return (
@@ -353,6 +397,7 @@ export function PlotsTab({ data }: Props) {
     mode: timeTraceMode,
     name: species,
     line: { width: 2 },
+    visible: traceVisibility(species, plotConfig.hideSpecies),
   }));
 
   const massFractionTraces = mainSpeciesMass.map((species) => ({
@@ -362,6 +407,7 @@ export function PlotsTab({ data }: Props) {
     mode: timeTraceMode,
     name: species,
     line: { width: 2 },
+    visible: traceVisibility(species, plotConfig.hideSpecies),
   }));
 
   return (

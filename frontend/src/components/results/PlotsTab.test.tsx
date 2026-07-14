@@ -8,6 +8,7 @@
 import { render } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useConfigStore } from "@/stores/configStore";
 import { useSelectionStore } from "@/stores/selectionStore";
 import type { SimulationProgress } from "@/types/simulation";
 import { PlotsTab } from "./PlotsTab";
@@ -16,6 +17,8 @@ interface PlotTrace {
   mode?: string;
   x?: number[];
   y?: number[];
+  name?: string;
+  visible?: true | "legendonly";
 }
 
 interface PlotProps {
@@ -82,6 +85,7 @@ describe("PlotsTab", () => {
     useSelectionStore.setState({
       selectedElement: { type: "node", data: { id: "steady_reactor" } },
     });
+    useConfigStore.getState().resetConfig();
   });
 
   it("shows markers for single-sample steady-state traces", () => {
@@ -119,5 +123,63 @@ describe("PlotsTab", () => {
       tickformat: ",.0f",
       exponentformat: "none",
     });
+  });
+
+  it("applies per-node plot_options.hide_species/show_species to mole fraction traces", () => {
+    useConfigStore.setState({
+      config: {
+        nodes: [
+          {
+            id: "steady_reactor",
+            type: "IdealGasReactor",
+            properties: {
+              plot_options: {
+                hide_species: ["N2"],
+                show_species: ["trace_radical"],
+              },
+            },
+          },
+        ],
+        connections: [],
+      },
+    });
+
+    const dataWithTrace: SimulationProgress = {
+      is_running: false,
+      is_complete: true,
+      times: [0, 1],
+      reactors_series: {
+        steady_reactor: {
+          T: [1011.31, 1011.31],
+          P: [101325, 101325],
+          X: {
+            O2: [0.2, 0.2],
+            N2: [0.7, 0.7],
+            // Below MAIN_SPECIES_MIN_FRACTION (1e-4) -- only appears because
+            // it's named in show_species.
+            trace_radical: [1e-6, 1e-6],
+          },
+          Y: { O2: [0.23, 0.23], N2: [0.77, 0.77] },
+        },
+      },
+    };
+
+    render(<PlotsTab data={dataWithTrace} />);
+
+    const moleFractionPlot = plotCalls.find((plot) =>
+      plot.data.some((trace) => trace.name === "N2" || trace.name === "trace_radical"),
+    );
+    expect(moleFractionPlot).toBeDefined();
+
+    const n2Trace = moleFractionPlot?.data.find((t) => t.name === "N2");
+    const o2Trace = moleFractionPlot?.data.find((t) => t.name === "O2");
+    const traceRadical = moleFractionPlot?.data.find(
+      (t) => t.name === "trace_radical",
+    );
+
+    expect(n2Trace?.visible).toBe("legendonly");
+    expect(o2Trace?.visible).toBe(true);
+    expect(traceRadical).toBeDefined();
+    expect(traceRadical?.visible).toBe(true);
   });
 });
