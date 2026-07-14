@@ -24,6 +24,7 @@ let mockSelectedElement: {
   type: "node" | "edge";
   data: Record<string, unknown>;
 } | null = null;
+let mockInitialConditionsEditNonce = 0;
 let mockConfig: Record<string, unknown> = {
   nodes: [
     {
@@ -47,6 +48,7 @@ vi.mock("@/stores/selectionStore", () => ({
   useSelectionStore: (selector: (s: unknown) => unknown) => {
     const store = {
       selectedElement: mockSelectedElement,
+      initialConditionsEditNonce: mockInitialConditionsEditNonce,
       clearSelection: mockClearSelection,
     };
     return selector(store);
@@ -69,6 +71,7 @@ vi.mock("@/stores/configStore", () => ({
 describe("PropertiesPanel delete confirmation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockInitialConditionsEditNonce = 0;
     mockSelectedElement = {
       type: "node",
       data: { id: "reactor_1", type: "IdealGasReactor" },
@@ -172,5 +175,48 @@ describe("PropertiesPanel delete confirmation", () => {
     expect(screen.getByText("101,325.00")).toBeInTheDocument();
     expect(screen.getByText("H2:2,O2:1,N2:4")).toBeInTheDocument();
     expect(screen.queryByText("initial")).not.toBeInTheDocument();
+  });
+});
+
+describe("PropertiesPanel edit-on-double-click", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInitialConditionsEditNonce = 0;
+    mockSelectedElement = {
+      type: "node",
+      data: { id: "reactor_1", type: "IdealGasReactor" },
+    };
+    mockConfig = {
+      nodes: [
+        {
+          id: "reactor_1",
+          type: "IdealGasReactor",
+          properties: { temperature: 1273.15, pressure: 101325 },
+        },
+      ],
+      connections: [],
+    };
+  });
+
+  it("enters edit mode when selection requests editInitialConditions", () => {
+    mockInitialConditionsEditNonce = 1;
+    mockSelectedElement = {
+      type: "node",
+      data: { id: "reactor_1", type: "IdealGasReactor" },
+    };
+
+    render(<PropertiesPanel />);
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("1000.00")).toBeInTheDocument();
+  });
+
+  it("shows view mode for a normal single-click selection", () => {
+    render(<PropertiesPanel />);
+
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByText("1000.00 °C")).toBeInTheDocument();
   });
 });

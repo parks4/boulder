@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
@@ -23,8 +23,23 @@ function unfoldInitialConditions(
   return flat;
 }
 
+function buildEditValuesFromProperties(
+  displayProperties: Record<string, unknown>,
+): Record<string, string> {
+  const vals: Record<string, string> = {};
+  for (const [key, value] of Object.entries(displayProperties)) {
+    if (key === "temperature" && typeof value === "number") {
+      vals[key] = String(kelvinToCelsius(value).toFixed(2));
+    } else {
+      vals[key] = String(value ?? "");
+    }
+  }
+  return vals;
+}
+
 export function PropertiesPanel() {
   const selectedElement = useSelectionStore((s) => s.selectedElement);
+  const initialConditionsEditNonce = useSelectionStore((s) => s.initialConditionsEditNonce);
   const config = useConfigStore((s) => s.config);
   const updateNode = useConfigStore((s) => s.updateNode);
   const updateConnection = useConfigStore((s) => s.updateConnection);
@@ -34,6 +49,57 @@ export function PropertiesPanel() {
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const handledEditNonceRef = useRef(0);
+  const prevSelectedElementRef = useRef<typeof selectedElement>(null);
+
+  // Double-click on a graph node bumps initialConditionsEditNonce.
+  useEffect(() => {
+    const element = selectedElement;
+    if (!element) {
+      setIsEditing(false);
+      prevSelectedElementRef.current = null;
+      return;
+    }
+
+    const elementChanged = prevSelectedElementRef.current !== element;
+    prevSelectedElementRef.current = element;
+
+    if (initialConditionsEditNonce > handledEditNonceRef.current) {
+      handledEditNonceRef.current = initialConditionsEditNonce;
+
+      if (element.data.isGroup) {
+        setIsEditing(false);
+        return;
+      }
+
+      const isNode = element.type === "node";
+      const id = String(element.data.id);
+      const entity = isNode
+        ? config.nodes.find((n) => n.id === id)
+        : config.connections.find((c) => c.id === id);
+      if (!entity) {
+        setIsEditing(false);
+        return;
+      }
+
+      const properties = entity.properties as Record<string, unknown>;
+      const isStreamPoint = isNode && Boolean(properties.stream_point);
+      const isTerminalSink = isNode && Boolean(properties.terminal_sink);
+      if (isStreamPoint || isTerminalSink) {
+        setIsEditing(false);
+        return;
+      }
+
+      const displayProperties = unfoldInitialConditions(properties);
+      setEditValues(buildEditValuesFromProperties(displayProperties));
+      setIsEditing(true);
+      return;
+    }
+
+    if (elementChanged) {
+      setIsEditing(false);
+    }
+  }, [selectedElement, initialConditionsEditNonce, config]);
 
   // Field metadata from the kind's registered schema (descriptions, enum
   // options, conditional visibility). Fetched before any early return so
@@ -125,15 +191,7 @@ export function PropertiesPanel() {
 
   // Start editing
   const handleEdit = () => {
-    const vals: Record<string, string> = {};
-    for (const [key, value] of Object.entries(displayProperties)) {
-      if (key === "temperature" && typeof value === "number") {
-        vals[key] = String(kelvinToCelsius(value).toFixed(2));
-      } else {
-        vals[key] = String(value ?? "");
-      }
-    }
-    setEditValues(vals);
+    setEditValues(buildEditValuesFromProperties(displayProperties));
     setIsEditing(true);
   };
 
