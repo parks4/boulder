@@ -4,8 +4,10 @@ import { create } from "zustand";
 const STORAGE_KEY = "boulder-layout";
 const LEFT_DEFAULT = 320;
 const RIGHT_DEFAULT = 250;
+const YAML_DEFAULT = 420;
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 600;
+const YAML_MAX_WIDTH = 900;
 
 interface LayoutState {
   leftCollapsed: boolean;
@@ -16,10 +18,16 @@ interface LayoutState {
   toggleRight: () => void;
   setLeftWidth: (w: number) => void;
   setRightWidth: (w: number) => void;
+  /** The YAML editor pane (opened on demand from Network's "Edit YAML"), not persisted open/closed. */
+  yamlPaneOpen: boolean;
+  yamlWidth: number;
+  openYamlPane: () => void;
+  closeYamlPane: () => void;
+  setYamlWidth: (w: number) => void;
 }
 
-function clampWidth(w: number): number {
-  return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(w)));
+function clampWidth(w: number, max: number = MAX_WIDTH): number {
+  return Math.max(MIN_WIDTH, Math.min(max, Math.round(w)));
 }
 
 function load(): Partial<LayoutState> {
@@ -47,6 +55,8 @@ export const useLayoutStore = create<LayoutState>((set) => {
     rightCollapsed: Boolean(init.rightCollapsed),
     leftWidth: clampWidth(init.leftWidth ?? LEFT_DEFAULT),
     rightWidth: clampWidth(init.rightWidth ?? RIGHT_DEFAULT),
+    yamlPaneOpen: false,
+    yamlWidth: clampWidth(init.yamlWidth ?? YAML_DEFAULT, YAML_MAX_WIDTH),
 
     toggleLeft: () =>
       set((s) => {
@@ -69,6 +79,13 @@ export const useLayoutStore = create<LayoutState>((set) => {
       const rightWidth = clampWidth(w);
       save({ rightWidth });
       set({ rightWidth });
+    },
+    openYamlPane: () => set({ yamlPaneOpen: true }),
+    closeYamlPane: () => set({ yamlPaneOpen: false }),
+    setYamlWidth: (w) => {
+      const yamlWidth = clampWidth(w, YAML_MAX_WIDTH);
+      save({ yamlWidth });
+      set({ yamlWidth });
     },
   };
 });

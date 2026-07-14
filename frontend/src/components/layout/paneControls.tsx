@@ -32,19 +32,22 @@ export function PaneToggle({ side }: { side: "left" | "right" }) {
 }
 
 /** Draggable vertical divider that resizes the adjacent sidebar. */
-export function PaneResizer({ side }: { side: "left" | "right" }) {
-  const { leftWidth, rightWidth, setLeftWidth, setRightWidth } =
+export function PaneResizer({ side }: { side: "left" | "right" | "yaml" }) {
+  const { leftWidth, rightWidth, yamlWidth, setLeftWidth, setRightWidth, setYamlWidth } =
     useLayoutStore();
 
   const onPointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
     const startX = e.clientX;
-    const startW = side === "left" ? leftWidth : rightWidth;
+    const startW = side === "left" ? leftWidth : side === "right" ? rightWidth : yamlWidth;
 
     const onMove = (ev: PointerEvent) => {
       const delta = ev.clientX - startX;
+      // "left" widens to the right (dragging right grows it); "right" and
+      // "yaml" both sit right of center and widen to the left.
       if (side === "left") setLeftWidth(startW + delta);
-      else setRightWidth(startW - delta);
+      else if (side === "right") setRightWidth(startW - delta);
+      else setYamlWidth(startW - delta);
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
