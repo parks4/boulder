@@ -56,6 +56,11 @@ class GuiActionPlugin(ABC):
         """When True, the action is disabled until a simulation completes."""
         return False
 
+    @property
+    def description(self) -> Optional[str]:
+        """Optional tooltip text shown next to the action's button."""
+        return None
+
     def is_listed(self, context: GuiActionContext) -> bool:
         """Return True when this action should appear in the Simulate panel."""
         return True

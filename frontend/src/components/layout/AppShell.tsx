@@ -1,15 +1,15 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { deriveMode } from "@/components/panels/solverShared";
 import { useThemeStore } from "@/stores/themeStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
+import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 import { useSimulationSSE } from "@/hooks/useSimulationSSE";
 import { useScenarioFocus } from "@/hooks/useScenarioFocus";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { startSimulation } from "@/api/simulations";
 import { fetchDefaultConfig, fetchPreloadedConfig } from "@/api/configs";
 import { fetchCachedResult } from "@/api/resultCache";
-import { EditNetworkCard } from "@/components/panels/EditNetworkCard";
+import { NetworkCard } from "@/components/panels/NetworkCard";
 import { SimulateCard } from "@/components/panels/SimulateCard";
 import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
 import { ScenarioPane } from "@/components/panels/ScenarioPane";
@@ -20,22 +20,18 @@ import { ReactorGraph } from "@/components/graph/ReactorGraph";
 import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
 import { YAMLEditorModal } from "@/components/modals/YAMLEditorModal";
+import { AddReactorModal } from "@/components/modals/AddReactorModal";
+import { AddMFCModal } from "@/components/modals/AddMFCModal";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 export function AppShell() {
   const { theme, toggleTheme } = useThemeStore();
-  const { config, fileName, setConfig } = useConfigStore();
+  const { config, setConfig } = useConfigStore();
   const { isRunning, beginSimulationRun, startSimulation: setStarted, setError, setResults } =
     useSimulationStore();
-  const solverMode = useMemo(() => {
-    const solver = (config.settings as Record<string, unknown> | null | undefined)
-      ?.solver as Record<string, unknown> | undefined;
-    return deriveMode(
-      solver?.kind as string | undefined,
-      solver?.mode as string | undefined,
-    );
-  }, [config.settings]);
+  const { reactorModal, connectionModal, closeAddReactor, closeAddConnection } =
+    useAddEntityModalStore();
   const [showYamlEditor, setShowYamlEditor] = useState(false);
   const { leftCollapsed, rightCollapsed, leftWidth, rightWidth, toggleLeft } =
     useLayoutStore();
@@ -203,59 +199,6 @@ export function AppShell() {
               v{headerVersion}
             </span>
           )}
-          <Button
-            id="config-file-name-span"
-            onClick={() => setShowYamlEditor(true)}
-            variant="link"
-            size="sm"
-            className="px-0 h-auto"
-          >
-            {fileName ?? "untitled.yaml"}
-          </Button>
-          {/* Solver mode badge */}
-          <span
-            data-testid="solver-mode-badge"
-            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${
-              solverMode === "transient"
-                ? "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200"
-                : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-            }`}
-          >
-            {solverMode === "transient" ? (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-              </svg>
-            ) : (
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="10"
-                height="10"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-            )}
-            {solverMode}
-          </span>
         </div>
         <div className="flex items-center gap-2">
           {scenariosAvailable && <PaneToggle side="right" />}
@@ -321,7 +264,7 @@ export function AppShell() {
               style={{ width: leftWidth }}
               className="shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-5rem)] pr-1"
             >
-              <EditNetworkCard />
+              <NetworkCard onEditYaml={() => setShowYamlEditor(true)} />
               <SimulateCard />
               <PropertiesPanel />
             </aside>
@@ -354,6 +297,25 @@ export function AppShell() {
       <YAMLEditorModal
         open={showYamlEditor}
         onClose={() => setShowYamlEditor(false)}
+      />
+      <AddReactorModal
+        // Remount (fresh form state) whenever it's opened with a different
+        // stage, instead of syncing defaultGroup into state via an effect.
+        key={reactorModal.open ? `open-${reactorModal.group ?? ""}` : "closed"}
+        open={reactorModal.open}
+        onClose={closeAddReactor}
+        defaultGroup={reactorModal.group}
+      />
+      <AddMFCModal
+        key={
+          connectionModal.open
+            ? `open-${connectionModal.group ?? ""}-${connectionModal.source ?? ""}`
+            : "closed"
+        }
+        open={connectionModal.open}
+        onClose={closeAddConnection}
+        defaultGroup={connectionModal.group}
+        defaultSource={connectionModal.source}
       />
     </div>
   );

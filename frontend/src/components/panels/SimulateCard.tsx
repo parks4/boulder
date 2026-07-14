@@ -5,10 +5,12 @@ import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
 import { startSimulation } from "@/api/simulations";
 import { checkSimulationCache } from "@/api/resultCache";
 import { Button } from "@/components/ui/Button";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { RunControl } from "./RunControl";
 import type { GuiActionMeta } from "@/types/guiAction";
 import { toast } from "sonner";
 import { SolverDetailsModal } from "./SolverDetailsModal";
+import { useSolverDetailsStore } from "@/stores/solverDetailsStore";
 import {
   deriveMode,
   KIND_LABELS,
@@ -49,7 +51,8 @@ export function SimulateCard() {
     return "advance_to_steady_state";
   });
 
-  const [solverDetailsOpen, setSolverDetailsOpen] = useState(false);
+  const solverDetailsOpen = useSolverDetailsStore((s) => s.open);
+  const setSolverDetailsOpen = useSolverDetailsStore((s) => s.setOpen);
   const [guiActions, setGuiActions] = useState<GuiActionMeta[]>([]);
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
 
@@ -186,7 +189,18 @@ export function SimulateCard() {
       fileName,
     );
     setSolverDetailsOpen(false);
-  }, [config, fileName, rtol, atol, maxSteps, mode, simTime, timeStep, setConfig]);
+  }, [
+    config,
+    fileName,
+    rtol,
+    atol,
+    maxSteps,
+    mode,
+    simTime,
+    timeStep,
+    setConfig,
+    setSolverDetailsOpen,
+  ]);
 
   // True when the loaded config has per-stage solver blocks that override the
   // global settings.solver the UI edits.
@@ -307,31 +321,45 @@ export function SimulateCard() {
         data-testid="solver-mode-toggle"
         className="flex rounded-md overflow-hidden border border-border text-xs font-medium"
       >
-        <button
-          data-testid="mode-steady"
-          type="button"
-          onClick={() => handleModeChange("steady")}
-          className={`flex-1 py-1.5 transition-colors ${
-            mode === "steady"
-              ? "bg-blue-600 text-white"
-              : "bg-input text-muted-foreground hover:bg-muted"
-          }`}
+        <Tooltip
+          className="flex-1"
+          content="Solves for the network's steady-state: mass flows continuously enter and exit, and time-resolved plots track a gas parcel as it moves through the network."
         >
-          Steady
-        </button>
-        <button
-          data-testid="mode-transient"
-          type="button"
-          onClick={() => handleModeChange("transient")}
-          className={`flex-1 py-1.5 transition-colors ${
-            mode === "transient"
-              ? "bg-teal-600 text-white"
-              : "bg-input text-muted-foreground hover:bg-muted"
-          }`}
+          <button
+            data-testid="mode-steady"
+            type="button"
+            onClick={() => handleModeChange("steady")}
+            className={`w-full py-1.5 transition-colors ${
+              mode === "steady"
+                ? "bg-blue-600 text-white"
+                : "bg-input text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            Steady
+          </button>
+        </Tooltip>
+        <Tooltip
+          className="flex-1"
+          content="Time-resolved simulation: plots show how the system evolves over the real timescale you configure below."
         >
-          Transient
-        </button>
+          <button
+            data-testid="mode-transient"
+            type="button"
+            onClick={() => handleModeChange("transient")}
+            className={`w-full py-1.5 transition-colors ${
+              mode === "transient"
+                ? "bg-teal-600 text-white"
+                : "bg-input text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            Transient
+          </button>
+        </Tooltip>
       </div>
+      <p className="text-xs text-muted-foreground -mt-1">
+        Stages share this mode — Boulder can't mix steady and transient stages in one
+        run. Click a stage in the graph to add reactors/connections to it.
+      </p>
 
       <div className="flex items-center gap-2">
         <p
@@ -378,7 +406,10 @@ export function SimulateCard() {
         runDisabled={runDisabled}
       />
 
-      {simulationId && (
+      <Tooltip
+        className="block"
+        content="Download the equivalent runnable Python/Cantera script for this network."
+      >
         <Button
           id="download-python"
           onClick={handleDownloadPy}
@@ -388,24 +419,33 @@ export function SimulateCard() {
         >
           Download Python
         </Button>
-      )}
+      </Tooltip>
 
-      {guiActions.map((action) => (
-        <Button
-          key={action.id}
-          id={`gui-action-${action.id}`}
-          onClick={() => handleGuiAction(action)}
-          disabled={
-            runningActionId !== null
-            || isRunning
-            || !action.is_available
-          }
-          variant="secondary"
-          className="w-full"
-        >
-          {runningActionId === action.id ? "Exporting..." : action.label}
-        </Button>
-      ))}
+      {guiActions.map((action) => {
+        const button = (
+          <Button
+            key={action.id}
+            id={`gui-action-${action.id}`}
+            onClick={() => handleGuiAction(action)}
+            disabled={
+              runningActionId !== null
+              || isRunning
+              || !action.is_available
+            }
+            variant="secondary"
+            className="w-full"
+          >
+            {runningActionId === action.id ? "Exporting..." : action.label}
+          </Button>
+        );
+        return action.description ? (
+          <Tooltip key={action.id} className="block" content={action.description}>
+            {button}
+          </Tooltip>
+        ) : (
+          button
+        );
+      })}
     </div>
   );
 }

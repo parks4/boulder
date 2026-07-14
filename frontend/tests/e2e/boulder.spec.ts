@@ -1,8 +1,28 @@
 import { test, expect, type Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
-// Helper function to add a reactor via the modal
+// Helpers: Add Reactor/Add Connection have no static sidebar button anymore
+// (they're opened by right-clicking the graph). Playwright can't easily
+// right-click a specific Cytoscape-rendered node by CSS selector since it's
+// canvas-rendered, so drive the same cxttap event ReactorGraph listens for
+// through the `window.__boulderCy` test hook it already exposes.
 // ---------------------------------------------------------------------------
+
+async function openAddReactorModal(page: Page) {
+  await page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__boulderCy.trigger("cxttap");
+  });
+  await expect(page.locator("#add-reactor-modal")).toBeVisible();
+}
+
+async function openAddConnectionModalFromNode(page: Page, nodeId: string) {
+  await page.evaluate((id) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__boulderCy.$id(id).trigger("cxttap");
+  }, nodeId);
+  await expect(page.locator("#add-mfc-modal")).toBeVisible();
+}
 
 async function addReactor(
   page: Page,
@@ -12,8 +32,7 @@ async function addReactor(
   pressure = "101325",
   composition = "O2:1,N2:3.76",
 ) {
-  await page.click("#open-reactor-modal");
-  await expect(page.locator("#add-reactor-modal")).toBeVisible();
+  await openAddReactorModal(page);
   await page.fill("#reactor-id", id);
   await page.selectOption("#reactor-type", type);
   await page.fill("#reactor-temp", temp);
@@ -43,8 +62,7 @@ test.describe("Boulder E2E Tests", () => {
   });
 
   test("2. add reactor validation - empty form", async ({ page }) => {
-    await page.click("#open-reactor-modal");
-    await expect(page.locator("#add-reactor-modal")).toBeVisible();
+    await openAddReactorModal(page);
     // Submit with empty ID
     await page.click("#add-reactor");
     // Modal should stay open (toast error) – ID required
@@ -56,9 +74,8 @@ test.describe("Boulder E2E Tests", () => {
     await addReactor(page, "r1", "IdealGasReactor");
     await addReactor(page, "r2", "Reservoir");
 
-    // Open MFC modal
-    await page.click("#open-mfc-modal");
-    await expect(page.locator("#add-mfc-modal")).toBeVisible();
+    // Right-click r1 to open the MFC modal pre-filled with it as the source
+    await openAddConnectionModalFromNode(page, "r1");
     await page.fill("#mfc-id", "mfc1");
     await page.selectOption("#mfc-source", "r1");
     await page.selectOption("#mfc-target", "r2");
@@ -74,8 +91,8 @@ test.describe("Boulder E2E Tests", () => {
   });
 
   test("5. YAML editor flow", async ({ page }) => {
-    // Click config filename to open editor
-    await page.click("#config-file-name-span");
+    // Click Edit YAML in the Network card to open the editor
+    await page.click("#edit-yaml-btn");
     await expect(page.locator("#config-yaml-modal")).toBeVisible();
 
     // Close
@@ -201,7 +218,7 @@ test.describe("Boulder E2E Tests", () => {
     await addReactor(page, "dup_reactor", "IdealGasReactor");
 
     // Try to add another with same ID
-    await page.click("#open-reactor-modal");
+    await openAddReactorModal(page);
     await page.fill("#reactor-id", "dup_reactor");
     await page.selectOption("#reactor-type", "Reservoir");
     await page.fill("#reactor-temp", "300");

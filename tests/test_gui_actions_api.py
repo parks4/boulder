@@ -88,6 +88,36 @@ class TestGuiActionsApi:
         echo = next(item for item in data if item["id"] == "test_echo_action")
         assert echo["label"] == "Echo Export"
         assert echo["requires_simulation"] is False
+        assert echo["description"] is None
+
+    def test_list_actions_includes_description_when_overridden(self):
+        """An action overriding `description` exposes it via GET /api/gui-actions."""
+
+        class _DescribedAction(GuiActionPlugin):
+            @property
+            def action_id(self) -> str:
+                return "test_described_action"
+
+            @property
+            def label(self) -> str:
+                return "Described Export"
+
+            @property
+            def description(self) -> str:
+                return "Explains what this button downloads."
+
+            def run(self, context: GuiActionContext) -> GuiActionResult:
+                return GuiActionResult(content=b"ok", filename="out.txt")
+
+        register_gui_action(_DescribedAction())
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get("/api/gui-actions")
+            assert resp.status_code == 200
+            item = next(
+                i for i in resp.json() if i["id"] == "test_described_action"
+            )
+            assert item["description"] == "Explains what this button downloads."
 
     def test_list_actions_for_context_reflects_uploaded_config(self):
         """POST /api/gui-actions lists actions for a browser-uploaded config.

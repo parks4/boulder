@@ -5,6 +5,7 @@ import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@
 import { useKindSchema } from "@/hooks/useKindSchema";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteNodeModal } from "@/components/modals/ConfirmDeleteNodeModal";
+import { StageCard } from "@/components/panels/StageCard";
 import { toast } from "sonner";
 
 function unfoldInitialConditions(
@@ -58,31 +59,9 @@ export function PropertiesPanel() {
   const id = String(selectedElement.data.id);
   const entityType = String(selectedElement.data.type ?? "");
 
-  // Group compound box selected — show a minimal summary panel.
+  // Group compound box (a stage) selected — show the Stage panel instead.
   if (selectedElement.data.isGroup) {
-    const childNodes = config.nodes.filter((n) => n.group === id);
-    return (
-      <div id="properties-panel" className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <div>
-          <h3 className="font-semibold text-sm text-foreground">{id}</h3>
-          <span className="text-xs text-muted-foreground">Stage group</span>
-        </div>
-        <div className="border-t border-border pt-2 mt-1">
-          <p className="text-xs text-muted-foreground mb-1.5">Child nodes</p>
-          <div className="divide-y divide-border">
-            {childNodes.map((n) => (
-              <div key={n.id} className="py-1 flex items-center justify-between gap-2">
-                <span className="text-xs font-mono text-foreground">{n.id}</span>
-                <span className="text-xs text-muted-foreground">{n.type}</span>
-              </div>
-            ))}
-            {childNodes.length === 0 && (
-              <p className="text-xs text-muted-foreground py-1 italic">No child nodes</p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+    return <StageCard stageId={id} />;
   }
 
   // Get full properties from config store (graph data may be subset)
