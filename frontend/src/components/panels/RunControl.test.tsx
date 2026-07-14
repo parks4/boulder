@@ -3,12 +3,15 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { RunControl } from "./RunControl";
 
+const mockGetSweepInfo = vi
+  .fn()
+  .mockResolvedValue({ can_run: false, reason: "No sweep" });
 vi.mock("@/api/sweep", () => ({
-  getSweepInfo: vi.fn().mockResolvedValue({ can_run: false, reason: "No sweep" }),
+  getSweepInfo: (...args: unknown[]) => mockGetSweepInfo(...args),
   getSweepStatus: vi.fn(),
   startSweep: vi.fn(),
 }));
@@ -18,9 +21,10 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: (...args: unknown[]) => mockToastInfo(...args) },
 }));
 
+let mockScenarioRevision = 0;
 vi.mock("@/stores/scenarioStore", () => ({
   useScenarioStore: (selector: (s: unknown) => unknown) =>
-    selector({ refresh: vi.fn() }),
+    selector({ refresh: vi.fn(), revision: mockScenarioRevision }),
 }));
 
 describe("RunControl", () => {
@@ -28,6 +32,8 @@ describe("RunControl", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetSweepInfo.mockResolvedValue({ can_run: false, reason: "No sweep" });
+    mockScenarioRevision = 0;
   });
 
   it("shows Force Run in the menu and switches the primary label without Ctrl+Enter", () => {
@@ -114,5 +120,20 @@ describe("RunControl", () => {
     fireEvent.click(button);
 
     expect(mockToastInfo).not.toHaveBeenCalled();
+  });
+
+  it("re-fetches sweep info when a scenario is added/edited/renamed/deleted elsewhere", async () => {
+    const { rerender } = render(
+      <RunControl onRunSimulation={onRunSimulation} isRunning={false} runDisabled={false} />,
+    );
+    await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalledOnce());
+
+    mockGetSweepInfo.mockResolvedValue({ can_run: true, n_scenarios: 3, reason: "Run 3 scenarios" });
+    mockScenarioRevision += 1;
+    rerender(
+      <RunControl onRunSimulation={onRunSimulation} isRunning={false} runDisabled={false} />,
+    );
+
+    await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalledTimes(2));
   });
 });

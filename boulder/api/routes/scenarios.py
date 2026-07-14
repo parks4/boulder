@@ -70,12 +70,29 @@ def _scenario_entries(h5_path: Path) -> List[Dict[str, Any]]:
     return entries
 
 
+def _authored_scenario_ids(request: Request) -> List[str]:
+    """Return every scenario id currently in the config's `scenario:` mapping.
+
+    Unlike the HDF5-derived list below (only scenarios a sweep has actually
+    computed), this reflects the source YAML directly — so a scenario that
+    was just created/edited but never swept still shows up, e.g. as a clone
+    base in the Add Scenario modal.
+    """
+    cfg_path = _config_path(request)
+    if cfg_path is None or not cfg_path.is_file():
+        return []
+    from ...scenario_editor import list_scenario_ids
+
+    return list_scenario_ids(cfg_path)
+
+
 @router.get("")
 async def list_scenarios(request: Request) -> Dict[str, Any]:
     """List the scenarios in the active store (fast — reads attrs only)."""
     store = _store_path(request)
+    authored_ids = _authored_scenario_ids(request)
     if h5py is None or store is None or not store.is_file():
-        return {"available": False, "scenarios": []}
+        return {"available": False, "scenarios": [], "authored_ids": authored_ids}
     root = _root_attrs(store)
     return {
         "available": True,
@@ -84,6 +101,7 @@ async def list_scenarios(request: Request) -> Dict[str, Any]:
         "reactor_mode": root.get("reactor_mode"),
         "created_at": root.get("created_at"),
         "scenarios": _scenario_entries(store),
+        "authored_ids": authored_ids,
     }
 
 

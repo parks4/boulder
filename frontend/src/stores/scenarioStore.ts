@@ -14,11 +14,21 @@ import { useSelectionStore } from "./selectionStore";
 interface ScenarioState {
   available: boolean;
   scenarios: ScenarioMeta[];
+  /** Every scenario id in the config, computed or not — see `authored_ids`. */
+  authoredIds: string[];
   /** Unix seconds the store was written; drives the "computed X ago" label. */
   createdAt?: number;
   activeId: string | null;
   loading: boolean;
   error: string | null;
+  /**
+   * Bumped by every `refresh()` (including the ones create/update/rename/
+   * delete already trigger internally) — listen to this instead of
+   * `scenarios` when you only care "did something about the scenarios
+   * change", e.g. to re-fetch unrelated derived info like Run Sweep's
+   * scenario count.
+   */
+  revision: number;
 
   /** Fetch the scenario list for the active store (no-op-safe if none). */
   refresh: () => Promise<void>;
@@ -41,21 +51,30 @@ interface ScenarioState {
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
   available: false,
   scenarios: [],
+  authoredIds: [],
   activeId: null,
   loading: false,
   error: null,
+  revision: 0,
 
   refresh: async () => {
     try {
       const resp = await listScenarios();
-      set({
+      set((s) => ({
         available: resp.available,
         scenarios: resp.scenarios ?? [],
+        authoredIds: resp.authored_ids ?? [],
         createdAt: resp.created_at ?? undefined,
-      });
+        revision: s.revision + 1,
+      }));
     } catch {
       // No store / API not ready: the pane simply stays hidden.
-      set({ available: false, scenarios: [] });
+      set((s) => ({
+        available: false,
+        scenarios: [],
+        authoredIds: [],
+        revision: s.revision + 1,
+      }));
     }
   },
 
@@ -63,22 +82,27 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     await apiCreateScenario(id, baseId);
     set({ activeId: id });
     // The scenario config now exists but has no precomputed trajectory yet
-    // (that needs a Run Sweep) — `available`/`scenarios` are left as-is until
-    // the caller/editor decides whether to refresh the (still HDF5-backed) list.
+    // (that needs a Run Sweep) — refresh so it shows up as a clone base and
+    // Run Sweep's scenario count picks it up, even though `scenarios` (the
+    // HDF5-derived list) won't include it until a sweep actually runs.
+    await get().refresh();
   },
 
   updateScenario: async (id, yaml) => {
     await apiUpdateScenario(id, yaml);
+    await get().refresh();
   },
 
   renameScenario: async (id, newId) => {
     await apiRenameScenario(id, newId);
     if (get().activeId === id) set({ activeId: newId });
+    await get().refresh();
   },
 
   deleteScenario: async (id) => {
     await apiDeleteScenario(id);
     if (get().activeId === id) set({ activeId: null });
+    await get().refresh();
   },
 
   setActive: async (id) => {
