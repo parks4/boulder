@@ -176,6 +176,39 @@ describe("PropertiesPanel delete confirmation", () => {
     expect(screen.getByText("H2:2,O2:1,N2:4")).toBeInTheDocument();
     expect(screen.queryByText("initial")).not.toBeInTheDocument();
   });
+
+  it("defaults to the sole stage's panel when nothing is selected and the config has one stage", () => {
+    mockSelectedElement = null;
+    mockConfig = {
+      nodes: [{ id: "r1", type: "IdealGasReactor", group: "default", properties: {} }],
+      connections: [],
+    };
+
+    render(<PropertiesPanel />);
+
+    expect(screen.getByText("default")).toBeInTheDocument();
+    expect(screen.getByText("Stage")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Click a node or edge in the graph to view its properties."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the plain placeholder when nothing is selected and the config has multiple stages", () => {
+    mockSelectedElement = null;
+    mockConfig = {
+      nodes: [
+        { id: "r1", type: "IdealGasReactor", group: "stage_a", properties: {} },
+        { id: "r2", type: "IdealGasReactor", group: "stage_b", properties: {} },
+      ],
+      connections: [],
+    };
+
+    render(<PropertiesPanel />);
+
+    expect(
+      screen.getByText("Click a node or edge in the graph to view its properties."),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("PropertiesPanel edit-on-double-click", () => {

@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import socket
 import sys
@@ -517,6 +518,17 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
         ``BoulderRunner`` is used.  The ``--runner`` CLI flag is an
         alternative for shell-level overrides.
     """
+    # Windows consoles often default to a legacy codepage (e.g. cp1252) that
+    # can't encode the emoji used in the status messages below, crashing the
+    # whole CLI with UnicodeEncodeError. Reconfigure to UTF-8 so those prints
+    # degrade to best-effort substitution instead.
+    for _stream in (sys.stdout, sys.stderr):
+        if isinstance(_stream, io.TextIOWrapper):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except ValueError:
+                pass
+
     if argv is None:
         argv = sys.argv[1:]
 
@@ -602,6 +614,16 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
                 npm_cmd = "npm.cmd" if platform.system() == "Windows" else "npm"
 
+                # A conda/venv env's Node install lives alongside python.exe
+                # (npm's own script then shells out to a bare "node"), but
+                # some spawn environments (IDE task runners, process
+                # managers) only put python.exe's own directory on PATH, not
+                # the rest of what the env's activation script would add.
+                # Prepend it explicitly so npm/node resolve regardless.
+                env = os.environ.copy()
+                env_dir = str(Path(sys.executable).parent)
+                env["PATH"] = os.pathsep.join([env_dir, env.get("PATH", "")])
+
                 # Check if node_modules exists
                 if not (frontend_dir / "node_modules").exists():
                     print("📦 Installing frontend dependencies (npm install)...")
@@ -610,6 +632,7 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
                         cwd=frontend_dir,
                         check=True,
                         shell=True,
+                        env=env,
                     )
 
                 print("🎨 Starting Vite dev server...")
@@ -618,6 +641,7 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
                     cwd=frontend_dir,
                     check=True,
                     shell=True,
+                    env=env,
                 )
             except subprocess.CalledProcessError as e:
                 print(f"❌ Error starting frontend dev server: {e}")

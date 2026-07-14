@@ -6,6 +6,7 @@ import { useConfigStore } from "@/stores/configStore";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useResultsTabStore } from "@/stores/resultsTabStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 
 // Register dagre layout
 cytoscape.use(dagre);
@@ -161,15 +162,25 @@ export function ReactorGraph() {
     // --- build node-to-group map and find existing stream-point ids ---
     const nodeToGroup = new Map<string, string>();
     const existingStreamIds = new Set<string>();
+    const allGroupNames = new Set<string>();
     for (const node of config.nodes) {
       const grp = String(
         node.group ?? node.properties?.group ?? node.properties?.group_name ?? "",
       ).trim();
-      if (grp) nodeToGroup.set(node.id, grp);
+      if (grp) {
+        nodeToGroup.set(node.id, grp);
+        allGroupNames.add(grp);
+      }
       if (node.properties?.stream_point || node.metadata?.stream_point) {
         existingStreamIds.add(node.id);
       }
     }
+    // Single-stage configs get a synthesized group="default" on every node
+    // (see boulder/config.py _normalize_v2_network) — a box wrapping the
+    // entire graph and labeled "default" is meaningless clutter, so suppress
+    // it when it's the only group in the whole config. A multi-stage config
+    // never hits this: allGroupNames.size would then be >1.
+    const suppressDefaultGroup = allGroupNames.size === 1 && allGroupNames.has("default");
 
     // --- detect inter-stage connections needing synthesis ---
     // inter_by_src[sourceId] = list of original connection objects
@@ -211,12 +222,13 @@ export function ReactorGraph() {
           ).trim()
         : "";
 
-      const group = String(
+      let group = String(
         node.group ??
           node.properties?.group ??
           node.properties?.group_name ??
           upstreamStage,
       ).trim();
+      if (suppressDefaultGroup && group === "default") group = "";
 
       if (group) ensureGroup(group);
 
@@ -1267,9 +1279,10 @@ export function ReactorGraph() {
   // Initialize cytoscape
   useEffect(() => {
     if (!containerRef.current) return;
+    const container = containerRef.current;
 
     const cy = cytoscape({
-      container: containerRef.current,
+      container,
       elements: buildElements(),
       style: buildStylesheet() as any,
       minZoom: 0.3,
@@ -1336,6 +1349,36 @@ export function ReactorGraph() {
       if (e.target === cy) clearSelection();
     });
 
+    // Right-click (or long-press on touch): add a reactor/connection without
+    // hunting for the sidebar buttons. Background -> Add Reactor (auto stage).
+    // A stage box -> Add Reactor pre-filled with that stage. A reactor node ->
+    // Add Connection with that node pre-filled as the source. Stream-point
+    // diamonds are synthesized display-only nodes, not addressable sources.
+    const preventNativeMenu = (e: Event) => e.preventDefault();
+    container.addEventListener("contextmenu", preventNativeMenu);
+
+    cy.on("cxttap", (e: EventObject) => {
+      if (e.target !== cy) return; // background only; node/edge handled below
+      useAddEntityModalStore.getState().openAddReactor();
+    });
+
+    cy.on("cxttap", "node", (e: EventObject) => {
+      const data = e.target.data();
+      if (data.stream_point) return;
+      if (data.isGroup) {
+        const rawId = String(data.id ?? "");
+        const stageId = rawId.startsWith("group:") ? rawId.slice("group:".length) : rawId;
+        useAddEntityModalStore.getState().openAddReactor({ group: stageId });
+        return;
+      }
+      const nodeId = String(data.id);
+      const node = useConfigStore.getState().config.nodes.find((n) => n.id === nodeId);
+      useAddEntityModalStore.getState().openAddConnection({
+        source: nodeId,
+        group: node?.group ?? null,
+      });
+    });
+
     // Persist manually dragged positions as a relative offset from the node's
     // algorithmically computed "natural" position (metadata.layout_offset {dx,dy}).
     // Using useConfigStore.getState() to avoid stale closure captures.
@@ -1365,6 +1408,7 @@ export function ReactorGraph() {
         tapTimeoutRef.current = null;
       }
       lastTappedRef.current = null;
+      container.removeEventListener("contextmenu", preventNativeMenu);
       cy.destroy();
       cyRef.current = null;
     };

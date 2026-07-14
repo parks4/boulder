@@ -21,6 +21,14 @@ export interface ConfigConnection {
   logical?: boolean | null;
 }
 
+/** Per-stage metadata for a multi-stage (STONE v2 `stages:`) config. */
+export interface StageGroup {
+  stage_order?: number;
+  mechanism?: string;
+  /** This stage's resolved solver — its own override, or inherited from `settings.solver`. */
+  solver?: Record<string, unknown>;
+}
+
 /** The normalised reactor-network configuration. */
 export interface NormalizedConfig {
   metadata?: Record<string, unknown> | null;
@@ -29,4 +37,6 @@ export interface NormalizedConfig {
   nodes: ConfigNode[];
   connections: ConfigConnection[];
   output?: unknown;
+  /** Present for staged configs; one entry per stage, keyed by stage id. */
+  groups?: Record<string, StageGroup> | null;
 }

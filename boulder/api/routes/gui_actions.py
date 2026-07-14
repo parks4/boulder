@@ -103,6 +103,7 @@ def _list_actions_response(
             "label": action.label,
             "requires_simulation": action.requires_simulation,
             "is_available": action.is_available(context),
+            "description": action.description,
         }
         for action in registry.get_listed_actions(context)
     ]

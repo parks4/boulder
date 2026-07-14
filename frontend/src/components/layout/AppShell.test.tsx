@@ -1,18 +1,18 @@
 /**
- * Vitest unit tests for the AppShell Mode badge (Phase 0).
+ * Vitest unit tests for the AppShell header and sidebar wiring.
  *
  * Asserts:
- * - The mode badge reads "steady" when no solver is configured.
- * - The mode badge reads "transient" when config.settings.solver.kind is a transient kind.
- * - The mode badge reads "transient" when config.settings.solver.mode is "transient".
- * - The mode badge reads "steady" when config.settings.solver.kind is "solve_steady".
+ * - The header no longer shows a filename button or solver-mode badge
+ *   (moved into NetworkCard / removed as redundant with the Simulate toggle).
+ * - The left sidebar renders NetworkCard, SimulateCard, and PropertiesPanel.
+ * - AddReactorModal/AddMFCModal read their open state from addEntityModalStore,
+ *   so right-click-on-graph and Stage-panel triggers reach the same modal.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
-// We need to mock all hooks/stores the AppShell component relies on
 vi.mock("@/stores/themeStore", () => ({
   useThemeStore: () => ({ theme: "light", toggleTheme: vi.fn() }),
 }));
@@ -47,8 +47,8 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@/components/panels/EditNetworkCard", () => ({
-  EditNetworkCard: () => <div data-testid="edit-network-card" />,
+vi.mock("@/components/panels/NetworkCard", () => ({
+  NetworkCard: () => <div data-testid="network-card" />,
 }));
 
 vi.mock("@/components/panels/SimulateCard", () => ({
@@ -75,6 +75,37 @@ vi.mock("@/components/modals/YAMLEditorModal", () => ({
   YAMLEditorModal: () => <div data-testid="yaml-editor-modal" />,
 }));
 
+let mockReactorModal: { open: boolean; group?: string | null } = { open: false };
+let mockConnectionModal: { open: boolean; group?: string | null; source?: string } = {
+  open: false,
+};
+const mockCloseAddReactor = vi.fn();
+const mockCloseAddConnection = vi.fn();
+
+vi.mock("@/components/modals/AddReactorModal", () => ({
+  AddReactorModal: ({ open, defaultGroup }: { open: boolean; defaultGroup?: string | null }) =>
+    open ? <div data-testid="add-reactor-modal">{defaultGroup ?? ""}</div> : null,
+}));
+
+vi.mock("@/components/modals/AddMFCModal", () => ({
+  AddMFCModal: ({
+    open,
+    defaultSource,
+  }: {
+    open: boolean;
+    defaultSource?: string;
+  }) => (open ? <div data-testid="add-mfc-modal">{defaultSource ?? ""}</div> : null),
+}));
+
+vi.mock("@/stores/addEntityModalStore", () => ({
+  useAddEntityModalStore: () => ({
+    reactorModal: mockReactorModal,
+    connectionModal: mockConnectionModal,
+    closeAddReactor: mockCloseAddReactor,
+    closeAddConnection: mockCloseAddConnection,
+  }),
+}));
+
 let mockConfig: Record<string, unknown> = { nodes: [], connections: [] };
 
 vi.mock("@/stores/configStore", () => ({
@@ -88,60 +119,39 @@ vi.mock("@/stores/configStore", () => ({
 // Import AFTER mocks are set up
 import { AppShell } from "./AppShell";
 
-describe("AppShell Mode badge", () => {
+describe("AppShell", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConfig = { nodes: [], connections: [] };
+    mockReactorModal = { open: false };
+    mockConnectionModal = { open: false };
   });
 
-  it("shows 'steady' badge when no solver is configured", () => {
+  it("renders the sidebar cards but no header filename button or solver badge", () => {
     render(<AppShell />);
-    const badge = screen.getByTestId("solver-mode-badge");
-    expect(badge).toBeInTheDocument();
-    expect(badge.textContent).toMatch(/steady/i);
+
+    expect(screen.getByTestId("network-card")).toBeInTheDocument();
+    expect(screen.getByTestId("simulate-card")).toBeInTheDocument();
+    expect(screen.getByTestId("properties-panel")).toBeInTheDocument();
+
+    expect(screen.queryByTestId("solver-mode-badge")).not.toBeInTheDocument();
+    expect(screen.queryByText("test.yaml")).not.toBeInTheDocument();
   });
 
-  it("shows 'transient' badge when kind is advance_grid", () => {
-    mockConfig = {
-      nodes: [],
-      connections: [],
-      settings: { solver: { kind: "advance_grid" } },
-    };
+  it("does not render the Add Reactor modal when the store says it's closed", () => {
     render(<AppShell />);
-    const badge = screen.getByTestId("solver-mode-badge");
-    expect(badge.textContent).toMatch(/transient/i);
+    expect(screen.queryByTestId("add-reactor-modal")).not.toBeInTheDocument();
   });
 
-  it("shows 'transient' badge when kind is micro_step", () => {
-    mockConfig = {
-      nodes: [],
-      connections: [],
-      settings: { solver: { kind: "micro_step" } },
-    };
+  it("renders the Add Reactor modal, pre-filled with its stage, when the store opens it", () => {
+    mockReactorModal = { open: true, group: "psr_stage" };
     render(<AppShell />);
-    const badge = screen.getByTestId("solver-mode-badge");
-    expect(badge.textContent).toMatch(/transient/i);
+    expect(screen.getByTestId("add-reactor-modal")).toHaveTextContent("psr_stage");
   });
 
-  it("shows 'steady' badge when kind is solve_steady", () => {
-    mockConfig = {
-      nodes: [],
-      connections: [],
-      settings: { solver: { kind: "solve_steady" } },
-    };
+  it("renders the Add Connection modal, pre-filled with its source, when the store opens it", () => {
+    mockConnectionModal = { open: true, source: "torch" };
     render(<AppShell />);
-    const badge = screen.getByTestId("solver-mode-badge");
-    expect(badge.textContent).toMatch(/steady/i);
-  });
-
-  it("shows 'transient' badge when solver.mode is explicitly transient", () => {
-    mockConfig = {
-      nodes: [],
-      connections: [],
-      settings: { solver: { mode: "transient", kind: "advance" } },
-    };
-    render(<AppShell />);
-    const badge = screen.getByTestId("solver-mode-badge");
-    expect(badge.textContent).toMatch(/transient/i);
+    expect(screen.getByTestId("add-mfc-modal")).toHaveTextContent("torch");
   });
 });

@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { Button } from "@/components/ui/Button";
+import { Tooltip } from "@/components/ui/Tooltip";
 import {
+  KIND_DOC_URLS,
   KIND_LABELS,
   type SolverKind,
   type SolverMode,
@@ -13,8 +15,6 @@ interface SolverDetailsModalProps {
   kind: SolverKind;
   kinds: SolverKind[];
   onKindChange: (newKind: SolverKind) => void;
-  /** When true, the config has per-stage solver blocks that override settings.solver. */
-  hasStageOverride?: boolean;
   rtol: string;
   onRtolChange: (v: string) => void;
   atol: string;
@@ -34,7 +34,6 @@ export function SolverDetailsModal({
   kind,
   kinds,
   onKindChange,
-  hasStageOverride = false,
   rtol,
   onRtolChange,
   atol,
@@ -80,30 +79,44 @@ export function SolverDetailsModal({
         </div>
 
         <div className="p-4 space-y-3 overflow-y-auto">
-          {hasStageOverride && (
-            <div
-              data-testid="stage-override-banner"
-              className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground"
-            >
-              This config has per-stage solver overrides. The global kind set
-              here applies as a default only — individual stage solvers take
-              precedence. Edit the YAML directly to change a specific stage.
-            </div>
-          )}
           <label className="block text-xs text-muted-foreground">
             Kind
-            <select
-              data-testid="solver-kind-select"
-              value={kind}
-              onChange={(e) => onKindChange(e.target.value as SolverKind)}
-              className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
-            >
-              {kinds.map((k) => (
-                <option key={k} value={k}>
-                  {KIND_LABELS[k]}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1.5 mt-1">
+              <select
+                data-testid="solver-kind-select"
+                value={kind}
+                onChange={(e) => onKindChange(e.target.value as SolverKind)}
+                className="block w-full px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
+              >
+                {kinds.map((k) => (
+                  <option key={k} value={k}>
+                    {KIND_LABELS[k]}
+                  </option>
+                ))}
+              </select>
+              <Tooltip
+                content={
+                  <span className="block space-y-1">
+                    <span className="block">{KIND_DOC_URLS[kind].description}</span>
+                    <a
+                      href={KIND_DOC_URLS[kind].docUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline text-primary"
+                    >
+                      Cantera docs
+                    </a>
+                  </span>
+                }
+              >
+                <span
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground cursor-help"
+                  aria-label={`About ${KIND_LABELS[kind]}`}
+                >
+                  ⓘ
+                </span>
+              </Tooltip>
+            </div>
           </label>
 
           {mode === "steady" && (

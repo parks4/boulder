@@ -64,6 +64,14 @@ make type-check
 make qa                           # pre-commit on all files
 ```
 
+**Always run the actual `make qa` (`pre-commit run --all-files`) — do not substitute
+individual tool calls for it.** Running `ruff check` and `mypy` by hand does *not* exercise
+`ruff-format`, `mdformat`, `blackdoc`, or the trailing-whitespace/end-of-file fixers that
+`pre-commit` also runs. CI's separate `pre-commit` job (`.github/workflows/on-push.yml`) fails
+if any hook would still modify a file — including pure reformatting with no functional
+change — even when `ruff check`/`mypy` alone are clean. This has caused avoidable red CI runs
+(e.g. PRs #93, #94): `ruff-format` reformatted files that `ruff check` had already passed.
+
 Optional docs:
 
 ```bash

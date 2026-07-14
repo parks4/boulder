@@ -2000,14 +2000,27 @@ def convert_to_stone_format(config: dict) -> dict:
             continue
         solver = g.get("solver")
         if isinstance(solver, dict) and solver:
-            # Normalized form: solver: {kind: ...}
+            # Normalized form: solver: {kind: ..., mode: ..., ...}. "mode" is
+            # always re-derivable from "kind" and "advance_time" has its own
+            # sibling-key convention below, so a solver dict containing only
+            # those three keys can still collapse to the compact scalar form
+            # (solver: <kind>). Anything else — rtol/atol/max_steps/grid/etc,
+            # genuinely set by the user via the GUI — has no other home, so
+            # emit the full block instead or it silently vanishes on sync.
             kind = solver.get("kind", "advance_to_steady_state")
-            meta: Dict[str, Any] = {
-                "mechanism": g.get("mechanism", "gri30.yaml"),
-                "solver": kind,
-            }
-            if "advance_time" in solver:
-                meta["advance_time"] = solver["advance_time"]
+            extra_keys = set(solver) - {"kind", "mode", "advance_time"}
+            if extra_keys:
+                meta: Dict[str, Any] = {
+                    "mechanism": g.get("mechanism", "gri30.yaml"),
+                    "solver": dict(solver),
+                }
+            else:
+                meta = {
+                    "mechanism": g.get("mechanism", "gri30.yaml"),
+                    "solver": kind,
+                }
+                if "advance_time" in solver:
+                    meta["advance_time"] = solver["advance_time"]
         elif "solve" in g:
             # Legacy in-memory form: groups carry solve: / advance_time: directly.
             meta = {
@@ -2399,10 +2412,13 @@ def merge_config_into_yaml(
     stone_for_merge = {k: v for k, v in stone.items() if k in original_data}
 
     # 7b. Mirror original solver syntax.
-    #     convert_to_stone_format always emits ``solver:`` blocks (normalized form).
-    #     If the original stage used ``solve:`` / ``advance_time:``, rewrite back to
-    #     that form so the merge does not introduce ``solver:`` alongside the existing
-    #     ``solve:`` key (parser rejects both coexisting).
+    #     convert_to_stone_format emits either a compact solver: <kind> scalar
+    #     (plus an advance_time: sibling when relevant) or, when the resolved
+    #     solver carries fields with no other home (rtol/atol/max_steps/grid),
+    #     a full solver: {} block. If the original stage used solve: /
+    #     advance_time:, rewrite back to that form so the merge does not
+    #     introduce solver: alongside the existing solve: key (parser rejects
+    #     both coexisting).
     if "stages" in stone_for_merge and "stages" in original_data:
         orig_stages = original_data["stages"]
         for sid, stone_meta in list(stone_for_merge["stages"].items()):
@@ -2410,11 +2426,24 @@ def merge_config_into_yaml(
             if not isinstance(orig_stage, dict):
                 continue
             if "solve" in orig_stage and "solver" in stone_meta:
-                solver_block = stone_meta.pop("solver")
-                stone_meta["solve"] = solver_block.get("kind", "advance")
-                at = solver_block.get("advance_time")
-                if at is not None:
-                    stone_meta["advance_time"] = at
+                solver_value = stone_meta.pop("solver")
+                if isinstance(solver_value, dict):
+                    stone_meta["solve"] = solver_value.get("kind", "advance")
+                    at = solver_value.get("advance_time")
+                    if at is not None:
+                        stone_meta["advance_time"] = at
+                    lost_keys = set(solver_value) - {"kind", "mode", "advance_time"}
+                    if lost_keys:
+                        warnings.append(
+                            f"Stage '{sid}' uses the legacy solve: syntax, which has "
+                            f"no slot for {sorted(lost_keys)}; those solver settings "
+                            "were not saved. Switch this stage to the solver: {} "
+                            "block form in the YAML to keep them."
+                        )
+                else:
+                    # Already the compact scalar form (advance_time, if any,
+                    # is already a sibling key from the emit step above).
+                    stone_meta["solve"] = solver_value
 
     # 8. Merge STONE dict into original ruamel tree in-place.
     _update_yaml_preserving_comments(

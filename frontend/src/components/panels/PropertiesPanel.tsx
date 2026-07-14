@@ -1,11 +1,23 @@
 import { useState, useEffect, useRef } from "react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
+import type { NormalizedConfig } from "@/types/config";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
 import { useKindSchema } from "@/hooks/useKindSchema";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDeleteNodeModal } from "@/components/modals/ConfirmDeleteNodeModal";
+import { StageCard } from "@/components/panels/StageCard";
 import { toast } from "sonner";
+
+/** The config's one stage, when it has exactly one — undefined for 0 or 2+. */
+function getSoleGroup(config: NormalizedConfig): string | undefined {
+  const groups = new Set(
+    [...config.nodes.map((n) => n.group), ...config.connections.map((c) => c.group)].filter(
+      (g): g is string => typeof g === "string" && g.length > 0,
+    ),
+  );
+  return groups.size === 1 ? [...groups][0] : undefined;
+}
 
 function unfoldInitialConditions(
   properties: Record<string, unknown>,
@@ -111,6 +123,13 @@ export function PropertiesPanel() {
   const schemaMeta = useKindSchema(schemaKind);
 
   if (!selectedElement) {
+    // A config with exactly one stage has no clickable stage box (see
+    // ReactorGraph's suppressDefaultGroup) — show that stage's panel by
+    // default instead, so its solver controls are still reachable.
+    const soleGroup = getSoleGroup(config);
+    if (soleGroup) {
+      return <StageCard stageId={soleGroup} />;
+    }
     return (
       <div id="properties-panel" className="rounded-lg border border-border bg-card p-4">
         <p className="text-xs text-muted-foreground italic">
@@ -124,31 +143,9 @@ export function PropertiesPanel() {
   const id = String(selectedElement.data.id);
   const entityType = String(selectedElement.data.type ?? "");
 
-  // Group compound box selected — show a minimal summary panel.
+  // Group compound box (a stage) selected — show the Stage panel instead.
   if (selectedElement.data.isGroup) {
-    const childNodes = config.nodes.filter((n) => n.group === id);
-    return (
-      <div id="properties-panel" className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <div>
-          <h3 className="font-semibold text-sm text-foreground">{id}</h3>
-          <span className="text-xs text-muted-foreground">Stage group</span>
-        </div>
-        <div className="border-t border-border pt-2 mt-1">
-          <p className="text-xs text-muted-foreground mb-1.5">Child nodes</p>
-          <div className="divide-y divide-border">
-            {childNodes.map((n) => (
-              <div key={n.id} className="py-1 flex items-center justify-between gap-2">
-                <span className="text-xs font-mono text-foreground">{n.id}</span>
-                <span className="text-xs text-muted-foreground">{n.type}</span>
-              </div>
-            ))}
-            {childNodes.length === 0 && (
-              <p className="text-xs text-muted-foreground py-1 italic">No child nodes</p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
+    return <StageCard stageId={id} />;
   }
 
   // Get full properties from config store (graph data may be subset)
