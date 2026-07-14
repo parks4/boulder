@@ -1,5 +1,6 @@
-"""Regression test: sim2stone's emitted connection order must not depend on
-Python object ``id()`` (a memory address), which varies between process runs.
+"""Regression test: sim2stone's connection order must not depend on id().
+
+Python object ``id()`` (a memory address) varies between process runs.
 
 Bug: the wall-export loop sorted walls by
 ``key=lambda w: (id(w.left_reactor), id(w.right_reactor))``, and the
