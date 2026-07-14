@@ -290,6 +290,15 @@ class NormalizedConfigModel(BaseModel):
     #: Staged-solving group definitions.
     #: ``{group_id: {stage_order, mechanism, solve, advance_time}}``
     groups: Optional[Dict[str, Any]] = None
+    #: Phase-B causal layer: named signal sources (``boulder.signals``) and
+    #: their bindings to connection/node targets (``boulder.bindings``).
+    #: Flexible shape (validated by those modules, not here) -- without these
+    #: two fields, every config that round-trips through validate_config()
+    #: (every API-served/preloaded config) silently loses its signals:/
+    #: bindings: blocks, and every MFC/tau_s/reduced_electric_field binding
+    #: stops working with no error at all.
+    signals: Optional[List[Dict[str, Any]]] = None
+    bindings: Optional[List[Dict[str, Any]]] = None
 
     def __init__(self, **data):
         super().__init__(**data)
