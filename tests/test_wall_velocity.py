@@ -19,6 +19,7 @@ import ast
 import os
 import tempfile
 import textwrap
+from typing import cast
 
 import cantera as ct
 import pytest
@@ -169,7 +170,9 @@ def test_cantera_converter_builds_velocity_wall_from_closure_spec() -> None:
     converter.build_connection(conn)
 
     wall = converter.walls["piston"]
-    net = ct.ReactorNet([converter.reactors["left"], converter.reactors["right"]])
+    left_reactor = cast(ct.Reactor, converter.reactors["left"])
+    right_reactor = cast(ct.Reactor, converter.reactors["right"])
+    net = ct.ReactorNet([left_reactor, right_reactor])
     # Held fixed before start_time...
     net.advance(0.05)
     assert wall.velocity == pytest.approx(0.0)

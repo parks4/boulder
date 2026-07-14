@@ -51,17 +51,17 @@ everywhere), no surface-phase node kind, and no distance-based plotting support.
 
 1. A YAML node of `type: FlowReactor` builds a working `ct.FlowReactor` with
    `mass_flow_rate`, `area`, initial `T`/`P`/`X`.
-2. A YAML node of `type: FlowReactorSurface` (or a `surface:` property on the
+1. A YAML node of `type: FlowReactorSurface` (or a `surface:` property on the
    `FlowReactor` node) attaches surface chemistry with initial coverages and a surface
    mechanism reference.
-3. sim2stone can convert a hand-written `ct.FlowReactor` + `ct.FlowReactorSurface`
+1. sim2stone can convert a hand-written `ct.FlowReactor` + `ct.FlowReactorSurface`
    Cantera script back into STONE YAML (reverse direction), following the existing
    AST-detection pattern used for Gaussian MFC schedules.
-4. The frontend plots these nodes' output against `distance`, not `t` — a per-node
+1. The frontend plots these nodes' output against `distance`, not `t` — a per-node
    x-axis override, not a global change.
-5. `surf_pfr.py` runs end-to-end as a new boulder_examples catalog entry, replacing its
+1. `surf_pfr.py` runs end-to-end as a new boulder_examples catalog entry, replacing its
    `status: unsupported` manifest entry.
-6. New tests cover both directions (YAML→Cantera and Cantera→YAML).
+1. New tests cover both directions (YAML→Cantera and Cantera→YAML).
 
 ______________________________________________________________________
 
