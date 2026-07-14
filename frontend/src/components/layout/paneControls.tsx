@@ -1,5 +1,6 @@
 import { PanelLeft, PanelRight } from "lucide-react";
 import { useLayoutStore } from "@/stores/layoutStore";
+import { useShortcutNudge } from "@/hooks/useShortcutNudge";
 
 /** Notify canvas-based components (Cytoscape, Plotly) that the layout changed. */
 function nudgeResize() {
@@ -10,6 +11,7 @@ function nudgeResize() {
 export function PaneToggle({ side }: { side: "left" | "right" }) {
   const { leftCollapsed, rightCollapsed, toggleLeft, toggleRight } =
     useLayoutStore();
+  const notifyShortcutUsage = useShortcutNudge();
   const collapsed = side === "left" ? leftCollapsed : rightCollapsed;
   const Icon = side === "left" ? PanelLeft : PanelRight;
   const label = `${collapsed ? "Expand" : "Collapse"} ${side} sidebar`;
@@ -18,6 +20,8 @@ export function PaneToggle({ side }: { side: "left" | "right" }) {
       type="button"
       onClick={() => {
         side === "left" ? toggleLeft() : toggleRight();
+        // Only "left" has a keyboard shortcut (Ctrl+B) — see AppShell.
+        if (side === "left") notifyShortcutUsage("toggle-left-sidebar", "Ctrl+B");
         // Let the flex layout settle, then re-fit canvases.
         requestAnimationFrame(nudgeResize);
       }}
