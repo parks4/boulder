@@ -48,7 +48,11 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@/components/panels/NetworkCard", () => ({
-  NetworkCard: () => <div data-testid="network-card" />,
+  NetworkCard: ({ onEditYaml }: { onEditYaml: () => void }) => (
+    <div data-testid="network-card">
+      <button onClick={onEditYaml}>Edit YAML</button>
+    </div>
+  ),
 }));
 
 vi.mock("@/components/panels/SimulateCard", () => ({
@@ -57,6 +61,27 @@ vi.mock("@/components/panels/SimulateCard", () => ({
 
 vi.mock("@/components/panels/PropertiesPanel", () => ({
   PropertiesPanel: () => <div data-testid="properties-panel" />,
+}));
+
+vi.mock("@/components/panels/YamlPane", () => ({
+  YamlPane: () => <div data-testid="yaml-pane" />,
+}));
+
+let mockYamlPaneOpen = false;
+const mockOpenYamlPane = vi.fn();
+
+vi.mock("@/stores/layoutStore", () => ({
+  useLayoutStore: () => ({
+    leftCollapsed: false,
+    rightCollapsed: false,
+    leftWidth: 320,
+    rightWidth: 250,
+    toggleLeft: vi.fn(),
+    yamlPaneOpen: mockYamlPaneOpen,
+    yamlWidth: 420,
+    openYamlPane: mockOpenYamlPane,
+    closeYamlPane: vi.fn(),
+  }),
 }));
 
 vi.mock("@/components/graph/ReactorGraph", () => ({
@@ -69,10 +94,6 @@ vi.mock("@/components/results/ResultsTabs", () => ({
 
 vi.mock("@/components/simulation/SimulationOverlay", () => ({
   SimulationOverlay: () => <div data-testid="simulation-overlay" />,
-}));
-
-vi.mock("@/components/modals/YAMLEditorModal", () => ({
-  YAMLEditorModal: () => <div data-testid="yaml-editor-modal" />,
 }));
 
 let mockReactorModal: { open: boolean; group?: string | null } = { open: false };
@@ -125,6 +146,7 @@ describe("AppShell", () => {
     mockConfig = { nodes: [], connections: [] };
     mockReactorModal = { open: false };
     mockConnectionModal = { open: false };
+    mockYamlPaneOpen = false;
   });
 
   it("renders the sidebar cards but no header filename button or solver badge", () => {
@@ -153,5 +175,22 @@ describe("AppShell", () => {
     mockConnectionModal = { open: true, source: "torch" };
     render(<AppShell />);
     expect(screen.getByTestId("add-mfc-modal")).toHaveTextContent("torch");
+  });
+
+  it("does not render the YAML pane when the layout store says it's closed", () => {
+    render(<AppShell />);
+    expect(screen.queryByTestId("yaml-pane")).not.toBeInTheDocument();
+  });
+
+  it("renders the YAML pane when the layout store says it's open", () => {
+    mockYamlPaneOpen = true;
+    render(<AppShell />);
+    expect(screen.getByTestId("yaml-pane")).toBeInTheDocument();
+  });
+
+  it("clicking Edit YAML in the Network card opens the YAML pane", () => {
+    render(<AppShell />);
+    screen.getByRole("button", { name: "Edit YAML" }).click();
+    expect(mockOpenYamlPane).toHaveBeenCalledOnce();
   });
 });

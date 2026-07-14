@@ -13,13 +13,13 @@ import { NetworkCard } from "@/components/panels/NetworkCard";
 import { SimulateCard } from "@/components/panels/SimulateCard";
 import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
 import { ScenarioPane } from "@/components/panels/ScenarioPane";
+import { YamlPane } from "@/components/panels/YamlPane";
 import { PaneToggle, PaneResizer } from "@/components/layout/paneControls";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { ReactorGraph } from "@/components/graph/ReactorGraph";
 import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
-import { YAMLEditorModal } from "@/components/modals/YAMLEditorModal";
 import { AddReactorModal } from "@/components/modals/AddReactorModal";
 import { AddMFCModal } from "@/components/modals/AddMFCModal";
 import { Button } from "@/components/ui/Button";
@@ -32,9 +32,16 @@ export function AppShell() {
     useSimulationStore();
   const { reactorModal, connectionModal, closeAddReactor, closeAddConnection } =
     useAddEntityModalStore();
-  const [showYamlEditor, setShowYamlEditor] = useState(false);
-  const { leftCollapsed, rightCollapsed, leftWidth, rightWidth, toggleLeft } =
-    useLayoutStore();
+  const {
+    leftCollapsed,
+    rightCollapsed,
+    leftWidth,
+    rightWidth,
+    toggleLeft,
+    yamlPaneOpen,
+    yamlWidth,
+    openYamlPane,
+  } = useLayoutStore();
   const scenariosAvailable = useScenarioStore((s) => s.available);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
 
@@ -264,7 +271,7 @@ export function AppShell() {
               style={{ width: leftWidth }}
               className="shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-5rem)] pr-1"
             >
-              <NetworkCard onEditYaml={() => setShowYamlEditor(true)} />
+              <NetworkCard onEditYaml={openYamlPane} />
               <SimulateCard />
               <PropertiesPanel />
             </aside>
@@ -290,14 +297,22 @@ export function AppShell() {
             </aside>
           </>
         )}
+
+        {/* YAML editor pane — opened on demand from Network's "Edit YAML",
+            docked right of the Scenario pane so it can sit alongside the
+            graph instead of blocking it. */}
+        {yamlPaneOpen && (
+          <>
+            <PaneResizer side="yaml" />
+            <aside style={{ width: yamlWidth }} className="shrink-0 pl-1">
+              <YamlPane />
+            </aside>
+          </>
+        )}
       </div>
 
       {/* Overlays and modals */}
       <SimulationOverlay />
-      <YAMLEditorModal
-        open={showYamlEditor}
-        onClose={() => setShowYamlEditor(false)}
-      />
       <AddReactorModal
         // Remount (fresh form state) whenever it's opened with a different
         // stage, instead of syncing defaultGroup into state via an effect.

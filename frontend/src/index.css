@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Tailwind v4 defaults `dark:` to a `prefers-color-scheme` media query. This
+   app toggles a `.dark` class on <html> instead (see themeStore.ts), so
+   without this, `dark:` utilities go by OS preference instead of the app's
+   own light/dark toggle — e.g. showing dark-styled colors while the rest of
+   the page (driven by the CSS variables below) is correctly in light mode. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Root light theme colors */
 :root {
   --color-background: hsl(0 0% 100%);
