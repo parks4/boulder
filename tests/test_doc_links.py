@@ -58,4 +58,6 @@ def test_doc_link_anchor_exists(kind: str, url: str) -> None:
     except (urllib.error.URLError, TimeoutError) as exc:
         pytest.skip(f"{kind}: cantera.org unreachable — offline environment ({exc})")
 
-    assert f'id="{anchor}"' in body, f"{kind}: anchor '#{anchor}' not found on {base_url}"
+    assert f'id="{anchor}"' in body, (
+        f"{kind}: anchor '#{anchor}' not found on {base_url}"
+    )

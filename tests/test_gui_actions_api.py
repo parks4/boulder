@@ -114,9 +114,7 @@ class TestGuiActionsApi:
         with TestClient(app) as client:
             resp = client.get("/api/gui-actions")
             assert resp.status_code == 200
-            item = next(
-                i for i in resp.json() if i["id"] == "test_described_action"
-            )
+            item = next(i for i in resp.json() if i["id"] == "test_described_action")
             assert item["description"] == "Explains what this button downloads."
 
     def test_list_actions_for_context_reflects_uploaded_config(self):
