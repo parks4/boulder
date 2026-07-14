@@ -29,6 +29,11 @@ vi.mock("@/api/simulations", () => ({
   startSimulation: vi.fn().mockResolvedValue({ simulation_id: "test-123" }),
 }));
 
+vi.mock("@/api/guiActions", () => ({
+  fetchGuiActions: vi.fn().mockResolvedValue([]),
+  runGuiAction: vi.fn().mockResolvedValue({ blob: new Blob(["x"]), filename: "note.xlsx" }),
+}));
+
 vi.mock("@/api/resultCache", () => ({
   checkSimulationCache: vi.fn().mockResolvedValue({
     cached: true,
@@ -42,23 +47,35 @@ const mockStartSimulation = startSimulation as ReturnType<typeof vi.fn>;
 import { checkSimulationCache } from "@/api/resultCache";
 const mockCheckSimulationCache = checkSimulationCache as ReturnType<typeof vi.fn>;
 
+import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
+const mockFetchGuiActions = fetchGuiActions as ReturnType<typeof vi.fn>;
+const mockRunGuiAction = runGuiAction as ReturnType<typeof vi.fn>;
+
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
 const mockSetConfig = vi.fn();
+const mockSyncYaml = vi.fn().mockResolvedValue(undefined);
 let mockConfig: Record<string, unknown> = { nodes: [], connections: [] };
 
-vi.mock("@/stores/configStore", () => ({
-  useConfigStore: (selector: (s: unknown) => unknown) => {
-    const store = {
-      config: mockConfig,
-      fileName: "test.yaml",
-      setConfig: mockSetConfig,
-    };
-    return selector(store);
-  },
-}));
+function configStoreState() {
+  return {
+    config: mockConfig,
+    fileName: "test.yaml",
+    originalYaml: "",
+    dirty: false,
+    setConfig: mockSetConfig,
+    syncYaml: mockSyncYaml,
+  };
+}
+
+vi.mock("@/stores/configStore", () => {
+  const useConfigStore = (selector: (s: unknown) => unknown) =>
+    selector(configStoreState());
+  useConfigStore.getState = () => configStoreState();
+  return { useConfigStore };
+});
 
 vi.mock("@/stores/simulationStore", () => ({
   useSimulationStore: () => ({
@@ -275,5 +292,28 @@ describe("SimulateCard", () => {
     });
     expect(mockCheckSimulationCache).not.toHaveBeenCalled();
     expect(mockStartSimulation).toHaveBeenCalledOnce();
+  });
+
+  it("syncs YAML before fetching GUI actions on mount", async () => {
+    render(<SimulateCard />);
+    await act(async () => {});
+    expect(mockSyncYaml).toHaveBeenCalled();
+    expect(mockFetchGuiActions).toHaveBeenCalled();
+  });
+
+  it("syncs YAML before running a GUI export action, so the export reflects GUI edits", async () => {
+    mockFetchGuiActions.mockResolvedValueOnce([
+      { id: "calc_note", label: "Export Calculation Note", requires_simulation: false, is_available: true },
+    ]);
+    render(<SimulateCard />);
+    await act(async () => {});
+    mockSyncYaml.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /export calculation note/i }));
+    });
+
+    expect(mockSyncYaml).toHaveBeenCalled();
+    expect(mockRunGuiAction).toHaveBeenCalledOnce();
   });
 });

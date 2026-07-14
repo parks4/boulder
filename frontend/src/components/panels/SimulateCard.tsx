@@ -23,7 +23,7 @@ export function SimulateCard() {
   const config = useConfigStore((s) => s.config);
   const setConfig = useConfigStore((s) => s.setConfig);
   const fileName = useConfigStore((s) => s.fileName);
-  const originalYaml = useConfigStore((s) => s.originalYaml);
+  const syncYaml = useConfigStore((s) => s.syncYaml);
   const {
     isRunning,
     simulationId,
@@ -82,12 +82,18 @@ export function SimulateCard() {
     let cancelled = false;
 
     const doFetch = () =>
-      fetchGuiActions({
-        config: config as unknown as Record<string, unknown>,
-        config_yaml: originalYaml || null,
-        filename: fileName,
-        simulation_id: simulationId,
-      })
+      syncYaml()
+        .catch(() => {
+          // Sync failure is non-fatal here — fall back to whatever YAML we have.
+        })
+        .then(() =>
+          fetchGuiActions({
+            config: config as unknown as Record<string, unknown>,
+            config_yaml: useConfigStore.getState().originalYaml || null,
+            filename: fileName,
+            simulation_id: simulationId,
+          }),
+        )
         .then((actions) => {
           if (!cancelled) setGuiActions(actions);
         })
@@ -108,7 +114,7 @@ export function SimulateCard() {
       cancelled = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [config, simulationId, results]);
+  }, [config, simulationId, results, fileName, syncYaml]);
 
   const handleModeChange = useCallback(
     (newMode: SolverMode) => {
@@ -262,9 +268,14 @@ export function SimulateCard() {
     async (action: GuiActionMeta) => {
       setRunningActionId(action.id);
       try {
+        try {
+          await syncYaml();
+        } catch {
+          // Sync failure is non-fatal — fall back to whatever YAML we have.
+        }
         const { blob, filename: downloadName } = await runGuiAction(action.id, {
           config: config as unknown as Record<string, unknown>,
-          config_yaml: originalYaml || null,
+          config_yaml: useConfigStore.getState().originalYaml || null,
           filename: fileName,
           simulation_id: simulationId,
         });
@@ -282,7 +293,7 @@ export function SimulateCard() {
         setRunningActionId(null);
       }
     },
-    [config, originalYaml, fileName, simulationId],
+    [config, fileName, simulationId, syncYaml],
   );
 
   const runDisabled = isRunning || config.nodes.length === 0;
