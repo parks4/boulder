@@ -266,6 +266,11 @@ def registered_kinds() -> List[str]:
     return sorted(_SCHEMA_REGISTRY.keys())
 
 
+def registered_connection_kinds() -> List[str]:
+    """Return the list of connection kinds that have a registered schema."""
+    return sorted(_CONNECTION_SCHEMAS.keys())
+
+
 def _iter_node_props(node: Dict[str, Any]) -> List[tuple]:
     """Yield ``(kind, prop_dict)`` tuples for a normalised node.
 

@@ -50,6 +50,39 @@ async def get_kind_schema(kind: str) -> Dict[str, Any]:
     return {"kind": kind, "schema": schema}
 
 
+@router.get("/kinds")
+async def get_kinds() -> Dict[str, Any]:
+    """List every reactor and connection kind the running Boulder can build.
+
+    Combines Boulder's built-in kinds (with a Cantera doc link/description
+    from :mod:`boulder.cantera_docs`) with any kind a loaded plugin has
+    registered via ``schema_registry.register_reactor_builder``/
+    ``register_connection_schema`` (no doc link — plugins document their own
+    kinds). Powers the Add Reactor/Add Connection modals so the type
+    dropdown always reflects what this build can actually construct.
+    """
+    from ...cantera_docs import CONNECTION_DOCS, REACTOR_DOCS
+    from ...schema_registry import registered_connection_kinds, registered_kinds
+
+    reactors = [
+        {"kind": kind, "doc_url": doc["doc_url"], "description": doc["description"]}
+        for kind, doc in REACTOR_DOCS.items()
+    ] + [
+        {"kind": kind, "doc_url": None, "description": None}
+        for kind in registered_kinds()
+        if kind not in REACTOR_DOCS
+    ]
+    connections = [
+        {"kind": kind, "doc_url": doc["doc_url"], "description": doc["description"]}
+        for kind, doc in CONNECTION_DOCS.items()
+    ] + [
+        {"kind": kind, "doc_url": None, "description": None}
+        for kind in registered_connection_kinds()
+        if kind not in CONNECTION_DOCS
+    ]
+    return {"reactors": reactors, "connections": connections}
+
+
 @router.get("/branding")
 async def get_branding() -> Dict[str, Any]:
     """Return the host branding set by a plugin (name/version), if any.
