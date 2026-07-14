@@ -1,5 +1,9 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
+import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 import { SweepResultsPlot } from "./SweepResultsPlot";
 
 /** Compact relative-time label, e.g. "just now", "2 min ago", "3 h ago". */
@@ -30,7 +34,10 @@ export function ScenarioPane() {
     error,
     refresh,
     setActive,
+    deleteScenario,
   } = useScenarioStore();
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Tick so relative-time labels stay fresh without a reload.
   const [now, setNow] = useState(() => Date.now());
@@ -58,7 +65,50 @@ export function ScenarioPane() {
     prevCreated.current = createdAt;
   }, [createdAt]);
 
-  if (!available || scenarios.length === 0) return null;
+  const handleDelete = async (id: string) => {
+    if (!window.confirm(`Delete scenario "${id}"? This cannot be undone.`)) return;
+    try {
+      await deleteScenario(id);
+      toast.success(`Scenario "${id}" deleted`);
+      void refresh();
+    } catch (err) {
+      toast.error(
+        `Could not delete scenario: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  if (!available || scenarios.length === 0) {
+    // No precomputed store yet (nothing has been swept), but scenario
+    // authoring doesn't need one — surface just the "+ Add Scenario" entry
+    // point so the pane isn't the only way in (Run Sweep's menu has it too).
+    return (
+      <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-sm text-foreground">Scenarios</h3>
+          <button
+            type="button"
+            onClick={() => setAddModalOpen(true)}
+            className="flex items-center gap-1 text-xs text-primary hover:underline"
+          >
+            <Plus size={12} /> Add Scenario
+          </button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          No computed scenarios yet — add one, then Run Sweep.
+        </p>
+        <AddScenarioModal
+          open={addModalOpen}
+          onClose={() => setAddModalOpen(false)}
+          onCreated={(id) => setEditingId(id)}
+        />
+        <ScenarioYamlEditorModal
+          scenarioId={editingId}
+          onClose={() => setEditingId(null)}
+        />
+      </div>
+    );
+  }
 
   const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -89,7 +139,17 @@ export function ScenarioPane() {
       <div className="rounded-lg border border-border bg-card p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-sm text-foreground">Scenarios</h3>
-          <span className="text-xs text-muted-foreground">{scenarios.length}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{scenarios.length}</span>
+            <button
+              type="button"
+              onClick={() => setAddModalOpen(true)}
+              title="Add Scenario"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
         </div>
         {error && <p className="text-xs text-red-500">{error}</p>}
         <ul
@@ -102,7 +162,7 @@ export function ScenarioPane() {
             const isActive = s.id === activeId;
             const ago = timeAgo(s.computed_at ?? createdAt, now);
             return (
-              <li key={s.id}>
+              <li key={s.id} className="group flex items-center gap-1">
                 <button
                   id={`scenario-${s.id}`}
                   type="button"
@@ -117,7 +177,7 @@ export function ScenarioPane() {
                       : undefined
                   }
                   className={[
-                    "w-full text-left rounded-md px-2 py-1.5 text-xs transition-colors border",
+                    "flex-1 min-w-0 text-left rounded-md px-2 py-1.5 text-xs transition-colors border",
                     "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400",
                     isActive
                       ? "border-blue-500 bg-blue-500/20 text-foreground"
@@ -138,12 +198,38 @@ export function ScenarioPane() {
                     </div>
                   )}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingId(s.id)}
+                  title="Edit scenario YAML"
+                  className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted"
+                >
+                  <Pencil size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete(s.id)}
+                  title="Delete scenario"
+                  className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-muted"
+                >
+                  <Trash2 size={12} />
+                </button>
               </li>
             );
           })}
         </ul>
       </div>
       <SweepResultsPlot scenarios={scenarios} />
+      <AddScenarioModal
+        open={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onCreated={(id) => setEditingId(id)}
+      />
+      <ScenarioYamlEditorModal
+        scenarioId={editingId}
+        onClose={() => setEditingId(null)}
+        onSaved={() => void refresh()}
+      />
     </div>
   );
 }

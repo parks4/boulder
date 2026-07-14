@@ -50,3 +50,56 @@ export function focusScenario(id: string) {
 
 /** SSE URL the GUI subscribes to for scenario-focus events. */
 export const SCENARIO_FOCUS_STREAM_URL = "/api/scenarios/focus/stream";
+
+// ---------------------------------------------------------------------------
+// Scenario authoring — create/edit/delete a `scenario:` overlay on disk.
+// Unlike the read helpers above (precomputed HDF5 trajectories), these edit
+// the source config file so the next Run Sweep picks up the change.
+// ---------------------------------------------------------------------------
+
+export interface ScenarioSourceResponse {
+  scenario_id: string;
+  yaml: string;
+}
+
+/** Fetch one scenario overlay's raw YAML text (for the scoped editor). */
+export function fetchScenarioSource(id: string) {
+  return apiFetch<ScenarioSourceResponse>(
+    `/scenarios/${encodeURIComponent(id)}/source`,
+  );
+}
+
+/** Create a new scenario overlay — blank, or cloned from an existing one. */
+export function createScenario(scenarioId: string, baseScenarioId?: string) {
+  return apiFetch<ScenarioSourceResponse>("/scenarios", {
+    method: "POST",
+    body: JSON.stringify({
+      scenario_id: scenarioId,
+      base_scenario_id: baseScenarioId ?? null,
+    }),
+  });
+}
+
+/** Save edits to a scenario overlay's YAML text. */
+export function updateScenario(id: string, yaml: string) {
+  return apiFetch<ScenarioSourceResponse>(
+    `/scenarios/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify({ yaml }) },
+  );
+}
+
+/** Rename a scenario's id (its `scenario:` mapping key). */
+export function renameScenario(id: string, newId: string) {
+  return apiFetch<{ ok: boolean; scenario_id: string }>(
+    `/scenarios/${encodeURIComponent(id)}/rename`,
+    { method: "PATCH", body: JSON.stringify({ new_id: newId }) },
+  );
+}
+
+/** Delete a scenario overlay. The next Run Sweep prunes its stale HDF5 group. */
+export function deleteScenario(id: string) {
+  return apiFetch<{ ok: boolean; scenario_id: string }>(
+    `/scenarios/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
