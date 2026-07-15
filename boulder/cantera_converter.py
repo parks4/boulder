@@ -1431,6 +1431,7 @@ class DualCanteraConverter:
         inlet_states: Dict[str, "ct.Solution"],
         stage_id: str = "",
         stage: Optional[Any] = None,
+        pre_solve_hook: Optional[Callable[["DualCanteraConverter"], None]] = None,
     ) -> Tuple["ct.ReactorNet", Dict[str, "ct.ReactorBase"]]:
         """Build (and solve) a :class:`~cantera.ReactorNet` for one stage.
 
@@ -1454,6 +1455,13 @@ class DualCanteraConverter:
         stage :
             :class:`~boulder.staged_solver.Stage` dataclass; used to set the
             solve directive (``advance_to_steady_state`` vs ``advance``).
+        pre_solve_hook :
+            Optional callback invoked with ``self`` after ``self.reactors``/
+            ``self.connections`` are populated for this stage but *before*
+            the solve dispatch runs. This is the only correct place to wire
+            causal-layer bindings (e.g. ``apply_bindings_block``) — calling
+            them after this method returns means the solve already ran to
+            completion with no schedule callbacks registered.
 
         Returns
         -------
@@ -1684,6 +1692,17 @@ class DualCanteraConverter:
                     exc,
                 )
 
+        # Give the caller a chance to wire causal-layer bindings (Phase B:
+        # signals -> reduced_electric_field/mass_flow_rate/tau_s) now that
+        # self.reactors/self.connections are populated but nothing has been
+        # solved yet. A binding applied *after* this method returns (as when
+        # this was the caller's own responsibility) is applied after the
+        # solve already ran to completion -- e.g. a micro_step plasma pulse
+        # would drive the reaction with reduced_electric_field frozen at
+        # its initial value the entire time, never actually pulsing.
+        if pre_solve_hook is not None:
+            pre_solve_hook(self)
+
         # Dispatch to the right integrator
         kind = str(solver.get("kind", "advance_to_steady_state"))
         if kind == "advance_to_steady_state":
@@ -1765,12 +1784,20 @@ class DualCanteraConverter:
             t = float(solver.get("start", 0.0))
             while t < t_total:
                 t_end = min(t + chunk_dt, t_total)
-                # Fire any schedule callbacks before each chunk
+                # Fire any schedule callbacks before each chunk, then
+                # reinitialize *immediately* -- CVODES caches the RHS's
+                # external parameters (e.g. a plasma's electron energy
+                # distribution) internally and won't notice a callback's
+                # mutation until reinitialize() runs. Reinitializing only
+                # after the advance loop below (the previous order) meant
+                # every chunk's advance() calls integrated with the *stale*
+                # field from before this callback, silently freezing out an
+                # entire pulse's worth of dynamics.
                 self._fire_schedule_callbacks(network, t, t_end, stage_id)
-                while network.time < t_end:
-                    network.advance(network.time + max_dt)
                 if reinit:
                     network.reinitialize()
+                while network.time < t_end:
+                    network.advance(network.time + max_dt)
                 if _scope_recorder is not None:
                     _scope_recorder.record(t_end)
                 t = t_end

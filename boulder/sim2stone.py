@@ -532,6 +532,27 @@ def sim_to_internal_config(
                 except Exception:
                     pass
 
+            # Plasma phases (methane-plasma-pavan-2023.yaml and similar) cannot
+            # honour a `reduced_electric_field` setter once cloned -- Cantera
+            # raises ThermoModelMethodError("This method is invalid for
+            # plasma") on every single write, which the schedule callback
+            # swallows, leaving the pulse frozen at its initial value for the
+            # entire solve. Boulder's own default is clone: true, so a plasma
+            # node must explicitly opt out; every vendored plasma example
+            # (e.g. nanosecond_pulse_discharge.py) already constructs its
+            # reactor with clone=False for exactly this reason.
+            #
+            # `hasattr` can't be used here: reading `reduced_electric_field`
+            # on a phase model that doesn't support it raises
+            # ThermoModelMethodError (a bare Exception subclass, not
+            # AttributeError), which `hasattr` does not swallow -- it would
+            # propagate and abort conversion for every non-plasma reactor.
+            try:
+                phase.reduced_electric_field  # noqa: B018 -- probe, not a no-op
+                props["clone"] = False
+            except ct.ThermoModelMethodError:
+                pass
+
             # Mechanism: node-level override first, then infer from thermo
             if isinstance(mech_override, str) and mech_override:
                 props["mechanism"] = mech_override

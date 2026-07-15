@@ -645,6 +645,24 @@ def solve_staged(
         # Merge intra-stage connections with interface MFCs for this stage
         stage_connections = list(stage.intra_connections) + extra_conns
 
+        # Apply causal-layer bindings (Phase B): wire signals to MFCs / reactors.
+        # Must run as a pre_solve_hook -- build_sub_network solves the stage
+        # internally before returning, so applying bindings on its *result*
+        # (as this used to) means e.g. a plasma reduced_electric_field pulse
+        # would drive the whole solve frozen at its initial value, never
+        # actually pulsing.
+        _signals_block = config.get("signals")
+        _bindings_block = config.get("bindings")
+
+        def _apply_stage_bindings(built_converter: DualCanteraConverter) -> None:
+            if not (_signals_block and _bindings_block):
+                return
+            from boulder.bindings import apply_bindings_block
+            from boulder.signals import build_signal_registry
+
+            _signal_registry = build_signal_registry(_signals_block)
+            apply_bindings_block(built_converter, _bindings_block, _signal_registry)
+
         # Build sub-network and solve
         network, stage_reactors = converter.build_sub_network(
             stage_nodes=stage_nodes + extra_nodes,
@@ -653,18 +671,9 @@ def solve_staged(
             inlet_states=inlet_states,
             stage_id=stage.id,
             stage=stage,
+            pre_solve_hook=_apply_stage_bindings,
         )
         trajectory.networks[stage.id] = network
-
-        # Apply causal-layer bindings (Phase B): wire signals to MFCs / reactors.
-        _signals_block = config.get("signals")
-        _bindings_block = config.get("bindings")
-        if _signals_block and _bindings_block:
-            from boulder.bindings import apply_bindings_block
-            from boulder.signals import build_signal_registry
-
-            _signal_registry = build_signal_registry(_signals_block)
-            apply_bindings_block(converter, _bindings_block, _signal_registry)
 
         # Collect SolutionArray in flow order through the stage
         flow_order = _flow_order_within_stage(stage)
