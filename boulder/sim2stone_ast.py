@@ -81,6 +81,24 @@ class DetectedClosure:
 
 
 @dataclass
+class DetectedWallVelocityClosure:
+    """Detected ``def v(t): return coeff * (r1.phase.P - r2.phase.P)`` pattern.
+
+    Also matches the delayed form ``if t < start: return 0.0 else: ...`` used
+    by upstream Cantera's ``piston.py`` example, where the wall is held fixed
+    until ``start_time``. Maps to STONE's ``{closure: pressure_proportional}``
+    wall velocity spec.
+    """
+
+    wall_var: str
+    src_reactor_var: str
+    tgt_reactor_var: str
+    coeff: float
+    start_time: float = 0.0
+    derived_via: str = "ast_match"
+
+
+@dataclass
 class DetectedContinuation:
     """Detected ``while reactor.T > N: sim.solve_steady(); tau *= k`` pattern."""
 
@@ -107,6 +125,9 @@ class ASTExtractionResult:
     signals: List[DetectedSignal] = field(default_factory=list)
     bindings: List[DetectedBinding] = field(default_factory=list)
     closures: List[DetectedClosure] = field(default_factory=list)
+    wall_velocity_closures: List[DetectedWallVelocityClosure] = field(
+        default_factory=list
+    )
     continuations: List[DetectedContinuation] = field(default_factory=list)
     solver: Optional[DetectedSolver] = None
 
@@ -518,6 +539,172 @@ def _detect_residence_time_closures(
 
 
 # ---------------------------------------------------------------------------
+# Wall velocity closure detection
+# ---------------------------------------------------------------------------
+
+
+def _match_pressure_diff_expr(
+    expr: ast.expr, scalars: Dict[str, float]
+) -> Optional[Tuple[str, str, float]]:
+    """Match ``coeff * (rA.phase.P - rB.phase.P)`` (either operand order).
+
+    Returns ``(rA_var, rB_var, coeff)`` such that the expression equals
+    ``coeff * (rA.phase.P - rB.phase.P)``, or ``None`` if no match.
+    """
+    if not (isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Mult)):
+        return None
+    sides = [expr.left, expr.right]
+    diff_node: Optional[ast.BinOp] = None
+    coeff_node: Optional[ast.expr] = None
+    for i, side in enumerate(sides):
+        if isinstance(side, ast.BinOp) and isinstance(side.op, ast.Sub):
+            diff_node = side
+            coeff_node = sides[1 - i]
+    if diff_node is None or coeff_node is None:
+        return None
+    coeff = _eval_const_extended(coeff_node, scalars)
+    if not isinstance(coeff, (int, float)):
+        return None
+
+    def _reactor_pressure_var(node: ast.expr) -> Optional[str]:
+        # Matches ``X.phase.P``
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "P"
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "phase"
+            and isinstance(node.value.value, ast.Name)
+        ):
+            return node.value.value.id
+        return None
+
+    r_a = _reactor_pressure_var(diff_node.left)
+    r_b = _reactor_pressure_var(diff_node.right)
+    if r_a is None or r_b is None:
+        return None
+    return r_a, r_b, float(coeff)
+
+
+def _detect_wall_velocity_closures(
+    tree: ast.AST,
+) -> List[DetectedWallVelocityClosure]:
+    """Detect ``def v(t): [if t < start:] return coeff*(r1.phase.P - r2.phase.P)``.
+
+    Also looks for ``ct.Wall(r1, r2, velocity=<var>)`` to link the function to
+    the Wall variable. Matches upstream Cantera's ``piston.py`` pattern, where
+    the wall is held at rest until ``start_time`` then moves proportionally to
+    the pressure difference between its two reactors.
+    """
+    scalars = _collect_scalar_assignments(tree)
+    # func_name -> (rA_var, rB_var, coeff, start_time)
+    closure_funcs: Dict[str, Tuple[str, str, float, float]] = {}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or len(node.args.args) != 1:
+            continue
+        arg_name = node.args.args[0].arg
+        body = node.body
+
+        if (
+            len(body) == 1
+            and isinstance(body[0], ast.Return)
+            and body[0].value is not None
+        ):
+            match = _match_pressure_diff_expr(body[0].value, scalars)
+            if match is not None:
+                r_a, r_b, coeff = match
+                closure_funcs[node.name] = (r_a, r_b, coeff, 0.0)
+            continue
+
+        if not (len(body) == 1 and isinstance(body[0], ast.If)):
+            continue
+        if_stmt: ast.If = body[0]
+        test = if_stmt.test
+        if not (
+            isinstance(test, ast.Compare)
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], (ast.Lt, ast.LtE))
+            and isinstance(test.left, ast.Name)
+            and test.left.id == arg_name
+        ):
+            continue
+        threshold = _eval_const_extended(test.comparators[0], scalars)
+        if not isinstance(threshold, (int, float)):
+            continue
+        if not (
+            len(if_stmt.body) == 1
+            and isinstance(if_stmt.body[0], ast.Return)
+            and len(if_stmt.orelse) == 1
+            and isinstance(if_stmt.orelse[0], ast.Return)
+        ):
+            continue
+        zero_return = if_stmt.body[0].value
+        zero_val = (
+            _eval_const_extended(zero_return, scalars)
+            if zero_return is not None
+            else None
+        )
+        if zero_val not in (0, 0.0):
+            continue
+        else_return = if_stmt.orelse[0].value
+        if else_return is None:
+            continue
+        match = _match_pressure_diff_expr(else_return, scalars)
+        if match is None:
+            continue
+        r_a, r_b, coeff = match
+        closure_funcs[node.name] = (r_a, r_b, coeff, float(threshold))
+
+    closures: List[DetectedWallVelocityClosure] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        wall_var = node.targets[0].id
+        call = node.value
+        if not isinstance(call, ast.Call):
+            continue
+        callee = call.func
+        is_wall = (isinstance(callee, ast.Attribute) and callee.attr == "Wall") or (
+            isinstance(callee, ast.Name) and callee.id == "Wall"
+        )
+        if not is_wall:
+            continue
+        velocity_kw = next((kw for kw in call.keywords if kw.arg == "velocity"), None)
+        if velocity_kw is None or not isinstance(velocity_kw.value, ast.Name):
+            continue
+        func_name = velocity_kw.value.id
+        if func_name not in closure_funcs:
+            continue
+        r_a, r_b, coeff, start_time = closure_funcs[func_name]
+
+        # Resolve source/target reactor vars from the Wall(...) call's own
+        # positional args when available, flipping the coefficient's sign if
+        # the closure's variable order is reversed relative to the call --
+        # STONE's connection source/target must follow the call, not the
+        # closure body's arbitrary variable order.
+        src_var, tgt_var = r_a, r_b
+        pos_args = [a.id for a in call.args if isinstance(a, ast.Name)]
+        if len(pos_args) >= 2 and {pos_args[0], pos_args[1]} == {r_a, r_b}:
+            src_var, tgt_var = pos_args[0], pos_args[1]
+            if src_var != r_a:
+                coeff = -coeff
+
+        closures.append(
+            DetectedWallVelocityClosure(
+                wall_var=wall_var,
+                src_reactor_var=src_var,
+                tgt_reactor_var=tgt_var,
+                coeff=coeff,
+                start_time=start_time,
+                derived_via="ast_match",
+            )
+        )
+    return closures
+
+
+# ---------------------------------------------------------------------------
 # Continuation detection
 # ---------------------------------------------------------------------------
 
@@ -823,6 +1010,7 @@ def extract_from_source(source_file: str) -> ASTExtractionResult:
 
     result.signals = _detect_func1_signals(tree)
     result.closures = _detect_residence_time_closures(tree)
+    result.wall_velocity_closures = _detect_wall_velocity_closures(tree)
     result.continuations = _cont_list(_detect_continuation(tree))
     solver = _detect_solver_hint(tree)
     if solver is not None:

@@ -1141,6 +1141,17 @@ def sim_to_stone_yaml(
         if s.kind == "Gaussian" and s.source_var not in _bound_signal_ids
     ]
 
+    # AST-detected Wall velocity closures (e.g. upstream Cantera's piston.py:
+    # `def v(t): ... return coeff*(r1.phase.P - r2.phase.P)`). Live
+    # introspection of ``wall.velocity`` always yields the evaluated float at
+    # conversion time, never the original Func1/callable (same limitation as
+    # ``mass_flow_rate`` above), so a velocity-only Wall falls through
+    # ``sim_to_internal_config``'s heat-rate snapshot branch and needs its
+    # properties substituted here instead.
+    wall_velocity_closures = (
+        list(ast_result.wall_velocity_closures) if ast_result else []
+    )
+
     for node in internal.get("nodes", []):
         node_cm = CommentedMap()
         node_cm["id"] = node["id"]
@@ -1241,6 +1252,28 @@ def sim_to_stone_yaml(
                     ],
                 }
                 conn_props.pop("_comment", None)
+
+        # Substitute a real velocity closure for a Wall whose motion was
+        # snapshotted as a (typically zero) electric_power_kW torch — same
+        # single-candidate-on-each-side heuristic as the Gaussian/MFC and
+        # residence-time cases above.
+        if (
+            conn.get("type") == "Wall"
+            and len(wall_velocity_closures) == 1
+            and "electric_power_kW" in conn_props
+        ):
+            wall_connections = [
+                c for c in internal.get("connections", []) if c.get("type") == "Wall"
+            ]
+            if len(wall_connections) == 1:
+                wv = wall_velocity_closures[0]
+                conn_props = {
+                    "velocity": {
+                        "closure": "pressure_proportional",
+                        "coeff": wv.coeff,
+                        "start_time": wv.start_time,
+                    }
+                }
 
         conn_cm[conn["type"]] = conn_props if conn_props else None
         conn_cm["source"] = conn["source"]
