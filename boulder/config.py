@@ -168,6 +168,7 @@ _NODE_STANDARD_FIELDS: frozenset = frozenset(
         "mechanism",
         "description",
         "label",
+        "plot_options",  # optional per-node species-visibility hints (hide/show_species)
     }
 )
 
@@ -939,6 +940,8 @@ def _process_stage_items(
                     node[fld] = item[fld]
             if "mechanism" in item:
                 node["mechanism"] = item["mechanism"]
+            if "plot_options" in item:
+                node["plot_options"] = item["plot_options"]
             nodes.append(node)
 
         else:
@@ -1292,7 +1295,14 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
     if "nodes" in normalized:
         for node in normalized["nodes"]:
             if "type" not in node:
-                standard_fields = {"id", "metadata", "mechanism", "group", "logical"}
+                standard_fields = {
+                    "id",
+                    "metadata",
+                    "mechanism",
+                    "group",
+                    "logical",
+                    "plot_options",
+                }
                 type_keys = [k for k in node.keys() if k not in standard_fields]
 
                 if type_keys:
@@ -1309,6 +1319,13 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
                 props = node.setdefault("properties", {})
                 if "mechanism" not in props:
                     props["mechanism"] = node["mechanism"]
+            # Same for `plot_options:` -- optional per-node species-visibility
+            # hints for the frontend's Mole/Mass fraction charts
+            # (hide_species/show_species).
+            if "plot_options" in node:
+                props = node.setdefault("properties", {})
+                if "plot_options" not in props:
+                    props["plot_options"] = node["plot_options"]
 
     # Normalize connections — ensure every connection has type/properties keys.
     if "connections" in normalized:

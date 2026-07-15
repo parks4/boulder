@@ -19,6 +19,11 @@ function getSoleGroup(config: NormalizedConfig): string | undefined {
   return groups.size === 1 ? [...groups][0] : undefined;
 }
 
+// Display-order keys that should always render last, regardless of where
+// they land in the underlying properties dict (e.g. `plot_options` is
+// metadata about *how* to chart the node, not a physical initial condition).
+const _TRAILING_DISPLAY_KEYS = ["plot_options"];
+
 function unfoldInitialConditions(
   properties: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -32,6 +37,15 @@ function unfoldInitialConditions(
       }
     }
   }
+  // Re-insert trailing keys last -- deleting and re-adding moves a key to the
+  // end of a plain object's insertion-order iteration.
+  for (const key of _TRAILING_DISPLAY_KEYS) {
+    if (key in flat) {
+      const value = flat[key];
+      delete flat[key];
+      flat[key] = value;
+    }
+  }
   return flat;
 }
 
@@ -42,6 +56,11 @@ function buildEditValuesFromProperties(
   for (const [key, value] of Object.entries(displayProperties)) {
     if (key === "temperature" && typeof value === "number") {
       vals[key] = String(kelvinToCelsius(value).toFixed(2));
+    } else if (typeof value === "object" && value !== null) {
+      // Object-valued properties (e.g. a node's `plot: {hide_species, show_species}`
+      // hints) must be JSON-stringified same as the display-mode span below --
+      // plain `String(value)` on an object yields the useless "[object Object]".
+      vals[key] = JSON.stringify(value);
     } else {
       vals[key] = String(value ?? "");
     }
@@ -196,8 +215,18 @@ export function PropertiesPanel() {
   const handleSave = () => {
     const updated: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(editValues)) {
+      const original = properties[key];
       if (key === "temperature") {
         updated[key] = celsiusToKelvin(parseFloat(val) || 0);
+      } else if (typeof original === "object" && original !== null) {
+        // Object-valued properties round-trip through JSON text in the edit
+        // box (see buildEditValuesFromProperties) -- parse back to an object
+        // rather than saving the raw JSON string over the original value.
+        try {
+          updated[key] = JSON.parse(val);
+        } catch {
+          updated[key] = original;
+        }
       } else {
         const num = parseFloat(val);
         updated[key] = isNaN(num) ? val : num;

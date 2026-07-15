@@ -19,6 +19,8 @@ vi.mock("sonner", () => ({
 
 const mockRemoveNode = vi.fn();
 const mockRemoveConnection = vi.fn();
+const mockUpdateNode = vi.fn();
+const mockUpdateConnection = vi.fn();
 const mockClearSelection = vi.fn();
 let mockSelectedElement: {
   type: "node" | "edge";
@@ -59,8 +61,8 @@ vi.mock("@/stores/configStore", () => ({
   useConfigStore: (selector: (s: unknown) => unknown) => {
     const store = {
       config: mockConfig,
-      updateNode: vi.fn(),
-      updateConnection: vi.fn(),
+      updateNode: mockUpdateNode,
+      updateConnection: mockUpdateConnection,
       removeNode: mockRemoveNode,
       removeConnection: mockRemoveConnection,
     };
@@ -251,5 +253,83 @@ describe("PropertiesPanel edit-on-double-click", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
     expect(screen.getByText("1000.00 °C")).toBeInTheDocument();
+  });
+});
+
+describe("PropertiesPanel object-valued properties", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInitialConditionsEditNonce = 0;
+    mockSelectedElement = {
+      type: "node",
+      data: { id: "reactor_1", type: "ConstPressureReactor" },
+    };
+    mockConfig = {
+      nodes: [
+        {
+          id: "reactor_1",
+          type: "ConstPressureReactor",
+          properties: {
+            volume: 1.0,
+            // Declared before `initial` so the ordering test below actually
+            // exercises the "move to the end" re-insertion, not just a
+            // dict that already happened to have it last.
+            plot_options: { hide_species: ["N2", "O2"], show_species: ["e", "OH"] },
+            initial: { temperature: 1273.15, pressure: 101325.0 },
+          },
+        },
+      ],
+      connections: [],
+    };
+  });
+
+  it("renders an object-valued property as JSON text, not [object Object]", () => {
+    render(<PropertiesPanel />);
+
+    expect(
+      screen.getByText('{"hide_species":["N2","O2"],"show_species":["e","OH"]}'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("[object Object]")).not.toBeInTheDocument();
+  });
+
+  it("shows JSON text (not [object Object]) in the edit-mode input", () => {
+    render(<PropertiesPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(
+      screen.getByDisplayValue('{"hide_species":["N2","O2"],"show_species":["e","OH"]}'),
+    ).toBeInTheDocument();
+  });
+
+  it("round-trips the object back through Save without corrupting it to a string", () => {
+    render(<PropertiesPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mockUpdateNode).toHaveBeenCalledWith(
+      "reactor_1",
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          plot_options: { hide_species: ["N2", "O2"], show_species: ["e", "OH"] },
+        }),
+      }),
+    );
+  });
+
+  it("renders plot_options last, after unfolded initial-condition fields", () => {
+    render(<PropertiesPanel />);
+
+    const labels = screen
+      .getAllByText(/^(volume|plot_options|temperature|pressure)/i)
+      .map((el) => el.textContent);
+    const plotIndex = labels.findIndex((t) => /^plot_options/i.test(t ?? ""));
+    const temperatureIndex = labels.findIndex((t) => /^temperature/i.test(t ?? ""));
+    const pressureIndex = labels.findIndex((t) => /^pressure/i.test(t ?? ""));
+
+    expect(plotIndex).toBeGreaterThan(-1);
+    expect(plotIndex).toBeGreaterThan(temperatureIndex);
+    expect(plotIndex).toBeGreaterThan(pressureIndex);
   });
 });
