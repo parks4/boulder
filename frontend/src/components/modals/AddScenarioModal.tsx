@@ -20,6 +20,7 @@ const BLANK = "__blank__";
  */
 export function AddScenarioModal({ open, onClose, onCreated }: Props) {
   const scenarios = useScenarioStore((s) => s.scenarios);
+  const authoredIds = useScenarioStore((s) => s.authoredIds);
   const createScenario = useScenarioStore((s) => s.createScenario);
   const [id, setId] = useState("");
   const [baseId, setBaseId] = useState(BLANK);
@@ -87,9 +88,12 @@ export function AddScenarioModal({ open, onClose, onCreated }: Props) {
             className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input border border-border text-foreground"
           >
             <option value={BLANK}>Blank overlay</option>
-            {scenarios.map((s) => (
-              <option key={s.id} value={s.id}>
-                Clone of {s.label || s.id}
+            {/* All scenarios currently in the config, not just ones a sweep has
+                already computed — otherwise a scenario created (or edited) since
+                the last sweep can't be used as a clone base. */}
+            {authoredIds.map((sid) => (
+              <option key={sid} value={sid}>
+                Clone of {scenarios.find((s) => s.id === sid)?.label || sid}
               </option>
             ))}
           </select>

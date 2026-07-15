@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, SquarePen, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
@@ -34,6 +34,7 @@ export function ScenarioPane() {
     error,
     refresh,
     setActive,
+    renameScenario,
     deleteScenario,
   } = useScenarioStore();
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -70,10 +71,26 @@ export function ScenarioPane() {
     try {
       await deleteScenario(id);
       toast.success(`Scenario "${id}" deleted`);
-      void refresh();
     } catch (err) {
       toast.error(
         `Could not delete scenario: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  const handleRename = async (id: string) => {
+    const trimmed = window.prompt(`Rename scenario "${id}" to:`, id)?.trim();
+    if (!trimmed || trimmed === id) return;
+    if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+      toast.error("Scenario id must use letters, digits, '_' or '-' only");
+      return;
+    }
+    try {
+      await renameScenario(id, trimmed);
+      toast.success(`Scenario renamed to "${trimmed}"`);
+    } catch (err) {
+      toast.error(
+        `Could not rename scenario: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   };
@@ -105,6 +122,7 @@ export function ScenarioPane() {
         <ScenarioYamlEditorModal
           scenarioId={editingId}
           onClose={() => setEditingId(null)}
+          onSaved={() => void refresh()}
         />
       </div>
     );
@@ -197,6 +215,14 @@ export function ScenarioPane() {
                       {s.reactor_mode}
                     </div>
                   )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleRename(s.id)}
+                  title="Rename scenario"
+                  className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted"
+                >
+                  <SquarePen size={12} />
                 </button>
                 <button
                   type="button"

@@ -36,6 +36,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   const appliedDefault = useRef(false);
   const appliedAutorun = useRef(false);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
+  const scenarioRevision = useScenarioStore((s) => s.revision);
   const [addScenarioOpen, setAddScenarioOpen] = useState(false);
   const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
   const notifyShortcutUsage = useShortcutNudge();
@@ -53,12 +54,21 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
       .catch(() => setSweep(null));
   }, []);
 
+  // Re-fetch whenever a scenario is added/edited/renamed/deleted elsewhere
+  // (scenarioRevision bumps on every scenarioStore.refresh()) — otherwise
+  // "Run N scenarios" silently goes stale after any Scenario Pane action.
   useEffect(() => {
     loadSweepInfo();
+  }, [loadSweepInfo, scenarioRevision]);
+
+  // Separate from the effect above: only tears down the poll interval on
+  // unmount, not on every scenarioRevision bump (which would otherwise kill
+  // an in-flight sweep's progress polling the moment a scenario changes).
+  useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [loadSweepInfo]);
+  }, []);
 
   const canSweep = Boolean(sweep?.can_run);
   // If sweep is unavailable, fall back to simulation (force_sim is kept as-is).

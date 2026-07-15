@@ -231,3 +231,44 @@ def test_delete_scenario_unknown_404(tmp_path: Path) -> None:
         assert resp.status_code == 404
     finally:
         client.__exit__(None, None, None)
+
+
+def test_list_scenarios_includes_authored_ids_without_a_store(tmp_path: Path) -> None:
+    """authored_ids reflects the YAML directly, even with no HDF5 store.
+
+    So a scenario created (or edited) since the last sweep can still be
+    offered as an Add Scenario clone base, instead of only ones a sweep has
+    already computed.
+    """
+    cfg = _write_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.get("/api/scenarios")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["available"] is False
+        assert body["authored_ids"] == ["base_case"]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_list_scenarios_authored_ids_reflects_a_newly_created_scenario(
+    tmp_path: Path,
+) -> None:
+    cfg = _write_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        client.post("/api/scenarios", json={"scenario_id": "new1"})
+        resp = client.get("/api/scenarios")
+        assert resp.json()["authored_ids"] == ["base_case", "new1"]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_list_scenarios_authored_ids_empty_without_a_config_path() -> None:
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.preloaded_config_path = None
+        resp = client.get("/api/scenarios")
+        assert resp.status_code == 200
+        assert resp.json()["authored_ids"] == []

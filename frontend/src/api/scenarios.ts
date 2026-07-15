@@ -24,6 +24,13 @@ export interface ScenarioListResponse {
   /** Unix seconds when the store (sweep) was written (fallback for all rows). */
   created_at?: number | null;
   scenarios: ScenarioMeta[];
+  /**
+   * Every scenario id in the config's `scenario:` mapping, regardless of
+   * whether a sweep has computed it yet — the source of truth for what can
+   * be used as an Add Scenario clone base (`scenarios` above only lists
+   * ones a sweep has already run).
+   */
+  authored_ids?: string[];
 }
 
 /** List the scenarios available in the server's active store (fast — attrs only). */
