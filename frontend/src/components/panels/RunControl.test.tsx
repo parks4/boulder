@@ -2,18 +2,21 @@
  * Asserts RunControl split-button modes: Run Simulation, Force Run, and Run Sweep.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { RunControl } from "./RunControl";
+import { useSweepRunStore } from "@/stores/sweepStore";
 
 const mockGetSweepInfo = vi
   .fn()
   .mockResolvedValue({ can_run: false, reason: "No sweep" });
+const mockStartSweep = vi.fn();
+const mockGetSweepStatus = vi.fn();
 vi.mock("@/api/sweep", () => ({
   getSweepInfo: (...args: unknown[]) => mockGetSweepInfo(...args),
-  getSweepStatus: vi.fn(),
-  startSweep: vi.fn(),
+  getSweepStatus: (...args: unknown[]) => mockGetSweepStatus(...args),
+  startSweep: (...args: unknown[]) => mockStartSweep(...args),
 }));
 
 const mockToastInfo = vi.fn();
@@ -22,10 +25,16 @@ vi.mock("sonner", () => ({
 }));
 
 let mockScenarioRevision = 0;
-vi.mock("@/stores/scenarioStore", () => ({
-  useScenarioStore: (selector: (s: unknown) => unknown) =>
-    selector({ refresh: vi.fn(), revision: mockScenarioRevision }),
-}));
+const mockRefresh = vi.fn();
+vi.mock("@/stores/scenarioStore", () => {
+  // sweepStore (a real module, exercised via useSweepRunStore below) reads
+  // this through the static `.getState()` accessor, not the selector-hook
+  // call form the rest of this test file uses -- both need to work.
+  const hook = (selector: (s: unknown) => unknown) =>
+    selector({ refresh: mockRefresh, revision: mockScenarioRevision });
+  hook.getState = () => ({ refresh: mockRefresh, revision: mockScenarioRevision });
+  return { useScenarioStore: hook };
+});
 
 describe("RunControl", () => {
   const onRunSimulation = vi.fn();
@@ -34,6 +43,11 @@ describe("RunControl", () => {
     vi.clearAllMocks();
     mockGetSweepInfo.mockResolvedValue({ can_run: false, reason: "No sweep" });
     mockScenarioRevision = 0;
+    useSweepRunStore.setState({ sweeping: false, progress: { current: 0, total: 0 } });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows Force Run in the menu and switches the primary label without Ctrl+Enter", () => {
@@ -120,6 +134,35 @@ describe("RunControl", () => {
     fireEvent.click(button);
 
     expect(mockToastInfo).not.toHaveBeenCalled();
+  });
+
+  it("clicking Run Sweep starts a sweep via the shared sweep-run store", async () => {
+    mockGetSweepInfo.mockResolvedValue({
+      can_run: true,
+      n_scenarios: 2,
+      reason: "Run 2 scenarios",
+    });
+    render(
+      <RunControl onRunSimulation={onRunSimulation} isRunning={false} runDisabled={false} />,
+    );
+    await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByLabelText("Choose run action"));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /run sweep/i }));
+
+    vi.useFakeTimers();
+    try {
+      mockStartSweep.mockResolvedValue({ status: "running", total: 2 });
+      mockGetSweepStatus.mockResolvedValueOnce({ status: "done", current: 2, total: 2 });
+
+      fireEvent.click(screen.getByRole("button", { name: /run sweep/i }));
+
+      expect(mockStartSweep).toHaveBeenCalledWith({ noCache: undefined });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("re-fetches sweep info when a scenario is added/edited/renamed/deleted elsewhere", async () => {

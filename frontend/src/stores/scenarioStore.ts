@@ -44,8 +44,8 @@ interface ScenarioState {
   updateScenario: (id: string, yaml: string) => Promise<void>;
   /** Rename a scenario's id. */
   renameScenario: (id: string, newId: string) => Promise<void>;
-  /** Delete a scenario overlay. */
-  deleteScenario: (id: string) => Promise<void>;
+  /** Delete a scenario overlay; resolves with whether a cached result was purged too. */
+  deleteScenario: (id: string) => Promise<{ cachePurged: boolean }>;
 }
 
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
@@ -100,9 +100,10 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   },
 
   deleteScenario: async (id) => {
-    await apiDeleteScenario(id);
+    const resp = await apiDeleteScenario(id);
     if (get().activeId === id) set({ activeId: null });
     await get().refresh();
+    return { cachePurged: resp.cache_purged };
   },
 
   setActive: async (id) => {

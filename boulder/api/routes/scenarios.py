@@ -39,6 +39,27 @@ def _store_path(request: Request) -> Optional[Path]:
     return Path(raw) if raw else None
 
 
+def _purge_cached_group(store: Optional[Path], scenario_id: str) -> bool:
+    """Remove *scenario_id*'s cached trajectory from the store, if present.
+
+    Best-effort: the scenario's *definition* is already deleted by the caller
+    by the time this runs, so a missing/unreadable store is not an error here
+    — there is just nothing left to purge. Returns whether a group was
+    actually removed (surfaced to the frontend so "Delete" can honestly say
+    whether it also cleared a cached result).
+    """
+    if h5py is None or store is None or not store.is_file():
+        return False
+    try:
+        with h5py.File(str(store), "a") as handle:
+            if scenario_id in handle:
+                del handle[scenario_id]
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def _to_py(value: Any) -> Any:
     if isinstance(value, bytes):
         return value.decode("utf-8", "replace")
@@ -257,7 +278,14 @@ async def rename_scenario(
 
 @router.delete("/{scenario_id}")
 async def delete_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
-    """Delete a scenario overlay. The next Run Sweep prunes its stale HDF5 group."""
+    """Delete a scenario overlay and purge its cached trajectory, if any.
+
+    Both happen immediately: the definition is removed from the config's
+    ``scenario:`` mapping, and the matching HDF5 group (if the active store
+    has one) is deleted right away — not left for the next Run Sweep to
+    notice and prune. ``cache_purged`` in the response tells the caller
+    whether there was actually a cached result to clear.
+    """
     cfg_path = _require_config_path(request)
     try:
         from ...scenario_editor import ScenarioEditError
@@ -266,8 +294,9 @@ async def delete_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
         _delete(cfg_path, scenario_id)
     except ScenarioEditError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    cache_purged = _purge_cached_group(_store_path(request), scenario_id)
     _reload_preloaded_state(request, cfg_path)
-    return {"ok": True, "scenario_id": scenario_id}
+    return {"ok": True, "scenario_id": scenario_id, "cache_purged": cache_purged}
 
 
 # --------------------------------------------------------------------------- #

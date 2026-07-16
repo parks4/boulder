@@ -23,8 +23,19 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 router = APIRouter()
+
+
+class SweepRunRequest(BaseModel):
+    """Body for ``POST /run``. Defaults match the plain "Run Sweep" click."""
+
+    #: "Regenerate cache" — set BOULDER_NO_CACHE=1 for the subprocess so a
+    #: cache-aware runner (e.g. bloc.scenario_sweep) discards its collection
+    #: store and re-solves every scenario instead of skipping unchanged ones.
+    no_cache: bool = False
+
 
 _SCENARIO_RE = re.compile(r"scenario\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 _RUNNER_NAME = "run_sweep.py"
@@ -193,8 +204,13 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/run")
-async def sweep_run(request: Request) -> Dict[str, Any]:
-    """Start the run-set subprocess for the preloaded config."""
+async def sweep_run(
+    request: Request, body: SweepRunRequest = SweepRunRequest()
+) -> Dict[str, Any]:
+    """Start the run-set subprocess for the preloaded config.
+
+    ``no_cache=true`` is the Scenario Pane's "Regenerate cache" action.
+    """
     cmd = _runner_command(request)
     if not _has_run_set(request) or cmd is None:
         raise HTTPException(
@@ -220,10 +236,17 @@ async def sweep_run(request: Request) -> Dict[str, Any]:
     }
     request.app.state.sweep_job = state
     # Surface on the server console by default — at least that the run started.
-    print(f"[sweep] starting {total} run(s): {' '.join(cmd['argv'])}", flush=True)
+    cache_note = " (no-cache: re-solving everything)" if body.no_cache else ""
+    print(
+        f"[sweep] starting {total} run(s){cache_note}: {' '.join(cmd['argv'])}",
+        flush=True,
+    )
 
     def _worker() -> None:
         try:
+            env = os.environ.copy()
+            if body.no_cache:
+                env["BOULDER_NO_CACHE"] = "1"
             proc = subprocess.Popen(
                 cmd["argv"],
                 cwd=cmd["cwd"],
@@ -231,7 +254,7 @@ async def sweep_run(request: Request) -> Dict[str, Any]:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                env=os.environ.copy(),
+                env=env,
             )
             tail: list[str] = []
             assert proc.stdout is not None
