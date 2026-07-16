@@ -54,7 +54,7 @@ def _client_with_local_runner(tmp_path: Path):
 
 
 def _mock_popen_factory(started: threading.Event, captured: Dict[str, Any]):
-    """A Popen stand-in that exits immediately with no output."""
+    """Build a Popen stand-in that exits immediately with no output."""
     proc = MagicMock()
     proc.stdout = iter([])
     proc.wait.return_value = None
