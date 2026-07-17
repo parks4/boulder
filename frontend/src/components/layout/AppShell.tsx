@@ -43,7 +43,12 @@ export function AppShell() {
     openYamlPane,
   } = useLayoutStore();
   const scenariosAvailable = useScenarioStore((s) => s.available);
+  const authoredScenarioIds = useScenarioStore((s) => s.authoredIds);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
+  // Show the pane once a sweep has produced a store OR the config already
+  // has authored (not-yet-swept) scenarios — otherwise a freshly authored
+  // scenario has nowhere to appear until the user runs a sweep first.
+  const showScenarioPane = scenariosAvailable || authoredScenarioIds.length > 0;
 
   // Discover available scenarios once so the right pane can appear.
   useEffect(() => {
@@ -208,7 +213,7 @@ export function AppShell() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {scenariosAvailable && <PaneToggle side="right" />}
+          {showScenarioPane && <PaneToggle side="right" />}
           <Button
             onClick={toggleTheme}
             variant="secondary"
@@ -286,7 +291,7 @@ export function AppShell() {
         </main>
 
         {/* Right scenario-inspector pane (hidden when no store / collapsed) */}
-        {scenariosAvailable && !rightCollapsed && (
+        {showScenarioPane && !rightCollapsed && (
           <>
             <PaneResizer side="right" />
             <aside

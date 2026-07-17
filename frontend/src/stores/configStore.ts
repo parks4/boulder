@@ -11,6 +11,13 @@ interface ConfigState {
 
   // Actions
   setConfig: (config: NormalizedConfig, fileName?: string | null, yaml?: string) => void;
+  /**
+   * Replace only the on-disk YAML snapshot, leaving the live graph/dirty
+   * state untouched — for edits made out-of-band (e.g. scenario authoring
+   * writes straight to the config file) that the in-memory graph doesn't
+   * need to reflect, so we don't clobber any unsaved node/connection edits.
+   */
+  setOriginalYaml: (yaml: string, fileName?: string) => void;
   resetConfig: () => void;
   addNode: (node: ConfigNode, group?: string | null) => void;
   updateNode: (id: string, updates: Partial<ConfigNode>) => void;
@@ -50,6 +57,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       originalYaml: yaml ?? get().originalYaml,
       dirty: false,
     }),
+
+  setOriginalYaml: (yaml, fileName) =>
+    set((s) => ({ originalYaml: yaml, fileName: fileName ?? s.fileName })),
 
   resetConfig: () =>
     set({ config: EMPTY_CONFIG, fileName: null, originalYaml: "", dirty: false }),
