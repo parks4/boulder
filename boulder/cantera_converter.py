@@ -92,6 +92,21 @@ class BoulderPlugins:
     #: the Boulder title.
     branding: Optional[Dict[str, str]] = None
 
+    #: ``(config: dict) -> list[dict]`` callables that synthesize additional
+    #: display-only Cytoscape elements (nodes/edges) for
+    #: :func:`~boulder.utils.config_to_cyto_elements`, appended after its own
+    #: elements. Each callable receives the same config dict passed to
+    #: ``config_to_cyto_elements`` and must not mutate it. Lets a host
+    #: represent a concept that never becomes a real STONE node/connection
+    #: (e.g. a non-physical energy source with no meaningful composition) in
+    #: the interactive graph, without Boulder's core knowing what that
+    #: concept is. Mirrors the pattern ``config_to_cyto_elements`` already
+    #: uses internally for its own stream-point diamond synthesis, made
+    #: pluggable. Registered by an external plugin package.
+    cyto_element_synthesizers: List[Callable[[Dict[str, Any]], List[Dict[str, Any]]]] = field(
+        default_factory=list
+    )
+
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.
     sources: Dict[str, List[Any]] = field(

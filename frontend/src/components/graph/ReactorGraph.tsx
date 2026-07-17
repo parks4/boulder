@@ -499,6 +499,28 @@ export function ReactorGraph() {
         },
       },
       {
+        // Energy Stream (host-plugin concept, e.g. Bloc): a non-mass energy
+        // flow -- either a display-only synthesized edge (e.g. a torch's
+        // electrical power, which never becomes a real Wall/Reservoir) or a
+        // real Wall additionally flagged `_is_energy_stream` so it renders
+        // identically (e.g. a PFR's ambient heat-loss wall). Leading
+        // underscore: internal display machinery, not a user-facing data
+        // field, same convention as the Properties panel's underscore
+        // hiding rule. Dotted, blue tint to read as distinct from both
+        // material streams (solid) and generic Walls (dashed, orange).
+        // Placed after `[type='Wall']` so it overrides that rule's dashed
+        // styling for flagged real Walls.
+        selector: "[?_is_energy_stream]",
+        style: {
+          width: 1.5,
+          "line-style": "dotted",
+          "line-dash-pattern": [3, 5],
+          "target-arrow-shape": "triangle",
+          "line-color": isDark ? "#6bb0f0" : "#2a6fc0",
+          "target-arrow-color": isDark ? "#6bb0f0" : "#2a6fc0",
+        },
+      },
+      {
         // Pass-through: synthetic edge short-circuiting a hidden (skip_viz) node.
         // Rendered as a faint dotted line so the flow path is traceable without
         // implying a direct physical connection.
