@@ -67,6 +67,23 @@ vi.mock("@/components/panels/YamlPane", () => ({
   YamlPane: () => <div data-testid="yaml-pane" />,
 }));
 
+vi.mock("@/components/panels/ScenarioPane", () => ({
+  ScenarioPane: () => <div data-testid="scenario-pane" />,
+}));
+
+let mockScenariosAvailable = false;
+let mockAuthoredScenarioIds: string[] = [];
+const mockRefreshScenarios = vi.fn();
+
+vi.mock("@/stores/scenarioStore", () => ({
+  useScenarioStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      available: mockScenariosAvailable,
+      authoredIds: mockAuthoredScenarioIds,
+      refresh: mockRefreshScenarios,
+    }),
+}));
+
 let mockYamlPaneOpen = false;
 const mockOpenYamlPane = vi.fn();
 
@@ -147,6 +164,8 @@ describe("AppShell", () => {
     mockReactorModal = { open: false };
     mockConnectionModal = { open: false };
     mockYamlPaneOpen = false;
+    mockScenariosAvailable = false;
+    mockAuthoredScenarioIds = [];
   });
 
   it("renders the sidebar cards but no header filename button or solver badge", () => {
@@ -192,5 +211,22 @@ describe("AppShell", () => {
     render(<AppShell />);
     screen.getByRole("button", { name: "Edit YAML" }).click();
     expect(mockOpenYamlPane).toHaveBeenCalledOnce();
+  });
+
+  it("does not render the Scenario pane when there's no store and no authored scenarios", () => {
+    render(<AppShell />);
+    expect(screen.queryByTestId("scenario-pane")).not.toBeInTheDocument();
+  });
+
+  it("renders the Scenario pane once a scenario store exists", () => {
+    mockScenariosAvailable = true;
+    render(<AppShell />);
+    expect(screen.getByTestId("scenario-pane")).toBeInTheDocument();
+  });
+
+  it("renders the Scenario pane for authored-but-not-yet-swept scenarios even without a store", () => {
+    mockAuthoredScenarioIds = ["draft_a"];
+    render(<AppShell />);
+    expect(screen.getByTestId("scenario-pane")).toBeInTheDocument();
   });
 });

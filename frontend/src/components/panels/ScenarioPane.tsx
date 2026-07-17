@@ -28,6 +28,7 @@ export function ScenarioPane() {
   const {
     available,
     scenarios,
+    authoredIds,
     createdAt,
     activeId,
     loading,
@@ -111,9 +112,43 @@ export function ScenarioPane() {
             <Plus size={12} /> Add Scenario
           </button>
         </div>
-        <p className="text-xs text-muted-foreground">
-          No computed scenarios yet — add one, then Run Sweep.
-        </p>
+        {authoredIds.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No computed scenarios yet — add one, then Run Sweep.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Not computed yet — Run Sweep to solve{" "}
+              {authoredIds.length === 1 ? "it" : "them"}.
+            </p>
+            <ul className="space-y-1 max-h-[70vh] overflow-y-auto pr-1">
+              {authoredIds.map((id) => (
+                <li key={id} className="group flex items-center gap-1">
+                  <span className="flex-1 min-w-0 truncate rounded-md px-2 py-1.5 text-xs text-foreground">
+                    {id}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(id)}
+                    title="Edit scenario YAML"
+                    className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(id)}
+                    title="Delete scenario"
+                    className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-muted"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
         <AddScenarioModal
           open={addModalOpen}
           onClose={() => setAddModalOpen(false)}
