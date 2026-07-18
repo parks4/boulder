@@ -148,8 +148,7 @@ class TestBoulderUtils:
         assert edge["data"]["target"] == "reactor2"
 
     def test_config_to_cyto_elements_promotes_is_energy_stream_property(self):
-        """A connection's `_is_energy_stream` property promotes to the same
-        (still underscored) edge data key.
+        """A connection's `_is_energy_stream` property promotes to the edge data key.
 
         Mirrors the existing `mass_flow_rate`/`valve_coeff` promotion so a
         host plugin (e.g. a real Wall additionally flagged as an energy

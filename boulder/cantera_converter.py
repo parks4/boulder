@@ -103,9 +103,9 @@ class BoulderPlugins:
     #: concept is. Mirrors the pattern ``config_to_cyto_elements`` already
     #: uses internally for its own stream-point diamond synthesis, made
     #: pluggable. Registered by an external plugin package.
-    cyto_element_synthesizers: List[Callable[[Dict[str, Any]], List[Dict[str, Any]]]] = field(
-        default_factory=list
-    )
+    cyto_element_synthesizers: List[
+        Callable[[Dict[str, Any]], List[Dict[str, Any]]]
+    ] = field(default_factory=list)
 
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.
