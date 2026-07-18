@@ -179,6 +179,34 @@ describe("PropertiesPanel delete confirmation", () => {
     expect(screen.queryByText("initial")).not.toBeInTheDocument();
   });
 
+  it("hides underscore-prefixed properties from display", () => {
+    // A leading underscore marks a property as private/internal (e.g. a
+    // plugin's own display annotation, not a physical input) -- mirrors
+    // Python's own convention. Must not appear in the panel, editable or not.
+    mockConfig = {
+      nodes: [],
+      connections: [
+        {
+          id: "pfr_loss_wall",
+          type: "Wall",
+          source: "pfr_ambient",
+          target: "pfr",
+          properties: { area: 1.0, _is_energy_stream: true },
+        },
+      ],
+    } as Record<string, unknown>;
+    mockSelectedElement = {
+      type: "edge",
+      data: { id: "pfr_loss_wall", type: "Wall" },
+    };
+
+    render(<PropertiesPanel />);
+
+    expect(screen.getByText("area")).toBeInTheDocument();
+    expect(screen.queryByText("_is_energy_stream")).not.toBeInTheDocument();
+    expect(screen.queryByText("is_energy_stream")).not.toBeInTheDocument();
+  });
+
   it("defaults to the sole stage's panel when nothing is selected and the config has one stage", () => {
     mockSelectedElement = null;
     mockConfig = {

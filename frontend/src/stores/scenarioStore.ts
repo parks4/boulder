@@ -8,8 +8,29 @@ import {
   updateScenario as apiUpdateScenario,
   type ScenarioMeta,
 } from "@/api/scenarios";
+import { fetchPreloadedConfig } from "@/api/configs";
+import { useConfigStore } from "./configStore";
 import { useSimulationStore } from "./simulationStore";
 import { useSelectionStore } from "./selectionStore";
+
+/**
+ * Scenario authoring (create/update/rename/delete) writes straight to the
+ * config file on disk, bypassing the in-memory graph entirely — so the YAML
+ * pane's `originalYaml` snapshot (fetched once on load) goes stale the
+ * moment a scenario changes. Re-fetch and push just that snapshot into
+ * `configStore` (not the whole `config`, which would clobber any unsaved
+ * node/connection edits) so the editor picks it up on its next refresh.
+ */
+async function resyncConfigYaml(): Promise<void> {
+  try {
+    const resp = await fetchPreloadedConfig();
+    if (resp.preloaded && resp.yaml !== undefined) {
+      useConfigStore.getState().setOriginalYaml(resp.yaml, resp.filename);
+    }
+  } catch {
+    // Best-effort — the YAML pane just keeps showing its last-known text.
+  }
+}
 
 interface ScenarioState {
   available: boolean;
@@ -86,23 +107,27 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     // Run Sweep's scenario count picks it up, even though `scenarios` (the
     // HDF5-derived list) won't include it until a sweep actually runs.
     await get().refresh();
+    await resyncConfigYaml();
   },
 
   updateScenario: async (id, yaml) => {
     await apiUpdateScenario(id, yaml);
     await get().refresh();
+    await resyncConfigYaml();
   },
 
   renameScenario: async (id, newId) => {
     await apiRenameScenario(id, newId);
     if (get().activeId === id) set({ activeId: newId });
     await get().refresh();
+    await resyncConfigYaml();
   },
 
   deleteScenario: async (id) => {
     const resp = await apiDeleteScenario(id);
     if (get().activeId === id) set({ activeId: null });
     await get().refresh();
+    await resyncConfigYaml();
     return { cachePurged: resp.cache_purged };
   },
 

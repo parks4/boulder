@@ -344,6 +344,16 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             edge_data["mass_flow_rate"] = properties["mass_flow_rate"]
         if "valve_coeff" in properties:
             edge_data["valve_coeff"] = properties["valve_coeff"]
+        if "_is_energy_stream" in properties:
+            # Leading underscore: a display-only annotation, not a physical
+            # input -- kept out of the Properties panel by the same
+            # underscore convention PropertiesPanel.tsx's unfoldInitialConditions
+            # already applies. Promoted here to an edge data key of the same
+            # (still underscored) name, matched by a `[?_is_energy_stream]`
+            # Cytoscape selector -- the underscore marks "internal machinery"
+            # consistently at every layer, not just where the Properties
+            # panel happens to render it.
+            edge_data["_is_energy_stream"] = properties["_is_energy_stream"]
         elements.append({"data": edge_data})
 
     # -----------------------------------------------------------------------
@@ -378,6 +388,18 @@ def config_to_cyto_elements(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             if "mass_flow_rate" in properties:
                 edge_data["mass_flow_rate"] = properties["mass_flow_rate"]
             elements.append({"data": edge_data})
+
+    # -----------------------------------------------------------------------
+    # Plugin-contributed display-only elements (e.g. a host's non-physical
+    # energy source that never becomes a real STONE node/connection). Each
+    # synthesizer receives the same `config` passed to this function and
+    # must not mutate it -- Boulder itself has no notion of what these
+    # elements represent.
+    # -----------------------------------------------------------------------
+    from .cantera_converter import get_plugins  # noqa: PLC0415 (avoid import cycle)
+
+    for synthesizer in get_plugins().cyto_element_synthesizers:
+        elements.extend(synthesizer(config))
 
     return elements
 

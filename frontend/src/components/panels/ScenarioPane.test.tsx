@@ -24,11 +24,13 @@ let mockAvailable = true;
 let mockScenarios: Array<{ id: string; label: string; t0_K: number }> = [
   { id: "A", label: "Scenario A", t0_K: 300 },
 ];
+let mockAuthoredIds: string[] = [];
 
 vi.mock("@/stores/scenarioStore", () => ({
   useScenarioStore: () => ({
     available: mockAvailable,
     scenarios: mockScenarios,
+    authoredIds: mockAuthoredIds,
     createdAt: undefined,
     activeId: null,
     loading: false,
@@ -73,6 +75,7 @@ describe("ScenarioPane", () => {
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
     mockSweeping = false;
+    mockAuthoredIds = [];
   });
 
   it("deleting a scenario confirms first, then calls deleteScenario", () => {
@@ -145,5 +148,29 @@ describe("ScenarioPane", () => {
     expect(capturedOnSaved).toBeInstanceOf(Function);
     capturedOnSaved?.();
     expect(mockRefresh).toHaveBeenCalled();
+  });
+
+  it("lists authored-but-not-yet-swept scenarios before any store exists", () => {
+    mockAvailable = false;
+    mockScenarios = [];
+    mockAuthoredIds = ["draft_a", "draft_b"];
+    render(<ScenarioPane />);
+
+    expect(screen.getByText("draft_a")).toBeInTheDocument();
+    expect(screen.getByText("draft_b")).toBeInTheDocument();
+    expect(screen.getByText(/Run Sweep to solve them/)).toBeInTheDocument();
+  });
+
+  it("deleting an authored-but-unswept scenario confirms and calls deleteScenario", () => {
+    mockAvailable = false;
+    mockScenarios = [];
+    mockAuthoredIds = ["draft_a"];
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ScenarioPane />);
+
+    fireEvent.click(screen.getByTitle("Delete scenario"));
+
+    expect(mockDeleteScenario).toHaveBeenCalledWith("draft_a");
+    confirmSpy.mockRestore();
   });
 });

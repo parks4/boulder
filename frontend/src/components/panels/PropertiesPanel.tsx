@@ -37,6 +37,14 @@ function unfoldInitialConditions(
       }
     }
   }
+  // Underscore-prefixed keys are private/internal by convention (mirrors
+  // Python's own convention) -- a plugin annotation for other tooling (e.g.
+  // display styling), not a physical input the user should see or edit.
+  for (const key of Object.keys(flat)) {
+    if (key.startsWith("_")) {
+      delete flat[key];
+    }
+  }
   // Re-insert trailing keys last -- deleting and re-adding moves a key to the
   // end of a plain object's insertion-order iteration.
   for (const key of _TRAILING_DISPLAY_KEYS) {
