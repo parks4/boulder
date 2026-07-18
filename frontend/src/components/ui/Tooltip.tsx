@@ -6,6 +6,18 @@ interface TooltipProps {
   className?: string;
 }
 
+const _DISPLAY_UTILITIES = new Set([
+  "block",
+  "inline-block",
+  "inline",
+  "flex",
+  "inline-flex",
+  "grid",
+  "inline-grid",
+  "contents",
+  "hidden",
+]);
+
 /**
  * Hover/focus tooltip that works even when `children` is a disabled button.
  *
@@ -18,9 +30,19 @@ export function Tooltip({ content, children, className }: TooltipProps) {
   const [open, setOpen] = useState(false);
   const id = useId();
 
+  // Default to `inline-flex` (shrink-to-fit trigger), but defer to a display
+  // utility the caller passed (e.g. `className="block"` for a full-width
+  // button) -- Tailwind's generated stylesheet defines `.inline-flex` after
+  // `.block`, so appending "block" to the class string does NOT override a
+  // hardcoded "inline-flex" of equal specificity; only omitting it does.
+  const callerClasses = (className ?? "").split(/\s+/).filter(Boolean);
+  const display = callerClasses.some((c) => _DISPLAY_UTILITIES.has(c))
+    ? ""
+    : "inline-flex";
+
   return (
     <span
-      className={`relative inline-flex ${className ?? ""}`}
+      className={`relative ${display} ${className ?? ""}`.trim().replace(/\s+/g, " ")}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}

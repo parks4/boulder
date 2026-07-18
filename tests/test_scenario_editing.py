@@ -223,6 +223,47 @@ def test_delete_scenario(tmp_path: Path) -> None:
         client.__exit__(None, None, None)
 
 
+def test_delete_scenario_purges_cached_group(tmp_path: Path) -> None:
+    """Deleting a scenario immediately removes its cached HDF5 group too.
+
+    Not left for the next Run Sweep to notice and prune — the Scenario Pane's
+    "N cached" count and the store on disk stay in sync with the config the
+    moment you click Delete.
+    """
+    pytest.importorskip("h5py")
+    import h5py
+
+    cfg = _write_config(tmp_path)
+    client, app = _client_with_config(cfg)
+    try:
+        store = tmp_path / "scenarios.h5"
+        with h5py.File(str(store), "w") as handle:
+            grp = handle.create_group("base_case")
+            grp.create_dataset("payload_json", data=b"{}")
+        app.state.scenario_store_path = str(store)
+
+        resp = client.delete("/api/scenarios/base_case")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["cache_purged"] is True
+
+        with h5py.File(str(store), "r") as handle:
+            assert "base_case" not in handle
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_delete_scenario_without_cached_group_reports_false(tmp_path: Path) -> None:
+    """`cache_purged` is False when there was nothing cached to clear."""
+    cfg = _write_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.delete("/api/scenarios/base_case")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["cache_purged"] is False
+    finally:
+        client.__exit__(None, None, None)
+
+
 def test_delete_scenario_unknown_404(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     client, _app = _client_with_config(cfg)

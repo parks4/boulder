@@ -1,8 +1,15 @@
 /**
- * Asserts ScenarioPane: the new rename action calls the store's
- * renameScenario, and the previously-missing onSaved wiring (both in the
- * empty "no scenarios yet" state and the populated one) triggers a refresh
- * after editing a scenario's YAML.
+ * Asserts ScenarioPane: deleting a scenario confirms first, then reports
+ * whether a cached result was purged too; "Regenerate cache" confirms, then
+ * starts a no-cache sweep via the shared sweep-run store; and the
+ * previously-missing onSaved wiring (both in the empty "no scenarios yet"
+ * state and the populated one) triggers a refresh after editing a scenario's
+ * YAML.
+ *
+ * No "Rename scenario" action here — a scenario's display name is
+ * `metadata.scenario_name`, already editable via "Edit scenario YAML"; a
+ * separate control that renames the underlying `scenario:` mapping key
+ * would be a second, confusing way to change what looks like the same thing.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -12,7 +19,6 @@ import { ScenarioPane } from "./ScenarioPane";
 
 const mockRefresh = vi.fn();
 const mockSetActive = vi.fn();
-const mockRenameScenario = vi.fn();
 const mockDeleteScenario = vi.fn();
 let mockAvailable = true;
 let mockScenarios: Array<{ id: string; label: string; t0_K: number }> = [
@@ -31,9 +37,15 @@ vi.mock("@/stores/scenarioStore", () => ({
     error: null,
     refresh: mockRefresh,
     setActive: mockSetActive,
-    renameScenario: mockRenameScenario,
     deleteScenario: mockDeleteScenario,
   }),
+}));
+
+const mockRunSweepJob = vi.fn();
+let mockSweeping = false;
+vi.mock("@/stores/sweepStore", () => ({
+  useSweepRunStore: (selector: (s: unknown) => unknown) =>
+    selector({ sweeping: mockSweeping, run: mockRunSweepJob }),
 }));
 
 vi.mock("sonner", () => ({
@@ -62,38 +74,64 @@ describe("ScenarioPane", () => {
     capturedOnSaved = undefined;
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
+    mockSweeping = false;
     mockAuthoredIds = [];
   });
 
-  it("renaming a scenario prompts for a new id and calls renameScenario", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("A2");
+  it("deleting a scenario confirms first, then calls deleteScenario", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockDeleteScenario.mockResolvedValue({ cachePurged: true });
     render(<ScenarioPane />);
 
-    fireEvent.click(screen.getByTitle("Rename scenario"));
+    fireEvent.click(screen.getByTitle("Delete scenario"));
 
-    expect(promptSpy).toHaveBeenCalledWith('Rename scenario "A" to:', "A");
-    expect(mockRenameScenario).toHaveBeenCalledWith("A", "A2");
-    promptSpy.mockRestore();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Delete scenario "A"? This also removes its cached trajectory ' +
+        "immediately. This cannot be undone.",
+    );
+    expect(mockDeleteScenario).toHaveBeenCalledWith("A");
+    confirmSpy.mockRestore();
   });
 
-  it("rejects an invalid new id without calling renameScenario", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("bad id!");
+  it("does nothing when the delete confirmation is dismissed", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<ScenarioPane />);
 
-    fireEvent.click(screen.getByTitle("Rename scenario"));
+    fireEvent.click(screen.getByTitle("Delete scenario"));
 
-    expect(mockRenameScenario).not.toHaveBeenCalled();
-    promptSpy.mockRestore();
+    expect(mockDeleteScenario).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
-  it("does nothing when the rename prompt is cancelled or unchanged", () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("A");
+  it("Regenerate cache confirms, then starts a no-cache sweep", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<ScenarioPane />);
 
-    fireEvent.click(screen.getByTitle("Rename scenario"));
+    fireEvent.click(screen.getByTitle(/Regenerate cache/));
 
-    expect(mockRenameScenario).not.toHaveBeenCalled();
-    promptSpy.mockRestore();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      "Regenerate the cache? This re-solves every scenario in this sweep " +
+        "from scratch, ignoring cached results. This may take a while.",
+    );
+    expect(mockRunSweepJob).toHaveBeenCalledWith({ total: 1, noCache: true });
+    confirmSpy.mockRestore();
+  });
+
+  it("does nothing when the Regenerate cache confirmation is dismissed", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<ScenarioPane />);
+
+    fireEvent.click(screen.getByTitle(/Regenerate cache/));
+
+    expect(mockRunSweepJob).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("disables Regenerate cache while a sweep is already running", () => {
+    mockSweeping = true;
+    render(<ScenarioPane />);
+
+    expect(screen.getByTitle(/Regenerate cache/)).toBeDisabled();
   });
 
   it("wires onSaved into the scoped editor in the populated state", () => {

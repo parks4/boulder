@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Plus } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/Button";
-import { getSweepInfo, getSweepStatus, startSweep, type SweepInfo } from "@/api/sweep";
+import { getSweepInfo, type SweepInfo } from "@/api/sweep";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 import { useShortcutNudge } from "@/hooks/useShortcutNudge";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
@@ -26,13 +27,15 @@ interface RunControlProps {
 export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunControlProps) {
   const [runMode, setRunMode] = useState<RunMode>("sim");
   const [menuOpen, setMenuOpen] = useState(false);
+  // The menu portals to `document.body` (see below) so the sidebar's
+  // `overflow-y-auto` can't clip it -- position is computed from this
+  // anchor's rect each time the menu opens.
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [sweep, setSweep] = useState<SweepInfo | null>(null);
-  const [sweeping, setSweeping] = useState(false);
-  const [progress, setProgress] = useState<{ current: number; total: number }>({
-    current: 0,
-    total: 0,
-  });
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sweeping = useSweepRunStore((s) => s.sweeping);
+  const progress = useSweepRunStore((s) => s.progress);
+  const runSweepJob = useSweepRunStore((s) => s.run);
   const appliedDefault = useRef(false);
   const appliedAutorun = useRef(false);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
@@ -61,14 +64,30 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
     loadSweepInfo();
   }, [loadSweepInfo, scenarioRevision]);
 
-  // Separate from the effect above: only tears down the poll interval on
-  // unmount, not on every scenarioRevision bump (which would otherwise kill
-  // an in-flight sweep's progress polling the moment a scenario changes).
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
+  // Open: compute the menu's viewport position from the anchor now (not on
+  // every render) so it tracks wherever the split button actually is,
+  // including when the sidebar has been scrolled.
+  const openMenu = useCallback(() => {
+    const rect = anchorRef.current?.getBoundingClientRect();
+    if (rect) {
+      setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+    }
+    setMenuOpen(true);
   }, []);
+
+  // Close (rather than reposition) on scroll/resize elsewhere on the page --
+  // simplest robust fix for the menu drifting from its anchor; reopening
+  // recomputes the position fresh via openMenu above.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menuOpen]);
 
   const canSweep = Boolean(sweep?.can_run);
   // If sweep is unavailable, fall back to simulation (force_sim is kept as-is).
@@ -79,39 +98,14 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
         ? "force_sim"
         : "sim";
 
+  // loadSweepInfo() re-fetches automatically once the sweep finishes: it
+  // depends on scenarioRevision (above), which the shared sweep store bumps
+  // via scenarioStore.refresh() on completion -- no separate wiring needed
+  // here, and it stays in sync even when a sweep is started elsewhere (e.g.
+  // the Scenario Pane's "Regenerate cache").
   const handleRunSweep = useCallback(() => {
-    setSweeping(true);
-    setProgress({ current: 0, total: sweep?.n_scenarios ?? 0 });
-    startSweep()
-      .then(() => {
-        pollRef.current = setInterval(() => {
-          getSweepStatus()
-            .then((st) => {
-              if (st.status === "running") {
-                setProgress({ current: st.current ?? 0, total: st.total ?? 0 });
-              } else {
-                if (pollRef.current) clearInterval(pollRef.current);
-                setSweeping(false);
-                if (st.status === "done") {
-                  toast.success("Sweep complete — scenarios updated");
-                  void refreshScenarios();
-                  loadSweepInfo();
-                } else {
-                  toast.error(`Sweep failed: ${st.message ?? "unknown error"}`);
-                }
-              }
-            })
-            .catch(() => {
-              if (pollRef.current) clearInterval(pollRef.current);
-              setSweeping(false);
-            });
-        }, 1000);
-      })
-      .catch((e) => {
-        setSweeping(false);
-        toast.error(e instanceof Error ? e.message : String(e));
-      });
-  }, [sweep, refreshScenarios, loadSweepInfo]);
+    runSweepJob({ total: sweep?.n_scenarios ?? 0 });
+  }, [runSweepJob, sweep]);
 
   // `--run`: auto-start the run once, as soon as it is actually runnable.
   useEffect(() => {
@@ -169,7 +163,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   };
 
   return (
-    <div className="relative w-full">
+    <div className="relative w-full" ref={anchorRef}>
       <div className="flex w-full">
         <Button
           id="run-primary"
@@ -182,7 +176,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
         </Button>
         <Button
           id="run-mode-caret"
-          onClick={() => setMenuOpen((o) => !o)}
+          onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
           disabled={isRunning || sweeping}
           variant={variant}
           className="rounded-l-none border-l border-black/15 px-2"
@@ -194,12 +188,13 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
         </Button>
       </div>
 
-      {menuOpen && (
+      {menuOpen && menuPos && createPortal(
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
           <div
             role="menu"
-            className="absolute right-0 z-20 mt-1 w-72 rounded-md border border-border bg-card shadow-lg overflow-hidden"
+            style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
+            className="z-[41] w-72 rounded-md border border-border bg-card shadow-lg overflow-hidden"
           >
             <RunModeItem
               active={effectiveMode === "sim"}
@@ -253,7 +248,8 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
               </span>
             </button>
           </div>
-        </>
+        </>,
+        document.body,
       )}
 
       <AddScenarioModal

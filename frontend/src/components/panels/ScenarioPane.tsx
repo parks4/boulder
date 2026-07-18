@@ -1,7 +1,8 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Pencil, Plus, SquarePen, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 import { SweepResultsPlot } from "./SweepResultsPlot";
@@ -35,9 +36,10 @@ export function ScenarioPane() {
     error,
     refresh,
     setActive,
-    renameScenario,
     deleteScenario,
   } = useScenarioStore();
+  const sweeping = useSweepRunStore((s) => s.sweeping);
+  const runSweepJob = useSweepRunStore((s) => s.run);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -68,10 +70,24 @@ export function ScenarioPane() {
   }, [createdAt]);
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm(`Delete scenario "${id}"? This cannot be undone.`)) return;
+    // Every row here already has a cached trajectory (that's why it's in
+    // `scenarios`, the store-derived list), so this message is always
+    // accurate — deleting drops both the definition and its cached result.
+    if (
+      !window.confirm(
+        `Delete scenario "${id}"? This also removes its cached trajectory ` +
+          "immediately. This cannot be undone.",
+      )
+    ) {
+      return;
+    }
     try {
-      await deleteScenario(id);
-      toast.success(`Scenario "${id}" deleted`);
+      const { cachePurged } = await deleteScenario(id);
+      toast.success(
+        cachePurged
+          ? `Scenario "${id}" and its cached result deleted`
+          : `Scenario "${id}" deleted`,
+      );
     } catch (err) {
       toast.error(
         `Could not delete scenario: ${err instanceof Error ? err.message : String(err)}`,
@@ -79,21 +95,16 @@ export function ScenarioPane() {
     }
   };
 
-  const handleRename = async (id: string) => {
-    const trimmed = window.prompt(`Rename scenario "${id}" to:`, id)?.trim();
-    if (!trimmed || trimmed === id) return;
-    if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) {
-      toast.error("Scenario id must use letters, digits, '_' or '-' only");
+  const handleRegenerate = () => {
+    if (
+      !window.confirm(
+        "Regenerate the cache? This re-solves every scenario in this sweep " +
+          "from scratch, ignoring cached results. This may take a while.",
+      )
+    ) {
       return;
     }
-    try {
-      await renameScenario(id, trimmed);
-      toast.success(`Scenario renamed to "${trimmed}"`);
-    } catch (err) {
-      toast.error(
-        `Could not rename scenario: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    runSweepJob({ total: scenarios.length, noCache: true });
   };
 
   if (!available || scenarios.length === 0) {
@@ -196,6 +207,15 @@ export function ScenarioPane() {
             <span className="text-xs text-muted-foreground">{scenarios.length}</span>
             <button
               type="button"
+              onClick={handleRegenerate}
+              disabled={sweeping}
+              title="Regenerate cache (re-solve every scenario, ignoring cached results)"
+              className="text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={14} className={sweeping ? "animate-spin" : ""} />
+            </button>
+            <button
+              type="button"
               onClick={() => setAddModalOpen(true)}
               title="Add Scenario"
               className="text-muted-foreground hover:text-foreground"
@@ -250,14 +270,6 @@ export function ScenarioPane() {
                       {s.reactor_mode}
                     </div>
                   )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleRename(s.id)}
-                  title="Rename scenario"
-                  className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted"
-                >
-                  <SquarePen size={12} />
                 </button>
                 <button
                   type="button"

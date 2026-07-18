@@ -103,9 +103,13 @@ export function renameScenario(id: string, newId: string) {
   );
 }
 
-/** Delete a scenario overlay. The next Run Sweep prunes its stale HDF5 group. */
+/**
+ * Delete a scenario overlay. Also purges its cached HDF5 group immediately,
+ * if the active store has one — `cache_purged` reports whether there was
+ * actually a cached result to clear.
+ */
 export function deleteScenario(id: string) {
-  return apiFetch<{ ok: boolean; scenario_id: string }>(
+  return apiFetch<{ ok: boolean; scenario_id: string; cache_purged: boolean }>(
     `/scenarios/${encodeURIComponent(id)}`,
     { method: "DELETE" },
   );
