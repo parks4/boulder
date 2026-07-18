@@ -62,11 +62,13 @@ export function ReactorGraph() {
   // whose unfolder produced visible child nodes.
   //
   // Detection heuristic: a skip_viz node is treated as a composite placeholder
-  // (hidden) if it has at least one outgoing connection TO a node whose id
-  // starts with the parent id followed by an underscore (e.g. cgr → cgr_seg1).
-  // This distinguishes synthesized reactor children from independent same-group
-  // nodes like pfr_ambient (which has an INCOMING wall connection FROM pfr, not
-  // an outgoing connection to pfr, so the direction check filters it out).
+  // (hidden) if it has at least one outgoing, non-Wall connection TO a node
+  // whose id starts with the parent id followed by an underscore (e.g.
+  // cgr → cgr_seg1, wired by mass flow). The type check matters: composite
+  // children are always wired by mass flow, never by a Wall, so a Wall to a
+  // same-group satellite (e.g. pfr → pfr_ambient, its own ambient heat-loss
+  // sink) must never count as a "child" -- regardless of which way the
+  // Wall's source/target point.
   //
   // Nodes that are skip_viz but produce no such outgoing-to-child connections are
   // rendered normally (e.g. RefractoryReactor in A3/A4 whose segments are not
@@ -77,7 +79,10 @@ export function ReactorGraph() {
       if (!node.metadata?.skip_viz) continue;
       const prefix = `${node.id}_`;
       const hasChildConn = config.connections.some(
-        (c) => c.source === node.id && c.target.startsWith(prefix),
+        (c) =>
+          c.source === node.id &&
+          c.target.startsWith(prefix) &&
+          c.type !== "Wall",
       );
       if (hasChildConn) hidden.add(node.id);
     }
@@ -496,6 +501,28 @@ export function ReactorGraph() {
           "target-arrow-shape": "triangle",
           "line-color": isDark ? "#e07b39" : "#c0622a",
           "target-arrow-color": isDark ? "#e07b39" : "#c0622a",
+        },
+      },
+      {
+        // Energy Stream (host-plugin concept, e.g. Bloc): a non-mass energy
+        // flow -- either a display-only synthesized edge (e.g. a torch's
+        // electrical power, which never becomes a real Wall/Reservoir) or a
+        // real Wall additionally flagged `_is_energy_stream` so it renders
+        // identically (e.g. a PFR's ambient heat-loss wall). Leading
+        // underscore: internal display machinery, not a user-facing data
+        // field, same convention as the Properties panel's underscore
+        // hiding rule. Dotted, blue tint to read as distinct from both
+        // material streams (solid) and generic Walls (dashed, orange).
+        // Placed after `[type='Wall']` so it overrides that rule's dashed
+        // styling for flagged real Walls.
+        selector: "[?_is_energy_stream]",
+        style: {
+          width: 1.5,
+          "line-style": "dotted",
+          "line-dash-pattern": [3, 5],
+          "target-arrow-shape": "triangle",
+          "line-color": isDark ? "#6bb0f0" : "#2a6fc0",
+          "target-arrow-color": isDark ? "#6bb0f0" : "#2a6fc0",
         },
       },
       {

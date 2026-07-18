@@ -147,6 +147,85 @@ class TestBoulderUtils:
         assert edge["data"]["source"] == "reactor1"
         assert edge["data"]["target"] == "reactor2"
 
+    def test_config_to_cyto_elements_promotes_is_energy_stream_property(self):
+        """A connection's `_is_energy_stream` property promotes to the edge data key.
+
+        Mirrors the existing `mass_flow_rate`/`valve_coeff` promotion so a
+        host plugin (e.g. a real Wall additionally flagged as an energy
+        stream) can drive frontend styling from a top-level data attribute,
+        the same way Cytoscape selectors already key on e.g. `[?stream_point]`.
+        The underscore prefix marks "internal display machinery, not a
+        user-facing field" consistently at every layer -- kept on the
+        promoted edge-data key too, not just the Properties-panel-facing
+        properties key.
+        """
+        config = {
+            "nodes": [
+                {"id": "a", "type": "Reservoir", "properties": {}},
+                {"id": "b", "type": "IdealGasReactor", "properties": {}},
+            ],
+            "connections": [
+                {
+                    "id": "w1",
+                    "source": "a",
+                    "target": "b",
+                    "type": "Wall",
+                    "properties": {"_is_energy_stream": True},
+                }
+            ],
+        }
+
+        elements = config_to_cyto_elements(config)
+        edges = [elem for elem in elements if "source" in elem["data"]]
+
+        assert len(edges) == 1
+        assert edges[0]["data"]["_is_energy_stream"] is True
+
+    def test_config_to_cyto_elements_invokes_plugin_synthesizers(self, monkeypatch):
+        """Registered `cyto_element_synthesizers` contribute extra elements.
+
+        Lets a host represent a concept that never becomes a real STONE
+        node/connection (e.g. a non-physical energy source) in the graph,
+        without `config_to_cyto_elements` knowing what that concept is.
+        """
+        import boulder.cantera_converter as cc
+
+        def fake_synthesizer(cfg):
+            return [{"data": {"id": "synthetic", "label": "Synthetic"}}]
+
+        plugins = cc.BoulderPlugins()
+        plugins.cyto_element_synthesizers = [fake_synthesizer]
+        monkeypatch.setattr(cc, "get_plugins", lambda: plugins)
+
+        config = {"nodes": [], "connections": []}
+        elements = config_to_cyto_elements(config)
+
+        assert elements == [{"data": {"id": "synthetic", "label": "Synthetic"}}]
+
+    def test_config_to_cyto_elements_synthesizer_receives_unmutated_config(
+        self, monkeypatch
+    ):
+        """Synthesizers must see the exact config passed in, never a copy/mutation."""
+        import boulder.cantera_converter as cc
+
+        captured = {}
+
+        def capturing_synthesizer(cfg):
+            captured["config"] = cfg
+            return []
+
+        plugins = cc.BoulderPlugins()
+        plugins.cyto_element_synthesizers = [capturing_synthesizer]
+        monkeypatch.setattr(cc, "get_plugins", lambda: plugins)
+
+        config = {
+            "nodes": [{"id": "a", "type": "Reservoir", "properties": {}}],
+            "connections": [],
+        }
+        config_to_cyto_elements(config)
+
+        assert captured["config"] is config
+
 
 @pytest.mark.unit
 class TestBoulderCallbacks:
