@@ -10,7 +10,10 @@ import {
 
 interface SolverDetailsModalProps {
   open: boolean;
-  onClose: () => void;
+  /** Dismiss without persisting (✕, backdrop click, Escape). */
+  onCancel: () => void;
+  /** Persist the edited fields, then dismiss ("Done"). */
+  onDone: () => void;
   mode: SolverMode;
   kind: SolverKind;
   kinds: SolverKind[];
@@ -21,6 +24,8 @@ interface SolverDetailsModalProps {
   onAtolChange: (v: string) => void;
   maxSteps: string;
   onMaxStepsChange: (v: string) => void;
+  startTime: string;
+  onStartTimeChange: (v: string) => void;
   simTime: string;
   onSimTimeChange: (v: string) => void;
   timeStep: string;
@@ -29,7 +34,8 @@ interface SolverDetailsModalProps {
 
 export function SolverDetailsModal({
   open,
-  onClose,
+  onCancel,
+  onDone,
   mode,
   kind,
   kinds,
@@ -40,6 +46,8 @@ export function SolverDetailsModal({
   onAtolChange,
   maxSteps,
   onMaxStepsChange,
+  startTime,
+  onStartTimeChange,
   simTime,
   onSimTimeChange,
   timeStep,
@@ -48,11 +56,11 @@ export function SolverDetailsModal({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCancel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onCancel]);
 
   if (!open) return null;
 
@@ -61,7 +69,7 @@ export function SolverDetailsModal({
       data-testid="solver-details-modal"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) onCancel();
       }}
     >
       <div
@@ -73,7 +81,7 @@ export function SolverDetailsModal({
           <h2 id="solver-details-title" className="text-lg font-semibold text-foreground">
             Solver details
           </h2>
-          <Button onClick={onClose} variant="ghost" size="icon" className="text-lg" aria-label="Close">
+          <Button onClick={onCancel} variant="ghost" size="icon" className="text-lg" aria-label="Close">
             ×
           </Button>
         </div>
@@ -159,8 +167,21 @@ export function SolverDetailsModal({
 
           {mode === "transient" && (
             <div className="grid grid-cols-2 gap-2">
+              {kind === "advance_grid" && (
+                <label className="block text-xs text-muted-foreground col-span-2">
+                  Start (s)
+                  <input
+                    data-testid="transient-start"
+                    type="number"
+                    value={startTime}
+                    onChange={(e) => onStartTimeChange(e.target.value)}
+                    className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
+                    step="0.1"
+                  />
+                </label>
+              )}
               <label className="block text-xs text-muted-foreground">
-                Time (s)
+                {kind === "advance_grid" ? "Stop (s)" : "Time (s)"}
                 <input
                   data-testid="transient-time"
                   type="number"
@@ -188,7 +209,10 @@ export function SolverDetailsModal({
         </div>
 
         <div className="flex justify-end gap-2 p-4 border-t border-border shrink-0">
-          <Button onClick={onClose} variant="primary" size="sm">
+          <Button onClick={onCancel} variant="secondary" size="sm">
+            Cancel
+          </Button>
+          <Button onClick={onDone} variant="primary" size="sm">
             Done
           </Button>
         </div>

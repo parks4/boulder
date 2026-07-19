@@ -10,6 +10,7 @@ interface SolverState {
   rtol: string;
   atol: string;
   maxSteps: string;
+  startTime: string;
   simTime: string;
   timeStep: string;
 
@@ -18,10 +19,11 @@ interface SolverState {
   setRtol: (v: string) => void;
   setAtol: (v: string) => void;
   setMaxSteps: (v: string) => void;
+  setStartTime: (v: string) => void;
   setSimTime: (v: string) => void;
   setTimeStep: (v: string) => void;
 
-  /** Re-derive mode/kind/rtol/atol/maxSteps from a freshly loaded config.settings. */
+  /** Re-derive mode/kind/rtol/atol/maxSteps/startTime/simTime/timeStep from a freshly loaded config.settings. */
   syncFromConfig: (settings: unknown) => void;
 }
 
@@ -48,6 +50,7 @@ export const useSolverStore = create<SolverState>((set, get) => ({
   rtol: "1e-9",
   atol: "1e-15",
   maxSteps: "10000",
+  startTime: "0",
   simTime: "10",
   timeStep: "1",
 
@@ -56,6 +59,7 @@ export const useSolverStore = create<SolverState>((set, get) => ({
   setRtol: (rtol) => set({ rtol }),
   setAtol: (atol) => set({ atol }),
   setMaxSteps: (maxSteps) => set({ maxSteps }),
+  setStartTime: (startTime) => set({ startTime }),
   setSimTime: (simTime) => set({ simTime }),
   setTimeStep: (timeStep) => set({ timeStep }),
 
@@ -63,6 +67,7 @@ export const useSolverStore = create<SolverState>((set, get) => ({
     const solver = (settings as Record<string, unknown> | null | undefined)?.solver as
       | Record<string, unknown>
       | undefined;
+    const grid = solver?.grid as Record<string, unknown> | undefined;
     const k = solver?.kind as string | undefined;
     const m = solver?.mode as SolverMode | undefined;
     const state = get();
@@ -72,6 +77,9 @@ export const useSolverStore = create<SolverState>((set, get) => ({
       rtol: solver?.rtol != null ? String(solver.rtol) : state.rtol,
       atol: solver?.atol != null ? String(solver.atol) : state.atol,
       maxSteps: solver?.max_steps != null ? String(solver.max_steps) : state.maxSteps,
+      startTime: grid?.start != null ? String(grid.start) : state.startTime,
+      simTime: String(grid?.stop ?? solver?.advance_time ?? state.simTime),
+      timeStep: grid?.dt != null ? String(grid.dt) : state.timeStep,
     });
   },
 }));

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from ...cantera_converter import DualCanteraConverter
 from ...config import TRANSIENT_SOLVER_KINDS, synthesize_default_group
 from ...simulation_worker import SimulationWorker
-from ..sse import simulation_event_stream
+from ..sse import sanitize_for_json, simulation_event_stream
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,21 @@ def _require_positive(value: float, name: str) -> None:
         raise HTTPException(status_code=422, detail=f"{name} must be > 0")
 
 
+def _first_finite(*values: Any, default: float) -> float:
+    """Return the first non-``None`` value in *values*, else *default*.
+
+    Used to resolve a run-duration/step field from an ordered list of
+    fallback sources (body override, legacy config keys, the current
+    grid/advance_time schema) without a nested ``dict.get(key, dict.get(...))``
+    chain, which mypy cannot always narrow to a definite non-``None`` type by
+    the time it reaches the final ``float(...)`` call.
+    """
+    for v in values:
+        if v is not None:
+            return float(v)
+    return default
+
+
 def _resolve_run_grid(
     config: Dict[str, Any],
     body_simulation_time: Optional[float],
@@ -89,10 +104,24 @@ def _resolve_run_grid(
     transform the submitted config exactly like a run would.
     """
     settings = config.get("settings", {}) or {}
-    settings_simulation_time = float(
-        settings.get("end_time", settings.get("max_time", 10.0))
+    solver = settings.get("solver") or {}
+    grid = solver.get("grid")
+    grid = grid if isinstance(grid, dict) else {}
+    # The current schema (settings.solver.grid.{start,stop,dt} for advance_grid/
+    # micro_step, or settings.solver.advance_time for the flat "advance" kind)
+    # is checked before the legacy top-level end_time/max_time/dt/time_step
+    # keys, so total_time/progress reporting reflects the real grid even
+    # though nothing here writes those legacy keys.
+    settings_simulation_time = _first_finite(
+        settings.get("end_time"),
+        settings.get("max_time"),
+        grid.get("stop"),
+        solver.get("advance_time"),
+        default=10.0,
     )
-    settings_time_step = float(settings.get("dt", settings.get("time_step", 1.0)))
+    settings_time_step = _first_finite(
+        settings.get("dt"), settings.get("time_step"), grid.get("dt"), default=1.0
+    )
     simulation_time = (
         body_simulation_time
         if body_simulation_time is not None
@@ -269,13 +298,15 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
     progress = worker.get_progress()
 
     if not progress.is_complete and not progress.error_message:
-        return {
-            "status": "running",
-            "is_complete": False,
-            "times": progress.times,
-            "reactors_series": progress.reactors_series,
-            "total_time": progress.total_time,
-        }
+        return sanitize_for_json(
+            {
+                "status": "running",
+                "is_complete": False,
+                "times": progress.times,
+                "reactors_series": progress.reactors_series,
+                "total_time": progress.total_time,
+            }
+        )
 
     from ..sse import _serialise_reports
 
@@ -300,7 +331,7 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
     if cleanup:
         del _simulations[sim_id]
 
-    return result
+    return sanitize_for_json(result)
 
 
 @router.delete("/{sim_id}")
@@ -374,13 +405,19 @@ async def check_simulation_cache(
         fingerprint[:12],
     )
     meta = cached.get("meta", {})
-    return {
-        "cached": True,
-        "fingerprint": fingerprint,
-        "result": cached.get("gui_payload", {}),
-        "config_snapshot": cached.get("config_snapshot", {}),
-        "meta": meta,
-    }
+    # gui_payload was written to disk unsanitized (result_cache/payload_store
+    # both dump the raw worker output) — a cached NaN/Infinity would otherwise
+    # reproduce the exact silent-hang bug this endpoint's live-run sibling
+    # (get_simulation_results) already guards against.
+    return sanitize_for_json(
+        {
+            "cached": True,
+            "fingerprint": fingerprint,
+            "result": cached.get("gui_payload", {}),
+            "config_snapshot": cached.get("config_snapshot", {}),
+            "meta": meta,
+        }
+    )
 
 
 @router.get("/cached")
@@ -397,13 +434,15 @@ async def get_cached_result(request: Request) -> Dict[str, Any]:
         return {"cached": False}
 
     meta = cached.get("meta", {})
-    return {
-        "cached": True,
-        "fingerprint": fingerprint,
-        "result": cached.get("gui_payload", {}),
-        "config_snapshot": cached.get("config_snapshot", {}),
-        "meta": meta,
-    }
+    return sanitize_for_json(
+        {
+            "cached": True,
+            "fingerprint": fingerprint,
+            "result": cached.get("gui_payload", {}),
+            "config_snapshot": cached.get("config_snapshot", {}),
+            "meta": meta,
+        }
+    )
 
 
 @router.get("/cached/artifacts/{artifact_name}")

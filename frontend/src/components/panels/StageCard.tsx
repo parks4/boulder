@@ -27,6 +27,7 @@ function deriveLocalSolverState(solver: Record<string, unknown> | undefined) {
     rtol: solver?.rtol != null ? String(solver.rtol) : "1e-9",
     atol: solver?.atol != null ? String(solver.atol) : "1e-15",
     maxSteps: solver?.max_steps != null ? String(solver.max_steps) : "10000",
+    startTime: String(grid?.start ?? "0"),
     simTime: String(grid?.stop ?? solver?.advance_time ?? "10"),
     timeStep: String(grid?.dt ?? "1"),
   };
@@ -63,6 +64,7 @@ export function StageCard({ stageId }: Props) {
   const globalRtol = useSolverStore((s) => s.rtol);
   const globalAtol = useSolverStore((s) => s.atol);
   const globalMaxSteps = useSolverStore((s) => s.maxSteps);
+  const globalStartTime = useSolverStore((s) => s.startTime);
   const globalSimTime = useSolverStore((s) => s.simTime);
   const globalTimeStep = useSolverStore((s) => s.timeStep);
   const setGlobalMode = useSolverStore((s) => s.setMode);
@@ -70,6 +72,7 @@ export function StageCard({ stageId }: Props) {
   const setGlobalRtol = useSolverStore((s) => s.setRtol);
   const setGlobalAtol = useSolverStore((s) => s.setAtol);
   const setGlobalMaxSteps = useSolverStore((s) => s.setMaxSteps);
+  const setGlobalStartTime = useSolverStore((s) => s.setStartTime);
   const setGlobalSimTime = useSolverStore((s) => s.setSimTime);
   const setGlobalTimeStep = useSolverStore((s) => s.setTimeStep);
 
@@ -83,12 +86,13 @@ export function StageCard({ stageId }: Props) {
   // --- Local, per-stage-scoped solver state (multi-stage configs only) ---
   const stageSolver = config.groups?.[stageId]?.solver;
   const [localState, setLocalState] = useState(() => deriveLocalSolverState(stageSolver));
-  const { mode: localMode, kind: localKind, rtol: localRtol, atol: localAtol, maxSteps: localMaxSteps, simTime: localSimTime, timeStep: localTimeStep } = localState;
+  const { mode: localMode, kind: localKind, rtol: localRtol, atol: localAtol, maxSteps: localMaxSteps, startTime: localStartTime, simTime: localSimTime, timeStep: localTimeStep } = localState;
   const setLocalMode = (v: SolverMode) => setLocalState((s) => ({ ...s, mode: v }));
   const setLocalKind = (v: SolverKind) => setLocalState((s) => ({ ...s, kind: v }));
   const setLocalRtol = (v: string) => setLocalState((s) => ({ ...s, rtol: v }));
   const setLocalAtol = (v: string) => setLocalState((s) => ({ ...s, atol: v }));
   const setLocalMaxSteps = (v: string) => setLocalState((s) => ({ ...s, maxSteps: v }));
+  const setLocalStartTime = (v: string) => setLocalState((s) => ({ ...s, startTime: v }));
   const setLocalSimTime = (v: string) => setLocalState((s) => ({ ...s, simTime: v }));
   const setLocalTimeStep = (v: string) => setLocalState((s) => ({ ...s, timeStep: v }));
 
@@ -111,11 +115,13 @@ export function StageCard({ stageId }: Props) {
   const rtol = isMultiStage ? localRtol : globalRtol;
   const atol = isMultiStage ? localAtol : globalAtol;
   const maxSteps = isMultiStage ? localMaxSteps : globalMaxSteps;
+  const startTime = isMultiStage ? localStartTime : globalStartTime;
   const simTime = isMultiStage ? localSimTime : globalSimTime;
   const timeStep = isMultiStage ? localTimeStep : globalTimeStep;
   const onRtolChange = isMultiStage ? setLocalRtol : setGlobalRtol;
   const onAtolChange = isMultiStage ? setLocalAtol : setGlobalAtol;
   const onMaxStepsChange = isMultiStage ? setLocalMaxSteps : setGlobalMaxSteps;
+  const onStartTimeChange = isMultiStage ? setLocalStartTime : setGlobalStartTime;
   const onSimTimeChange = isMultiStage ? setLocalSimTime : setGlobalSimTime;
   const onTimeStepChange = isMultiStage ? setLocalTimeStep : setGlobalTimeStep;
 
@@ -201,24 +207,54 @@ export function StageCard({ stageId }: Props) {
     [config, fileName, isMultiStage, stageId, setConfig, setGlobalKind],
   );
 
+  // Builds the transient-specific fields, merging into (not replacing) an
+  // existing grid dict so unrelated keys (e.g. an explicit list grid, or a
+  // `start` the modal doesn't have a field for on other kinds) survive.
+  const buildTransientExtra = useCallback(
+    (currentSolver: Record<string, unknown>): Record<string, unknown> => {
+      if (mode !== "transient") return {};
+      if (kind === "advance") return { advance_time: parseFloat(simTime) };
+      if (kind === "advance_grid") {
+        const currentGrid = currentSolver.grid;
+        const gridBase =
+          currentGrid && typeof currentGrid === "object" && !Array.isArray(currentGrid)
+            ? (currentGrid as Record<string, unknown>)
+            : {};
+        return {
+          grid: {
+            ...gridBase,
+            start: parseFloat(startTime),
+            stop: parseFloat(simTime),
+            dt: parseFloat(timeStep),
+          },
+        };
+      }
+      // micro_step isn't represented by this modal's fields (it uses
+      // t_total/chunk_dt/max_dt, not grid.start/stop/dt) — leave it alone.
+      return {};
+    },
+    [mode, kind, startTime, simTime, timeStep],
+  );
+
   // Persists tolerance and transient-grid values from the modal into
   // whichever solver block this stage's panel is editing.
   const handleSolverDetailsDone = useCallback(() => {
     const rtolNum = parseFloat(rtol);
     const atolNum = parseFloat(atol);
     const maxStepsNum = parseInt(maxSteps, 10);
+    const currentGroups = config.groups ?? {};
+    const currentGroup = currentGroups[stageId] ?? {};
+    const currentSettings = (config.settings as Record<string, unknown>) ?? {};
+    const currentSolver = (isMultiStage
+      ? (currentGroup.solver ?? {})
+      : (currentSettings.solver ?? {})) as Record<string, unknown>;
     const extra: Record<string, unknown> = {
       ...(Number.isFinite(rtolNum) ? { rtol: rtolNum } : {}),
       ...(Number.isFinite(atolNum) ? { atol: atolNum } : {}),
       ...(Number.isFinite(maxStepsNum) ? { max_steps: maxStepsNum } : {}),
-      ...(mode === "transient"
-        ? { grid: { stop: parseFloat(simTime), dt: parseFloat(timeStep) } }
-        : {}),
+      ...buildTransientExtra(currentSolver),
     };
     if (isMultiStage) {
-      const currentGroups = config.groups ?? {};
-      const currentGroup = currentGroups[stageId] ?? {};
-      const currentSolver = currentGroup.solver ?? {};
       setConfig(
         {
           ...config,
@@ -230,8 +266,6 @@ export function StageCard({ stageId }: Props) {
         fileName,
       );
     } else {
-      const currentSettings = (config.settings as Record<string, unknown>) ?? {};
-      const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
       setConfig(
         {
           ...config,
@@ -247,14 +281,19 @@ export function StageCard({ stageId }: Props) {
     rtol,
     atol,
     maxSteps,
-    mode,
-    simTime,
-    timeStep,
+    buildTransientExtra,
     isMultiStage,
     stageId,
     setConfig,
     setDetailsOpen,
   ]);
+
+  // Dismiss without persisting — the ✕ button, backdrop click, and Escape
+  // key should not silently commit whatever's in the (possibly-unedited)
+  // fields back into the config.
+  const handleSolverDetailsCancel = useCallback(() => {
+    setDetailsOpen(false);
+  }, [setDetailsOpen]);
 
   const kinds = mode === "steady" ? STEADY_KINDS : TRANSIENT_KINDS;
 
@@ -366,7 +405,8 @@ export function StageCard({ stageId }: Props) {
 
       <SolverDetailsModal
         open={detailsOpen}
-        onClose={handleSolverDetailsDone}
+        onCancel={handleSolverDetailsCancel}
+        onDone={handleSolverDetailsDone}
         mode={mode}
         kind={kind}
         kinds={kinds}
@@ -377,6 +417,8 @@ export function StageCard({ stageId }: Props) {
         onAtolChange={onAtolChange}
         maxSteps={maxSteps}
         onMaxStepsChange={onMaxStepsChange}
+        startTime={startTime}
+        onStartTimeChange={onStartTimeChange}
         simTime={simTime}
         onSimTimeChange={onSimTimeChange}
         timeStep={timeStep}

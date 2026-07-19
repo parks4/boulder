@@ -29,9 +29,16 @@ export function SimulateCard() {
   // Steady/Transient mode and its tolerances are edited from the Stage panel
   // (StageCard) — this card only needs to read them to run a simulation.
   const mode = useSolverStore((s) => s.mode);
+  const kind = useSolverStore((s) => s.kind);
   const simTime = useSolverStore((s) => s.simTime);
   const timeStep = useSolverStore((s) => s.timeStep);
   const syncSolverFromConfig = useSolverStore((s) => s.syncFromConfig);
+
+  // Only the flat "advance" kind takes a simulation_time/time_step override —
+  // advance_grid/micro_step carry their own authoritative grid in
+  // settings.solver, which these overrides would otherwise clobber (see
+  // _resolve_run_grid in the backend).
+  const sendTimeOverride = mode === "transient" && kind === "advance";
 
   const [guiActions, setGuiActions] = useState<GuiActionMeta[]>([]);
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
@@ -103,8 +110,8 @@ export function SimulateCard() {
         const cacheResp = await checkSimulationCache(
           cfgRaw,
           mechStr,
-          mode === "transient" ? parseFloat(simTime) : undefined,
-          mode === "transient" ? parseFloat(timeStep) : undefined,
+          sendTimeOverride ? parseFloat(simTime) : undefined,
+          sendTimeOverride ? parseFloat(timeStep) : undefined,
         );
         if (cacheResp.cached) {
           setResults(cacheResp.result);
@@ -123,8 +130,8 @@ export function SimulateCard() {
     try {
       const resp = await startSimulation(
         config,
-        mode === "transient" ? parseFloat(simTime) : undefined,
-        mode === "transient" ? parseFloat(timeStep) : undefined,
+        sendTimeOverride ? parseFloat(simTime) : undefined,
+        sendTimeOverride ? parseFloat(timeStep) : undefined,
       );
       setStarted(resp.simulation_id);
     } catch (err) {
@@ -132,7 +139,7 @@ export function SimulateCard() {
       toast.error(`Failed: ${msg}`);
       setError(msg);
     }
-  }, [config, simTime, timeStep, mode, beginSimulationRun, setStarted, setError, setResults]);
+  }, [config, simTime, timeStep, sendTimeOverride, beginSimulationRun, setStarted, setError, setResults]);
 
   const handleDownloadPy = useCallback(() => {
     if (!pythonCode) return;
