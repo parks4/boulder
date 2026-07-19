@@ -152,7 +152,25 @@ Two **profiles** of this one encoding:
 |---|---|---|
 | File | `<cache>/<fp>/result.h5` (+ `meta.json` carries config_snapshot) | `results/<map>_scenarios.h5` |
 | Holds | one result (1..n reactors, groups `r0`,`r1`,…) | many single-reactor results, one group per scenario |
-| Producer / reader | `result_cache.save_result` / `load_result*` | `run_sweep.py` (host) / `api/routes/scenarios.py` |
+| Producer / reader | `result_cache.save_result` / `load_result*` | `sweep_runner.py` (or a host `run_sweep.py`) / `api/routes/scenarios.py` |
+
+#### Run-set expansion and the generic sweep runner
+
+`runset.py` is the reference implementation of the STONE `scenario:`/`sweep:` semantics
+(STONE_SPECIFICATIONS.md §14): `expand_scenarios` (union run-set, id-keyed `deep_merge`, sweep-path
+resolution against the schema registry), `run_set_size` (the cheap count the `/api/sweep` availability
+endpoint uses — same module, so the count can never drift from the expansion), `sweeps_of`,
+`sweep_axis_values`, `resolve_store_path`, and `load_yaml_with_inheritance` (`from:` chains;
+`scenario:` is deliberately not inherited, `sweep:` is).
+
+`sweep_runner.py` (`python -m boulder.sweep_runner <config.yaml>`) is the generic out-of-process
+runner behind the Run Sweep button: expand → skip runs whose per-scenario fingerprint is unchanged
+(incremental cache; `BOULDER_NO_CACHE` recreates the store) → solve via `DualCanteraConverter` →
+`write_payload` one group per scenario → prune groups whose id left the run-set. Host packages that
+need process setup (mechanism search paths), mechanism-path resolution, or extra per-scenario KPI
+attrs register their own thin wrapper via `plugins.sweep_runner` and pass the `setup` /
+`resolve_mechanism` / `scenario_attrs` hooks to `sweep_runner.run`; sweep-id naming is customized via
+`plugins.sweep_symbols`.
 
 Both call `payload_store.gui_payload_from_solution_array` to rebuild the same `SimulationResults` the
 GUI renders. `CACHE_VERSION` (in `result_cache.py`) gates cache entries; `PAYLOAD_SCHEMA` (== the root

@@ -87,6 +87,13 @@ class BoulderPlugins:
     #: sits next to the config. Registered by an external plugin package.
     sweep_runner: Optional[List[str]] = None
 
+    #: Axis-name/path-leaf → symbol mapping used by
+    #: :func:`boulder.runset.expand_scenarios` to label sweep points in
+    #: scenario ids (e.g. ``diameter`` → ``TF_D`` gives ``BASE__TF_D=0.03``).
+    #: Registered by an external plugin package so sweep ids stay consistent
+    #: between the GUI and out-of-process runners. ``None`` → plain axis names.
+    sweep_symbols: Optional[Dict[str, str]] = None
+
     #: GUI branding set by a host plugin: ``{"name": "MyApp", "version": "1.2"}``.
     #: When set, the frontend header shows the host name and version next to
     #: the Boulder title.

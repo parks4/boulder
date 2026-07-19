@@ -1263,9 +1263,12 @@ ______________________________________________________________________
 ## 14. Inline run-set variations — `scenario:` and `sweep:`
 
 A STONE file may declare multiple runs inline, instead of a glob of separate overlay files. Boulder
-validates and passes these blocks through; a host's expansion/reporting layer turns them into the
-run set (one config per run). They never alter the topology a single run sees — each expanded run is
-the base with its overlay/patch deep-merged, and the directives stripped.
+validates and passes these blocks through single-run normalization; `boulder.runset.expand_scenarios`
+is the **reference implementation** that turns them into the run set (one config per run), and
+`python -m boulder.sweep_runner` is the generic runner that solves it into the collection store.
+Hosts customize naming/validation through hooks (`plugins.sweep_symbols`, `schema_entry`) rather
+than re-implementing the semantics. The directives never alter the topology a single run sees —
+each expanded run is the base with its overlay/patch deep-merged, and the directives stripped.
 
 ### `scenario:` — a mapping of `id → overlay`
 
