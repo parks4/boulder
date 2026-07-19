@@ -39,9 +39,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 def _is_id_based_list(lst: list) -> bool:
     """Return whether *lst* is a non-empty list of dicts that all carry ``id``."""
-    return bool(lst) and all(
-        isinstance(item, dict) and "id" in item for item in lst
-    )
+    return bool(lst) and all(isinstance(item, dict) and "id" in item for item in lst)
 
 
 def _merge_lists_by_id(base_list: list, overlay_list: list) -> list:
