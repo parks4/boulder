@@ -1,0 +1,284 @@
+"""Generic scenario/sweep runner → composite collection store (for the GUI Run Sweep).
+
+Invoked out-of-process by the ``/api/sweep`` routes for any config that declares
+``scenario:`` and/or ``sweep:``. It:
+
+1. loads the raw config (``from:`` inheritance resolved),
+2. expands the union run-set with :func:`boulder.runset.expand_scenarios`,
+3. solves each run through the Boulder converter, and
+4. writes each result as a **composite** payload into the collection store
+   (``metadata.extra.scenario_store``, default ``<stem>_scenarios.h5``), one
+   ``<scenario_id>/`` group per run,
+
+printing ``scenario N/M`` per run so the sweep API can show progress. The
+Scenario Pane then lists every run and opens each instantly.
+
+Caching is incremental by default: each group carries the Boulder cache
+fingerprint of its config (:func:`scenario_fingerprint`), and runs whose
+fingerprint is unchanged are skipped. ``BOULDER_NO_CACHE`` (the Scenario
+Pane's "Regenerate cache" action) recreates the store from scratch. Groups
+whose scenario id left the run-set are pruned.
+
+Usage: ``python -m boulder.sweep_runner <config.yaml> [--no-plot]``
+
+Host packages with extra needs keep their own entry point (registered via
+``plugins.sweep_runner``) as a thin wrapper around :func:`run`, passing hooks:
+``setup`` for process-level preparation (e.g. putting a private mechanism
+directory on Cantera's search path), ``resolve_mechanism`` to turn bare
+mechanism names into absolute paths (so the GUI server can read the store
+without the host's search-path setup), and ``scenario_attrs`` to attach extra
+scalar KPI attributes to each scenario group (what the Sweep Results plot
+reads).
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import os
+import time
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Tuple
+
+import h5py
+
+from .cantera_converter import DualCanteraConverter, get_plugins
+from .config import normalize_config
+from .payload_store import write_payload
+from .runset import expand_scenarios, load_yaml_with_inheritance, resolve_store_path
+
+
+def _mechanism_of(raw: Dict[str, Any]) -> str:
+    gas = (raw.get("phases") or {}).get("gas") or {}
+    return str(gas.get("mechanism") or "")
+
+
+def scenario_fingerprint(
+    raw_cfg: Dict[str, Any],
+    *,
+    extra: Optional[Dict[str, Any]] = None,
+    resolve_mechanism: Optional[Callable[[str], str]] = None,
+) -> str:
+    """Boulder cache fingerprint for one merged (``from:``-resolved) scenario.
+
+    THE fingerprint every scenario store uses — this runner and any host batch
+    writer both call this; do not re-implement the cache key elsewhere.
+    ``extra`` mixes caller-specific inputs into the hash (e.g. a save grid that
+    lives outside the solved network config). ``resolve_mechanism`` maps a bare
+    mechanism name to the identity actually hashed (hosts pass their
+    name→absolute-path resolver so fingerprints match their store contents).
+    """
+    from .result_cache import compute_fingerprint  # noqa: PLC0415
+
+    plugins = get_plugins()
+    config = normalize_config(copy.deepcopy(raw_cfg), plugins=plugins)
+    mechanism = _mechanism_of(raw_cfg)
+    if resolve_mechanism is not None:
+        mechanism = resolve_mechanism(mechanism)
+    return compute_fingerprint(config, mechanism=mechanism, extra=extra)
+
+
+def _prepare(
+    raw_cfg: Dict[str, Any],
+    resolve_mechanism: Optional[Callable[[str], str]],
+) -> Tuple[Dict[str, Any], str, str]:
+    """Normalize a merged scenario config → ``(config, mechanism, fingerprint)``.
+
+    The fingerprint (Boulder's cache key) lets the run skip scenarios that are
+    already cached unchanged — computed without building/solving the network.
+    """
+    from .result_cache import compute_fingerprint  # noqa: PLC0415
+
+    plugins = get_plugins()
+    config = normalize_config(copy.deepcopy(raw_cfg), plugins=plugins)
+    mechanism = _mechanism_of(raw_cfg)
+    hashed = resolve_mechanism(mechanism) if resolve_mechanism else mechanism
+    fingerprint = compute_fingerprint(config, mechanism=hashed)
+    return config, mechanism, fingerprint
+
+
+def _solve(config: Dict[str, Any], mechanism: str) -> Tuple[Dict[str, Any], str]:
+    """Solve one normalized scenario config → (gui_payload, resolved mechanism)."""
+    plugins = get_plugins()
+    conv = DualCanteraConverter(mechanism=mechanism or None, plugins=plugins)
+    conv.build_network(config)
+
+    settings = config.get("settings") or {}
+    sim_t = float(settings.get("end_time") or 0.0)
+    if sim_t <= 0.0:
+        sim_t = 1.0
+        if not settings.get("solver"):
+            # A solver grid (e.g. from a host config transform) overrides the
+            # nominal end_time; without either, flag the silent 1 s default.
+            print(
+                "  WARNING: settings.end_time missing — defaulting to 1.0 s. "
+                "Declare settings.end_time (or a settings.solver grid) for a "
+                "meaningful trajectory.",
+                flush=True,
+            )
+    dt = float(settings.get("dt") or 0.0) or (sim_t / 10.0)
+    results, code = conv.run_streaming_simulation(
+        simulation_time=sim_t, time_step=dt, config=config
+    )
+
+    gui = {
+        "status": "complete",
+        "is_running": False,
+        "is_complete": True,
+        "error_message": None,
+        "times": results.get("time", []),
+        "reactors_series": results.get("reactors", {}),
+        "reactor_reports": {},
+        "connection_reports": {},
+        "code_str": code,
+        "summary": results.get("summary", []),
+        "sankey_links": results.get("sankey_links"),
+        "sankey_nodes": results.get("sankey_nodes"),
+        "elapsed_time": None,
+        "updated_nodes": None,
+        "updated_connections": None,
+    }
+    return gui, conv.mechanism
+
+
+def existing_fingerprints(store: Path) -> Dict[str, str]:
+    """Per-scenario fingerprints already in the store (group id → fingerprint).
+
+    Shared cache primitive: any writer of a collection store (this runner, a
+    host batch writer) reads its cache state through this.
+    """
+    found: Dict[str, str] = {}
+    if not store.exists():
+        return found
+    with h5py.File(str(store), "r") as handle:
+        for sid, node in handle.items():
+            if isinstance(node, h5py.Group) and "payload_json" in node:
+                fp = node.attrs.get("fingerprint")
+                if fp:
+                    found[sid] = str(fp)
+    return found
+
+
+def prune_stale_groups(store: Path, run_ids: set) -> list:
+    """Delete groups whose scenario id is no longer in the run set.
+
+    Renamed or removed scenarios would otherwise linger in the GUI's Scenario
+    Pane forever (only ``--no-cache`` recreates the file). Returns the deleted
+    group names.
+    """
+    with h5py.File(str(store), "a") as handle:
+        stale = [
+            sid
+            for sid, node in handle.items()
+            if isinstance(node, h5py.Group) and sid not in run_ids
+        ]
+        for sid in stale:
+            del handle[sid]
+    return stale
+
+
+def run(
+    cfg_path: Path,
+    *,
+    setup: Optional[Callable[[], None]] = None,
+    resolve_mechanism: Optional[Callable[[str], str]] = None,
+    scenario_attrs: Optional[
+        Callable[[str, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
+    ] = None,
+) -> Path:
+    """Expand and solve *cfg_path*'s run-set into its collection store.
+
+    Parameters
+    ----------
+    cfg_path : Path
+        The STONE config declaring ``scenario:`` / ``sweep:``.
+    setup : callable, optional
+        Called once before anything else — host process-level preparation
+        (e.g. registering a mechanism directory on Cantera's search path).
+    resolve_mechanism : callable, optional
+        ``name -> str`` mapping a bare mechanism name to the identity stored
+        and hashed (typically an absolute path). Defaults to the name itself.
+    scenario_attrs : callable, optional
+        ``(scenario_id, merged_config, gui_payload) -> dict`` of extra scalar
+        attributes written onto the scenario's HDF5 group after each solve —
+        the per-run KPIs the Sweep Results plot reads (``t0_K``,
+        ``final_X_<species>``, …).
+
+    Returns
+    -------
+    Path
+        The collection store written.
+    """
+    if setup is not None:
+        setup()
+    _resolve = resolve_mechanism or (lambda name: name)
+    raw = load_yaml_with_inheritance(cfg_path)
+    store = resolve_store_path(raw, cfg_path)
+    assert store is not None  # cfg_path is always set here
+    store.parent.mkdir(parents=True, exist_ok=True)
+
+    # Incremental by default: keep the store and skip scenarios whose fingerprint
+    # is unchanged. ``--no-cache`` (BOULDER_NO_CACHE) forces a full recompute.
+    no_cache = bool(os.environ.get("BOULDER_NO_CACHE"))
+    if no_cache and store.exists():
+        store.unlink()
+    cached_fps = {} if no_cache else existing_fingerprints(store)
+
+    runs = expand_scenarios(raw)
+    total = len(runs)
+    run_ids = {sid for sid, _ in runs}
+    mechanism = _mechanism_of(raw)
+    n_cached = 0
+    for i, (sid, cfg) in enumerate(runs):
+        config, mech_name, fingerprint = _prepare(cfg, resolve_mechanism)
+        label = str((cfg.get("metadata") or {}).get("scenario_name") or sid)
+        if cached_fps.get(sid) == fingerprint:
+            n_cached += 1
+            print(f"scenario {i + 1}/{total} ({sid}): cached, skipped", flush=True)
+            # Display attrs still track the YAML (reorderings / renamed labels)
+            # even when the solve itself is skipped.
+            with h5py.File(str(store), "a") as handle:
+                attrs = handle[sid].attrs
+                attrs["label"] = label
+                attrs["order"] = int(i)
+            continue
+        print(f"scenario {i + 1}/{total} ({sid})", flush=True)
+        gui, resolved_mech = _solve(config, mech_name)
+        write_payload(store, gui, _resolve(resolved_mech), group=sid, fresh=False)
+        with h5py.File(str(store), "a") as handle:
+            attrs = handle[sid].attrs
+            attrs["label"] = label
+            attrs["order"] = int(i)
+            attrs["fingerprint"] = fingerprint
+            attrs["computed_at"] = float(time.time())
+            if scenario_attrs is not None:
+                for key, value in (scenario_attrs(sid, cfg, gui) or {}).items():
+                    attrs[key] = value
+
+    stale = prune_stale_groups(store, run_ids)
+    if stale:
+        print(f"Pruned {len(stale)} stale scenario group(s): {', '.join(stale)}")
+
+    with h5py.File(str(store), "a") as handle:
+        handle.attrs["map_config"] = cfg_path.name
+        handle.attrs["mechanism"] = _resolve(mechanism)
+        handle.attrs["mechanism_name"] = Path(mechanism).name if mechanism else ""
+        handle.attrs["created_at"] = float(time.time())
+    print(
+        f"Wrote {store} ({total} scenarios; {n_cached} cached, "
+        f"{total - n_cached} solved)",
+        flush=True,
+    )
+    return store
+
+
+def main(argv: "list[str] | None" = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("config", help="STONE config with scenario:/sweep:")
+    parser.add_argument("--no-plot", action="store_true", help="(accepted, ignored)")
+    args = parser.parse_args(argv)
+    run(Path(args.config).resolve())
+
+
+if __name__ == "__main__":
+    main()

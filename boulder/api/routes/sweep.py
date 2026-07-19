@@ -25,6 +25,10 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ...runset import resolve_store_path, run_set_size, sweeps_of
+
+__all__ = ["has_run_set", "resolve_store_path", "router"]
+
 router = APIRouter()
 
 
@@ -41,41 +45,9 @@ _SCENARIO_RE = re.compile(r"scenario\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 _RUNNER_NAME = "run_sweep.py"
 
 
-def _sweep_points(sweeps: Dict[str, Any]) -> int:
-    """Cartesian-product size of a sweep block's axes (generic; no host import)."""
-    if not isinstance(sweeps, dict) or not sweeps:
-        return 0
-    total = 1
-    for axis in sweeps.values():
-        if not isinstance(axis, dict):
-            continue
-        if axis.get("values") is not None:
-            n = len(axis["values"])
-        elif axis.get("num") is not None:
-            n = int(axis["num"])
-        elif axis.get("npoints") is not None:
-            n = int(axis["npoints"])
-        else:
-            n = 0
-        total *= max(n, 0)
-    return total
-
-
-def _sweep_block(d: Dict[str, Any]) -> Dict[str, Any]:
-    return d.get("sweep") or d.get("sweeps") or {}
-
-
-def _run_set_size(raw: Dict[str, Any]) -> int:
-    """Return the union run-set size (mirrors expand_scenarios without importing it).
-
-    Global sweep points ⊎ each `scenario:` entry (its inner sweep, else 1).
-    """
-    scenario = raw.get("scenario") or {}
-    total = _sweep_points(_sweep_block(raw))  # global sweep points (0 if none)
-    for overlay in scenario.values():
-        inner = _sweep_block(overlay or {})
-        total += _sweep_points(inner) if inner else 1
-    return total
+# Run-set sizing lives in boulder.runset (the reference implementation of the
+# scenario:/sweep: union semantics) — the old local mirror is gone.
+_run_set_size = run_set_size
 
 
 def _local_runner_path_for(config_path: Optional[str]) -> Optional[Path]:
@@ -96,28 +68,9 @@ def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     request-scoped sweep routes and the app-startup lifespan can share one
     detection rule instead of re-deciding "is this a sweep config?" twice.
     """
-    if raw.get("scenario") or _sweep_block(raw):
+    if raw.get("scenario") or sweeps_of(raw):
         return True
     return _local_runner_path_for(config_path) is not None
-
-
-def resolve_store_path(
-    raw: Dict[str, Any], config_path: Optional[str]
-) -> Optional[Path]:
-    """Return the collection store a run-set writes to, or ``None``.
-
-    Declared via ``metadata.extra.scenario_store`` or the ``<stem>_scenarios.h5``
-    default (must match the runner's default). ``None`` when *config_path* is
-    unset — there is no config to resolve a default against.
-    """
-    if not config_path:
-        return None
-    cfg = Path(config_path).resolve()
-    rel = ((raw.get("metadata") or {}).get("extra") or {}).get("scenario_store")
-    if rel:
-        p = Path(rel)
-        return p if p.is_absolute() else cfg.parent / p
-    return cfg.parent / f"{cfg.stem}_scenarios.h5"
 
 
 def _local_runner_path(request: Request) -> Optional[Path]:
