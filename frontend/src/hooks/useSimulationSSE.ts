@@ -24,8 +24,12 @@ export function useSimulationSSE() {
       try {
         const data = JSON.parse(e.data) as SimulationProgress;
         updateProgress(data);
-      } catch {
-        /* ignore parse errors */
+      } catch (err) {
+        // Non-fatal (unlike the "complete" handler below): a dropped
+        // intermediate tick self-heals on the next poll, so this only logs
+        // rather than surfacing a run error the user would have to dismiss.
+        // eslint-disable-next-line no-console
+        console.error("Failed to process simulation 'progress' event:", err);
       }
     });
 
@@ -85,8 +89,19 @@ export function useSimulationSSE() {
             })),
           });
         }
-      } catch {
-        /* ignore parse errors */
+      } catch (err) {
+        // A parse/processing failure here must not leave the caller stuck
+        // in isRunning=true forever with no feedback — surface it as a run
+        // error (this previously failed silently, e.g. when the payload
+        // contained a NaN, invalid JSON per the JSON spec even though
+        // Python's json.dumps emits it by default).
+        // eslint-disable-next-line no-console
+        console.error("Failed to process simulation 'complete' event:", err);
+        setError(
+          err instanceof Error
+            ? `Failed to parse simulation results: ${err.message}`
+            : "Failed to parse simulation results.",
+        );
       }
       source.close();
     });

@@ -155,6 +155,38 @@ describe("StageCard", () => {
       expect(grid.dt).toBeCloseTo(0.5);
     });
 
+    it("dismissing Solver Details via Cancel does not write anything back into config.settings.solver", () => {
+      mockConfig = {
+        ...mockConfig,
+        settings: { solver: { kind: "advance_grid", mode: "transient", grid: { start: 0, stop: 5e-8, dt: 1e-11 } } },
+      };
+      useSolverStore.setState({ mode: "transient", kind: "advance_grid", simTime: "10", timeStep: "1", startTime: "0" });
+      render(<StageCard stageId="torch_stage" />);
+      openSolverDetails();
+      fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+      expect(mockSetConfig).not.toHaveBeenCalled();
+    });
+
+    it('Solver Details "Done" merges into an existing grid, preserving grid.start', () => {
+      mockConfig = {
+        ...mockConfig,
+        settings: { solver: { kind: "advance_grid", mode: "transient", grid: { start: 3, stop: 5e-8, dt: 1e-11 } } },
+      };
+      useSolverStore.setState({ mode: "transient", kind: "advance_grid", startTime: "3", simTime: "20", timeStep: "0.5" });
+      render(<StageCard stageId="torch_stage" />);
+      openSolverDetails();
+      mockSetConfig.mockClear();
+      closeSolverDetailsDone();
+      expect(mockSetConfig).toHaveBeenCalledOnce();
+      const [updatedConfig] = mockSetConfig.mock.calls[0];
+      const solver = (updatedConfig.settings as Record<string, unknown>)
+        .solver as Record<string, unknown>;
+      const grid = solver.grid as Record<string, unknown>;
+      expect(grid.start).toBeCloseTo(3);
+      expect(grid.stop).toBeCloseTo(20);
+      expect(grid.dt).toBeCloseTo(0.5);
+    });
+
     it("a single materialized group (e.g. 'default') still edits config.settings.solver, not config.groups", () => {
       const groups = {
         default: { stage_order: 1, mechanism: "gri30.yaml", solver: { kind: "advance_to_steady_state" } },

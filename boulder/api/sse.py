@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from typing import Any, AsyncGenerator, Dict
 
 from ..simulation_worker import SimulationWorker
@@ -75,8 +76,31 @@ async def simulation_event_stream(
 
 def _sse_event(event_type: str, data: dict) -> str:
     """Format a single SSE event string."""
-    payload = json.dumps(data, default=str)
+    payload = json.dumps(sanitize_for_json(data), default=str)
     return f"event: {event_type}\ndata: {payload}\n\n"
+
+
+def sanitize_for_json(obj: Any) -> Any:
+    """Recursively replace NaN/Infinity/-Infinity floats with ``None``.
+
+    ``json.dumps`` emits the bare tokens ``NaN``/``Infinity``/``-Infinity``
+    for these values by default (``allow_nan=True``) — valid Python, but
+    **not valid JSON**: a strict consumer (JavaScript's ``JSON.parse``,
+    which every browser uses) throws a ``SyntaxError`` on them. A single
+    NaN anywhere in a large payload (e.g. a derived reactor-report field
+    that divides by zero) then silently breaks the whole parse for
+    whichever caller wraps it in a bare ``try/catch`` — the simulation
+    completes on the backend but the frontend never finds out. Returns a
+    new structure; never mutates the input (some of it, like
+    ``progress.reactors_series``, is live/actively-appended-to state).
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [sanitize_for_json(v) for v in obj]
+    return obj
 
 
 def _serialise_reports(reports: Dict[str, Any]) -> Dict[str, Any]:

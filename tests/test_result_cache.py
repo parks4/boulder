@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 
+from boulder.api.routes.simulations import _resolve_run_grid
 from boulder.result_cache import (
     CACHE_VERSION,
     CacheContributorPlugin,
@@ -108,6 +109,73 @@ class TestComputeFingerprint:
         fp1 = compute_fingerprint(SIMPLE_CONFIG)
         fp2 = compute_fingerprint(SIMPLE_CONFIG, extra={"simulation_time": 10.0})
         assert fp1 != fp2
+
+
+# ---------------------------------------------------------------------------
+# _resolve_run_grid
+# ---------------------------------------------------------------------------
+
+
+class TestResolveRunGrid:
+    """_resolve_run_grid's settings-derived fallback (no body override).
+
+    Regression coverage for a bug where an advance_grid/advance config's
+    real settings.solver.grid.{stop,dt} (or advance_time) was ignored in
+    favor of a hard-coded 10.0/1.0 default, because the fallback only ever
+    looked at the legacy top-level settings.end_time/max_time/dt/time_step
+    keys. That wrong total_time/time_step fed the "Using config parameters"
+    log line and progress.total_time (the run itself, driven by
+    groups.<stage>.solver, was unaffected).
+    """
+
+    def test_advance_grid_stop_dt_used_when_no_legacy_keys_or_override(self):
+        config = {
+            "settings": {
+                "solver": {
+                    "kind": "advance_grid",
+                    "grid": {"start": 0.0, "stop": 5e-8, "dt": 1e-11},
+                }
+            }
+        }
+        simulation_time, time_step = _resolve_run_grid(config, None, None)
+        assert simulation_time == pytest.approx(5e-8)
+        assert time_step == pytest.approx(1e-11)
+        # No override was passed, so the grid must be left untouched.
+        assert config["settings"]["solver"]["grid"] == {
+            "start": 0.0,
+            "stop": 5e-8,
+            "dt": 1e-11,
+        }
+
+    def test_advance_time_used_for_flat_advance_kind(self):
+        config = {"settings": {"solver": {"kind": "advance", "advance_time": 2.5e-6}}}
+        simulation_time, time_step = _resolve_run_grid(config, None, None)
+        assert simulation_time == pytest.approx(2.5e-6)
+        assert time_step == pytest.approx(1.0)  # no dt concept for "advance"
+
+    def test_legacy_end_time_dt_still_take_priority_over_grid(self):
+        config = {
+            "settings": {
+                "end_time": 3.0,
+                "dt": 0.1,
+                "solver": {"kind": "advance_grid", "grid": {"stop": 5e-8, "dt": 1e-11}},
+            }
+        }
+        simulation_time, time_step = _resolve_run_grid(config, None, None)
+        assert simulation_time == pytest.approx(3.0)
+        assert time_step == pytest.approx(0.1)
+
+    def test_body_override_still_takes_priority_over_grid(self):
+        config = {
+            "settings": {
+                "solver": {"kind": "advance_grid", "grid": {"stop": 5e-8, "dt": 1e-11}}
+            }
+        }
+        simulation_time, time_step = _resolve_run_grid(config, 20.0, 0.5)
+        assert simulation_time == pytest.approx(20.0)
+        assert time_step == pytest.approx(0.5)
+        # An explicit override IS authoritative and does get written back.
+        assert config["settings"]["solver"]["grid"]["stop"] == pytest.approx(20.0)
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +637,57 @@ class TestCachedEndpoint:
         assert data["result"]["status"] == "complete"
         assert "fingerprint" in data
         assert "meta" in data
+
+    def test_cached_endpoint_sanitizes_nan_in_payload(self, tmp_path: Path):
+        """GET /cached and POST /check-cache must not resurrect a cached NaN.
+
+        Regression: gui_payload is written to disk unsanitized (a NaN in a
+        derived reactor-report field survives a save/load round-trip just
+        fine on the Python side), so these two cache-hit endpoints carried
+        the exact same silent-hang bug as the live-run SSE stream — a NaN
+        reaching the browser as the invalid-JSON bare token `NaN` instead of
+        `null`. Both must run their response through the same sanitizer.
+        """
+        from boulder.config import synthesize_default_group
+
+        poisoned_payload = copy.deepcopy(SIMPLE_PAYLOAD)
+        poisoned_payload["reactors_series"]["r1"]["k"] = [float("nan")]
+        # /check-cache fingerprints the submitted config AFTER default-group
+        # synthesis, so the cached snapshot must match that shape (same
+        # normalization used by client_with_cache above).
+        snapshot = copy.deepcopy(SIMPLE_CONFIG)
+        synthesize_default_group(snapshot)
+
+        fingerprint = "n" * 64
+        artifacts_dir = tmp_path / "artifacts_nan"
+        artifacts_dir.mkdir()
+        cache_data = {
+            "fingerprint": fingerprint,
+            "gui_payload": poisoned_payload,
+            "config_snapshot": snapshot,
+            "meta": {"cache_version": CACHE_VERSION, "created_at": time.time()},
+            "artifacts_dir": artifacts_dir,
+        }
+        app = create_app()
+        with TestClient(app) as client:
+            app.state.preloaded_result = cache_data
+            app.state.preloaded_fingerprint = fingerprint
+
+            resp = client.get("/api/simulations/cached")
+            assert resp.status_code == 200
+            body = resp.text
+            assert "NaN" not in body
+            assert resp.json()["result"]["reactors_series"]["r1"]["k"] == [None]
+
+            cfg = tmp_path / "case.yaml"
+            cfg.write_text("x: 1", encoding="utf-8")
+            app.state.preloaded_config_path = str(cfg)
+            resp2 = client.post(
+                "/api/simulations/check-cache", json={"config": SIMPLE_CONFIG}
+            )
+        assert resp2.status_code == 200
+        assert "NaN" not in resp2.text
+        assert resp2.json()["result"]["reactors_series"]["r1"]["k"] == [None]
 
     def test_artifact_missing_returns_404(self, client_with_cache: TestClient):
         """GET /api/simulations/cached/artifacts/missing.txt returns 404."""

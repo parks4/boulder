@@ -13,7 +13,8 @@ function renderModal(kind: (typeof STEADY_KINDS)[number] = "advance_to_steady_st
   return render(
     <SolverDetailsModal
       open
-      onClose={vi.fn()}
+      onCancel={vi.fn()}
+      onDone={vi.fn()}
       mode="steady"
       kind={kind}
       kinds={STEADY_KINDS}
@@ -24,6 +25,8 @@ function renderModal(kind: (typeof STEADY_KINDS)[number] = "advance_to_steady_st
       onAtolChange={vi.fn()}
       maxSteps="10000"
       onMaxStepsChange={vi.fn()}
+      startTime="0"
+      onStartTimeChange={vi.fn()}
       simTime="10"
       onSimTimeChange={vi.fn()}
       timeStep="1"

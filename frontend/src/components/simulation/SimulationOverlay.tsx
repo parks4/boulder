@@ -2,7 +2,7 @@ import { useSimulationStore } from "@/stores/simulationStore";
 
 // Sub-steps within a single stage, in order.
 // Each occupies an equal slice of that stage's bar segment.
-const SUBSTEPS = ["Building", "Integrating", "Outputs"] as const;
+const SUBSTEPS = ["Building", "Integrating", "Generating output"] as const;
 type Substep = typeof SUBSTEPS[number];
 
 function currentSubstep(
@@ -11,7 +11,7 @@ function currentSubstep(
 ): Substep {
   if (!buildComplete) return "Building";
   if (integrationPoints > 1) return "Integrating";
-  return "Outputs";
+  return "Generating output";
 }
 
 export function SimulationOverlay() {

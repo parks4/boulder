@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from ...cantera_converter import DualCanteraConverter
 from ...config import TRANSIENT_SOLVER_KINDS, synthesize_default_group
 from ...simulation_worker import SimulationWorker
-from ..sse import simulation_event_stream
+from ..sse import sanitize_for_json, simulation_event_stream
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +89,31 @@ def _resolve_run_grid(
     transform the submitted config exactly like a run would.
     """
     settings = config.get("settings", {}) or {}
+    solver = settings.get("solver") or {}
+    grid = solver.get("grid")
+    # The current schema (settings.solver.grid.{start,stop,dt} for advance_grid/
+    # micro_step, or settings.solver.advance_time for the flat "advance" kind)
+    # is checked before the legacy top-level end_time/max_time/dt/time_step
+    # keys, so total_time/progress reporting reflects the real grid even
+    # though nothing here writes those legacy keys.
+    grid_stop = grid.get("stop") if isinstance(grid, dict) else None
+    grid_dt = grid.get("dt") if isinstance(grid, dict) else None
     settings_simulation_time = float(
-        settings.get("end_time", settings.get("max_time", 10.0))
+        settings.get(
+            "end_time",
+            settings.get(
+                "max_time",
+                grid_stop
+                if grid_stop is not None
+                else solver.get("advance_time", 10.0),
+            ),
+        )
     )
-    settings_time_step = float(settings.get("dt", settings.get("time_step", 1.0)))
+    settings_time_step = float(
+        settings.get(
+            "dt", settings.get("time_step", grid_dt if grid_dt is not None else 1.0)
+        )
+    )
     simulation_time = (
         body_simulation_time
         if body_simulation_time is not None
@@ -269,13 +290,15 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
     progress = worker.get_progress()
 
     if not progress.is_complete and not progress.error_message:
-        return {
-            "status": "running",
-            "is_complete": False,
-            "times": progress.times,
-            "reactors_series": progress.reactors_series,
-            "total_time": progress.total_time,
-        }
+        return sanitize_for_json(
+            {
+                "status": "running",
+                "is_complete": False,
+                "times": progress.times,
+                "reactors_series": progress.reactors_series,
+                "total_time": progress.total_time,
+            }
+        )
 
     from ..sse import _serialise_reports
 
@@ -300,7 +323,7 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
     if cleanup:
         del _simulations[sim_id]
 
-    return result
+    return sanitize_for_json(result)
 
 
 @router.delete("/{sim_id}")
@@ -374,13 +397,19 @@ async def check_simulation_cache(
         fingerprint[:12],
     )
     meta = cached.get("meta", {})
-    return {
-        "cached": True,
-        "fingerprint": fingerprint,
-        "result": cached.get("gui_payload", {}),
-        "config_snapshot": cached.get("config_snapshot", {}),
-        "meta": meta,
-    }
+    # gui_payload was written to disk unsanitized (result_cache/payload_store
+    # both dump the raw worker output) — a cached NaN/Infinity would otherwise
+    # reproduce the exact silent-hang bug this endpoint's live-run sibling
+    # (get_simulation_results) already guards against.
+    return sanitize_for_json(
+        {
+            "cached": True,
+            "fingerprint": fingerprint,
+            "result": cached.get("gui_payload", {}),
+            "config_snapshot": cached.get("config_snapshot", {}),
+            "meta": meta,
+        }
+    )
 
 
 @router.get("/cached")
@@ -397,13 +426,15 @@ async def get_cached_result(request: Request) -> Dict[str, Any]:
         return {"cached": False}
 
     meta = cached.get("meta", {})
-    return {
-        "cached": True,
-        "fingerprint": fingerprint,
-        "result": cached.get("gui_payload", {}),
-        "config_snapshot": cached.get("config_snapshot", {}),
-        "meta": meta,
-    }
+    return sanitize_for_json(
+        {
+            "cached": True,
+            "fingerprint": fingerprint,
+            "result": cached.get("gui_payload", {}),
+            "config_snapshot": cached.get("config_snapshot", {}),
+            "meta": meta,
+        }
+    )
 
 
 @router.get("/cached/artifacts/{artifact_name}")
