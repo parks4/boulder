@@ -75,6 +75,21 @@ def _require_positive(value: float, name: str) -> None:
         raise HTTPException(status_code=422, detail=f"{name} must be > 0")
 
 
+def _first_finite(*values: Any, default: float) -> float:
+    """Return the first non-``None`` value in *values*, else *default*.
+
+    Used to resolve a run-duration/step field from an ordered list of
+    fallback sources (body override, legacy config keys, the current
+    grid/advance_time schema) without a nested ``dict.get(key, dict.get(...))``
+    chain, which mypy cannot always narrow to a definite non-``None`` type by
+    the time it reaches the final ``float(...)`` call.
+    """
+    for v in values:
+        if v is not None:
+            return float(v)
+    return default
+
+
 def _resolve_run_grid(
     config: Dict[str, Any],
     body_simulation_time: Optional[float],
@@ -91,28 +106,21 @@ def _resolve_run_grid(
     settings = config.get("settings", {}) or {}
     solver = settings.get("solver") or {}
     grid = solver.get("grid")
+    grid = grid if isinstance(grid, dict) else {}
     # The current schema (settings.solver.grid.{start,stop,dt} for advance_grid/
     # micro_step, or settings.solver.advance_time for the flat "advance" kind)
     # is checked before the legacy top-level end_time/max_time/dt/time_step
     # keys, so total_time/progress reporting reflects the real grid even
     # though nothing here writes those legacy keys.
-    grid_stop = grid.get("stop") if isinstance(grid, dict) else None
-    grid_dt = grid.get("dt") if isinstance(grid, dict) else None
-    settings_simulation_time = float(
-        settings.get(
-            "end_time",
-            settings.get(
-                "max_time",
-                grid_stop
-                if grid_stop is not None
-                else solver.get("advance_time", 10.0),
-            ),
-        )
+    settings_simulation_time = _first_finite(
+        settings.get("end_time"),
+        settings.get("max_time"),
+        grid.get("stop"),
+        solver.get("advance_time"),
+        default=10.0,
     )
-    settings_time_step = float(
-        settings.get(
-            "dt", settings.get("time_step", grid_dt if grid_dt is not None else 1.0)
-        )
+    settings_time_step = _first_finite(
+        settings.get("dt"), settings.get("time_step"), grid.get("dt"), default=1.0
     )
     simulation_time = (
         body_simulation_time
