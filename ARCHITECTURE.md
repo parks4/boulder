@@ -156,12 +156,12 @@ Two **profiles** of this one encoding:
 
 #### Run-set expansion and the generic sweep runner
 
-`runset.py` is the reference implementation of the STONE `scenario:`/`sweep:` semantics
+`runset.py` is the reference implementation of the STONE `scenarios:`/`sweep:` semantics
 (STONE_SPECIFICATIONS.md §14): `expand_scenarios` (union run-set, id-keyed `deep_merge`, sweep-path
 resolution against the schema registry), `run_set_size` (the cheap count the `/api/sweep` availability
 endpoint uses — same module, so the count can never drift from the expansion), `sweeps_of`,
 `sweep_axis_values`, `resolve_store_path`, and `load_yaml_with_inheritance` (`from:` chains;
-`scenario:` is deliberately not inherited, `sweep:` is).
+`scenarios:` is deliberately not inherited, `sweep:` is).
 
 `sweep_runner.py` (`python -m boulder.sweep_runner <config.yaml>`) is the generic out-of-process
 runner behind the Run Sweep button: expand → skip runs whose per-scenario fingerprint is unchanged

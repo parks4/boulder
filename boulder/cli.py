@@ -159,7 +159,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sweep",
         action="store_true",
         help=(
-            "Headless run-set runner: expand the config's scenario:/sweep: blocks, "
+            "Headless run-set runner: expand the config's scenarios:/sweep: blocks, "
             "solve every run, and serialize each into the collection store. Uses a "
             "host-registered sweep runner (BoulderPlugins.sweep_runner). No web UI."
         ),

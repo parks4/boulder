@@ -27,13 +27,14 @@ ______________________________________________________________________
 ## 2. Allowed Top-Level Keys
 
 ```
-metadata   phases   settings   stages   network   export   sweep   sweeps   scenario
+metadata   phases   settings   stages   network   export   sweep   sweeps   scenarios
 continuation   signals   bindings   scopes
 ```
 
-`scenario:` and `sweep:` declare inline run-set variations (Section 14). Boulder validates and
-passes them through; a host's reporting/expansion layer consumes them. (The legacy plural
-`scenarios:` list form is removed — use the `scenario:` mapping.)
+`scenarios:` and `sweep:` declare inline run-set variations (Section 14). Boulder validates and
+passes them through; a host's reporting/expansion layer consumes them. (The legacy list-valued
+top-level `scenarios:` — `[{id, set, metadata}, ...]` — is removed; only the mapping form
+`scenarios: {<id>: <overlay>}` is accepted.)
 
 Dynamic stage block names (declared under `stages:`) are also allowed at the top level.
 
@@ -1260,7 +1261,7 @@ name), `mechanism_sha256` (diagnostic; the cache fingerprint is the correctness 
 
 ______________________________________________________________________
 
-## 14. Inline run-set variations — `scenario:` and `sweep:`
+## 14. Inline run-set variations — `scenarios:` and `sweep:`
 
 A STONE file may declare multiple runs inline, instead of a glob of separate overlay files. Boulder
 validates and passes these blocks through single-run normalization; `boulder.runset.expand_scenarios`
@@ -1270,10 +1271,10 @@ Hosts customize naming/validation through hooks (`plugins.sweep_symbols`, `schem
 than re-implementing the semantics. The directives never alter the topology a single run sees —
 each expanded run is the base with its overlay/patch deep-merged, and the directives stripped.
 
-### `scenario:` — a mapping of `id → overlay`
+### `scenarios:` — a mapping of `id → overlay`
 
 ```yaml
-scenario:
+scenarios:
   case_a:                    # key is the scenario id
     settings:
       solver: {atol: 1.0e-12}
@@ -1288,6 +1289,10 @@ Each value is a STONE subtree (`metadata`/`stages`/`settings`/`network`/…) dee
 (id-keyed `nodes`/`connections` merge by id). The **key is the scenario id**. This is the same delta a
 standalone `from:` overlay file carries — `from:` remains fully valid and is unaffected.
 
+The unmodified base config is always part of the run-set too, as its own entry (id `BASELINE`,
+listed first) — `scenarios:` only *adds* named variations, it never stands in for the base itself.
+`BASELINE` is a reserved id: a `scenarios:` entry cannot use it.
+
 ### `sweep:` — a Cartesian parameter grid
 
 ```yaml
@@ -1296,11 +1301,11 @@ sweep:
   mdot: {path: "...", min: 1.0e-4, max: 2.0e-4, num: 3}   # or min/max/num (+ spacing: log)
 ```
 
-`sweep:` may appear at the top level (expanded on the base) **or inside a `scenario:` entry**
+`sweep:` may appear at the top level (expanded on the base) **or inside a `scenarios:` entry**
 (expanded on that scenario only). Ids are suffixed `__<axis>=<value>`.
 
 ### Run-set semantics (union)
 
-The run set is the **union**: the top-level `sweep:` points **⊎** each `scenario:` entry (each
+The run set is the **union**: the top-level `sweep:` points **⊎** each `scenarios:` entry (each
 expanded across its *own* inner `sweep:` if present). A top-level sweep and the scenarios do **not**
 cross-multiply. (`sweep:` and `sweeps:` are accepted spellings.)

@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`boulder.runset` — the scenario:/sweep: reference implementation.
+"""Unit tests for :mod:`boulder.runset` — the scenarios:/sweep: reference implementation.
 
 Ported from the host package that pioneered the semantics, so the union rules,
 id naming, and error messages stay locked while living upstream.
@@ -24,7 +24,7 @@ from boulder.runset import (
 
 
 def test_expand_scenarios_no_block_returns_single_base():
-    """A YAML without scenario:/sweep: yields a single scenario.
+    """A YAML without scenarios:/sweep: yields a single scenario.
 
     whose id matches ``metadata.scenario_id``.
     """
@@ -48,29 +48,32 @@ def test_expand_scenarios_legacy_scenarios_list_raises_migration_error():
         "metadata": {"scenario_id": "BASE"},
         "scenarios": [{"id": "old_style", "set": {"metadata": {"x": 1}}}],
     }
-    with pytest.raises(ValueError, match="no longer supported.*'scenario:' mapping"):
+    with pytest.raises(ValueError, match="no longer supported.*mapping form"):
         expand_scenarios(base)
 
 
 def test_expand_scenario_mapping_deep_merges_overlays():
-    """Deep-merge each `scenario:` overlay onto the base.
+    """Deep-merge each `scenarios:` overlay onto the base.
 
     The key is the scenario id; id-keyed lists (``nodes``) merge by id.
     """
     base = {
         "metadata": {"scenario_id": "BASE"},
         "nodes": [{"id": "torch", "properties": {"T_out": 2500}}],
-        "scenario": {
+        "scenarios": {
             "hot": {"nodes": [{"id": "torch", "properties": {"T_out": 3000}}]},
             "cold": {"nodes": [{"id": "torch", "properties": {"T_out": 2000}}]},
         },
     }
     out = expand_scenarios(base)
-    assert [sid for sid, _ in out] == ["hot", "cold"]
-    assert out[0][1]["nodes"][0]["properties"]["T_out"] == 3000
-    assert out[1][1]["nodes"][0]["properties"]["T_out"] == 2000
-    assert out[0][1]["metadata"]["scenario_id"] == "hot"
-    assert "scenario" not in out[0][1]
+    # BASELINE (the unmodified base) is always first when scenarios: is declared.
+    assert [sid for sid, _ in out] == ["BASELINE", "hot", "cold"]
+    assert out[0][1]["nodes"][0]["properties"]["T_out"] == 2500
+    assert out[1][1]["nodes"][0]["properties"]["T_out"] == 3000
+    assert out[2][1]["nodes"][0]["properties"]["T_out"] == 2000
+    assert out[0][1]["metadata"]["scenario_id"] == "BASELINE"
+    assert out[1][1]["metadata"]["scenario_id"] == "hot"
+    assert "scenarios" not in out[0][1]
 
 
 def test_expand_scenario_plus_global_sweep_is_union_not_cartesian():
@@ -81,14 +84,14 @@ def test_expand_scenario_plus_global_sweep_is_union_not_cartesian():
         "sweep": {
             "T": {"path": "nodes[id=torch].properties.T_out", "values": [2600, 2700]}
         },
-        "scenario": {
+        "scenarios": {
             "hot": {"nodes": [{"id": "torch", "properties": {"T_out": 3000}}]},
         },
     }
     out = expand_scenarios(base)
     ids = [sid for sid, _ in out]
-    # 2 global sweep points + 1 scenario = 3 (not 2*1 cross product).
-    assert ids == ["BASE__T=2600", "BASE__T=2700", "hot"]
+    # BASELINE + 2 global sweep points + 1 scenario = 4 (not a cross product).
+    assert ids == ["BASELINE", "BASE__T=2600", "BASE__T=2700", "hot"]
 
 
 def test_expand_scenario_local_sweep_multiplies_only_that_scenario():
@@ -96,7 +99,7 @@ def test_expand_scenario_local_sweep_multiplies_only_that_scenario():
     base = {
         "metadata": {"scenario_id": "BASE"},
         "nodes": [{"id": "torch", "properties": {"T_out": 2500}}],
-        "scenario": {
+        "scenarios": {
             "plain": {"nodes": [{"id": "torch", "properties": {"T_out": 2000}}]},
             "swept": {
                 "sweep": {
@@ -109,7 +112,12 @@ def test_expand_scenario_local_sweep_multiplies_only_that_scenario():
         },
     }
     out = expand_scenarios(base)
-    assert [sid for sid, _ in out] == ["plain", "swept__T=2800", "swept__T=2900"]
+    assert [sid for sid, _ in out] == [
+        "BASELINE",
+        "plain",
+        "swept__T=2800",
+        "swept__T=2900",
+    ]
     swept = {sid: cfg for sid, cfg in out}
     assert swept["swept__T=2800"]["nodes"][0]["properties"]["T_out"] == 2800
 
@@ -259,12 +267,14 @@ def test_run_set_size_matches_expand_scenarios():
     raw = {
         "metadata": {"scenario_id": "BASE"},
         "sweep": {"T": {"path": "metadata.t", "values": [1, 2]}},
-        "scenario": {
+        "scenarios": {
             "plain": {},
             "swept": {"sweep": {"P": {"path": "metadata.p", "values": [3, 4, 5]}}},
         },
     }
-    assert run_set_size(raw) == len(expand_scenarios(raw)) == 6  # 2 ⊎ (1 + 3)
+    assert (
+        run_set_size(raw) == len(expand_scenarios(raw)) == 7
+    )  # 1 (BASELINE) ⊎ 2 ⊎ (1 + 3)
 
 
 def test_run_set_size_malformed_axis_counts_zero():
@@ -297,7 +307,7 @@ def test_deep_merge_plain_lists_replace():
 
 
 def test_load_yaml_with_inheritance_sweeps_inherited_scenario_not(tmp_path: Path):
-    """``sweep:`` is inherited through ``from:``; ``scenario:`` is not.
+    """``sweep:`` is inherited through ``from:``; ``scenarios:`` is not.
 
     A parent's named run-set must not leak into a child overlay, but a child
     legitimately re-runs the parent's parameter sweep with overrides.
@@ -307,7 +317,7 @@ def test_load_yaml_with_inheritance_sweeps_inherited_scenario_not(tmp_path: Path
         "metadata: {scenario_id: PARENT}\n"
         "sweep:\n"
         "  T: {path: metadata.t, values: [1, 2]}\n"
-        "scenario:\n"
+        "scenarios:\n"
         "  variant_a: {metadata: {x: 1}}\n",
         encoding="utf-8",
     )
@@ -317,5 +327,5 @@ def test_load_yaml_with_inheritance_sweeps_inherited_scenario_not(tmp_path: Path
     )
     cfg = load_yaml_with_inheritance(child)
     assert cfg["metadata"]["scenario_id"] == "CHILD"
-    assert "scenario" not in cfg
+    assert "scenarios" not in cfg
     assert cfg["sweep"]["T"]["values"] == [1, 2]

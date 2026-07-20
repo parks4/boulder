@@ -1,7 +1,7 @@
 """Generic scenario/sweep runner → composite collection store (for the GUI Run Sweep).
 
 Invoked out-of-process by the ``/api/sweep`` routes for any config that declares
-``scenario:`` and/or ``sweep:``. It:
+``scenarios:`` and/or ``sweep:``. It:
 
 1. loads the raw config (``from:`` inheritance resolved),
 2. expands the union run-set with :func:`boulder.runset.expand_scenarios`,
@@ -38,7 +38,7 @@ import copy
 import os
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Type
 
 import h5py
 
@@ -73,7 +73,9 @@ def _default_resolve_mechanism(plugins: BoulderPlugins) -> Callable[[str], str]:
     state (true for the base class, and any host override should preserve
     this too).
     """
-    converter_cls = plugins.converter_class or DualCanteraConverter
+    converter_cls: Type[DualCanteraConverter] = (
+        plugins.converter_class or DualCanteraConverter
+    )
     instance = converter_cls.__new__(converter_cls)
     return instance.resolve_mechanism
 
@@ -224,7 +226,7 @@ def run(
     Parameters
     ----------
     cfg_path : Path
-        The STONE config declaring ``scenario:`` / ``sweep:``.
+        The STONE config declaring ``scenarios:`` / ``sweep:``.
     setup : callable, optional
         Called once before anything else — host process-level preparation
         (e.g. registering a mechanism directory on Cantera's search path).
@@ -311,7 +313,7 @@ def run(
 
 def main(argv: "list[str] | None" = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("config", help="STONE config with scenario:/sweep:")
+    parser.add_argument("config", help="STONE config with scenarios:/sweep:")
     parser.add_argument("--no-plot", action="store_true", help="(accepted, ignored)")
     args = parser.parse_args(argv)
     run(Path(args.config).resolve())
