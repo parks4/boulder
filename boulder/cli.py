@@ -159,9 +159,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sweep",
         action="store_true",
         help=(
-            "Headless run-set runner: expand the config's scenario:/sweep: blocks, "
-            "solve every run, and serialize each into the collection store. Uses a "
-            "host-registered sweep runner (BoulderPlugins.sweep_runner). No web UI."
+            "Expand the config's scenario:/sweep: blocks and run the whole "
+            "run-set instead of just the base case. GUI mode (default): opens "
+            "the web UI with the run-set already running (Run Sweep, not Run "
+            "Simulation). With --headless: run-set runner only, no web UI — "
+            "expand, solve every run, and serialize each into the collection "
+            "store via a host-registered sweep runner "
+            "(BoulderPlugins.sweep_runner)."
         ),
     )
     parser.add_argument(
@@ -169,8 +173,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Run immediately on startup. GUI mode: auto-start the run on load "
-            "(with --sweep, the whole run-set). --headless: solve the case now "
-            "(no GUI, no codegen). --headless requires --run or --download."
+            "(--sweep already implies this for the run-set; use --run without "
+            "--sweep to auto-start a plain single-case run). --headless: solve "
+            "the case now (no GUI, no codegen). --headless requires --run, "
+            "--sweep, or --download."
         ),
     )
     parser.add_argument(
@@ -550,8 +556,9 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     # --sweep is "Run Sweep mode":
     #   * with --headless → run the whole run-set now, no GUI (delegates to the
     #     host-registered BoulderPlugins.sweep_runner; Boulder stays host-agnostic).
-    #   * without --headless → launch the GUI with Run Sweep as the default action
-    #     and the (pre-computed) scenario store shown in the pane (BOULDER_SWEEP_MODE).
+    #   * without --headless → launch the GUI with Run Sweep as the default action,
+    #     auto-started on load (BOULDER_SWEEP_MODE + BOULDER_AUTORUN), and the
+    #     (pre-computed) scenario store shown in the pane.
     if args.sweep and args.headless:
         if not args.config:
             print("Error: --sweep requires a config file", file=sys.stderr)
@@ -572,8 +579,12 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
         cmd = [sys.executable, *runner, str(_Path(args.config).resolve())]
         sys.exit(subprocess.call(cmd))
     if args.sweep:
-        # GUI sweep mode — read by the lifespan / frontend.
+        # GUI sweep mode — read by the lifespan / frontend. Also autoruns (like
+        # --run does for a plain simulation): --sweep is a strong enough signal
+        # of intent that defaulting the split button without running it just
+        # forces an extra click every time.
         os.environ["BOULDER_SWEEP_MODE"] = "1"
+        os.environ["BOULDER_AUTORUN"] = "1"
     if args.run and not args.headless:
         # GUI auto-run on startup — read by the lifespan / frontend.
         os.environ["BOULDER_AUTORUN"] = "1"
