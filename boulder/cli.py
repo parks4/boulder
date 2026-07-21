@@ -159,13 +159,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sweep",
         action="store_true",
         help=(
-            "Headless run-set runner: expand the config's scenarios:/sweep: blocks, "
-            "solve every run, and serialize each into the collection store. GUI mode: opens "
+            "Expand the config's scenarios:/sweep: blocks and run the whole "
+            "run-set instead of just the base case. GUI mode (default): opens "
             "the web UI with the run-set already running (Run Sweep, not Run "
             "Simulation). With --headless: run-set runner only, no web UI — "
             "expand, solve every run, and serialize each into the collection "
             "store via a host-registered sweep runner "
-            "(BoulderPlugins.sweep_runner).
+            "(BoulderPlugins.sweep_runner)."
         ),
     )
     parser.add_argument(
