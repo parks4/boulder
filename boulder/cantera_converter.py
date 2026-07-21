@@ -13,6 +13,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    Type,
     cast,
 )
 
@@ -113,6 +114,19 @@ class BoulderPlugins:
     cyto_element_synthesizers: List[
         Callable[[Dict[str, Any]], List[Dict[str, Any]]]
     ] = field(default_factory=list)
+
+    #: Converter class used by :mod:`boulder.sweep_runner` to solve each
+    #: scenario, and (when a caller doesn't pass ``resolve_mechanism``
+    #: explicitly) to derive the mechanism-name resolver used for
+    #: fingerprinting and the persisted store too. ``None`` (the default)
+    #: means the plain :class:`DualCanteraConverter` — bare mechanism names
+    #: pass through unchanged. A host with its own mechanism search
+    #: convention (e.g. a private ``data/mechanisms/`` directory) registers
+    #: its ``DualCanteraConverter`` subclass here instead of only wiring
+    #: ``resolve_mechanism`` overrides into the GUI-server's own
+    #: ``runner_class.converter_class`` path — otherwise out-of-process
+    #: entry points like the sweep runner never see that override at all.
+    converter_class: Optional[Type[Any]] = None
 
     #: Per-source provenance for introspection (``boulder plugins list``).
     #: ``{"entry_point": [(ep_name, module)], "env_var": [module_name]}``.

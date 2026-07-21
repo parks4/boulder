@@ -1,19 +1,21 @@
-"""STONE run-set primitives: inline ``scenario:`` / ``sweep:`` expansion.
+"""STONE run-set primitives: inline ``scenarios:`` / ``sweep:`` expansion.
 
 A STONE YAML may declare parameter variations inline (STONE_SPECIFICATIONS.md,
 Section 14), avoiding a glob of overlay files:
 
-``scenario:``
+``scenarios:``
     Mapping ``{id: overlay-subtree}``. Each value is a STONE subtree
     (``metadata``/``settings``/``network``/…) deep-merged onto the base via
     :func:`deep_merge` (which supports id-keyed ``nodes``/``connections``
     merging) — exactly the overlay a standalone ``from:`` file carries. The
-    mapping **key is the scenario id**.
+    mapping **key is the scenario id**. (A *list*-valued top-level
+    ``scenarios:`` is the legacy pre-mapping dialect and is rejected —
+    see :func:`expand_scenarios`.)
 
 ``sweep:`` (or ``sweeps:``)
     Mapping axis name → ``{path, values | min/max/num}``, crossed as a
     Cartesian product. May appear at the top level (expanded on the base) or
-    *inside* a ``scenario:`` entry (expanded on that scenario only).
+    *inside* a ``scenarios:`` entry (expanded on that scenario only).
 
 This module is the reference implementation of those semantics: the Run Sweep
 API sizes run-sets with :func:`run_set_size`, and the generic
@@ -31,6 +33,14 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+
+#: Scenario id for the unmodified base config's own run-set entry, added
+#: automatically whenever a ``scenarios:`` mapping is declared (see
+#: :func:`expand_scenarios`). Reserved: a host must reject this as a
+#: user-authored scenario id (see ``scenario_editor._validate_id``) since a
+#: config could otherwise define its own "BASELINE" overlay that collides
+#: with this synthesized entry.
+BASELINE_SCENARIO_ID = "BASELINE"
 
 # ---------------------------------------------------------------------------
 # Deep merge with id-keyed list support (the STONE overlay merge).
@@ -117,7 +127,7 @@ def load_yaml_with_inheritance(path: "str | Path") -> dict:
     ``from``). Relative ``from`` paths are resolved against the current file
     directory.
 
-    The ``scenario:`` directive is **not inherited**: a named scenario mapping
+    The ``scenarios:`` directive is **not inherited**: a named scenario mapping
     declares *this* file's run-set, so a parent's scenarios must not leak into
     a child (which would re-run them against the child's base). ``sweep:`` /
     ``sweeps:`` **are** inherited — a child overlay legitimately re-runs the
@@ -145,7 +155,7 @@ def load_yaml_with_inheritance(path: "str | Path") -> dict:
 
     parent_path = (path.parent / str(from_path)).resolve()
     base = load_yaml_with_inheritance(parent_path)
-    base.pop("scenario", None)  # the named run-set is not inherited (sweeps are)
+    base.pop("scenarios", None)  # the named run-set is not inherited (sweeps are)
     return deep_merge(base, overlay)
 
 
@@ -224,16 +234,19 @@ def _sweep_size(sweeps_block: dict) -> int:
 
 
 def run_set_size(raw: Dict[str, Any]) -> int:
-    """Return the union run-set size of a config's ``scenario:``/``sweep:`` blocks.
+    """Return the union run-set size of a config's ``scenarios:``/``sweep:`` blocks.
 
-    Global sweep points ⊎ each ``scenario:`` entry (its inner sweep, else 1) —
-    the same union semantics :func:`expand_scenarios` implements, computed
-    without deep-merging or resolving sweep paths (cheap enough for an
-    availability endpoint).
+    The unmodified base config (:data:`BASELINE_SCENARIO_ID`) ⊎ global sweep
+    points ⊎ each ``scenarios:`` entry (its inner sweep, else 1) — the same
+    union semantics :func:`expand_scenarios` implements, computed without
+    deep-merging or resolving sweep paths (cheap enough for an availability
+    endpoint).
     """
-    scenario = raw.get("scenario") or {}
-    total = _sweep_size(sweeps_of(raw))
-    for overlay in scenario.values():
+    scenarios = raw.get("scenarios") or {}
+    scenarios = scenarios if isinstance(scenarios, dict) else {}
+    total = 1 if scenarios else 0
+    total += _sweep_size(sweeps_of(raw))
+    for overlay in scenarios.values():
         inner = sweeps_of(overlay or {})
         total += _sweep_size(inner) if inner else 1
     return total
@@ -270,10 +283,10 @@ def expand_scenarios(
     symbols: Optional[Mapping[str, str]] = None,
     schema_entry: Optional[Callable[[str], Any]] = None,
 ) -> List[Tuple[str, dict]]:
-    """Expand a STONE YAML's inline ``scenario:`` / ``sweep:`` blocks.
+    """Expand a STONE YAML's inline ``scenarios:`` / ``sweep:`` blocks.
 
     **Union semantics** (not a global cross-product): the run set is the
-    base's global-sweep points **⊎** each ``scenario:`` entry (each expanded
+    base's global-sweep points **⊎** each ``scenarios:`` entry (each expanded
     across its *own* inner sweep if it declares one). A top-level sweep and
     the scenarios do not cross-multiply.
 
@@ -299,20 +312,25 @@ def expand_scenarios(
     -------
     list of tuple
         ``[(scenario_id, merged_config_dict), ...]``. Each merged dict is a
-        deep copy with the ``scenario``/``sweep`` directives stripped, and
-        ``metadata.scenario_id`` set to the scenario id.
+        deep copy with the ``scenarios``/``sweep`` directives stripped, and
+        ``metadata.scenario_id`` set to the scenario id. When a ``scenarios:``
+        mapping is declared, the unmodified base config is always the first
+        entry, id :data:`BASELINE_SCENARIO_ID` — otherwise it would never be
+        part of the run-set at all (the union below only covers the named
+        overlays), so ``Run Sweep`` would silently never solve it.
     """
-    if "scenarios" in base_raw:
+    raw_scenarios = base_raw.get("scenarios")
+    if isinstance(raw_scenarios, list):
         raise ValueError(
-            "top-level 'scenarios:' (list of {id, set, metadata}) is no longer "
-            "supported; migrate to the 'scenario:' mapping form — "
-            "'scenario: {<scenario_id>: <overlay-subtree>}'. See "
+            "top-level 'scenarios:' as a list ([{id, set, metadata}, ...]) is "
+            "no longer supported; migrate to the mapping form — "
+            "'scenarios: {<scenario_id>: <overlay-subtree>}'. See "
             "boulder.runset.expand_scenarios."
         )
 
     base_meta = base_raw.get("metadata") or {}
     base_id = base_meta.get("scenario_id", "BASE")
-    scenario_block = base_raw.get("scenario") or {}
+    scenario_block = raw_scenarios or {}
     global_sweeps = sweeps_of(base_raw)
 
     if not scenario_block and not global_sweeps:
@@ -323,13 +341,23 @@ def expand_scenarios(
 
     # Strip the directives from the base so downstream consumers never see them.
     base_clean = copy.deepcopy(base_raw)
-    for key in ("scenario", "sweep", "sweeps"):
+    for key in ("scenarios", "sweep", "sweeps"):
         base_clean.pop(key, None)
 
     expanded: List[Tuple[str, dict]] = []
 
     def _with_id(cfg: dict, sid: str) -> dict:
         return deep_merge(cfg, {"metadata": {"scenario_id": sid}})
+
+    # 0) The unmodified base config, always first -- named scenarios: overlays
+    # only add to the run-set, they never stand in for the base itself.
+    if scenario_block:
+        expanded.append(
+            (
+                BASELINE_SCENARIO_ID,
+                _with_id(copy.deepcopy(base_clean), BASELINE_SCENARIO_ID),
+            )
+        )
 
     # 1) Global sweep points, expanded on the base.
     for sweep_id, patch in (

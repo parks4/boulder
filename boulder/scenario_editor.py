@@ -1,4 +1,4 @@
-"""Scenario authoring: create/update/delete a named ``scenario:`` overlay on disk.
+"""Scenario authoring: create/update/delete a named ``scenarios:`` overlay on disk.
 
 Complements :mod:`boulder.api.routes.scenarios` (which only *reads* precomputed
 trajectories from the HDF5 scenario store) with the input side of the Scenario
@@ -6,7 +6,7 @@ Pane: creating a new scenario adds a new named overlay, editing it changes
 only that overlay's subtree, and ``Run Sweep`` is what turns overlays into
 trajectories.
 
-Every function here mutates only the targeted ``scenario.<id>`` subtree of the
+Every function here mutates only the targeted ``scenarios.<id>`` subtree of the
 YAML on disk via ``ruamel.yaml`` — nodes, connections, settings, and comments
 elsewhere in the file are left untouched.
 """
@@ -26,8 +26,14 @@ from .config import (
     load_yaml_string_with_comments,
     yaml_to_string_with_comments,
 )
+from .runset import BASELINE_SCENARIO_ID
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+#: Scenario ids a user cannot author — reserved for a synthesized run-set
+#: entry (see boulder.runset.expand_scenarios). A user-declared "scenarios:"
+#: entry with a reserved id would otherwise collide with that synthesized one.
+_RESERVED_SCENARIO_IDS = frozenset({BASELINE_SCENARIO_ID})
 
 
 class ScenarioEditError(ValueError):
@@ -38,6 +44,11 @@ def _validate_id(scenario_id: str) -> None:
     if not scenario_id or not _ID_RE.match(scenario_id):
         raise ScenarioEditError(
             f"Invalid scenario id {scenario_id!r}: use letters, digits, '_' or '-' only"
+        )
+    if scenario_id in _RESERVED_SCENARIO_IDS:
+        raise ScenarioEditError(
+            f"Scenario id {scenario_id!r} is reserved (the unmodified base "
+            "config's own run-set entry) and cannot be used for an authored scenario"
         )
 
 
@@ -61,10 +72,21 @@ def _overlay_yaml_text(overlay: Any) -> str:
 
 
 def list_scenario_ids(cfg_path: Path) -> List[str]:
-    """Return the ``scenario:`` mapping's keys, in file order."""
+    """Return the run-set's scenario ids, in run-set order.
+
+    The unmodified base config's own synthesized entry
+    (:data:`~boulder.runset.BASELINE_SCENARIO_ID`) is prepended whenever the
+    ``scenarios:`` mapping is non-empty — matching
+    :func:`boulder.runset.expand_scenarios`, which always solves it first —
+    so it's listed (and clonable, see :func:`create_scenario`) even before
+    the first Run Sweep.
+    """
     data = _load(cfg_path)
-    scenario_map = data.get("scenario") or {}
-    return list(scenario_map.keys())
+    scenario_map = data.get("scenarios") or {}
+    ids = list(scenario_map.keys())
+    if ids:
+        ids.insert(0, BASELINE_SCENARIO_ID)
+    return ids
 
 
 def create_scenario(
@@ -73,18 +95,20 @@ def create_scenario(
     """Add a new (blank or cloned) scenario overlay. Returns its YAML text."""
     _validate_id(scenario_id)
     data = _load(cfg_path)
-    scenario_map = data.get("scenario")
+    scenario_map = data.get("scenarios")
     if scenario_map is None:
         scenario_map = CommentedMap()
-        data["scenario"] = scenario_map
+        data["scenarios"] = scenario_map
     if scenario_id in scenario_map:
         raise ScenarioEditError(f"Scenario {scenario_id!r} already exists")
 
-    if base_scenario_id is not None:
+    if base_scenario_id is not None and base_scenario_id != BASELINE_SCENARIO_ID:
         if base_scenario_id not in scenario_map:
             raise ScenarioEditError(f"Unknown base scenario {base_scenario_id!r}")
         overlay = copy.deepcopy(scenario_map[base_scenario_id])
     else:
+        # No base, or cloning BASELINE (the unmodified base config) -- either
+        # way, a blank overlay: BASELINE has no overlay subtree of its own.
         overlay = CommentedMap()
 
     scenario_map[scenario_id] = overlay
@@ -95,7 +119,7 @@ def create_scenario(
 def read_scenario(cfg_path: Path, scenario_id: str) -> str:
     """Return one scenario overlay's YAML text (for the scoped editor)."""
     data = _load(cfg_path)
-    scenario_map = data.get("scenario") or {}
+    scenario_map = data.get("scenarios") or {}
     if scenario_id not in scenario_map:
         raise ScenarioEditError(f"Unknown scenario {scenario_id!r}")
     return _overlay_yaml_text(scenario_map[scenario_id])
@@ -104,7 +128,7 @@ def read_scenario(cfg_path: Path, scenario_id: str) -> str:
 def update_scenario(cfg_path: Path, scenario_id: str, yaml_text: str) -> str:
     """Replace one scenario overlay's subtree from edited YAML text."""
     data = _load(cfg_path)
-    scenario_map = data.get("scenario")
+    scenario_map = data.get("scenarios")
     if not scenario_map or scenario_id not in scenario_map:
         raise ScenarioEditError(f"Unknown scenario {scenario_id!r}")
     try:
@@ -122,7 +146,7 @@ def rename_scenario(cfg_path: Path, scenario_id: str, new_id: str) -> None:
     """Rename a scenario's key. Note: moves it to the end of the mapping."""
     _validate_id(new_id)
     data = _load(cfg_path)
-    scenario_map = data.get("scenario")
+    scenario_map = data.get("scenarios")
     if not scenario_map or scenario_id not in scenario_map:
         raise ScenarioEditError(f"Unknown scenario {scenario_id!r}")
     if new_id in scenario_map:
@@ -134,7 +158,7 @@ def rename_scenario(cfg_path: Path, scenario_id: str, new_id: str) -> None:
 def delete_scenario(cfg_path: Path, scenario_id: str) -> None:
     """Remove a scenario overlay. The next sweep prunes its stale HDF5 group."""
     data = _load(cfg_path)
-    scenario_map = data.get("scenario")
+    scenario_map = data.get("scenarios")
     if not scenario_map or scenario_id not in scenario_map:
         raise ScenarioEditError(f"Unknown scenario {scenario_id!r}")
     del scenario_map[scenario_id]

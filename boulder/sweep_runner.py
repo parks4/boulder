@@ -1,7 +1,7 @@
 """Generic scenario/sweep runner → composite collection store (for the GUI Run Sweep).
 
 Invoked out-of-process by the ``/api/sweep`` routes for any config that declares
-``scenario:`` and/or ``sweep:``. It:
+``scenarios:`` and/or ``sweep:``. It:
 
 1. loads the raw config (``from:`` inheritance resolved),
 2. expands the union run-set with :func:`boulder.runset.expand_scenarios`,
@@ -38,11 +38,11 @@ import copy
 import os
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Type
 
 import h5py
 
-from .cantera_converter import DualCanteraConverter, get_plugins
+from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
 from .config import normalize_config
 from .payload_store import write_payload
 from .runset import expand_scenarios, load_yaml_with_inheritance, resolve_store_path
@@ -51,6 +51,33 @@ from .runset import expand_scenarios, load_yaml_with_inheritance, resolve_store_
 def _mechanism_of(raw: Dict[str, Any]) -> str:
     gas = (raw.get("phases") or {}).get("gas") or {}
     return str(gas.get("mechanism") or "")
+
+
+def _default_resolve_mechanism(plugins: BoulderPlugins) -> Callable[[str], str]:
+    """Derive a mechanism-name resolver from ``plugins.converter_class``.
+
+    Used whenever a caller doesn't pass ``resolve_mechanism`` explicitly, so a
+    host that registers its own converter subclass (for its own mechanism
+    search convention) gets consistent resolution everywhere -- the actual
+    solve (:func:`_solve`), the cache fingerprint, and what's persisted to the
+    store -- without every call site needing to know about the plugin. Falls
+    back to the base :class:`DualCanteraConverter`'s passthrough
+    (``resolve_mechanism`` returns its argument unchanged) when no converter
+    class is registered.
+
+    Uses ``__new__`` rather than a normal constructor call: ``__init__``
+    eagerly loads a real ``ct.Solution`` for the (possibly default)
+    mechanism, which would be wasteful -- or outright fail for a host with no
+    sensible default -- just to obtain a method reference. This assumes
+    ``resolve_mechanism`` overrides don't depend on ``__init__``-set instance
+    state (true for the base class, and any host override should preserve
+    this too).
+    """
+    converter_cls: Type[DualCanteraConverter] = (
+        plugins.converter_class or DualCanteraConverter
+    )
+    instance = converter_cls.__new__(converter_cls)
+    return instance.resolve_mechanism
 
 
 def scenario_fingerprint(
@@ -65,15 +92,18 @@ def scenario_fingerprint(
     writer both call this; do not re-implement the cache key elsewhere.
     ``extra`` mixes caller-specific inputs into the hash (e.g. a save grid that
     lives outside the solved network config). ``resolve_mechanism`` maps a bare
-    mechanism name to the identity actually hashed (hosts pass their
-    name→absolute-path resolver so fingerprints match their store contents).
+    mechanism name to the identity actually hashed — defaults to the resolver
+    derived from ``plugins.converter_class`` (see
+    :func:`_default_resolve_mechanism`) so fingerprints match the store
+    contents without the caller needing to pass its own resolver explicitly.
     """
     from .result_cache import compute_fingerprint  # noqa: PLC0415
 
     plugins = get_plugins()
     config = normalize_config(copy.deepcopy(raw_cfg), plugins=plugins)
     mechanism = _mechanism_of(raw_cfg)
-    if resolve_mechanism is not None:
+    if mechanism:
+        resolve_mechanism = resolve_mechanism or _default_resolve_mechanism(plugins)
         mechanism = resolve_mechanism(mechanism)
     return compute_fingerprint(config, mechanism=mechanism, extra=extra)
 
@@ -92,7 +122,11 @@ def _prepare(
     plugins = get_plugins()
     config = normalize_config(copy.deepcopy(raw_cfg), plugins=plugins)
     mechanism = _mechanism_of(raw_cfg)
-    hashed = resolve_mechanism(mechanism) if resolve_mechanism else mechanism
+    if mechanism:
+        resolve_mechanism = resolve_mechanism or _default_resolve_mechanism(plugins)
+        hashed = resolve_mechanism(mechanism)
+    else:
+        hashed = mechanism
     fingerprint = compute_fingerprint(config, mechanism=hashed)
     return config, mechanism, fingerprint
 
@@ -100,7 +134,8 @@ def _prepare(
 def _solve(config: Dict[str, Any], mechanism: str) -> Tuple[Dict[str, Any], str]:
     """Solve one normalized scenario config → (gui_payload, resolved mechanism)."""
     plugins = get_plugins()
-    conv = DualCanteraConverter(mechanism=mechanism or None, plugins=plugins)
+    converter_cls = plugins.converter_class or DualCanteraConverter
+    conv = converter_cls(mechanism=mechanism or None, plugins=plugins)
     conv.build_network(config)
 
     settings = config.get("settings") or {}
@@ -191,13 +226,15 @@ def run(
     Parameters
     ----------
     cfg_path : Path
-        The STONE config declaring ``scenario:`` / ``sweep:``.
+        The STONE config declaring ``scenarios:`` / ``sweep:``.
     setup : callable, optional
         Called once before anything else — host process-level preparation
         (e.g. registering a mechanism directory on Cantera's search path).
     resolve_mechanism : callable, optional
         ``name -> str`` mapping a bare mechanism name to the identity stored
-        and hashed (typically an absolute path). Defaults to the name itself.
+        and hashed (typically an absolute path). Defaults to the resolver
+        derived from ``plugins.converter_class`` (see
+        :func:`_default_resolve_mechanism`).
     scenario_attrs : callable, optional
         ``(scenario_id, merged_config, gui_payload) -> dict`` of extra scalar
         attributes written onto the scenario's HDF5 group after each solve —
@@ -211,7 +248,9 @@ def run(
     """
     if setup is not None:
         setup()
-    _resolve = resolve_mechanism or (lambda name: name)
+    plugins = get_plugins()
+    _do_resolve = resolve_mechanism or _default_resolve_mechanism(plugins)
+    _resolve = lambda name: _do_resolve(name) if name else name  # noqa: E731
     raw = load_yaml_with_inheritance(cfg_path)
     store = resolve_store_path(raw, cfg_path)
     assert store is not None  # cfg_path is always set here
@@ -274,7 +313,7 @@ def run(
 
 def main(argv: "list[str] | None" = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("config", help="STONE config with scenario:/sweep:")
+    parser.add_argument("config", help="STONE config with scenarios:/sweep:")
     parser.add_argument("--no-plot", action="store_true", help="(accepted, ignored)")
     args = parser.parse_args(argv)
     run(Path(args.config).resolve())

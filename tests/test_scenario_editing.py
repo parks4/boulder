@@ -1,7 +1,7 @@
 """Tests for scenario authoring: POST/PATCH/DELETE /api/scenarios*.
 
 Unlike the read routes in ``test_scenario_focus.py`` (which serve precomputed
-HDF5 trajectories), these edit the *source* config file's ``scenario:``
+HDF5 trajectories), these edit the *source* config file's ``scenarios:``
 mapping on disk — the input side of the Scenario Pane's create/edit workflow.
 """
 
@@ -30,7 +30,7 @@ network:
       temperature: 298.15
       pressure: 101325
       composition: "CH4:1"
-scenario:
+scenarios:
   base_case:
     metadata:
       scenario_name: "Base Case"
@@ -76,9 +76,9 @@ def test_create_scenario_blank(tmp_path: Path) -> None:
         resp = client.post("/api/scenarios", json={"scenario_id": "new1"})
         assert resp.status_code == 200, resp.text
         assert resp.json()["scenario_id"] == "new1"
-        assert _scenario_ids(cfg) == ["base_case", "new1"]
+        assert _scenario_ids(cfg) == ["BASELINE", "base_case", "new1"]
         # preloaded_raw refreshed so Run Sweep sees the new scenario immediately.
-        assert "new1" in (app.state.preloaded_raw.get("scenario") or {})
+        assert "new1" in (app.state.preloaded_raw.get("scenarios") or {})
         # The pre-existing comment elsewhere in the file survives.
         assert "keep this comment" in cfg.read_text(encoding="utf-8")
     finally:
@@ -116,6 +116,39 @@ def test_create_scenario_bad_id_422(tmp_path: Path) -> None:
     try:
         resp = client.post("/api/scenarios", json={"scenario_id": "bad id!"})
         assert resp.status_code == 422
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_create_scenario_reserved_baseline_id_422(tmp_path: Path) -> None:
+    """BASELINE is reserved for the synthesized unmodified-base entry.
+
+    A user-authored "scenarios: {BASELINE: ...}" would otherwise collide with
+    it in expand_scenarios' run-set.
+    """
+    cfg = _write_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.post("/api/scenarios", json={"scenario_id": "BASELINE"})
+        assert resp.status_code == 422
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_create_scenario_clone_from_baseline_is_blank(tmp_path: Path) -> None:
+    """Cloning "BASELINE" must produce a blank overlay, not an unknown-base error.
+
+    BASELINE is the unmodified base config, not a real scenario_map entry.
+    """
+    cfg = _write_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.post(
+            "/api/scenarios",
+            json={"scenario_id": "from_baseline", "base_scenario_id": "BASELINE"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["yaml"].strip() in ("", "{}")
     finally:
         client.__exit__(None, None, None)
 
@@ -167,7 +200,7 @@ def test_update_scenario(tmp_path: Path) -> None:
         assert "Updated" in resp.json()["yaml"]
         assert "350.0" in cfg.read_text(encoding="utf-8")
         assert (
-            app.state.preloaded_raw["scenario"]["base_case"]["metadata"][
+            app.state.preloaded_raw["scenarios"]["base_case"]["metadata"][
                 "scenario_name"
             ]
             == "Updated"
@@ -206,7 +239,7 @@ def test_rename_scenario(tmp_path: Path) -> None:
             "/api/scenarios/base_case/rename", json={"new_id": "renamed"}
         )
         assert resp.status_code == 200, resp.text
-        assert _scenario_ids(cfg) == ["renamed"]
+        assert _scenario_ids(cfg) == ["BASELINE", "renamed"]
     finally:
         client.__exit__(None, None, None)
 
@@ -218,7 +251,7 @@ def test_delete_scenario(tmp_path: Path) -> None:
         resp = client.delete("/api/scenarios/base_case")
         assert resp.status_code == 200, resp.text
         assert _scenario_ids(cfg) == []
-        assert not (app.state.preloaded_raw.get("scenario") or {})
+        assert not (app.state.preloaded_raw.get("scenarios") or {})
     finally:
         client.__exit__(None, None, None)
 
@@ -288,7 +321,7 @@ def test_list_scenarios_includes_authored_ids_without_a_store(tmp_path: Path) ->
         assert resp.status_code == 200
         body = resp.json()
         assert body["available"] is False
-        assert body["authored_ids"] == ["base_case"]
+        assert body["authored_ids"] == ["BASELINE", "base_case"]
     finally:
         client.__exit__(None, None, None)
 
@@ -301,7 +334,7 @@ def test_list_scenarios_authored_ids_reflects_a_newly_created_scenario(
     try:
         client.post("/api/scenarios", json={"scenario_id": "new1"})
         resp = client.get("/api/scenarios")
-        assert resp.json()["authored_ids"] == ["base_case", "new1"]
+        assert resp.json()["authored_ids"] == ["BASELINE", "base_case", "new1"]
     finally:
         client.__exit__(None, None, None)
 

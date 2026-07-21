@@ -92,7 +92,7 @@ def _scenario_entries(h5_path: Path) -> List[Dict[str, Any]]:
 
 
 def _authored_scenario_ids(request: Request) -> List[str]:
-    """Return every scenario id currently in the config's `scenario:` mapping.
+    """Return every scenario id currently in the config's `scenarios:` mapping.
 
     Unlike the HDF5-derived list below (only scenarios a sweep has actually
     computed), this reflects the source YAML directly — so a scenario that
@@ -153,7 +153,7 @@ async def get_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# Scenario authoring — create/edit/delete a ``scenario:`` overlay on disk.
+# Scenario authoring — create/edit/delete a ``scenarios:`` overlay on disk.
 #
 # Unlike the read routes above (which serve precomputed HDF5 trajectories),
 # these operate on the *source* config file (``app.state.preloaded_config_path``)
@@ -196,7 +196,7 @@ def _reload_preloaded_state(request: Request, cfg_path: Path) -> None:
     """Refresh the in-memory preloaded config after an on-disk scenario edit.
 
     Mirrors the subset of the app's startup load that Run Sweep and the config
-    endpoints read (``preloaded_raw`` keeps ``scenario:``/``sweep:`` for the
+    endpoints read (``preloaded_raw`` keeps ``scenarios:``/``sweep:`` for the
     Run Sweep button; ``preloaded_config``/``preloaded_yaml`` back the editor
     panel). Cached simulation results are untouched — editing a scenario
     doesn't invalidate the base config's last solve.
@@ -263,7 +263,7 @@ async def update_scenario(
 async def rename_scenario(
     scenario_id: str, body: RenameScenarioRequest, request: Request
 ) -> Dict[str, Any]:
-    """Rename a scenario's id (its ``scenario:`` mapping key)."""
+    """Rename a scenario's id (its ``scenarios:`` mapping key)."""
     cfg_path = _require_config_path(request)
     try:
         from ...scenario_editor import ScenarioEditError
@@ -281,7 +281,7 @@ async def delete_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
     """Delete a scenario overlay and purge its cached trajectory, if any.
 
     Both happen immediately: the definition is removed from the config's
-    ``scenario:`` mapping, and the matching HDF5 group (if the active store
+    ``scenarios:`` mapping, and the matching HDF5 group (if the active store
     has one) is deleted right away — not left for the next Run Sweep to
     notice and prune. ``cache_purged`` in the response tells the caller
     whether there was actually a cached result to clear.

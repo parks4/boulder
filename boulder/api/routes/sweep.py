@@ -46,7 +46,7 @@ _RUNNER_NAME = "run_sweep.py"
 
 
 # Run-set sizing lives in boulder.runset (the reference implementation of the
-# scenario:/sweep: union semantics) — the old local mirror is gone.
+# scenarios:/sweep: union semantics) — the old local mirror is gone.
 _run_set_size = run_set_size
 
 
@@ -61,14 +61,14 @@ def _local_runner_path_for(config_path: Optional[str]) -> Optional[Path]:
 def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     """Return whether *raw* (the inheritance-resolved config) declares a run-set.
 
-    True when it has an inline ``scenario:``/``sweep:``/``sweeps:`` block, or a
+    True when it has an inline ``scenarios:``/``sweep:``/``sweeps:`` block, or a
     ``run_sweep.py`` sits next to the config (a host-defined run-set: the runner
     script decides the cases — e.g. adaptive/bisection sweeps a static ``sweep:``
     block can't express). Pure function of ``(raw, config_path)`` so both the
     request-scoped sweep routes and the app-startup lifespan can share one
     detection rule instead of re-deciding "is this a sweep config?" twice.
     """
-    if raw.get("scenario") or sweeps_of(raw):
+    if raw.get("scenarios") or sweeps_of(raw):
         return True
     return _local_runner_path_for(config_path) is not None
 

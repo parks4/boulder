@@ -1,4 +1,4 @@
-"""Run-set size accounting for the Run Sweep API (scenario: ⊎ sweep:, no host import)."""
+"""Run-set size accounting for the Run Sweep API (scenarios: ⊎ sweep:, no host import)."""
 
 from __future__ import annotations
 
@@ -13,28 +13,29 @@ def test_sweep_only_counts_cartesian():
 
 
 def test_scenario_only_counts_entries():
-    raw = {"scenario": {"a": {}, "b": {}, "c": {}}}
-    assert _run_set_size(raw) == 3
+    raw = {"scenarios": {"a": {}, "b": {}, "c": {}}}
+    # BASELINE (the unmodified base) + 3 named entries = 4.
+    assert _run_set_size(raw) == 4
 
 
 def test_union_not_cartesian():
     raw = {
         "sweep": {"T": {"values": [1, 2]}},
-        "scenario": {"hot": {}, "cold": {}},
+        "scenarios": {"hot": {}, "cold": {}},
     }
-    # 2 global sweep points + 2 scenarios = 4 (not 2×2).
-    assert _run_set_size(raw) == 4
+    # BASELINE + 2 global sweep points + 2 scenarios = 5 (not a cross product).
+    assert _run_set_size(raw) == 5
 
 
 def test_scenario_local_sweep_multiplies_only_itself():
     raw = {
-        "scenario": {
+        "scenarios": {
             "plain": {},
             "swept": {"sweep": {"T": {"values": [1, 2, 3]}}},
         }
     }
-    # plain (1) + swept's inner sweep (3) = 4.
-    assert _run_set_size(raw) == 4
+    # BASELINE (1) + plain (1) + swept's inner sweep (3) = 5.
+    assert _run_set_size(raw) == 5
 
 
 def test_empty_is_zero():
@@ -42,7 +43,7 @@ def test_empty_is_zero():
 
 
 def test_has_run_set_true_for_scenario_block():
-    assert has_run_set({"scenario": {"a": {}}}, None) is True
+    assert has_run_set({"scenarios": {"a": {}}}, None) is True
 
 
 def test_has_run_set_true_for_sweep_block():
@@ -60,7 +61,7 @@ def test_has_run_set_true_for_local_run_sweep_script(tmp_path: Path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text("metadata: {}\n", encoding="utf-8")
     (tmp_path / "run_sweep.py").write_text("", encoding="utf-8")
-    # No inline scenario:/sweep: block at all — the local runner script alone
+    # No inline scenarios:/sweep: block at all — the local runner script alone
     # is enough (host-defined run-set, e.g. the CH4 reactor-map sandbox).
     assert has_run_set({}, str(cfg)) is True
 

@@ -213,7 +213,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Resolve the scenario-inspector store (HDF5): explicit env override wins,
     # else the preloaded config's ``metadata.extra.scenario_store`` (or the
     # ``<stem>_scenarios.h5`` default) whenever there is a run-set to show —
-    # declared inline (``scenario:``/``sweep:``/``sweeps:``), a host
+    # declared inline (``scenarios:``/``sweep:``/``sweeps:``), a host
     # ``run_sweep.py`` next to the config, or ``--sweep`` (BOULDER_SWEEP_MODE).
     # Reuses the same detection the Run Sweep button uses (routes.sweep) so a
     # config with a run-set shows its precomputed Scenario Pane on plain

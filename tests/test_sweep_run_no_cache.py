@@ -33,7 +33,7 @@ network:
       temperature: 298.15
       pressure: 101325
       composition: "CH4:1"
-scenario:
+scenarios:
   a:
     metadata:
       scenario_name: "A"
@@ -49,7 +49,7 @@ def _client_with_local_runner(tmp_path: Path):
     client = TestClient(app)
     client.__enter__()
     app.state.preloaded_config_path = str(cfg)
-    app.state.preloaded_raw = {"scenario": {"a": {}}}
+    app.state.preloaded_raw = {"scenarios": {"a": {}}}
     return client, app
 
 
