@@ -23,6 +23,70 @@ Optional flags::
     boulder --host 0.0.0.0 --port 8050 --debug
     boulder some_file.yaml --no-open
 
+Running scenario sweeps
+------------------------
+
+A STONE config may declare extra cases inline via a top-level ``scenarios:``
+block (a mapping of ``id -> overlay``) and/or a ``sweep:``/``sweeps:`` block
+(a Cartesian-product parameter sweep). See ``STONE_SPECIFICATIONS.md``
+(Section 14) for the full schema. Whenever ``scenarios:`` is declared,
+Boulder always adds an unmodified copy of the base config as its own
+``BASELINE`` entry, first in the run set.
+
+**From the GUI**
+
+The sidebar's "Run Simulation" button is a **split button**: a small
+caret/chevron sits to its right (accessible name "Choose run action").
+Clicking it opens a menu with:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Option
+     - Description
+   * - Run Simulation
+     - Solve the single reactor as configured.
+   * - Force Run
+     - Solve ignoring cache.
+   * - Run Sweep
+     - Run *N* scenarios (the count is read live from the config).
+   * - Add Scenario…
+     - Create a new scenario overlay and edit its YAML.
+
+Selecting "Run Sweep" switches the split button's primary action to "Run
+Sweep (N scenarios)" — you then click the (now relabeled) primary button to
+actually start it. Passing ``--sweep`` on the command line (see below) skips
+this: the run-set starts automatically as soon as the page loads.
+
+The right-hand **Scenario Pane** lists every declared scenario (id, plus
+"Edit scenario YAML" / "Delete scenario" actions per entry) and an "Add
+Scenario" button to create new ones — before a sweep has run, it reads
+"Not computed yet — Run Sweep to solve them."
+
+.. note::
+
+   Screenshot placeholder — the sidebar with the "Run Simulation" split
+   button and its caret menu expanded (showing Run Simulation / Force Run /
+   Run Sweep / Add Scenario…), plus the Scenario Pane listing BASELINE and
+   the declared scenario ids.
+
+**From the CLI**
+
+::
+
+    boulder some_file.yaml --sweep              # GUI, run-set auto-started on load
+    boulder some_file.yaml --sweep --headless    # no GUI: run every scenario, print
+                                                  # "scenario N/M" progress, and write
+                                                  # <config-stem>_scenarios.h5
+
+**Both flags are required for a true headless run.** ``--sweep`` alone still
+starts a web server (with the run-set auto-started instead of requiring a
+click); ``--headless`` is what skips the server entirely and runs everything
+in the terminal. This is implemented by a host-registered
+``BoulderPlugins.sweep_runner`` (see :func:`boulder.sweep_runner.run`); a
+plain ``boulder`` install without a host plugin falls back to
+:class:`~boulder.cantera_converter.DualCanteraConverter` directly.
+
 Environment variables
 ---------------------
 

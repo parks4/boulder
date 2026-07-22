@@ -83,6 +83,20 @@ boulder config.yaml --headless --download output.py  # headless code generation
 boulder --dev                                # run in development mode with Vite dev server
 ```
 
+### Running scenario sweeps
+
+A config declaring a top-level `scenarios:` block (mapping of `id -> overlay`)
+and/or `sweep:`/`sweeps:` block can be run as a whole run-set instead of just
+its base case — see [`docs/usage.rst`](docs/usage.rst#running-scenario-sweeps)
+for the full walkthrough (GUI split button + caret menu, Scenario Pane, and
+the CLI's `--sweep` / `--sweep --headless` flags).
+
+```bash
+boulder some_file.yaml --sweep              # GUI, run-set auto-started on load
+boulder some_file.yaml --sweep --headless   # no GUI: run every scenario, write
+                                             # <config-stem>_scenarios.h5
+```
+
 ### Development Mode
 
 You can start both the backend and frontend development server with a single command:
