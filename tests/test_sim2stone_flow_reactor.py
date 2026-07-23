@@ -68,9 +68,7 @@ def _surf_pfr_yaml(*, stop: float = 0.003, dt: float = 6.0e-5) -> str:
 
 def test_flow_reactor_axis_distance_validates() -> None:
     """``normalize_config`` accepts ``solver.axis: distance`` and defaults it to time."""
-    normalized = normalize_config(
-        load_yaml_string_with_comments(_surf_pfr_yaml())
-    )
+    normalized = normalize_config(load_yaml_string_with_comments(_surf_pfr_yaml()))
     validate_normalized_config(normalized)
     solver = normalized["groups"]["default"]["solver"]
     assert solver["axis"] == "distance"
@@ -118,9 +116,7 @@ def test_flow_reactor_builds_and_solves_distance_profile() -> None:
     and the resulting series is a distance profile (``is_spatial``/``x``, not
     a plain time series) showing real methane conversion along the bed.
     """
-    normalized = normalize_config(
-        load_yaml_string_with_comments(_surf_pfr_yaml())
-    )
+    normalized = normalize_config(load_yaml_string_with_comments(_surf_pfr_yaml()))
     converter = DualCanteraConverter(mechanism=_MECH)
     converter.build_network(normalized)
 
