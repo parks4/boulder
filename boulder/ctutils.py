@@ -31,6 +31,23 @@ def create_solution_from_spec(
     return ct.Solution(path)
 
 
+def create_interface_from_spec(
+    name: str,
+    phase_name: str,
+    *,
+    resolver: Optional[Callable[[str], str]] = None,
+) -> ct.Interface:
+    """Create a :class:`~cantera.Interface` (surface phase) from a mechanism file.
+
+    Mirrors :func:`create_solution_from_spec`, but for a named surface/interface
+    phase (e.g. a catalyst surface mechanism used by ``FlowReactorSurface``).
+    """
+    path, _ = parse_mechanism_spec(name)
+    if resolver is not None:
+        path = resolver(path)
+    return ct.Interface(path, phase_name)
+
+
 def get_mechanism_path(mechanism_str) -> str:
     """Return path (str) of Cantera mechanism.
 

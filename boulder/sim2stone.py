@@ -428,6 +428,35 @@ def _unique_walls(all_reactors: Set[ct.Reactor]) -> Set[ct.Wall]:
     return walls
 
 
+def _flow_reactor_surface_props(reactor: ct.Reactor) -> Optional[Dict[str, Any]]:
+    """Return a STONE ``surface:`` property block for a FlowReactor's attached surface.
+
+    Mirrors :meth:`DualCanteraConverter._build_flow_reactor_surface_phase` in
+    reverse: reads the phase name, site density, and coverages directly off the
+    live :class:`~cantera.ReactorSurface` -- no AST guessing needed, since (unlike
+    a Func1 schedule) a surface phase's current state is always fully readable.
+    Returns ``None`` when the reactor has no attached surface.
+    """
+    surfaces = list(getattr(reactor, "surfaces", []) or [])
+    if not surfaces:
+        return None
+    surf = surfaces[0]
+    phase = surf.phase
+    surface_props: Dict[str, Any] = {"phase": phase.name}
+    try:
+        site_density = float(phase.site_density)
+        if site_density > 0:
+            surface_props["site_density"] = site_density
+    except Exception:
+        pass
+    coverages = ", ".join(
+        f"{name}:{value:.6g}"
+        for name, value in zip(phase.species_names, phase.coverages)
+    )
+    surface_props["initial"] = {"coverages": coverages}
+    return surface_props
+
+
 def _flow_device_sort_key(dev: ct.FlowDevice) -> Tuple[str, str, str, str]:
     """Deterministic sort key for a flow device, stable across process runs.
 
@@ -509,13 +538,42 @@ def sim_to_internal_config(
                 "composition": _composition_to_string(phase),
             }
 
-            # Volume (Reservoirs have infinite / undefined volume)
-            try:
-                volume = float(r.volume)
-                if volume > 0:  # Only include positive volumes
-                    props["volume"] = volume
-            except (AttributeError, ValueError, TypeError):
-                pass
+            # Volume (Reservoirs have infinite / undefined volume). FlowReactor
+            # exposes `.volume` too (inherited from ReactorBase) but it isn't
+            # STONE's sizing basis for that kind (area + mass_flow_rate is) --
+            # emitting it would round-trip a meaningless property.
+            if node_type != "FlowReactor":
+                try:
+                    volume = float(r.volume)
+                    if volume > 0:  # Only include positive volumes
+                        props["volume"] = volume
+                except (AttributeError, ValueError, TypeError):
+                    pass
+
+            if node_type == "FlowReactor":
+                try:
+                    props["area"] = float(r.area)
+                except Exception:
+                    pass
+                # r.mass_flow_rate is write-only in the Cantera Python binding
+                # (AttributeError: "... is not readable") -- unlike a
+                # MassFlowController, this isn't a Func1-introspection
+                # limitation, it simply cannot be read back at all. Recover it
+                # from continuity (mdot = rho * u * A) using the readable
+                # density/speed/area instead.
+                try:
+                    props["mass_flow_rate"] = float(r.density * r.speed * r.area)
+                except Exception:
+                    pass
+                try:
+                    savr = float(r.surface_area_to_volume_ratio)
+                    if savr > 0:
+                        props["surface_area_to_volume_ratio"] = savr
+                except Exception:
+                    pass
+                surface_props = _flow_reactor_surface_props(r)
+                if surface_props is not None:
+                    props["surface"] = surface_props
 
             if hasattr(r, "energy_enabled"):
                 # Every Cantera reactor kind (not just ConstPressureReactor)
@@ -1052,6 +1110,30 @@ def sim_to_stone_yaml(
             )
         except Exception:
             pass
+
+    # solver.axis: distance -- a FlowReactor network is always distance-marched
+    # (Cantera's own ReactorNet.distance/.time dispatch, not a guessed pattern),
+    # so this is derived directly from node type rather than AST heuristics.
+    _has_flow_reactor = any(
+        n.get("type") == "FlowReactor" for n in internal.get("nodes", [])
+    )
+    if _has_flow_reactor:
+        _solver_cm = settings_cm.get("solver")
+        if _solver_cm is None:
+            from ruamel.yaml.comments import CommentedMap as _CM
+
+            _solver_cm = _CM()
+            settings_cm["solver"] = _solver_cm
+        _solver_cm["axis"] = "distance"
+        if "kind" not in _solver_cm:
+            _solver_cm["kind"] = "advance_grid"
+        if "grid" not in _solver_cm:
+            try:
+                stop = float(sim.distance)
+            except Exception:
+                stop = 1.0
+            _solver_cm["grid"] = {"start": 0.0, "stop": stop, "dt": stop / 500.0}
+
     stone_cm["settings"] = settings_cm
 
     # --- causal layer: signals / bindings ---

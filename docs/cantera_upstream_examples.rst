@@ -59,6 +59,13 @@ or in a per-stage ``groups.<id>.solver:`` block.
        a ``schedule:`` block drives ``reduced_electric_field`` on the
        plasma ``Solution``.  Requires ``clone: false`` on the reactor
        node.
+   * - ``surf_pfr.py``
+     - ``advance_grid`` with ``axis: distance``
+     - A ``FlowReactor`` (plug-flow, distance-marched) with a
+       ``FlowReactorSurface`` (``surface:`` property) for catalytic surface
+       chemistry.  ``network.advance(x)`` / ``ReactorNet.distance`` dispatch
+       on distance rather than time; state is sampled at every grid point
+       along the catalyst bed length.
 
 STONE example for ``combustor.py`` round-trip:
 
@@ -149,6 +156,45 @@ AST analysis and emits a causal-layer ``signals:`` + ``bindings:`` block.
          energy: "off"   # PlasmaPhase — cp_mole not implemented
          # clone: false — shares the Solution object with the Reservoir
 
+STONE example for ``surf_pfr.py`` round-trip:
+
+The ``surf_pfr.py`` script builds a ``ct.FlowReactor`` and attaches a
+``ct.ReactorSurface`` for catalytic chemistry, then marches
+``while sim.distance < length: sim.step()``. Boulder detects the
+``FlowReactor`` node type directly (no AST guessing needed, unlike a Func1
+schedule) and emits ``solver.axis: distance``. ``FlowReactor.mass_flow_rate``
+is write-only in the Cantera Python binding, so it is recovered from
+continuity (``mdot = rho * u * A``) using the readable ``density`` / ``speed``
+/ ``area`` attributes instead.
+
+.. code-block:: yaml
+
+   settings:
+     solver:
+       kind: advance_grid
+       axis: distance
+       grid:
+         start: 0.0
+         stop: 0.003        # final sim.distance reached (m)
+         dt: 6.0e-6
+
+   network:
+     - id: FlowReactor_0
+       FlowReactor:
+         area: 0.0001
+         mass_flow_rate: 5.943e-08   # recovered: density * speed * area
+         surface_area_to_volume_ratio: 300.0
+         surface:
+           phase: Pt_surf
+           site_density: 2.72e-08
+           initial:
+             coverages: "PT(S):0.93, H(S):0.026, CO(S):0.043, ..."
+         energy: "off"
+         initial:
+           temperature: 1073.15 K
+           pressure: 101325 Pa
+           composition: "CH4:1, O2:1.5, AR:0.1"
+
 Bundled scripts
 ---------------
 
@@ -170,6 +216,12 @@ Bundled scripts
      - Nanosecond plasma pulse; uses ``example_data/methane-plasma-pavan-2023.yaml``.
        `Original upstream source
        <https://github.com/Cantera/cantera/blob/main/samples/python/reactors/nanosecond_pulse_discharge.py>`__.
+   * - ``cantera_examples/surf_pfr.py``
+     - Plug-flow reactor with catalytic surface chemistry (``FlowReactor`` +
+       ``ReactorSurface``); uses ``methane_pox_on_pt.yaml``. ``--download`` is
+       ``xfail`` (not yet supported by ``download_script_emitter.py``).
+       `Original upstream source
+       <https://github.com/Cantera/cantera/blob/main/samples/python/reactors/surf_pfr.py>`__.
 
 Integration tests under ``tests/test_sim2stone/test_fixture_scripts_sim2stone.py``
 execute these scripts via ``sim2stone`` and Boulder headless paths (with

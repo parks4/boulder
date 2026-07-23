@@ -178,6 +178,31 @@ solver:
   reinitialize_between_chunks: true   # call network.reinitialize() after each chunk
 ```
 
+##### `solver.axis` — time vs. distance marching
+
+`solver.axis` is an optional label (`"time"` | `"distance"`, default `"time"`) naming the
+independent variable an `advance_grid` / `micro_step` solve marches over. It exists for stages
+built around a `FlowReactor` (see Node Kinds below): a plug-flow reactor is integrated along
+**distance**, not time, and Cantera's `ReactorNet.advance(x)` / `.step()` dispatch on whichever
+independent variable the network's reactors imply — `ReactorNet.distance` for a `FlowReactor`
+network, `ReactorNet.time` for every other reactor kind. `grid: { start, stop, dt }` keeps the
+same shape either way; `dt` is a step in the axis's own unit (s for `time`, m for `distance`).
+
+```yaml
+solver:
+  kind: advance_grid
+  axis: distance      # grid values below are meters, not seconds
+  grid:
+    start: 0.0
+    stop: 0.003        # 3 mm catalyst bed length
+    dt: 6.0e-5
+```
+
+`axis: distance` is opt-in and per-stage: it never changes the default (`time`) behaviour of
+existing `advance_to_steady_state` / `advance` / time-grid stages. A stage's recorded trajectory
+is tagged accordingly so the frontend plots it against position (m) instead of time (s) — see
+`FlowReactor` in Node Kinds.
+
 ### `export:`
 
 KPI functions, figure generators, calc-note targets. Consumed by downstream
@@ -419,6 +444,61 @@ Applicable to `ConstPressureReactor` and `IdealGasConstPressureReactor`:
 - id: isothermal
   ConstPressureReactor:
     energy: "off"   # "on" (default) or "off"
+```
+
+### `FlowReactor`
+
+A steady-state plug-flow reactor with constant cross-sectional area, integrated along **distance**
+(see `solver.axis: distance` above), not time. Pair with `solver.kind: advance_grid` (or
+`micro_step`) and `axis: distance` — Cantera's `ReactorNet.advance(x)` / `.distance` dispatch on
+the independent variable implied by the network's reactors.
+
+State placement follows the same `initial:` rules as other reactor kinds (top-level `temperature:`
+/ `composition:` / `mass_composition:` are invalid). Sizing is by `area:` + `mass_flow_rate:`, not
+`volume:` / `t_res_s:`.
+
+| Property | Required | Notes |
+|---|---|---|
+| `area:` | No | Cross-sectional area (m²). Changing it rescales flow speed to keep `mass_flow_rate` constant. |
+| `mass_flow_rate:` | No | Mass flow rate (kg/s) — a plain float, unlike `MassFlowController.mass_flow_rate` there is no Func1/schedule form. |
+| `surface_area_to_volume_ratio:` | No | Catalyst surface area per unit bed volume (1/m); only meaningful alongside `surface:`. |
+| `energy:` | No | `"on"` (default) or `"off"` — same convention as other energy-capable kinds. |
+| `surface:` | No | Attaches a `FlowReactorSurface` (catalytic surface chemistry) — see below. |
+
+```yaml
+- id: pfr
+  FlowReactor:
+    initial:
+      temperature: 1073.15 K
+      pressure: 1 atm
+      composition: "CH4:1, O2:1.5, AR:0.1"
+    area: 1.0e-4 m**2
+    mass_flow_rate: 1.7278e-05 kg/s
+    surface_area_to_volume_ratio: 300.0
+    energy: "off"
+```
+
+### `FlowReactorSurface` — `surface:` property on a `FlowReactor` node
+
+A `FlowReactor`'s `surface:` property attaches a `ct.ReactorSurface` (Cantera's general
+surface-chemistry class — there is no separate `ct.FlowReactorSurface` in the Cantera API) for
+catalytic reactions at the wall. Boulder builds the surface `Interface` phase **first** and derives
+the reactor's actual gas phase from `surface.adjacent[...]` — mirroring upstream Cantera's own
+`surf_pfr.py` pattern (`surf = ct.Interface(...); gas = surf.adjacent['gas']`) — since the interface
+kinetics reference that specific adjacent-phase object.
+
+| Property | Required | Notes |
+|---|---|---|
+| `phase:` | Yes | The `Interface` phase name within the mechanism file (e.g. `Pt_surf`). |
+| `mechanism:` | No | Surface mechanism file. Defaults to the `FlowReactor` node's own `mechanism:` — the common case is one file holding both the gas and surface phases. |
+| `site_density:` | No | Overrides the phase's default site density (mol/m²). |
+| `initial.coverages:` | No | `"species:fraction, species:fraction, ..."` — same string grammar as gas `composition:`. |
+
+```yaml
+    surface:
+      phase: Pt_surf
+      initial:
+        coverages: "PT(S): 0.7, O(S): 0.2, CO(S): 0.1"
 ```
 
 ### `Reservoir`
