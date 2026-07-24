@@ -108,6 +108,7 @@ Each item in a stage block or `network:` list is a YAML mapping:
 | `IdealGasReactor` | Reactor | Use `initial:` for seeding state |
 | `IdealGasConstPressureReactor` | Reactor | Const-pressure variant |
 | `IdealGasConstPressureMoleReactor` | Reactor | Mole-based const-pressure |
+| `FlowReactor` | Reactor | Plug-flow, distance-marched (`area:`, `mass_flow_rate:`); pair with `settings.solver.axis: distance`. Optional `surface:` property attaches a `FlowReactorSurface` (catalyst chemistry) |
 | `OutletSink` | Terminal | Visualization-only sink; cannot be a connection source |
 
 ## Connection Kinds
@@ -135,6 +136,7 @@ Numeric values may carry explicit units:
 | `mix_react_streams.yaml` | Mixer with two inlet streams and valve outlet |
 | `grouped_nodes.yaml` | Grouped reactors in one stage |
 | `staged_psr_pfr.yaml` | Two-stage PSR → PFR chain |
+| `surf_pfr.yaml` | `FlowReactor` + `FlowReactorSurface`: catalytic plug-flow, `solver.axis: distance` |
 
 ## Cantera Python examples (in `docs/cantera_examples/`)
 

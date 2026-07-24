@@ -1,0 +1,43 @@
+metadata:
+  title: Plug-flow reactor with surface chemistry (FlowReactor + FlowReactorSurface)
+  description: >-
+    Partial oxidation of methane over a platinum catalyst in a packed bed,
+    solved as a real ct.FlowReactor (distance-marched DAE), not a chain of
+    CSTRs. Mirrors upstream Cantera's surf_pfr.py example -- see
+    docs/cantera_examples/surf_pfr.py and STONE_SPECIFICATIONS.md
+    (solver.axis: distance).
+
+phases:
+  gas:
+    mechanism: methane_pox_on_pt.yaml
+
+network:
+- id: pfr
+  FlowReactor:
+    mechanism: methane_pox_on_pt.yaml
+    initial:
+      temperature: 1073.15 K
+      pressure: 1 atm
+      composition: "CH4:1, O2:1.5, AR:0.1"
+    area: 1.0e-4 m**2                     # 1 cm^2 catalyst bed cross-section
+    mass_flow_rate: 1.7278e-05 kg/s
+    surface_area_to_volume_ratio: 300.0   # 1/m -- catalyst particle area per bed volume
+    energy: "off"                         # isothermal bed
+    surface:
+      phase: Pt_surf
+      initial:
+        coverages: "PT(S): 0.7, O(S): 0.2, CO(S): 0.1"
+
+settings:
+  solver:
+    kind: advance_grid
+    axis: distance          # march by distance (m), not time -- see STONE_SPECIFICATIONS.md
+    grid:
+      start: 0.0
+      stop: 0.003            # 3 mm catalyst bed length
+      dt: 6.0e-5
+
+output:
+  pfr:
+  - "temperature, K"
+  - "pressure, Pa"

@@ -38,14 +38,20 @@ _FIXTURES: tuple[tuple[str, str], ...] = (
     ("combustor.py", "gri30.yaml"),
     ("reactor2.py", "gri30.yaml"),
     ("nanosecond_pulse_discharge.py", "example_data/methane-plasma-pavan-2023.yaml"),
+    ("surf_pfr.py", "methane_pox_on_pt.yaml"),
 )
 
 # Headless ``--download`` can still fail for some upstream examples:
 # - combustor: CVODE during staged solve on the extinguished end-state.
 # - nanosecond_pulse_discharge: PlasmaPhase ``cp_mole`` not implemented when the
 #   runner rebuilds/solves (sim2stone executing the .py alone may still succeed).
+# - surf_pfr: FlowReactor/FlowReactorSurface are not yet supported by
+#   download_script_emitter.py's reactor-type dispatch (a separate,
+#   code-generation-only pathway from cantera_converter.py's
+#   create_reactor_from_node). sim2stone YAML emission and headless
+#   --output-yaml + validate (exercised below, not xfail) work fully.
 _DOWNLOAD_XFAIL: frozenset[str] = frozenset(
-    {"combustor.py", "nanosecond_pulse_discharge.py"}
+    {"combustor.py", "nanosecond_pulse_discharge.py", "surf_pfr.py"}
 )
 
 _DOWNLOAD_PARAMS: list = []
@@ -134,6 +140,16 @@ def test_sim2stone_cantera_examples_yaml_valid(
         )
         assert "grid:" in yaml_text, "reactor2: missing grid: sub-block"
         assert "derived_via" in yaml_text, "reactor2: missing derived_via annotations"
+
+    elif script_name == "surf_pfr.py":
+        # FlowReactor / FlowReactorSurface: distance-axis solve + surface: block
+        assert "axis: distance" in yaml_text, "surf_pfr: missing solver.axis: distance"
+        assert "FlowReactor:" in yaml_text, "surf_pfr: missing FlowReactor node"
+        assert "mass_flow_rate" in yaml_text, (
+            "surf_pfr: missing mass_flow_rate (recovered via density*speed*area)"
+        )
+        assert "surface:" in yaml_text, "surf_pfr: missing surface: property block"
+        assert "Pt_surf" in yaml_text, "surf_pfr: missing surface phase name"
 
     cfg = load_config_file(str(out_yaml))
     normalized = normalize_config(cfg)

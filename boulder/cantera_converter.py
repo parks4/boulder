@@ -590,7 +590,7 @@ class _TrajectoryRecorder:
         self._converter = converter
         self._data: Dict[str, Dict[str, Any]] = {}
 
-    def record(self, t: float) -> None:
+    def record(self, t: float, axis: str = "time") -> None:
         try:
             reactors = self._converter._unique_non_reservoir_reactors()
         except Exception:  # noqa: BLE001 — recording must never break the solve
@@ -607,8 +607,10 @@ class _TrajectoryRecorder:
                     "X": [],
                     "Y": [],
                     "names": list(phase.species_names),
+                    "axis": axis,
                 },
             )
+            d["axis"] = axis
             d["t"].append(float(t))
             d["T"].append(float(phase.T))
             d["P"].append(float(phase.P))
@@ -626,7 +628,7 @@ class _TrajectoryRecorder:
             names = d["names"]
             xmat = np.asarray(d["X"], dtype=float)
             ymat = np.asarray(d["Y"], dtype=float)
-            out[rid] = {
+            series: Dict[str, Any] = {
                 "T": [float(v) for v in d["T"]],
                 "P": [float(v) for v in d["P"]],
                 "X": {
@@ -638,8 +640,17 @@ class _TrajectoryRecorder:
                     for j, sp in enumerate(names)
                 },
                 "t": [float(v) for v in d["t"]],
-                "is_residence": True,
             }
+            if d.get("axis") == "distance":
+                # Distance-marched (FlowReactor) trajectory: render as a
+                # spatial profile against position (m), reusing the existing
+                # is_spatial/x convention (see spatial_inference.py) instead
+                # of is_residence/t (a time-domain concept).
+                series["is_spatial"] = True
+                series["x"] = list(series["t"])
+            else:
+                series["is_residence"] = True
+            out[rid] = series
         return out
 
 
@@ -697,6 +708,11 @@ class DualCanteraConverter:
         self.reactor_meta: Dict[str, Dict[str, Any]] = {}
         self.connections: Dict[str, ct.FlowDevice] = {}
         self.walls: Dict[str, Any] = {}
+        # ReactorSurface objects attached to a FlowReactor node's `surface:`
+        # property (see create_reactor_from_node), keyed by the owning node id.
+        # Kept out of `self.reactors` -- a ReactorSurface is not a ct.Reactor and
+        # must never be handed to ct.ReactorNet() or the per-reactor series loop.
+        self.surfaces: Dict[str, ct.ReactorSurface] = {}
         self.network: Optional[ct.ReactorNet] = None
         self.code_lines: List[str] = []
         self.last_network: Optional[ct.ReactorNet] = (
@@ -1116,6 +1132,47 @@ class DualCanteraConverter:
                 type_name=typ,
             )
             reactor.name = rid
+        elif typ == "FlowReactor":
+            # Plug-flow reactor: integrated along distance (see solver.axis:
+            # distance in STONE_SPECIFICATIONS.md), not time. `mass_flow_rate`
+            # and `area` are plain floats on this Cantera class (unlike
+            # MassFlowController.mass_flow_rate, no Func1/schedule support).
+            flow_gas = gas_for_node
+            surf_phase: Optional[ct.Interface] = None
+            surface_spec = props.get("surface")
+            if isinstance(surface_spec, dict):
+                surf_phase, flow_gas = self._build_flow_reactor_surface_phase(
+                    rid, surface_spec, props, gas_for_node
+                )
+            flow_reactor = cast(
+                ct.FlowReactor,
+                build_reactor_with_energy(
+                    ct.FlowReactor,
+                    flow_gas,
+                    props=props,
+                    clone=clone,
+                    type_name=typ,
+                ),
+            )
+            reactor = flow_reactor
+            reactor.name = rid
+            if flow_gas is not gas_for_node:
+                # The reactor's true gas phase is the surface's adjacent bulk
+                # phase, not the generically-prepared gas_for_node -- keep
+                # reactor_meta (species names for reports/plots) in sync.
+                self.reactor_meta.setdefault(rid, {})["gas_solution"] = flow_gas
+            if "area" in props:
+                flow_reactor.area = float(props["area"])
+            if "mass_flow_rate" in props:
+                flow_reactor.mass_flow_rate = float(props["mass_flow_rate"])
+            if "surface_area_to_volume_ratio" in props:
+                flow_reactor.surface_area_to_volume_ratio = float(
+                    props["surface_area_to_volume_ratio"]
+                )
+            if surf_phase is not None:
+                self.surfaces[rid] = ct.ReactorSurface(
+                    surf_phase, flow_reactor, clone=clone, name=f"{rid}_surface"
+                )
         elif typ == "Reservoir":
             validate_explicit_energy(props, ct.Reservoir, typ)
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
@@ -1164,6 +1221,65 @@ class DualCanteraConverter:
                 self._schedule_callbacks.append(_ref_callback)
 
         return reactor
+
+    def _build_flow_reactor_surface_phase(
+        self,
+        rid: str,
+        surface_spec: Dict[str, Any],
+        flow_props: Dict[str, Any],
+        flow_gas: ct.Solution,
+    ) -> Tuple[ct.Interface, ct.Solution]:
+        """Build the ``Interface`` for a ``FlowReactor`` node's ``surface:`` property.
+
+        Cantera's surface-chemistry examples build the *surface* phase first and
+        obtain its adjacent bulk-gas phase via ``surf.adjacent[...]`` -- rather
+        than independently constructing a gas Solution and hoping Cantera
+        reconciles the two -- because the interface kinetics reference that
+        specific adjacent-phase object. Mirrors upstream Cantera's
+        ``surf_pfr.py``: ``surf = ct.Interface(...); gas = surf.adjacent['gas']``.
+
+        Returns
+        -------
+        (surf_phase, adjacent_gas)
+            The surface ``Interface`` (with coverages/site_density applied) and
+            its adjacent bulk-gas phase, seeded with *flow_gas*'s T/P/X -- this
+            replaces (does not mutate) the caller's ``gas_for_node``.
+        """
+        phase_name = surface_spec.get("phase")
+        if not phase_name:
+            raise ValueError(
+                f"FlowReactor '{rid}': 'surface.phase' is required (the Interface "
+                "phase name within the surface mechanism file, e.g. 'Pt_surf')."
+            )
+        surf_mech = str(
+            surface_spec.get("mechanism")
+            or flow_props.get("mechanism")
+            or self.mechanism
+        )
+        from .ctutils import create_interface_from_spec  # noqa: PLC0415
+
+        surf_phase = create_interface_from_spec(
+            surf_mech, phase_name, resolver=self.resolve_mechanism
+        )
+        surf_phase.TP = float(flow_gas.T), float(flow_gas.P)
+        if "site_density" in surface_spec:
+            surf_phase.site_density = float(surface_spec["site_density"])
+        initial = surface_spec.get("initial") or {}
+        coverages = initial.get("coverages", surface_spec.get("coverages"))
+        if coverages is not None:
+            surf_phase.coverages = (
+                self.parse_composition(coverages)
+                if isinstance(coverages, str)
+                else coverages
+            )
+        adjacent_gas = next(iter(surf_phase.adjacent.values()), None)
+        if adjacent_gas is None:
+            raise ValueError(
+                f"FlowReactor '{rid}': surface phase '{phase_name}' declares no "
+                "adjacent bulk phase in its mechanism file."
+            )
+        adjacent_gas.TPX = float(flow_gas.T), float(flow_gas.P), flow_gas.X
+        return surf_phase, adjacent_gas
 
     def build_connection(self, conn: Dict[str, Any]) -> None:
         """Create and register one Cantera flow device or wall from a connection dict.
@@ -1792,6 +1908,12 @@ class DualCanteraConverter:
             Stage identifier for error messages.
         """
         _scope_recorder = getattr(self, "_scope_recorder", None)
+        # axis: "time" (default) or "distance" -- see solver.axis in
+        # STONE_SPECIFICATIONS.md. A FlowReactor-only network raises
+        # CanteraError on `.time` ("Time is not the independent variable for
+        # this reactor network"), so `micro_step`'s polling loop must read
+        # `.distance` instead when this stage marches by distance.
+        axis = str(solver.get("axis", "time"))
 
         if kind == "advance_grid":
             grid_spec = solver.get("grid")
@@ -1811,7 +1933,7 @@ class DualCanteraConverter:
             for t in times:
                 network.advance(float(t))
                 if _scope_recorder is not None:
-                    _scope_recorder.record(float(t))
+                    _scope_recorder.record(float(t), axis=axis)
         elif kind == "micro_step":
             t_total = float(solver["t_total"])
             chunk_dt = float(solver["chunk_dt"])
@@ -1832,10 +1954,12 @@ class DualCanteraConverter:
                 self._fire_schedule_callbacks(network, t, t_end, stage_id)
                 if reinit:
                     network.reinitialize()
-                while network.time < t_end:
-                    network.advance(network.time + max_dt)
+                position = network.distance if axis == "distance" else network.time
+                while position < t_end:
+                    network.advance(position + max_dt)
+                    position = network.distance if axis == "distance" else network.time
                 if _scope_recorder is not None:
-                    _scope_recorder.record(t_end)
+                    _scope_recorder.record(t_end, axis=axis)
                 t = t_end
         else:
             raise ValueError(

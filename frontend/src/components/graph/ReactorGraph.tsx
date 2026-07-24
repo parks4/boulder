@@ -445,6 +445,7 @@ export function ReactorGraph() {
           "PFRThinShell",
           "PFRGasTemperatureProfile",
           "PFRWallProfile",
+          "FlowReactor",
         ].map((t) => `[type='${t}']`).join(", "),
         style: {
           shape: "rectangle",

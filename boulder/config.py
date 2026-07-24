@@ -94,10 +94,17 @@ TRANSIENT_SOLVER_KINDS: frozenset = frozenset(
 _SOLVER_KIND_TO_MODE = SOLVER_KIND_TO_MODE
 
 
+# Allowed values for solver.axis — the independent variable a transient/grid
+# solve marches over. "distance" is opt-in, for stages built around a
+# ``FlowReactor`` (plug-flow, distance-marched) instead of a time-integrated
+# ReactorNet. Absent → "time" (today's implicit, unchanged default).
+_VALID_SOLVER_AXES: frozenset = frozenset({"time", "distance"})
+
+
 def _resolve_and_validate_solver_mode(
     solver: Dict[str, Any], context: str
 ) -> Dict[str, Any]:
-    """Return a copy of *solver* with ``mode`` filled in and validated.
+    """Return a copy of *solver* with ``mode``/``axis`` filled in and validated.
 
     Rules:
 
@@ -105,6 +112,10 @@ def _resolve_and_validate_solver_mode(
       ``advance_to_steady_state`` → ``steady``).
     - If ``mode`` is present and contradicts ``kind``, raise ``ValueError``.
     - The returned dict always has a ``mode`` key.
+    - If ``axis`` is absent, defaults to ``"time"``. Must be ``"time"`` or
+      ``"distance"`` if present. The returned dict always has an ``axis`` key,
+      so downstream code (:mod:`boulder.cantera_converter`) never needs a
+      ``.get(..., "time")`` fallback.
 
     Parameters
     ----------
@@ -128,7 +139,13 @@ def _resolve_and_validate_solver_mode(
                 f"with solver.kind: {kind} (which implies mode: {implied_mode}). "
                 "See STONE_SPECIFICATIONS.md."
             )
-    return {**solver, "mode": implied_mode}
+    axis = solver.get("axis", "time")
+    if axis not in _VALID_SOLVER_AXES:
+        raise ValueError(
+            f"STONE v2 error: {context} solver.axis '{axis}' is not valid. "
+            f"Allowed values: {sorted(_VALID_SOLVER_AXES)}. See STONE_SPECIFICATIONS.md."
+        )
+    return {**solver, "mode": implied_mode, "axis": axis}
 
 
 # Names that may not be used as stage ids.
@@ -2026,6 +2043,12 @@ def convert_to_stone_format(config: dict) -> dict:
             # emit the full block instead or it silently vanishes on sync.
             kind = solver.get("kind", "advance_to_steady_state")
             extra_keys = set(solver) - {"kind", "mode", "advance_time"}
+            # "axis" is always-present (like "mode") but, unlike "mode", is not
+            # derivable from "kind" -- it must survive the collapse when the
+            # stage genuinely set axis: distance, or a FlowReactor stage would
+            # silently lose its distance-marching config on sync.
+            if solver.get("axis", "time") == "time":
+                extra_keys.discard("axis")
             if extra_keys:
                 meta: Dict[str, Any] = {
                     "mechanism": g.get("mechanism", "gri30.yaml"),
@@ -2450,6 +2473,8 @@ def merge_config_into_yaml(
                     if at is not None:
                         stone_meta["advance_time"] = at
                     lost_keys = set(solver_value) - {"kind", "mode", "advance_time"}
+                    if solver_value.get("axis", "time") == "time":
+                        lost_keys.discard("axis")
                     if lost_keys:
                         warnings.append(
                             f"Stage '{sid}' uses the legacy solve: syntax, which has "
