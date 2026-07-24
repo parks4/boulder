@@ -287,7 +287,7 @@ async def clear_scenario_cache(request: Request) -> Dict[str, Any]:
     """
     store = _store_path(request)
     cleared = store is not None and store.is_file()
-    if cleared:
+    if store is not None and cleared:
         store.unlink()
     return {"ok": True, "cleared": cleared}
 

@@ -317,9 +317,7 @@ def test_clear_scenario_cache_deletes_the_store(tmp_path: Path) -> None:
     try:
         store = tmp_path / "scenarios.h5"
         with h5py.File(str(store), "w") as handle:
-            handle.create_group("base_case").create_dataset(
-                "payload_json", data=b"{}"
-            )
+            handle.create_group("base_case").create_dataset("payload_json", data=b"{}")
         app.state.scenario_store_path = str(store)
 
         resp = client.post("/api/scenarios/clear-cache")
