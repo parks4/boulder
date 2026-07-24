@@ -53,6 +53,11 @@ vi.mock("@/stores/layoutStore", () => ({
     selector({ closeYamlPane: mockCloseYamlPane }),
 }));
 
+const mockScenarioRefresh = vi.fn();
+vi.mock("@/stores/scenarioStore", () => ({
+  useScenarioStore: { getState: () => ({ refresh: mockScenarioRefresh }) },
+}));
+
 vi.mock("@/stores/themeStore", () => ({
   useThemeStore: (selector: (s: unknown) => unknown) => selector({ theme: "light" }),
 }));
@@ -131,6 +136,9 @@ describe("YamlPane", () => {
     expect(mockParseYaml).toHaveBeenCalledWith("merged: yaml\nextra: 1\n");
     // A save that round-trips exactly what's on screen needs no re-sync.
     expect(saveButton()).toBeDisabled();
+    // Nudges RunControl to re-check Run Sweep availability: the backend may
+    // have just adopted this Save as its preloaded config.
+    expect(mockScenarioRefresh).toHaveBeenCalledOnce();
   });
 
   it("Cancel reverts unsaved edits back to the last synced value", async () => {
@@ -181,6 +189,32 @@ describe("YamlPane", () => {
 
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
     expect(mockParseYaml).not.toHaveBeenCalled();
+  });
+
+  it("mounts an empty, editable pane instead of an error when nothing is loaded yet", async () => {
+    mockConfig = { nodes: [], connections: [] };
+    mockOriginalYaml = "";
+    render(<YamlPane />);
+
+    const editor = await editorValue();
+    await waitFor(() => expect(editor).toHaveValue(""));
+    expect(screen.queryByText("No configuration available to edit.")).not.toBeInTheDocument();
+
+    fireEvent.change(editor, { target: { value: "nodes: []\n" } });
+    expect(editor).toHaveValue("nodes: []\n");
+    expect(saveButton()).not.toBeDisabled();
+  });
+
+  it("still shows the error when there's a live graph but no YAML to merge it into", async () => {
+    mockConfig = {
+      nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }],
+      connections: [],
+    };
+    mockOriginalYaml = "";
+    render(<YamlPane />);
+
+    expect(await screen.findByText("No configuration available to edit.")).toBeInTheDocument();
+    expect(mockSyncConfig).not.toHaveBeenCalled();
   });
 
   it("closes immediately when there are no unsaved edits", async () => {

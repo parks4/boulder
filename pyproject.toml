@@ -93,13 +93,19 @@ max-line-length = 110
 convention = "numpy"
 
 [tool.setuptools]
-packages = ["boulder"]
+packages = ["boulder", "configs"]
 
 [tool.setuptools.package-data]
 # Ship the prebuilt React frontend (emitted by `npm run build` into
 # boulder/_frontend) inside the wheel so the GUI works on a plain
 # `pip install` without Node/npm. The frontend is built in CI on release.
 boulder = ["_frontend/**/*"]
+# get_initial_config()/get_initial_config_with_comments() load default.yaml as
+# a sibling of the installed `boulder` package (see configs/__init__.py) — it
+# must ship in the wheel or the GUI's "no config preloaded" fallback 404s. The
+# rest of configs/ ships alongside it as a byproduct of setuptools_scm's
+# git-tracked-file inclusion; harmless (a few KB of example YAMLs).
+configs = ["*.yaml", "*.md"]
 
 [tool.setuptools_scm]
 write_to = "boulder/version.py"
