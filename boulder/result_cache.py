@@ -699,13 +699,6 @@ def find_result_by_config_snapshot(
     return None
 
 
-def clear_cache(cache_root: Path) -> None:
-    """Remove all cache entries under *cache_root*."""
-    if cache_root.exists():
-        shutil.rmtree(cache_root)
-    logger.info("Cache cleared: %s", cache_root)
-
-
 def _prune_orphan_aliases(cache_root: Path) -> None:
     """Remove alias files whose canonical cache entry no longer exists."""
     if not cache_root.exists():

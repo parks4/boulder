@@ -5,7 +5,6 @@ import { useSimulationStore } from "@/stores/simulationStore";
 import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 import { useSimulationSSE } from "@/hooks/useSimulationSSE";
 import { useScenarioFocus } from "@/hooks/useScenarioFocus";
-import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { startSimulation } from "@/api/simulations";
 import { fetchDefaultConfig, fetchPreloadedConfig } from "@/api/configs";
 import { fetchCachedResult } from "@/api/resultCache";
@@ -161,7 +160,17 @@ export function AppShell() {
     }
   }, [isRunning, config, beginSimulationRun, setStarted, setError]);
 
-  useKeyboardShortcuts(handleRunSimulation);
+  // Ctrl+Enter runs the simulation from anywhere in the app.
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.ctrlKey && e.key === "Enter") {
+        e.preventDefault();
+        handleRunSimulation();
+      }
+    }
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [handleRunSimulation]);
 
   // Host branding published by a Boulder plugin (e.g. {name: "MyApp", version: "1.2"}).
   const [branding, setBranding] = useState<{ name?: string; version?: string } | null>(

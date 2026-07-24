@@ -6,7 +6,6 @@ from typing import Callable, Optional
 
 import cantera as ct
 import numpy as np
-import pandas as pd
 
 
 def parse_mechanism_spec(name: str) -> tuple[str, Optional[str]]:
@@ -238,77 +237,3 @@ def get_STP_properties_IUPAC(g):
         g.TPX = T, P, X
 
     return density_STP, enthalpy_STP
-
-
-def get_NTP_properties_NIST(g):
-    """Get density and enthalpy under Normal Temperature & Pressure (NTP).
-
-    Here NTP is defined as :
-
-    - 20°C (293.15 K), 1 atm (101.325 kPa), according to NTP by NIST
-
-    It should not be confused with :
-
-    - 0°C (273.15 K), 1 bar (100 kPa), according to STP by IUPAC (>=1982)
-    - 0°C (273.15 K), 1 atm (101.325 kPa):  as in STP by IUPAC (before 1982) and as in
-                DIN 1343, used as the base value for defining the standard cubic meter.
-    - 15°C (288.15 K), 1 atm (101.325 kPa):  as in ISO 2533 conditions
-
-    References
-    ----------
-    https://en.wikipedia.org/wiki/Standard_temperature_and_pressure.
-
-    See Also
-    --------
-    :py:
-    """
-    T, P, X = g.TPX
-    try:
-        g.TPX = 293.15, ct.one_atm, X
-        density_STP = g.density
-        enthalpy_STP = g.enthalpy_mass
-    finally:
-        # reset as expected
-        g.TPX = T, P, X
-
-    return density_STP, enthalpy_STP
-
-
-def get_gas_phase_composition(
-    compo_dict, solid_sp=["C(s)", "BIN", "A37", "C(soot)", "CSOLID"], prefix="X"
-):
-    """Return the gas phase composition by removing solid species and renormalising the mole/mass fractions.
-
-    Parameters
-    ----------
-        compo_dict : dict
-            dictionary of species mole/mass fractions
-
-        solid_sp : list
-            list of solid species to exclude from the gas phase.
-
-        prefix : str
-            prefix for the output species names.
-            Convention: X for mole fractions, Y for mass fractions.
-    """
-    n_tot = 0
-    n_dict = {}
-    for s, n_s in compo_dict.items():
-        s_is_solid = False
-        for solid in solid_sp:
-            if solid in s:
-                s_is_solid = True
-
-        if s_is_solid:
-            # print(f'{s} is solid')
-            continue
-
-        n_tot += n_s
-        n_dict[f"{prefix}_{s}"] = n_s
-
-    # Guard against division by zero if all species are filtered out
-    if n_tot == 0:
-        # Return an empty Series if no non-solid species are found
-        return pd.Series(dtype=float)
-
-    return pd.Series(n_dict).sort_values(ascending=False) / n_tot

@@ -14,7 +14,7 @@ not part of this map.
 
 from __future__ import annotations
 
-from typing import Dict, Optional, TypedDict
+from typing import Dict, TypedDict
 
 #: Boulder supports a range of Cantera versions (pyproject.toml pins
 #: ``cantera>=3.0.0``, no upper bound), so link to the version-agnostic
@@ -75,16 +75,6 @@ CONNECTION_DOCS: Dict[str, KindDoc] = {
         "description": "Wall between two reactors; can move and/or exchange heat.",
     },
 }
-
-
-def get_reactor_doc(kind: str) -> Optional[KindDoc]:
-    """Return the doc-link metadata for a built-in reactor *kind*, or None."""
-    return REACTOR_DOCS.get(kind)
-
-
-def get_connection_doc(kind: str) -> Optional[KindDoc]:
-    """Return the doc-link metadata for a built-in connection *kind*, or None."""
-    return CONNECTION_DOCS.get(kind)
 
 
 def all_doc_urls() -> Dict[str, str]:

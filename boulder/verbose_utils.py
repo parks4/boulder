@@ -3,8 +3,6 @@
 import logging
 import os
 import threading
-from functools import wraps
-from typing import Any, Callable
 
 _lock = threading.Lock()
 _boulder_logging_configured = False
@@ -53,29 +51,3 @@ def get_verbose_logger(name: str) -> logging.Logger:
     """Return a logger under ``boulder.*`` with guaranteed console output."""
     _ensure_boulder_package_logging()
     return logging.getLogger(name)
-
-
-def verbose_print(*args, **kwargs) -> None:
-    """Print only if verbose mode is enabled."""
-    if is_verbose_mode():
-        print(*args, **kwargs)
-
-
-def log_function_call(logger: logging.Logger) -> Callable:
-    """Log function calls in verbose mode."""
-
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
-            if is_verbose_mode():
-                logger.info(
-                    f"Calling {func.__name__} with args={len(args)}, kwargs={list(kwargs.keys())}"
-                )
-            result = func(*args, **kwargs)
-            if is_verbose_mode():
-                logger.info(f"Completed {func.__name__}")
-            return result
-
-        return wrapper
-
-    return decorator

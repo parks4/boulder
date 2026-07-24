@@ -7,7 +7,6 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import { SolverDetailsModal } from "./SolverDetailsModal";
 import {
   deriveMode,
-  KIND_LABELS,
   KIND_TO_MODE,
   STEADY_KINDS,
   TRANSIENT_KINDS,
@@ -385,9 +384,9 @@ export function StageCard({ stageId }: Props) {
         <div className="flex items-center gap-2">
           <p
             className="text-xs text-muted-foreground truncate flex-1 min-w-0"
-            title={KIND_LABELS[kind]}
+            title={kind}
           >
-            {KIND_LABELS[kind]}
+            {kind}
           </p>
           <Button
             id="stage-solver-details"

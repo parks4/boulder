@@ -1,4 +1,5 @@
 import type { GuiActionMeta } from "@/types/guiAction";
+import { apiFetch } from "@/api/client";
 
 export interface GuiActionRunPayload {
   config?: Record<string, unknown> | null;
@@ -28,15 +29,10 @@ async function parseApiError(res: Response): Promise<string> {
 export async function fetchGuiActions(
   payload: GuiActionRunPayload = {},
 ): Promise<GuiActionMeta[]> {
-  const res = await fetch("/api/gui-actions", {
+  return apiFetch<GuiActionMeta[]>("/gui-actions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) {
-    throw new Error(`API ${res.status}: ${await parseApiError(res)}`);
-  }
-  return res.json() as Promise<GuiActionMeta[]>;
 }
 
 export async function runGuiAction(
