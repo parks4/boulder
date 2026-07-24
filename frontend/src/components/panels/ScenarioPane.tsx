@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Eraser, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
@@ -37,6 +37,7 @@ export function ScenarioPane() {
     refresh,
     setActive,
     deleteScenario,
+    clearCache,
   } = useScenarioStore();
   const sweeping = useSweepRunStore((s) => s.sweeping);
   const runSweepJob = useSweepRunStore((s) => s.run);
@@ -105,6 +106,26 @@ export function ScenarioPane() {
       return;
     }
     runSweepJob({ total: scenarios.length, noCache: true });
+  };
+
+  const handleClearCache = async () => {
+    if (
+      !window.confirm(
+        `Clear the cached results for all ${scenarios.length} scenario(s)? ` +
+          "This does not touch their definitions — Run Sweep will recompute " +
+          "them from scratch next time.",
+      )
+    ) {
+      return;
+    }
+    try {
+      const { cleared } = await clearCache();
+      toast.success(cleared ? "Scenario cache cleared" : "No cache to clear");
+    } catch (err) {
+      toast.error(
+        `Could not clear cache: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   };
 
   if (!available || scenarios.length === 0) {
@@ -213,6 +234,15 @@ export function ScenarioPane() {
               className="text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw size={14} className={sweeping ? "animate-spin" : ""} />
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleClearCache()}
+              disabled={sweeping}
+              title="Clear cache (delete every scenario's cached result, without re-solving)"
+              className="text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Eraser size={14} />
             </button>
             <button
               type="button"

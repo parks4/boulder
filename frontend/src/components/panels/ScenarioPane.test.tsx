@@ -20,6 +20,7 @@ import { ScenarioPane } from "./ScenarioPane";
 const mockRefresh = vi.fn();
 const mockSetActive = vi.fn();
 const mockDeleteScenario = vi.fn();
+const mockClearCache = vi.fn();
 let mockAvailable = true;
 let mockScenarios: Array<{ id: string; label: string; t0_K: number }> = [
   { id: "A", label: "Scenario A", t0_K: 300 },
@@ -38,6 +39,7 @@ vi.mock("@/stores/scenarioStore", () => ({
     refresh: mockRefresh,
     setActive: mockSetActive,
     deleteScenario: mockDeleteScenario,
+    clearCache: mockClearCache,
   }),
 }));
 
@@ -71,6 +73,7 @@ vi.mock("./SweepResultsPlot", () => ({
 describe("ScenarioPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockClearCache.mockResolvedValue({ cleared: true });
     capturedOnSaved = undefined;
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
@@ -132,6 +135,35 @@ describe("ScenarioPane", () => {
     render(<ScenarioPane />);
 
     expect(screen.getByTitle(/Regenerate cache/)).toBeDisabled();
+  });
+
+  it("Clear cache confirms, then clears the store", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ScenarioPane />);
+
+    fireEvent.click(screen.getByTitle(/Clear cache/));
+    await Promise.resolve();
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockClearCache).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("does nothing when the Clear cache confirmation is dismissed", () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<ScenarioPane />);
+
+    fireEvent.click(screen.getByTitle(/Clear cache/));
+
+    expect(mockClearCache).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("disables Clear cache while a sweep is already running", () => {
+    mockSweeping = true;
+    render(<ScenarioPane />);
+
+    expect(screen.getByTitle(/Clear cache/)).toBeDisabled();
   });
 
   it("wires onSaved into the scoped editor in the populated state", () => {

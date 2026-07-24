@@ -276,6 +276,22 @@ async def rename_scenario(
     return {"ok": True, "scenario_id": body.new_id}
 
 
+@router.post("/clear-cache")
+async def clear_scenario_cache(request: Request) -> Dict[str, Any]:
+    """Clear every scenario's cached trajectory in the active store.
+
+    Deletes the whole HDF5 store file — the same thing ``--no-cache`` does
+    before a sweep — so the next Run Sweep recomputes every scenario from
+    scratch. Scenario *definitions* in the config are untouched; only their
+    precomputed results disappear until then.
+    """
+    store = _store_path(request)
+    cleared = store is not None and store.is_file()
+    if cleared:
+        store.unlink()
+    return {"ok": True, "cleared": cleared}
+
+
 @router.delete("/{scenario_id}")
 async def delete_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
     """Delete a scenario overlay and purge its cached trajectory, if any.
