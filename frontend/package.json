@@ -14,8 +14,6 @@
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
-    "@tanstack/react-query": "^5.90.20",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cytoscape": "^3.33.1",
     "lucide-react": "^0.563.0",

@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/Button";
 import { Tooltip } from "@/components/ui/Tooltip";
 import {
   KIND_DOC_URLS,
-  KIND_LABELS,
   type SolverKind,
   type SolverMode,
 } from "./solverShared";
@@ -98,7 +97,7 @@ export function SolverDetailsModal({
               >
                 {kinds.map((k) => (
                   <option key={k} value={k}>
-                    {KIND_LABELS[k]}
+                    {k}
                   </option>
                 ))}
               </select>
@@ -119,7 +118,7 @@ export function SolverDetailsModal({
               >
                 <span
                   className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground cursor-help"
-                  aria-label={`About ${KIND_LABELS[kind]}`}
+                  aria-label={`About ${kind}`}
                 >
                   ⓘ
                 </span>

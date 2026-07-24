@@ -82,13 +82,6 @@ class SimulationProgress:
     end_time: Optional[float] = None
     total_time: Optional[float] = None  # simulation end time (s), for progress %
 
-    def get_elapsed_time(self) -> Optional[float]:
-        """Get elapsed time in seconds. Returns None if not started."""
-        if self.start_time is None:
-            return None
-        end_time = self.end_time if self.end_time is not None else time.time()
-        return end_time - self.start_time
-
     def get_calculation_time(self) -> Optional[float]:
         """Get total calculation time in seconds. Returns None if not completed."""
         if self.start_time is None or self.end_time is None:

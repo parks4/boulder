@@ -154,9 +154,9 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   const onPrimary = () => {
     if (effectiveMode === "sweep") handleRunSweep();
     else {
-      // Ctrl+Enter (see useKeyboardShortcuts) always runs the plain "sim"
-      // action regardless of the split button's mode — only nudge when a
-      // click here does the exact same thing the shortcut would.
+      // Ctrl+Enter (see AppShell's keydown handler) always runs the plain
+      // "sim" action regardless of the split button's mode — only nudge when
+      // a click here does the exact same thing the shortcut would.
       if (effectiveMode === "sim") notifyShortcutUsage("run-simulation", "Ctrl+Enter");
       onRunSimulation(effectiveMode === "force_sim");
     }

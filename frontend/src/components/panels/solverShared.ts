@@ -7,14 +7,6 @@ export type SolverKind = SteadyKind | TransientKind;
 export const STEADY_KINDS: SteadyKind[] = ["advance_to_steady_state", "solve_steady"];
 export const TRANSIENT_KINDS: TransientKind[] = ["advance", "advance_grid", "micro_step"];
 
-export const KIND_LABELS: Record<SolverKind, string> = {
-  advance_to_steady_state: "advance_to_steady_state",
-  solve_steady: "solve_steady",
-  advance: "advance",
-  advance_grid: "advance_grid",
-  micro_step: "micro_step",
-};
-
 export const KIND_TO_MODE: Record<SolverKind, SolverMode> = {
   advance_to_steady_state: "steady",
   solve_steady: "steady",
@@ -26,8 +18,8 @@ export const KIND_TO_MODE: Record<SolverKind, SolverMode> = {
 const _ZERODIM = "https://cantera.org/stable/python/zerodim.html";
 
 /**
- * Cantera doc link + description for each solver kind, keyed the same as
- * KIND_LABELS. Kept in sync with the network-gated check in
+ * Cantera doc link + description for each solver kind. Kept in sync with the
+ * network-gated check in
  * tests/test_doc_links.py (Python has no visibility into this TS module, so
  * that test duplicates these URLs as literals).
  */

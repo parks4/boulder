@@ -1044,30 +1044,26 @@ def get_yaml_with_comments():
     return yaml_obj
 
 
-def load_config_file(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file with 🪨 STONE standard."""
+def _assert_stone_yaml_extension(config_path: str) -> None:
+    """Raise ``ValueError`` unless *config_path* has a 🪨 STONE YAML extension."""
     _, ext = os.path.splitext(config_path.lower())
-
     if ext not in [".yaml", ".yml"]:
         raise ValueError(
             f"Only YAML format with 🪨 STONE standard (.yaml/.yml) files are supported. "
             f"Got: {ext}"
         )
 
+
+def load_config_file(config_path: str) -> Dict[str, Any]:
+    """Load configuration from YAML file with 🪨 STONE standard."""
+    _assert_stone_yaml_extension(config_path)
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def load_config_file_with_comments(config_path: str):
     """Load configuration from YAML file preserving comments with 🪨 STONE standard."""
-    _, ext = os.path.splitext(config_path.lower())
-
-    if ext not in [".yaml", ".yml"]:
-        raise ValueError(
-            f"Only YAML format with 🪨 STONE standard (.yaml/.yml) files are supported. "
-            f"Got: {ext}"
-        )
-
+    _assert_stone_yaml_extension(config_path)
     yaml_obj = get_yaml_with_comments()
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml_obj.load(f)
@@ -1882,36 +1878,6 @@ def get_initial_config_with_comments() -> tuple[Dict[str, Any], str]:
         raise FileNotFoundError(
             f"YAML configuration file with 🪨 STONE standard not found: {stone_config_path}"
         )
-
-
-def get_config_from_path(config_path: str) -> Dict[str, Any]:
-    """Load configuration from a specific path."""
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-    config = load_config_file(config_path)  # load YAML
-    normalized = normalize_config(config)  # convert to STONE format
-    return validate_config(normalized)  # validate inputs
-
-
-def get_config_from_path_with_comments(config_path: str) -> tuple[Dict[str, Any], str]:
-    """Load configuration from a specific path with comments preserved.
-
-    Returns
-    -------
-    tuple
-        (normalized_config, original_yaml_string)
-    """
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-
-    config_with_comments = load_config_file_with_comments(config_path)  # load YAML
-    with open(config_path, "r", encoding="utf-8") as f:
-        original_yaml = f.read()
-    normalized = normalize_config(
-        config_with_comments
-    )  # convert to STONE format with comments
-    return validate_config(normalized), original_yaml  # validate inputs
 
 
 def _internal_node_to_stone_v2_item(node: Dict[str, Any]) -> Dict[str, Any]:
@@ -2860,30 +2826,3 @@ def load_config_file_with_py_support(
 
     config = load_config_file(yaml_path)
     return config, yaml_path
-
-
-def load_config_file_with_py_support_and_comments(
-    config_path: str, verbose: bool = False
-) -> Tuple[Dict[str, Any], str, str]:
-    """Load configuration file with Python support, preserving comments.
-
-    Logic:
-    1. If .py file: convert to .yaml first
-    2. Always load from the resulting .yaml file with comments preserved
-
-    Args:
-        config_path: Path to configuration file (.yaml, .yml, or .py)
-        verbose: Enable verbose output
-
-    Returns
-    -------
-        Tuple of (config_dict, original_yaml_string, yaml_file_path)
-    """
-    # Step 1: Handle conversion if needed, get the YAML path
-    config, yaml_path = load_config_file_with_py_support(config_path, verbose)
-
-    # Step 2: Always read the YAML file with comments preserved
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        original_yaml = f.read()
-
-    return config, original_yaml, yaml_path
