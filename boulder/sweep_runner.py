@@ -131,8 +131,15 @@ def _prepare(
     return config, mechanism, fingerprint
 
 
-def _solve(config: Dict[str, Any], mechanism: str) -> Tuple[Dict[str, Any], str]:
-    """Solve one normalized scenario config → (gui_payload, resolved mechanism)."""
+def _solve(
+    config: Dict[str, Any], mechanism: str
+) -> Tuple[Dict[str, Any], str, DualCanteraConverter]:
+    """Solve one normalized scenario config → (gui_payload, mechanism, converter).
+
+    The solved ``converter`` is returned (not discarded) so callers can build a
+    :class:`~boulder.simulation_result.SimulationResult` from it or hand it to
+    cache contributors — see the ``on_solved`` hook of :func:`run`.
+    """
     plugins = get_plugins()
     converter_cls = plugins.converter_class or DualCanteraConverter
     conv = converter_cls(mechanism=mechanism or None, plugins=plugins)
@@ -173,7 +180,7 @@ def _solve(config: Dict[str, Any], mechanism: str) -> Tuple[Dict[str, Any], str]
         "updated_nodes": None,
         "updated_connections": None,
     }
-    return gui, conv.mechanism
+    return gui, conv.mechanism, conv
 
 
 def existing_fingerprints(store: Path) -> Dict[str, str]:
@@ -220,6 +227,12 @@ def run(
     scenario_attrs: Optional[
         Callable[[str, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
     ] = None,
+    on_solved: Optional[
+        Callable[
+            [str, Dict[str, Any], DualCanteraConverter, Any, str, Dict[str, Any], str],
+            None,
+        ]
+    ] = None,
 ) -> Path:
     """Expand and solve *cfg_path*'s run-set into its collection store.
 
@@ -240,6 +253,17 @@ def run(
         attributes written onto the scenario's HDF5 group after each solve —
         the per-run KPIs the Sweep Results plot reads (``t0_K``,
         ``final_X_<species>``, …).
+    on_solved : callable, optional
+        ``(scenario_id, config, converter, simulation_result, fingerprint,
+        gui_payload, mechanism) -> None`` called once per *freshly solved*
+        scenario (skipped runs that hit the store cache do not fire it), right
+        after the payload is written. Lets a host persist per-scenario
+        artifacts keyed by the same ``fingerprint`` used elsewhere — e.g.
+        writing each scenario into the single-run result cache
+        (``save_result`` + ``run_contributors``) so a downstream "Export"
+        action can reuse the sweep's solve work instead of re-solving.
+        Exceptions raised by the hook are caught and logged so one scenario's
+        artifact failure does not abort the whole sweep.
 
     Returns
     -------
@@ -282,8 +306,9 @@ def run(
                 attrs["order"] = int(i)
             continue
         print(f"scenario {i + 1}/{total} ({sid})", flush=True)
-        gui, resolved_mech = _solve(config, mech_name)
-        write_payload(store, gui, _resolve(resolved_mech), group=sid, fresh=False)
+        gui, resolved_mech, conv = _solve(config, mech_name)
+        stored_mech = _resolve(resolved_mech)
+        write_payload(store, gui, stored_mech, group=sid, fresh=False)
         with h5py.File(str(store), "a") as handle:
             attrs = handle[sid].attrs
             attrs["label"] = label
@@ -293,6 +318,29 @@ def run(
             if scenario_attrs is not None:
                 for key, value in (scenario_attrs(sid, cfg, gui) or {}).items():
                     attrs[key] = value
+        if on_solved is not None:
+            # Give the host a chance to persist per-scenario artifacts (e.g. a
+            # calc-note bundle in the single-run result cache) keyed by this
+            # scenario's fingerprint. Best-effort: a failure here must not abort
+            # the remaining scenarios or the store write.
+            try:
+                from .simulation_result import make_simulation_result  # noqa: PLC0415
+
+                simulation_result = make_simulation_result(conv, config)
+                on_solved(
+                    sid,
+                    config,
+                    conv,
+                    simulation_result,
+                    fingerprint,
+                    gui,
+                    stored_mech,
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"  WARNING: on_solved hook failed for scenario '{sid}': {exc}",
+                    flush=True,
+                )
 
     stale = prune_stale_groups(store, run_ids)
     if stale:
