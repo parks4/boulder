@@ -1,8 +1,7 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Eraser, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Eraser, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
-import { useSweepRunStore } from "@/stores/sweepStore";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 import { SweepResultsPlot } from "./SweepResultsPlot";
@@ -39,8 +38,6 @@ export function ScenarioPane() {
     deleteScenario,
     clearCache,
   } = useScenarioStore();
-  const sweeping = useSweepRunStore((s) => s.sweeping);
-  const runSweepJob = useSweepRunStore((s) => s.run);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -94,18 +91,6 @@ export function ScenarioPane() {
         `Could not delete scenario: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-  };
-
-  const handleRegenerate = () => {
-    if (
-      !window.confirm(
-        "Regenerate the cache? This re-solves every scenario in this sweep " +
-          "from scratch, ignoring cached results. This may take a while.",
-      )
-    ) {
-      return;
-    }
-    runSweepJob({ total: scenarios.length, noCache: true });
   };
 
   const handleClearCache = async () => {
@@ -228,19 +213,9 @@ export function ScenarioPane() {
             <span className="text-xs text-muted-foreground">{scenarios.length}</span>
             <button
               type="button"
-              onClick={handleRegenerate}
-              disabled={sweeping}
-              title="Regenerate cache (re-solve every scenario, ignoring cached results)"
-              className="text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw size={14} className={sweeping ? "animate-spin" : ""} />
-            </button>
-            <button
-              type="button"
               onClick={() => void handleClearCache()}
-              disabled={sweeping}
               title="Clear cache (delete every scenario's cached result, without re-solving)"
-              className="text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-muted-foreground hover:text-foreground"
             >
               <Eraser size={14} />
             </button>

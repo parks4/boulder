@@ -15,9 +15,9 @@ Scenario Pane then lists every run and opens each instantly.
 
 Caching is incremental by default: each group carries the Boulder cache
 fingerprint of its config (:func:`scenario_fingerprint`), and runs whose
-fingerprint is unchanged are skipped. ``BOULDER_NO_CACHE`` (the Scenario
-Pane's "Regenerate cache" action) recreates the store from scratch. Groups
-whose scenario id left the run-set are pruned.
+fingerprint is unchanged are skipped. ``BOULDER_NO_CACHE`` forces a full
+recompute, recreating the store from scratch. Groups whose scenario id left
+the run-set are pruned.
 
 Usage: ``python -m boulder.sweep_runner <config.yaml> [--no-plot]``
 

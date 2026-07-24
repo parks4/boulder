@@ -35,9 +35,9 @@ router = APIRouter()
 class SweepRunRequest(BaseModel):
     """Body for ``POST /run``. Defaults match the plain "Run Sweep" click."""
 
-    #: "Regenerate cache" — set BOULDER_NO_CACHE=1 for the subprocess so a
-    #: cache-aware runner (e.g. bloc.scenario_sweep) discards its collection
-    #: store and re-solves every scenario instead of skipping unchanged ones.
+    #: Force a full recompute: set BOULDER_NO_CACHE=1 for the subprocess so a
+    #: cache-aware host runner discards its collection store and re-solves
+    #: every scenario instead of skipping unchanged ones.
     no_cache: bool = False
 
 
@@ -162,7 +162,7 @@ async def sweep_run(
 ) -> Dict[str, Any]:
     """Start the run-set subprocess for the preloaded config.
 
-    ``no_cache=true`` is the Scenario Pane's "Regenerate cache" action.
+    ``no_cache=true`` forces every scenario to re-solve from scratch.
     """
     cmd = _runner_command(request)
     if not _has_run_set(request) or cmd is None:

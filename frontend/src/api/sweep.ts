@@ -27,9 +27,9 @@ export function getSweepInfo() {
 /**
  * Start the sweep as a background batch job on the server.
  *
- * `noCache` is the "Regenerate cache" action: the server sets
- * `BOULDER_NO_CACHE=1` for the runner subprocess, so every scenario is
- * re-solved instead of skipping ones whose fingerprint is unchanged.
+ * `noCache` forces a full recompute: the server sets `BOULDER_NO_CACHE=1`
+ * for the runner subprocess, so every scenario is re-solved instead of
+ * skipping ones whose fingerprint is unchanged.
  */
 export function startSweep(options?: { noCache?: boolean }) {
   return apiFetch<{ status: string; total: number }>("/sweep/run", {
