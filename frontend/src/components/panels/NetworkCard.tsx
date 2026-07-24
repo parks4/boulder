@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react";
 import { useConfigStore } from "@/stores/configStore";
+import { useScenarioStore } from "@/stores/scenarioStore";
 import { uploadConfigFile } from "@/api/configs";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
@@ -26,6 +27,10 @@ export function NetworkCard({ onEditYaml }: Props) {
       try {
         const resp = await uploadConfigFile(file);
         setConfig(resp.config, resp.filename, resp.yaml);
+        // The backend may have just adopted this upload as its preloaded
+        // config (if none was set yet) — bump scenarioRevision so RunControl
+        // re-checks Run Sweep availability instead of showing stale info.
+        void useScenarioStore.getState().refresh();
         toast.success(`Config uploaded: ${resp.filename}`);
       } catch (err) {
         toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);

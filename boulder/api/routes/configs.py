@@ -23,6 +23,7 @@ from ...config import (
     validate_config,
     yaml_to_string_with_comments,
 )
+from ..live_config import adopt_live_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -117,6 +118,11 @@ async def parse_yaml(request: Request, body: YAMLParseRequest) -> Dict[str, Any]
         else:
             normalized = normalize_config(plain)
             validated = validate_config(normalized)
+
+        # See the Run Sweep button / Scenario Pane -- both need a real
+        # on-disk config path to work at all, which a browser-only session
+        # (no CLI-preloaded file) never has otherwise.
+        adopt_live_config(request, raw=plain, validated=validated, yaml_str=body.yaml)
 
         return {"config": validated, "yaml": body.yaml}
     except Exception as exc:
@@ -236,6 +242,14 @@ async def upload_config(
         else:
             normalized = normalize_config(plain)
             validated = validate_config(normalized)
+
+        adopt_live_config(
+            request,
+            raw=plain,
+            validated=validated,
+            yaml_str=yaml_str,
+            filename=file.filename,
+        )
 
         return {
             "config": validated,
