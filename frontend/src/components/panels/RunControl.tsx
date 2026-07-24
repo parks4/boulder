@@ -101,8 +101,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   // loadSweepInfo() re-fetches automatically once the sweep finishes: it
   // depends on scenarioRevision (above), which the shared sweep store bumps
   // via scenarioStore.refresh() on completion -- no separate wiring needed
-  // here, and it stays in sync even when a sweep is started elsewhere (e.g.
-  // the Scenario Pane's "Regenerate cache").
+  // here, and it stays in sync even when a sweep is started elsewhere.
   const handleRunSweep = useCallback(() => {
     runSweepJob({ total: sweep?.n_scenarios ?? 0 });
   }, [runSweepJob, sweep]);

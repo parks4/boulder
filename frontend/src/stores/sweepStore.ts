@@ -8,10 +8,10 @@ interface SweepRunState {
   progress: { current: number; total: number };
   /**
    * Start a sweep job and poll it to completion, toasting the outcome and
-   * refreshing the Scenario Pane. A single shared job — RunControl's "Run
-   * Sweep" and the Scenario Pane's "Regenerate cache" both call this instead
-   * of each owning their own poll loop, so the two surfaces can never
-   * disagree about whether a sweep is currently running.
+   * refreshing the Scenario Pane. Backs RunControl's "Run Sweep" — a single
+   * shared job so any other caller can't disagree about whether a sweep is
+   * currently running. `noCache` forces a full recompute, ignoring the
+   * store's per-scenario fingerprint cache (see `startSweep`).
    */
   run: (options?: { total?: number; noCache?: boolean }) => void;
 }

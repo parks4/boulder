@@ -114,3 +114,15 @@ export function deleteScenario(id: string) {
     { method: "DELETE" },
   );
 }
+
+/**
+ * Clear every scenario's cached trajectory (deletes the whole HDF5 store).
+ * Scenario definitions in the config are untouched — the next Run Sweep
+ * recomputes them from scratch. `cleared` reports whether there was
+ * actually a store on disk to remove.
+ */
+export function clearScenarioCache() {
+  return apiFetch<{ ok: boolean; cleared: boolean }>("/scenarios/clear-cache", {
+    method: "POST",
+  });
+}

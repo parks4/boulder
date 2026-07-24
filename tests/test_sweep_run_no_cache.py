@@ -1,9 +1,9 @@
 """Tests for POST /api/sweep/run's `no_cache` passthrough.
 
-The "Regenerate cache" action (Scenario Pane) reuses the plain "Run Sweep"
-endpoint with ``no_cache: true``, which must set ``BOULDER_NO_CACHE=1`` in the
-subprocess env so a cache-aware runner (e.g. ``bloc.scenario_sweep``) discards
-its collection store instead of skipping unchanged scenarios.
+A caller can reuse the plain "Run Sweep" endpoint with ``no_cache: true`` to
+force a full recompute, which must set ``BOULDER_NO_CACHE=1`` in the
+subprocess env so a cache-aware host runner discards its collection store
+instead of skipping unchanged scenarios.
 """
 
 from __future__ import annotations

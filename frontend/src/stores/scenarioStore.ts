@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  clearScenarioCache as apiClearScenarioCache,
   createScenario as apiCreateScenario,
   deleteScenario as apiDeleteScenario,
   fetchScenario,
@@ -67,6 +68,8 @@ interface ScenarioState {
   renameScenario: (id: string, newId: string) => Promise<void>;
   /** Delete a scenario overlay; resolves with whether a cached result was purged too. */
   deleteScenario: (id: string) => Promise<{ cachePurged: boolean }>;
+  /** Clear every scenario's cached trajectory; resolves with whether there was a store to clear. */
+  clearCache: () => Promise<{ cleared: boolean }>;
 }
 
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
@@ -129,6 +132,13 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     await get().refresh();
     await resyncConfigYaml();
     return { cachePurged: resp.cache_purged };
+  },
+
+  clearCache: async () => {
+    const resp = await apiClearScenarioCache();
+    set({ activeId: null });
+    await get().refresh();
+    return { cleared: resp.cleared };
   },
 
   setActive: async (id) => {

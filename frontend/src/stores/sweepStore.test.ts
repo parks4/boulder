@@ -1,9 +1,8 @@
 /**
  * Asserts the shared sweep-run store: starts a job, polls to completion,
  * refreshes scenarios and toasts on success/failure, passes `noCache`
- * through, and refuses a second job while one is already running. Both
- * RunControl's "Run Sweep" and the Scenario Pane's "Regenerate cache" call
- * this single store instead of each owning their own poll loop.
+ * through, and refuses a second job while one is already running. RunControl's
+ * "Run Sweep" calls this single store instead of owning its own poll loop.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -76,7 +75,7 @@ describe("sweepStore", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
-  it("run() passes noCache through to startSweep (the Regenerate cache action)", async () => {
+  it("run() passes noCache through to startSweep, forcing a full recompute", async () => {
     vi.useFakeTimers();
     mockStartSweep.mockResolvedValue({ status: "running", total: 1 });
     mockGetSweepStatus.mockResolvedValueOnce({ status: "done", current: 1, total: 1 });

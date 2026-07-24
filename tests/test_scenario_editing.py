@@ -307,6 +307,40 @@ def test_delete_scenario_unknown_404(tmp_path: Path) -> None:
         client.__exit__(None, None, None)
 
 
+def test_clear_scenario_cache_deletes_the_store(tmp_path: Path) -> None:
+    """Clearing the cache removes the whole HDF5 store, not just one group."""
+    pytest.importorskip("h5py")
+    import h5py
+
+    cfg = _write_config(tmp_path)
+    client, app = _client_with_config(cfg)
+    try:
+        store = tmp_path / "scenarios.h5"
+        with h5py.File(str(store), "w") as handle:
+            handle.create_group("base_case").create_dataset("payload_json", data=b"{}")
+        app.state.scenario_store_path = str(store)
+
+        resp = client.post("/api/scenarios/clear-cache")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"ok": True, "cleared": True}
+        assert not store.exists()
+        # Scenario definitions in the config are untouched.
+        assert _scenario_ids(cfg) == ["BASELINE", "base_case"]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_clear_scenario_cache_without_a_store_reports_false(tmp_path: Path) -> None:
+    cfg = _write_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.post("/api/scenarios/clear-cache")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"ok": True, "cleared": False}
+    finally:
+        client.__exit__(None, None, None)
+
+
 def test_list_scenarios_includes_authored_ids_without_a_store(tmp_path: Path) -> None:
     """authored_ids reflects the YAML directly, even with no HDF5 store.
 

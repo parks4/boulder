@@ -1,8 +1,7 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Eraser, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
-import { useSweepRunStore } from "@/stores/sweepStore";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 import { SweepResultsPlot } from "./SweepResultsPlot";
@@ -37,9 +36,8 @@ export function ScenarioPane() {
     refresh,
     setActive,
     deleteScenario,
+    clearCache,
   } = useScenarioStore();
-  const sweeping = useSweepRunStore((s) => s.sweeping);
-  const runSweepJob = useSweepRunStore((s) => s.run);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -95,16 +93,24 @@ export function ScenarioPane() {
     }
   };
 
-  const handleRegenerate = () => {
+  const handleClearCache = async () => {
     if (
       !window.confirm(
-        "Regenerate the cache? This re-solves every scenario in this sweep " +
-          "from scratch, ignoring cached results. This may take a while.",
+        `Clear the cached results for all ${scenarios.length} scenario(s)? ` +
+          "This does not touch their definitions — Run Sweep will recompute " +
+          "them from scratch next time.",
       )
     ) {
       return;
     }
-    runSweepJob({ total: scenarios.length, noCache: true });
+    try {
+      const { cleared } = await clearCache();
+      toast.success(cleared ? "Scenario cache cleared" : "No cache to clear");
+    } catch (err) {
+      toast.error(
+        `Could not clear cache: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   };
 
   if (!available || scenarios.length === 0) {
@@ -207,12 +213,11 @@ export function ScenarioPane() {
             <span className="text-xs text-muted-foreground">{scenarios.length}</span>
             <button
               type="button"
-              onClick={handleRegenerate}
-              disabled={sweeping}
-              title="Regenerate cache (re-solve every scenario, ignoring cached results)"
-              className="text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => void handleClearCache()}
+              title="Clear cache (delete every scenario's cached result, without re-solving)"
+              className="text-muted-foreground hover:text-foreground"
             >
-              <RefreshCw size={14} className={sweeping ? "animate-spin" : ""} />
+              <Eraser size={14} />
             </button>
             <button
               type="button"

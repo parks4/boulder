@@ -17,6 +17,7 @@ const mockCreateScenario = vi.fn();
 const mockRenameScenario = vi.fn();
 const mockDeleteScenario = vi.fn();
 const mockFetchScenario = vi.fn();
+const mockClearScenarioCache = vi.fn();
 
 vi.mock("@/api/scenarios", () => ({
   listScenarios: (...args: unknown[]) => mockListScenarios(...args),
@@ -24,6 +25,7 @@ vi.mock("@/api/scenarios", () => ({
   renameScenario: (...args: unknown[]) => mockRenameScenario(...args),
   deleteScenario: (...args: unknown[]) => mockDeleteScenario(...args),
   fetchScenario: (...args: unknown[]) => mockFetchScenario(...args),
+  clearScenarioCache: (...args: unknown[]) => mockClearScenarioCache(...args),
   updateScenario: vi.fn(),
 }));
 
@@ -122,6 +124,18 @@ describe("scenarioStore", () => {
     await useScenarioStore.getState().deleteScenario("A");
 
     expect(mockListScenarios).toHaveBeenCalledOnce();
+    expect(useScenarioStore.getState().activeId).toBeNull();
+  });
+
+  it("clearCache refreshes afterward and clears activeId", async () => {
+    useScenarioStore.setState({ activeId: "A" });
+    mockClearScenarioCache.mockResolvedValue({ ok: true, cleared: true });
+    mockListScenarios.mockResolvedValue({ available: false, scenarios: [], authored_ids: ["A"] });
+
+    const result = await useScenarioStore.getState().clearCache();
+
+    expect(mockListScenarios).toHaveBeenCalledOnce();
+    expect(result).toEqual({ cleared: true });
     expect(useScenarioStore.getState().activeId).toBeNull();
   });
 

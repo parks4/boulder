@@ -1,10 +1,15 @@
 /**
  * Asserts ScenarioPane: deleting a scenario confirms first, then reports
- * whether a cached result was purged too; "Regenerate cache" confirms, then
- * starts a no-cache sweep via the shared sweep-run store; and the
+ * whether a cached result was purged too; "Clear cache" confirms, then
+ * deletes the whole store via scenarioStore.clearCache(); and the
  * previously-missing onSaved wiring (both in the empty "no scenarios yet"
  * state and the populated one) triggers a refresh after editing a scenario's
  * YAML.
+ *
+ * No "Regenerate cache" action here — it depended on the same host-registered
+ * sweep runner as "Run Sweep" (`useSweepRunStore`/`startSweep`), which isn't
+ * available in a plain Boulder install, making the button look broken. "Clear
+ * cache" only deletes the store, so it needs no sweep runner.
  *
  * No "Rename scenario" action here — a scenario's display name is
  * `metadata.scenario_name`, already editable via "Edit scenario YAML"; a
@@ -20,6 +25,7 @@ import { ScenarioPane } from "./ScenarioPane";
 const mockRefresh = vi.fn();
 const mockSetActive = vi.fn();
 const mockDeleteScenario = vi.fn();
+const mockClearCache = vi.fn();
 let mockAvailable = true;
 let mockScenarios: Array<{ id: string; label: string; t0_K: number }> = [
   { id: "A", label: "Scenario A", t0_K: 300 },
@@ -38,14 +44,8 @@ vi.mock("@/stores/scenarioStore", () => ({
     refresh: mockRefresh,
     setActive: mockSetActive,
     deleteScenario: mockDeleteScenario,
+    clearCache: mockClearCache,
   }),
-}));
-
-const mockRunSweepJob = vi.fn();
-let mockSweeping = false;
-vi.mock("@/stores/sweepStore", () => ({
-  useSweepRunStore: (selector: (s: unknown) => unknown) =>
-    selector({ sweeping: mockSweeping, run: mockRunSweepJob }),
 }));
 
 vi.mock("sonner", () => ({
@@ -71,10 +71,10 @@ vi.mock("./SweepResultsPlot", () => ({
 describe("ScenarioPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockClearCache.mockResolvedValue({ cleared: true });
     capturedOnSaved = undefined;
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
-    mockSweeping = false;
     mockAuthoredIds = [];
   });
 
@@ -103,35 +103,26 @@ describe("ScenarioPane", () => {
     confirmSpy.mockRestore();
   });
 
-  it("Regenerate cache confirms, then starts a no-cache sweep", () => {
+  it("Clear cache confirms, then clears the store", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<ScenarioPane />);
 
-    fireEvent.click(screen.getByTitle(/Regenerate cache/));
+    fireEvent.click(screen.getByTitle(/Clear cache/));
+    await Promise.resolve();
 
-    expect(confirmSpy).toHaveBeenCalledWith(
-      "Regenerate the cache? This re-solves every scenario in this sweep " +
-        "from scratch, ignoring cached results. This may take a while.",
-    );
-    expect(mockRunSweepJob).toHaveBeenCalledWith({ total: 1, noCache: true });
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mockClearCache).toHaveBeenCalled();
     confirmSpy.mockRestore();
   });
 
-  it("does nothing when the Regenerate cache confirmation is dismissed", () => {
+  it("does nothing when the Clear cache confirmation is dismissed", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<ScenarioPane />);
 
-    fireEvent.click(screen.getByTitle(/Regenerate cache/));
+    fireEvent.click(screen.getByTitle(/Clear cache/));
 
-    expect(mockRunSweepJob).not.toHaveBeenCalled();
+    expect(mockClearCache).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
-  });
-
-  it("disables Regenerate cache while a sweep is already running", () => {
-    mockSweeping = true;
-    render(<ScenarioPane />);
-
-    expect(screen.getByTitle(/Regenerate cache/)).toBeDisabled();
   });
 
   it("wires onSaved into the scoped editor in the populated state", () => {
