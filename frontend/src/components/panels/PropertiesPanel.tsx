@@ -5,7 +5,9 @@ import { useScenarioStore } from "@/stores/scenarioStore";
 import type { NormalizedConfig } from "@/types/config";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
 import { useKindSchema } from "@/hooks/useKindSchema";
+import { useKinds } from "@/hooks/useKinds";
 import { Button } from "@/components/ui/Button";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { ConfirmDeleteNodeModal } from "@/components/modals/ConfirmDeleteNodeModal";
 import { StageCard } from "@/components/panels/StageCard";
 import { toast } from "sonner";
@@ -162,6 +164,7 @@ export function PropertiesPanel() {
       ? String(selectedElement.data.type ?? "")
       : "";
   const schemaMeta = useKindSchema(schemaKind);
+  const { reactors, connections } = useKinds();
 
   if (!selectedElement) {
     // A config with exactly one stage has no clickable stage box (see
@@ -183,6 +186,7 @@ export function PropertiesPanel() {
   const isNode = selectedElement.type === "node";
   const id = String(selectedElement.data.id);
   const entityType = String(selectedElement.data.type ?? "");
+  const kindDoc = (isNode ? reactors : connections).find((k) => k.kind === entityType);
 
   // Group compound box (a stage) selected — show the Stage panel instead.
   if (selectedElement.data.isGroup) {
@@ -301,7 +305,35 @@ export function PropertiesPanel() {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold text-sm text-foreground">{id}</h3>
-          <span className="text-xs text-muted-foreground">{entityType}</span>
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground">{entityType}</span>
+            {kindDoc?.doc_url && (
+              <Tooltip
+                content={
+                  <span className="block space-y-1">
+                    {kindDoc.description && (
+                      <span className="block">{kindDoc.description}</span>
+                    )}
+                    <a
+                      href={kindDoc.doc_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline text-primary"
+                    >
+                      Cantera docs
+                    </a>
+                  </span>
+                }
+              >
+                <span
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] text-muted-foreground cursor-help"
+                  aria-label={`About ${entityType}`}
+                >
+                  ⓘ
+                </span>
+              </Tooltip>
+            )}
+          </div>
           {previewId && !isEditing && (
             <div
               className="text-[10px] text-amber-600 dark:text-amber-400"
