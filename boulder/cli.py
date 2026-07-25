@@ -202,6 +202,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--export-schema",
+        metavar="OUTPUT_FILE",
+        help=(
+            "Render the network graph to a PNG using a headless browser and save "
+            "to file (requires --headless and the optional 'playwright' "
+            "dependency: pip install boulder[playwright] && "
+            "playwright install chromium)"
+        ),
+    )
+    parser.add_argument(
         "--dev",
         action="store_true",
         help="Run the development frontend (starts both backend and Vite dev server)",
@@ -578,6 +588,25 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
         cmd = [sys.executable, *runner, str(_Path(args.config).resolve())]
         sys.exit(subprocess.call(cmd))
+    if args.export_schema:
+        if not args.headless:
+            print("Error: --export-schema requires --headless", file=sys.stderr)
+            sys.exit(2)
+        if not args.config:
+            print("Error: --export-schema requires a config file", file=sys.stderr)
+            sys.exit(2)
+        from .schema_export import PlaywrightNotInstalledError, render_network_schema_png
+
+        try:
+            output_path = render_network_schema_png(args.config, args.export_schema)
+        except PlaywrightNotInstalledError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        except (FileNotFoundError, TimeoutError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Network schema image written: {output_path}")
+        sys.exit(0)
     if args.sweep:
         # GUI sweep mode — read by the lifespan / frontend. Also autoruns (like
         # --run does for a plain simulation): --sweep is a strong enough signal
