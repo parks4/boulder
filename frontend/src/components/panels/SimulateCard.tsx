@@ -197,20 +197,15 @@ export function SimulateCard() {
         runDisabled={runDisabled}
       />
 
-      <Tooltip
-        className="block"
-        content="Download the equivalent runnable Python/Cantera script for this network."
+      <Button
+        id="download-python"
+        onClick={handleDownloadPy}
+        disabled={!pythonCode}
+        variant="secondary"
+        className="w-full"
       >
-        <Button
-          id="download-python"
-          onClick={handleDownloadPy}
-          disabled={!pythonCode}
-          variant="secondary"
-          className="w-full"
-        >
-          Download Python
-        </Button>
-      </Tooltip>
+        Download Python
+      </Button>
 
       {guiActions.map((action) => {
         const button = (
