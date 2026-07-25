@@ -151,7 +151,9 @@ class TestParseYamlAdoptsLiveConfig:
             assert resp.status_code == 200, resp.text
 
             assert app.state.preloaded_config_path is not None
-            assert app.state.preloaded_raw.get("scenarios") == {"a": {"metadata": {"scenario_name": "A"}}}
+            assert app.state.preloaded_raw.get("scenarios") == {
+                "a": {"metadata": {"scenario_name": "A"}}
+            }
         finally:
             client.__exit__(None, None, None)
 

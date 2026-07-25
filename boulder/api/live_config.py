@@ -81,7 +81,9 @@ def adopt_live_config(
         live_dir = tempfile.mkdtemp(prefix="boulder-live-config-")
         setattr(state, _LIVE_CONFIG_DIR_ATTR, live_dir)
 
-    path = Path(live_dir) / (filename or getattr(state, "preloaded_filename", None) or "config.yaml")
+    path = Path(live_dir) / (
+        filename or getattr(state, "preloaded_filename", None) or "config.yaml"
+    )
     path.write_text(yaml_str, encoding="utf-8")
 
     state.preloaded_config = validated
