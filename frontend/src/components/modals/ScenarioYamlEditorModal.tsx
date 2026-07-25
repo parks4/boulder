@@ -2,6 +2,8 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { fetchScenarioSource, updateScenario } from "@/api/scenarios";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
+import { useSimulationStore } from "@/stores/simulationStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 
 const MonacoEditor = lazy(() => import("@monaco-editor/react"));
 
@@ -30,6 +32,9 @@ export function ScenarioYamlEditorModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const isSimulating = useSimulationStore((s) => s.isRunning);
+  const isSweeping = useSweepRunStore((s) => s.sweeping);
+  const isCalculating = isSimulating || isSweeping;
 
   useEffect(() => {
     if (!scenarioId) return;
@@ -46,6 +51,10 @@ export function ScenarioYamlEditorModal({
   if (!scenarioId) return null;
 
   const handleSave = async () => {
+    if (isCalculating) {
+      toast.error("Wait for the current calculation to finish before saving YAML changes.");
+      return;
+    }
     setSaving(true);
     try {
       await updateScenario(scenarioId, value);
@@ -92,6 +101,12 @@ export function ScenarioYamlEditorModal({
           </Button>
         </div>
 
+        {isCalculating && (
+          <div className="px-4 py-2 text-xs bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 shrink-0">
+            A calculation is running — this scenario is locked until it finishes.
+          </div>
+        )}
+
         <div className="flex-1 overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -108,6 +123,7 @@ export function ScenarioYamlEditorModal({
                   id="scenario-yaml-editor"
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
+                  readOnly={isCalculating}
                   className="w-full h-full p-4 font-mono text-sm bg-background text-foreground resize-none"
                 />
               }
@@ -122,6 +138,7 @@ export function ScenarioYamlEditorModal({
                   minimap: { enabled: false },
                   wordWrap: "on",
                   fontSize: 13,
+                  readOnly: isCalculating,
                 }}
               />
             </Suspense>
@@ -135,9 +152,10 @@ export function ScenarioYamlEditorModal({
           <Button
             id="save-scenario-yaml-btn"
             onClick={() => void handleSave()}
-            disabled={saving || loading || !!loadError}
+            disabled={saving || loading || !!loadError || isCalculating}
             variant="primary"
             size="sm"
+            title={isCalculating ? "Wait for the current calculation to finish" : undefined}
           >
             {saving ? "Saving…" : "Save"}
           </Button>

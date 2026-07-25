@@ -62,6 +62,17 @@ vi.mock("@/stores/themeStore", () => ({
   useThemeStore: (selector: (s: unknown) => unknown) => selector({ theme: "light" }),
 }));
 
+let mockIsRunning = false;
+vi.mock("@/stores/simulationStore", () => ({
+  useSimulationStore: (selector: (s: unknown) => unknown) =>
+    selector({ isRunning: mockIsRunning }),
+}));
+
+let mockSweeping = false;
+vi.mock("@/stores/sweepStore", () => ({
+  useSweepRunStore: (selector: (s: unknown) => unknown) => selector({ sweeping: mockSweeping }),
+}));
+
 const mockSyncConfig = vi.fn();
 const mockParseYaml = vi.fn();
 vi.mock("@/api/configs", () => ({
@@ -91,6 +102,8 @@ describe("YamlPane", () => {
     mockOriginalYaml = "original: yaml\n";
     mockFileName = "test.yaml";
     mockSyncConfig.mockResolvedValue({ yaml: "merged: yaml\n", warnings: [] });
+    mockIsRunning = false;
+    mockSweeping = false;
   });
 
   it("syncs the merged YAML on mount", async () => {
@@ -186,6 +199,40 @@ describe("YamlPane", () => {
     render(<YamlPane />);
     const editor = await editorValue();
     await waitFor(() => expect(editor).toHaveValue("merged: yaml\n"));
+
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+    expect(mockParseYaml).not.toHaveBeenCalled();
+  });
+
+  it("locks Save and shows a banner while a sweep is running", async () => {
+    mockSweeping = true;
+    render(<YamlPane />);
+    const editor = await editorValue();
+    await waitFor(() => expect(editor).toHaveValue("merged: yaml\n"));
+    fireEvent.change(editor, { target: { value: "merged: yaml\nextra: 1\n" } });
+
+    expect(saveButton()).toBeDisabled();
+    expect(
+      screen.getByText(/calculation is running.*locked until it finishes/i),
+    ).toBeInTheDocument();
+  });
+
+  it("locks Save while a single simulation is running", async () => {
+    mockIsRunning = true;
+    render(<YamlPane />);
+    const editor = await editorValue();
+    await waitFor(() => expect(editor).toHaveValue("merged: yaml\n"));
+    fireEvent.change(editor, { target: { value: "merged: yaml\nextra: 1\n" } });
+
+    expect(saveButton()).toBeDisabled();
+  });
+
+  it("Ctrl+S does not save while a calculation is running", async () => {
+    mockSweeping = true;
+    render(<YamlPane />);
+    const editor = await editorValue();
+    await waitFor(() => expect(editor).toHaveValue("merged: yaml\n"));
+    fireEvent.change(editor, { target: { value: "merged: yaml\nextra: 1\n" } });
 
     fireEvent.keyDown(window, { key: "s", ctrlKey: true });
     expect(mockParseYaml).not.toHaveBeenCalled();
