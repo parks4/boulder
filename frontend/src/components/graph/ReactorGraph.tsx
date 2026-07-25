@@ -1319,10 +1319,12 @@ export function ReactorGraph() {
       userZoomingEnabled: true,
     });
 
-    // Test/tooling hook only (e.g. scripts/capture_screenshots.py driving
-    // node selection via cy.$id(id).trigger("tap") instead of guessing pixel
-    // coordinates on the canvas, whose layout varies per network). Not read
-    // anywhere in application code.
+    // Exposes the live cy instance for two consumers: test/tooling scripts
+    // (e.g. scripts/capture_screenshots.py driving node selection via
+    // cy.$id(id).trigger("tap") instead of guessing pixel coordinates on the
+    // canvas, whose layout varies per network), and SimulateCard's Export
+    // Calculation Note handler, which captures cy.png() for the workbook's
+    // first-sheet network image.
     (window as unknown as { __boulderCy?: typeof cy }).__boulderCy = cy;
 
     cy.on("tap", "node", (e: EventObject) => {

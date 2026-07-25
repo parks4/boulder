@@ -1,4 +1,5 @@
 import { useCallback, useState, useEffect } from "react";
+import type { Core as CytoscapeCore } from "cytoscape";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSolverStore } from "@/stores/solverStore";
@@ -10,6 +11,27 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import { RunControl } from "./RunControl";
 import type { GuiActionMeta } from "@/types/guiAction";
 import { toast } from "sonner";
+
+//: The Calculation Note export embeds a light-background capture of the
+//: live network graph on its first sheet — this is the only GUI action
+//: that needs one.
+const CALC_NOTE_ACTION_ID = "bloc_export_calculation_note";
+
+/**
+ * Capture the live Cytoscape graph as a light-background PNG (base64, no
+ * data URI prefix) for the Calculation Note export. Returns null when no
+ * graph is mounted yet, or the capture itself fails — the export still
+ * proceeds, just without a sheet-1 network image.
+ */
+function captureNetworkImagePng(): string | null {
+  const cy = (window as unknown as { __boulderCy?: CytoscapeCore }).__boulderCy;
+  if (!cy) return null;
+  try {
+    return cy.png({ bg: "#ffffff", full: true, scale: 2, output: "base64" });
+  } catch {
+    return null;
+  }
+}
 
 export function SimulateCard() {
   const config = useConfigStore((s) => s.config);
@@ -167,6 +189,8 @@ export function SimulateCard() {
           config_yaml: useConfigStore.getState().originalYaml || null,
           filename: fileName,
           simulation_id: simulationId,
+          network_image_png:
+            action.id === CALC_NOTE_ACTION_ID ? captureNetworkImagePng() : null,
         });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");

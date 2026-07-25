@@ -6,6 +6,8 @@ export interface GuiActionRunPayload {
   config_yaml?: string | null;
   filename?: string | null;
   simulation_id?: string | null;
+  /** Base64 PNG of the live network graph (e.g. a Cytoscape `cy.png()` capture). */
+  network_image_png?: string | null;
 }
 
 async function parseApiError(res: Response): Promise<string> {

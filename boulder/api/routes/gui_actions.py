@@ -18,6 +18,9 @@ class GuiActionRunRequest(BaseModel):
     config_yaml: Optional[str] = None
     filename: Optional[str] = None
     simulation_id: Optional[str] = None
+    #: Base64-encoded PNG of the live network graph (e.g. a Cytoscape
+    #: `cy.png()` capture), forwarded as-is to the GUI action's context.
+    network_image_png: Optional[str] = None
 
 
 def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None) -> Any:
@@ -78,6 +81,13 @@ def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None)
         cache_fingerprint = fingerprint
         has_cached_result = cached is not None
 
+    network_image_b64 = body.network_image_png if body is not None else None
+    if network_image_b64 and "," in network_image_b64[:64]:
+        # Defensive: accept a "data:image/png;base64,...." URI too, in case a
+        # future caller sends cy.png({output: "base64uri"}) instead of the
+        # plain base64 string this route otherwise expects.
+        network_image_b64 = network_image_b64.split(",", 1)[1]
+
     return GuiActionContext(
         config=config,
         config_yaml=config_yaml,
@@ -87,6 +97,7 @@ def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None)
         simulation_data=simulation_data,
         has_cached_result=has_cached_result,
         cache_fingerprint=cache_fingerprint,
+        network_image_b64=network_image_b64,
     )
 
 
