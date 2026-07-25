@@ -25,6 +25,11 @@ class GuiActionContext:
     has_cached_result: bool = False
     #: Fingerprint hex of the cached entry, or None when no cache is available.
     cache_fingerprint: Optional[str] = None
+    #: Base64-encoded PNG of the live network graph, captured client-side
+    #: (e.g. a Cytoscape ``cy.png()`` export) and sent along with the action
+    #: request. None when no browser session captured one (including every
+    #: headless/CLI-triggered run, which has no graph to capture at all).
+    network_image_b64: Optional[str] = None
 
 
 @dataclass
