@@ -55,9 +55,7 @@ class TestExportSchemaCliValidation:
             errors="replace",
         )
         assert result.returncode == 2
-        assert "Error: --export-schema requires a config file" in (
-            result.stderr or ""
-        )
+        assert "Error: --export-schema requires a config file" in (result.stderr or "")
 
     def test_cli_help_includes_export_schema(self):
         result = subprocess.run(
@@ -74,10 +72,16 @@ class TestExportSchemaCliValidation:
 
 class TestPlaywrightOptionalDependency:
     def test_missing_playwright_raises_clear_error(self, monkeypatch):
-        """Simulate playwright not being installed: ImportError halted by a
-        None sys.modules entry must surface as PlaywrightNotInstalledError
-        with install instructions, not a bare traceback."""
-        from boulder.schema_export import PlaywrightNotInstalledError, _require_playwright
+        """Simulate playwright not being installed.
+
+        ImportError halted by a None sys.modules entry must surface as
+        PlaywrightNotInstalledError with install instructions, not a bare
+        traceback.
+        """
+        from boulder.schema_export import (
+            PlaywrightNotInstalledError,
+            _require_playwright,
+        )
 
         monkeypatch.setitem(sys.modules, "playwright", None)
         monkeypatch.setitem(sys.modules, "playwright.sync_api", None)

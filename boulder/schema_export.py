@@ -25,7 +25,6 @@ import base64
 import os
 import threading
 from pathlib import Path
-from typing import Optional
 
 _INSTALL_HINT = (
     "Rendering the network graph requires the optional 'playwright' dependency, "

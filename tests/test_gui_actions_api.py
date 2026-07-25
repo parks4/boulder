@@ -292,9 +292,7 @@ class TestGuiActionNetworkImage:
         class _Req:
             app = type("_App", (), {"state": type("_State", (), {})()})()
 
-        ctx = _build_context(
-            _Req(), GuiActionRunRequest(network_image_png="QUJD")
-        )
+        ctx = _build_context(_Req(), GuiActionRunRequest(network_image_png="QUJD"))
         assert ctx.network_image_b64 == "QUJD"
 
     def test_data_uri_prefix_is_stripped(self):

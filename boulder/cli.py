@@ -595,7 +595,10 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
         if not args.config:
             print("Error: --export-schema requires a config file", file=sys.stderr)
             sys.exit(2)
-        from .schema_export import PlaywrightNotInstalledError, render_network_schema_png
+        from .schema_export import (
+            PlaywrightNotInstalledError,
+            render_network_schema_png,
+        )
 
         try:
             output_path = render_network_schema_png(args.config, args.export_schema)
