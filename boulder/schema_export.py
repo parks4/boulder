@@ -112,13 +112,32 @@ def render_network_schema_png(
     from .cli import find_available_port, wait_for_port
 
     port = find_available_port(host, 8100)
-    server, thread = _start_server_thread(config_path, host, port)
+
+    # BOULDER_CONFIG_PATH is process-wide env state (create_app()'s lifespan
+    # hook reads it, same mechanism the CLI itself uses), so it must be
+    # restored afterward — otherwise this call leaks a stale config path to
+    # any other code sharing the interpreter (a second render call for a
+    # different config, or unrelated code in the same process/test run that
+    # creates its own app expecting no preload).
+    _prev_config_path = os.environ.get("BOULDER_CONFIG_PATH")
+    os.environ["BOULDER_CONFIG_PATH"] = str(config_path)
+    server, thread = _start_server_thread(host, port)
     try:
-        if not wait_for_port(host, port, timeout=timeout):
-            raise TimeoutError(
-                f"Boulder server did not start within {timeout:.0f}s "
-                f"(preloading {config_path})"
-            )
+        try:
+            if not wait_for_port(host, port, timeout=timeout):
+                raise TimeoutError(
+                    f"Boulder server did not start within {timeout:.0f}s "
+                    f"(preloading {config_path})"
+                )
+        finally:
+            # The app has already read the env var into app.state by the
+            # time the socket accepts connections (ASGI lifespan startup
+            # runs before uvicorn starts serving) — safe to restore now,
+            # before the (potentially slow) browser step below.
+            if _prev_config_path is None:
+                os.environ.pop("BOULDER_CONFIG_PATH", None)
+            else:
+                os.environ["BOULDER_CONFIG_PATH"] = _prev_config_path
 
         with sync_playwright() as p:
             browser = p.chromium.launch()
@@ -148,14 +167,15 @@ def render_network_schema_png(
     return output_path
 
 
-def _start_server_thread(config_path: Path, host: str, port: int):
-    """Start a Boulder ASGI server on a background thread, preloaded with *config_path*."""
-    import uvicorn
+def _start_server_thread(host: str, port: int):
+    """Start a Boulder ASGI server on a background thread.
 
-    # Same preload mechanism the CLI itself uses (cli.py sets this before
-    # create_app() so its lifespan hook picks it up) — env var, not a
-    # create_app() kwarg, since create_app() takes none.
-    os.environ["BOULDER_CONFIG_PATH"] = str(config_path)
+    Preloads whatever config BOULDER_CONFIG_PATH points to — the caller is
+    responsible for setting (and restoring) that env var, since create_app()
+    takes no kwargs and reads it via its lifespan hook instead (same
+    mechanism the CLI itself uses).
+    """
+    import uvicorn
 
     from .api.main import create_app
 
