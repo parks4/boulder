@@ -142,6 +142,14 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   },
 
   setActive: async (id) => {
+    // Not computed yet (authored but unswept, or mid-sweep and not reached/
+    // finished yet) — just record the selection, no fetch. `GET /api/scenarios/
+    // {id}` would 404 for it; the Scenario Pane / results area read `activeId`
+    // directly to show a "calculating"/"pending" state for this case instead.
+    if (!get().scenarios.some((s) => s.id === id)) {
+      set({ activeId: id, error: null });
+      return;
+    }
     set({ loading: true, error: null, activeId: id });
     try {
       const result = await fetchScenario(id);

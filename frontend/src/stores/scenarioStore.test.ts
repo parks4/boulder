@@ -139,6 +139,16 @@ describe("scenarioStore", () => {
     expect(useScenarioStore.getState().activeId).toBeNull();
   });
 
+  it("setActive on an id not yet computed just selects it, without fetching", async () => {
+    useScenarioStore.setState({ scenarios: [{ id: "A", t0_K: 300, label: "A" }] });
+
+    await useScenarioStore.getState().setActive("pending_id");
+
+    expect(useScenarioStore.getState().activeId).toBe("pending_id");
+    expect(useScenarioStore.getState().error).toBeNull();
+    expect(mockFetchScenario).not.toHaveBeenCalled();
+  });
+
   it("createScenario pushes the freshly-written config YAML into configStore", async () => {
     mockCreateScenario.mockResolvedValue({ scenario_id: "C", yaml: "" });
     mockListScenarios.mockResolvedValue({ available: false, scenarios: [], authored_ids: ["C"] });

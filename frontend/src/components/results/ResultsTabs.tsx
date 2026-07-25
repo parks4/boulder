@@ -4,6 +4,8 @@ import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useResultsTabStore } from "@/stores/resultsTabStore";
+import { useScenarioStore } from "@/stores/scenarioStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 import { fetchPlugins, renderPlugin } from "@/api/plugins";
 import { Button } from "@/components/ui/Button";
 import { PlotsTab } from "./PlotsTab";
@@ -11,6 +13,7 @@ import { ConvergenceTab } from "./ConvergenceTab";
 import { SummaryTab } from "./SummaryTab";
 import { ErrorTab } from "./ErrorTab";
 import { PluginTab } from "./PluginTab";
+import { SweepCalculatingCard } from "./SweepCalculatingCard";
 import type { PluginMeta, PluginRenderData } from "@/types/plugin";
 
 const SankeyTab = lazy(() => import("./SankeyTab").then((m) => ({ default: m.SankeyTab })));
@@ -31,6 +34,8 @@ export function ResultsTabs() {
   const theme = useThemeStore((s) => s.theme);
   const activeTab = useResultsTabStore((s) => s.activeTab);
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
+  const activeScenarioId = useScenarioStore((s) => s.activeId);
+  const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
   /** Resolved tab for UI: explicit choice, else Sankey when results exist, else Plots. */
   const displayTab = activeTab ?? (results ? "Sankey" : "Plots");
   const [plugins, setPlugins] = useState<PluginMeta[]>([]);
@@ -163,6 +168,19 @@ export function ResultsTabs() {
       });
   }); // no dependency array — runs every render, but the cache-key
       // guard above ensures we only actually fetch when needed.
+
+  // A scenario currently mid-sweep takes priority over whatever stale
+  // results/progress a previously-viewed scenario left behind — non-blocking
+  // (this just occupies the results card's own slot), so the Scenario Pane
+  // and the rest of the layout stay fully visible and usable.
+  if (activeScenarioId != null && activeScenarioId in scenarioProgress) {
+    return (
+      <SweepCalculatingCard
+        scenarioId={activeScenarioId}
+        stage={scenarioProgress[activeScenarioId]}
+      />
+    );
+  }
 
   const data = results ?? progress;
   if (!data && !error) return null;

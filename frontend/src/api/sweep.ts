@@ -17,6 +17,13 @@ export interface SweepStatus {
   current?: number;
   total?: number;
   message?: string;
+  /**
+   * Scenarios currently being solved, keyed by id — a scenario id's presence
+   * here *is* "calculating". A map rather than a single "current scenario"
+   * field so a future parallel sweep runner can report more than one
+   * in-flight scenario at once without a shape change.
+   */
+  scenario_progress?: Record<string, { stage: number | null; stage_total: number | null }>;
 }
 
 /** Whether the preloaded config has a runnable sweep, and how many scenarios. */

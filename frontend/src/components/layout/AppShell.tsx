@@ -16,6 +16,7 @@ import { YamlPane } from "@/components/panels/YamlPane";
 import { PaneToggle, PaneResizer } from "@/components/layout/paneControls";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 import { ReactorGraph } from "@/components/graph/ReactorGraph";
 import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
@@ -53,6 +54,13 @@ export function AppShell() {
   useEffect(() => {
     void refreshScenarios();
   }, [refreshScenarios]);
+
+  // Reconstruct an in-flight Run Sweep after a page refresh — the backend
+  // (a separate process/thread) may still be running one even though this
+  // fresh page load has no memory of it.
+  useEffect(() => {
+    useSweepRunStore.getState().hydrate();
+  }, []);
 
   // Connect SSE stream
   useSimulationSSE();
