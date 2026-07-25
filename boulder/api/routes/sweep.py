@@ -42,6 +42,17 @@ class SweepRunRequest(BaseModel):
 
 
 _SCENARIO_RE = re.compile(r"scenario\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+#: Captures the scenario id `sweep_runner.run()` already prints in parens,
+#: e.g. "scenario 3/8 (cold_feed)" or "scenario 3/8 (cold_feed): cached, skipped".
+_SCENARIO_ID_RE = re.compile(r"scenario\s+\d+\s*/\s*\d+\s*\(([^)]+)\)", re.IGNORECASE)
+_SCENARIO_SKIP_RE = re.compile(
+    r"scenario\s+\d+\s*/\s*\d+\s*\([^)]+\)\s*:\s*cached,\s*skipped", re.IGNORECASE
+)
+#: `boulder.staged_solver`'s per-stage progress log line, e.g.
+#: "Staged solve: stage 'default' (1/3, 3 reactors)".
+_STAGE_RE = re.compile(
+    r"Staged solve:\s*stage\s+'([^']*)'\s*\((\d+)\s*/\s*(\d+)", re.IGNORECASE
+)
 _RUNNER_NAME = "run_sweep.py"
 
 
@@ -186,6 +197,12 @@ async def sweep_run(
         "total": total,
         "message": "starting…",
         "returncode": None,
+        # Keyed by scenario id, e.g. {"cold_feed": {"stage": 1, "stage_total": 3}}.
+        # A scenario id's presence here *is* "currently being solved" — a
+        # deliberate map rather than a single "current scenario" scalar so a
+        # future parallel sweep runner can hold more than one entry at once
+        # without changing this shape.
+        "scenario_progress": {},
     }
     request.app.state.sweep_job = state
     # Surface on the server console by default — at least that the run started.
@@ -218,6 +235,24 @@ async def sweep_run(
                     state["current"] = int(match.group(1))
                     state["total"] = int(match.group(2))
                     state["message"] = line.strip()
+                    if _SCENARIO_SKIP_RE.search(line):
+                        # Cache hit: instantaneous, never "calculating".
+                        state["scenario_progress"] = {}
+                    else:
+                        id_match = _SCENARIO_ID_RE.search(line)
+                        sid = id_match.group(1).strip() if id_match else None
+                        # Serial today: one scenario in flight, so replace the
+                        # whole map. A parallel runner would add/remove keys
+                        # here instead of replacing.
+                        state["scenario_progress"] = (
+                            {sid: {"stage": None, "stage_total": None}} if sid else {}
+                        )
+                else:
+                    stage_match = _STAGE_RE.search(line)
+                    if stage_match:
+                        for progress in state["scenario_progress"].values():
+                            progress["stage"] = int(stage_match.group(2))
+                            progress["stage_total"] = int(stage_match.group(3))
                 if line:
                     tail.append(line)
                     del tail[:-30]
@@ -225,6 +260,10 @@ async def sweep_run(
                     print(f"[sweep] {line}", flush=True)
             proc.wait()
             state["returncode"] = proc.returncode
+            # The last scenario processed may not have ended with a "cached,
+            # skipped" line clearing it — nothing is "calculating" once the
+            # subprocess itself has exited, one way or another.
+            state["scenario_progress"] = {}
             if proc.returncode == 0:
                 state["status"] = "done"
                 state["message"] = "Sweep complete"

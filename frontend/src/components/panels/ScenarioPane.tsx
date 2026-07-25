@@ -2,9 +2,32 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Eraser, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 import { SweepResultsPlot } from "./SweepResultsPlot";
+import type { ScenarioMeta } from "@/api/scenarios";
+
+/** One row in the pane: every authored id, paired with its computed data if any. */
+interface ScenarioRow {
+  id: string;
+  computed: ScenarioMeta | null;
+}
+
+/** `authoredIds` first (the sweep's solve order), then any computed scenario
+ * a host's `run_sweep.py` produced without declaring it in `scenarios:`. */
+function buildRows(authoredIds: string[], scenarios: ScenarioMeta[]): ScenarioRow[] {
+  const byId = new Map(scenarios.map((s) => [s.id, s]));
+  const seen = new Set<string>();
+  const rows: ScenarioRow[] = authoredIds.map((id) => {
+    seen.add(id);
+    return { id, computed: byId.get(id) ?? null };
+  });
+  for (const s of scenarios) {
+    if (!seen.has(s.id)) rows.push({ id: s.id, computed: s });
+  }
+  return rows;
+}
 
 /** Compact relative-time label, e.g. "just now", "2 min ago", "3 h ago". */
 function timeAgo(tsSeconds: number | undefined, nowMs: number): string {
@@ -26,7 +49,6 @@ function timeAgo(tsSeconds: number | undefined, nowMs: number): string {
  */
 export function ScenarioPane() {
   const {
-    available,
     scenarios,
     authoredIds,
     createdAt,
@@ -38,6 +60,7 @@ export function ScenarioPane() {
     deleteScenario,
     clearCache,
   } = useScenarioStore();
+  const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -67,18 +90,13 @@ export function ScenarioPane() {
     prevCreated.current = createdAt;
   }, [createdAt]);
 
-  const handleDelete = async (id: string) => {
-    // Every row here already has a cached trajectory (that's why it's in
-    // `scenarios`, the store-derived list), so this message is always
-    // accurate — deleting drops both the definition and its cached result.
-    if (
-      !window.confirm(
-        `Delete scenario "${id}"? This also removes its cached trajectory ` +
-          "immediately. This cannot be undone.",
-      )
-    ) {
-      return;
-    }
+  const handleDelete = async (id: string, isComputed: boolean) => {
+    // Only a computed row actually has a cached trajectory to lose.
+    const confirmMsg = isComputed
+      ? `Delete scenario "${id}"? This also removes its cached trajectory ` +
+        "immediately. This cannot be undone."
+      : `Delete scenario "${id}"? This cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
     try {
       const { cachePurged } = await deleteScenario(id);
       toast.success(
@@ -113,10 +131,10 @@ export function ScenarioPane() {
     }
   };
 
-  if (!available || scenarios.length === 0) {
-    // No precomputed store yet (nothing has been swept), but scenario
-    // authoring doesn't need one — surface just the "+ Add Scenario" entry
-    // point so the pane isn't the only way in (Run Sweep's menu has it too).
+  if (authoredIds.length === 0 && scenarios.length === 0) {
+    // Nothing authored, nothing computed — scenario authoring doesn't need a
+    // store, so surface just the "+ Add Scenario" entry point (Run Sweep's
+    // menu has it too).
     return (
       <div className="rounded-lg border border-border bg-card p-4 space-y-2">
         <div className="flex items-center justify-between">
@@ -129,43 +147,9 @@ export function ScenarioPane() {
             <Plus size={12} /> Add Scenario
           </button>
         </div>
-        {authoredIds.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            No computed scenarios yet — add one, then Run Sweep.
-          </p>
-        ) : (
-          <>
-            <p className="text-xs text-muted-foreground">
-              Not computed yet — Run Sweep to solve{" "}
-              {authoredIds.length === 1 ? "it" : "them"}.
-            </p>
-            <ul className="space-y-1 max-h-[70vh] overflow-y-auto pr-1">
-              {authoredIds.map((id) => (
-                <li key={id} className="group flex items-center gap-1">
-                  <span className="flex-1 min-w-0 truncate rounded-md px-2 py-1.5 text-xs text-foreground">
-                    {id}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setEditingId(id)}
-                    title="Edit scenario YAML"
-                    className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted"
-                  >
-                    <Pencil size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(id)}
-                    title="Delete scenario"
-                    className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-muted"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+        <p className="text-xs text-muted-foreground">
+          No computed scenarios yet — add one, then Run Sweep.
+        </p>
         <AddScenarioModal
           open={addModalOpen}
           onClose={() => setAddModalOpen(false)}
@@ -180,20 +164,26 @@ export function ScenarioPane() {
     );
   }
 
+  // Every authored id (Run Sweep's solve order), paired with its computed
+  // data if any — kept as one list so a scenario mid-sweep (or never yet
+  // swept) stays visible and clickable instead of disappearing once
+  // something else has been computed.
+  const rows = buildRows(authoredIds, scenarios);
+
   const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
-    const idx = scenarios.findIndex((s) => s.id === activeId);
+    const idx = rows.findIndex((r) => r.id === activeId);
     let next =
       idx === -1
         ? e.key === "ArrowDown"
           ? 0
-          : scenarios.length - 1
+          : rows.length - 1
         : e.key === "ArrowDown"
           ? idx + 1
           : idx - 1;
-    next = Math.max(0, Math.min(scenarios.length - 1, next));
-    const target = scenarios[next];
+    next = Math.max(0, Math.min(rows.length - 1, next));
+    const target = rows[next];
     if (!target) return;
     void setActive(target.id);
     // Focus synchronously on the already-rendered node — a requestAnimationFrame
@@ -210,15 +200,17 @@ export function ScenarioPane() {
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-sm text-foreground">Scenarios</h3>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">{scenarios.length}</span>
-            <button
-              type="button"
-              onClick={() => void handleClearCache()}
-              title="Clear cache (delete every scenario's cached result, without re-solving)"
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <Eraser size={14} />
-            </button>
+            <span className="text-xs text-muted-foreground">{rows.length}</span>
+            {scenarios.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleClearCache()}
+                title="Clear cache (delete every scenario's cached result, without re-solving)"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <Eraser size={14} />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setAddModalOpen(true)}
@@ -230,24 +222,32 @@ export function ScenarioPane() {
           </div>
         </div>
         {error && <p className="text-xs text-red-500">{error}</p>}
+        {scenarios.length === 0 && (
+          <p className="text-xs text-muted-foreground">
+            Not computed yet — Run Sweep to solve{" "}
+            {rows.length === 1 ? "it" : "them"}.
+          </p>
+        )}
         <ul
           onKeyDown={onKeyDown}
           className={`space-y-1 max-h-[70vh] overflow-y-auto pr-1${
             bump ? " animate-[scenarioBump_0.6s_ease-out]" : ""
           }`}
         >
-          {scenarios.map((s) => {
-            const isActive = s.id === activeId;
-            const ago = timeAgo(s.computed_at ?? createdAt, now);
+          {rows.map((row) => {
+            const isActive = row.id === activeId;
+            const isCalculating = row.id in scenarioProgress;
+            const s = row.computed;
+            const ago = s ? timeAgo(s.computed_at ?? createdAt, now) : "";
             return (
-              <li key={s.id} className="group flex items-center gap-1">
+              <li key={row.id} className="group flex items-center gap-1">
                 <button
-                  id={`scenario-${s.id}`}
+                  id={`scenario-${row.id}`}
                   type="button"
-                  onClick={() => void setActive(s.id)}
+                  onClick={() => void setActive(row.id)}
                   aria-busy={loading && isActive}
                   title={
-                    s.final_temperature_K != null
+                    s?.final_temperature_K != null
                       ? `T_final ≈ ${Math.round(s.final_temperature_K)} K` +
                         (s.solid_carbon_yield_pct != null
                           ? ` · C(s) ${s.solid_carbon_yield_pct.toFixed(1)}%`
@@ -263,14 +263,24 @@ export function ScenarioPane() {
                   ].join(" ")}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate">{s.label}</span>
-                    {ago && (
+                    <span className="font-medium truncate">{s?.label ?? row.id}</span>
+                    {isCalculating ? (
+                      <span className="shrink-0 text-[10px] text-primary animate-pulse">
+                        Calculating…
+                      </span>
+                    ) : s ? (
+                      ago && (
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {ago}
+                        </span>
+                      )
+                    ) : (
                       <span className="shrink-0 text-[10px] text-muted-foreground">
-                        {ago}
+                        Not computed yet
                       </span>
                     )}
                   </div>
-                  {s.reactor_mode && (
+                  {s?.reactor_mode && (
                     <div className="text-[10px] text-muted-foreground">
                       {s.reactor_mode}
                     </div>
@@ -278,7 +288,7 @@ export function ScenarioPane() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setEditingId(s.id)}
+                  onClick={() => setEditingId(row.id)}
                   title="Edit scenario YAML"
                   className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted"
                 >
@@ -286,7 +296,7 @@ export function ScenarioPane() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => void handleDelete(s.id)}
+                  onClick={() => void handleDelete(row.id, s !== null)}
                   title="Delete scenario"
                   className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-muted"
                 >

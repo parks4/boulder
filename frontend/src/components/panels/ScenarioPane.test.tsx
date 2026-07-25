@@ -48,6 +48,12 @@ vi.mock("@/stores/scenarioStore", () => ({
   }),
 }));
 
+let mockScenarioProgress: Record<string, { stage: number | null; stageTotal: number | null }> = {};
+vi.mock("@/stores/sweepStore", () => ({
+  useSweepRunStore: (selector: (s: unknown) => unknown) =>
+    selector({ scenarioProgress: mockScenarioProgress }),
+}));
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
@@ -76,6 +82,7 @@ describe("ScenarioPane", () => {
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
     mockAuthoredIds = [];
+    mockScenarioProgress = {};
   });
 
   it("deleting a scenario confirms first, then calls deleteScenario", () => {
@@ -163,5 +170,36 @@ describe("ScenarioPane", () => {
 
     expect(mockDeleteScenario).toHaveBeenCalledWith("draft_a");
     confirmSpy.mockRestore();
+  });
+
+  it("shows a mixed list: computed scenarios alongside authored-but-pending ones", () => {
+    mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
+    mockAuthoredIds = ["A", "pending_b"];
+    render(<ScenarioPane />);
+
+    expect(screen.getByText("Scenario A")).toBeInTheDocument();
+    expect(screen.getByText("pending_b")).toBeInTheDocument();
+    expect(screen.getByText("Not computed yet")).toBeInTheDocument();
+  });
+
+  it('shows "Calculating…" for the scenario currently mid-sweep, in place of its status', () => {
+    mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
+    mockAuthoredIds = ["A", "cold_feed"];
+    mockScenarioProgress = { cold_feed: { stage: 1, stageTotal: 3 } };
+    render(<ScenarioPane />);
+
+    expect(screen.getByText("Calculating…")).toBeInTheDocument();
+    // The computed, not-currently-solving row keeps its own status.
+    expect(screen.queryByText("Not computed yet")).not.toBeInTheDocument();
+  });
+
+  it("clicking a pending (not-yet-computed) row still calls setActive", () => {
+    mockScenarios = [];
+    mockAuthoredIds = ["pending_a"];
+    render(<ScenarioPane />);
+
+    fireEvent.click(screen.getByText("pending_a"));
+
+    expect(mockSetActive).toHaveBeenCalledWith("pending_a");
   });
 });

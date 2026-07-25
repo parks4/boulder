@@ -80,6 +80,11 @@ vi.mock("@/stores/scenarioStore", () => ({
     }),
 }));
 
+const mockHydrate = vi.fn();
+vi.mock("@/stores/sweepStore", () => ({
+  useSweepRunStore: { getState: () => ({ hydrate: mockHydrate }) },
+}));
+
 let mockYamlPaneOpen = false;
 const mockOpenYamlPane = vi.fn();
 
@@ -224,5 +229,10 @@ describe("AppShell", () => {
     mockAuthoredScenarioIds = ["draft_a"];
     render(<AppShell />);
     expect(screen.getByTestId("scenario-pane")).toBeInTheDocument();
+  });
+
+  it("hydrates the sweep store once on mount, to resume an in-flight sweep after a refresh", () => {
+    render(<AppShell />);
+    expect(mockHydrate).toHaveBeenCalledOnce();
   });
 });
