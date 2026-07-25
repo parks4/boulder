@@ -1,5 +1,6 @@
 import { apiFetch } from "./client";
 import type { SimulationResults } from "@/types/simulation";
+import type { ConfigConnection, ConfigNode } from "@/types/config";
 
 /** One precomputed scenario (trajectory) in the active store. */
 export interface ScenarioMeta {
@@ -73,6 +74,23 @@ export interface ScenarioSourceResponse {
 export function fetchScenarioSource(id: string) {
   return apiFetch<ScenarioSourceResponse>(
     `/scenarios/${encodeURIComponent(id)}/source`,
+  );
+}
+
+export interface ScenarioPreviewResponse {
+  scenario_id: string;
+  nodes: ConfigNode[];
+  connections: ConfigConnection[];
+}
+
+/**
+ * Fetch one scenario's effective node/connection properties (base config
+ * deep-merged with its overlay) — works before Run Sweep has ever solved it,
+ * unlike `fetchScenario` (which 404s until a trajectory is cached).
+ */
+export function fetchScenarioPreview(id: string) {
+  return apiFetch<ScenarioPreviewResponse>(
+    `/scenarios/${encodeURIComponent(id)}/preview`,
   );
 }
 

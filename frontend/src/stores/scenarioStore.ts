@@ -4,12 +4,14 @@ import {
   createScenario as apiCreateScenario,
   deleteScenario as apiDeleteScenario,
   fetchScenario,
+  fetchScenarioPreview,
   listScenarios,
   renameScenario as apiRenameScenario,
   updateScenario as apiUpdateScenario,
   type ScenarioMeta,
 } from "@/api/scenarios";
 import { fetchPreloadedConfig } from "@/api/configs";
+import type { ConfigConnection, ConfigNode } from "@/types/config";
 import { useConfigStore } from "./configStore";
 import { useSimulationStore } from "./simulationStore";
 import { useSelectionStore } from "./selectionStore";
@@ -52,10 +54,30 @@ interface ScenarioState {
    */
   revision: number;
 
+  /**
+   * Effective (base + overlay) node/connection properties for `previewId` —
+   * lets the Inputs pane show a scenario's parameter overrides immediately,
+   * even for an authored scenario Run Sweep hasn't solved yet. Populated by
+   * every `setActive()` call, computed or not (see `loadPreview`).
+   */
+  previewId: string | null;
+  previewNodes: ConfigNode[] | null;
+  previewConnections: ConfigConnection[] | null;
+  previewLoading: boolean;
+  previewError: string | null;
+  /** Internal: guards against a stale response landing after a newer selection. */
+  previewSeq: number;
+
   /** Fetch the scenario list for the active store (no-op-safe if none). */
   refresh: () => Promise<void>;
   /** Load a scenario's trajectory and push it into the simulation results. */
   setActive: (id: string) => Promise<void>;
+  /**
+   * Fetch `id`'s effective node/connection properties (base ⊕ overlay) into
+   * `previewNodes`/`previewConnections`. Called by `setActive` for every
+   * selection, so callers normally don't need to call this directly.
+   */
+  loadPreview: (id: string) => Promise<void>;
   /**
    * Create a new scenario overlay (blank, or cloned from `baseId`) and mark
    * it active for editing. Throws on failure (id collision, no config file,
@@ -80,6 +102,12 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   loading: false,
   error: null,
   revision: 0,
+  previewId: null,
+  previewNodes: null,
+  previewConnections: null,
+  previewLoading: false,
+  previewError: null,
+  previewSeq: 0,
 
   refresh: async () => {
     try {
@@ -129,6 +157,9 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   deleteScenario: async (id) => {
     const resp = await apiDeleteScenario(id);
     if (get().activeId === id) set({ activeId: null });
+    if (get().previewId === id) {
+      set({ previewId: null, previewNodes: null, previewConnections: null, previewError: null });
+    }
     await get().refresh();
     await resyncConfigYaml();
     return { cachePurged: resp.cache_purged };
@@ -142,15 +173,20 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   },
 
   setActive: async (id) => {
+    set({ activeId: id, error: null });
+    // Always preview the scenario's effective properties, computed or not —
+    // this is what lets the Inputs pane show an authored-but-unswept
+    // scenario's overrides without ever needing a trajectory.
+    void get().loadPreview(id);
+
     // Not computed yet (authored but unswept, or mid-sweep and not reached/
     // finished yet) — just record the selection, no fetch. `GET /api/scenarios/
     // {id}` would 404 for it; the Scenario Pane / results area read `activeId`
     // directly to show a "calculating"/"pending" state for this case instead.
     if (!get().scenarios.some((s) => s.id === id)) {
-      set({ activeId: id, error: null });
       return;
     }
-    set({ loading: true, error: null, activeId: id });
+    set({ loading: true });
     try {
       const result = await fetchScenario(id);
       // Same sink the cached-result path uses → swaps result data only, no
@@ -174,6 +210,27 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
       set({ error: e instanceof Error ? e.message : String(e) });
     } finally {
       set({ loading: false });
+    }
+  },
+
+  loadPreview: async (id) => {
+    const seq = get().previewSeq + 1;
+    set({ previewSeq: seq, previewLoading: true, previewError: null });
+    try {
+      const preview = await fetchScenarioPreview(id);
+      if (get().previewSeq !== seq) return; // superseded by a newer selection
+      set({
+        previewId: id,
+        previewNodes: preview.nodes,
+        previewConnections: preview.connections,
+        previewLoading: false,
+      });
+    } catch (e) {
+      if (get().previewSeq !== seq) return;
+      set({
+        previewError: e instanceof Error ? e.message : String(e),
+        previewLoading: false,
+      });
     }
   },
 }));

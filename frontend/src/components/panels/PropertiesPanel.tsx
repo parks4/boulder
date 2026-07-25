@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
+import { useScenarioStore } from "@/stores/scenarioStore";
 import type { NormalizedConfig } from "@/types/config";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
 import { useKindSchema } from "@/hooks/useKindSchema";
@@ -57,6 +58,16 @@ function unfoldInitialConditions(
   return flat;
 }
 
+/** Render a property value the same way for the display span and override tooltips. */
+function formatDisplayValue(key: string, value: unknown): string {
+  if (key === "temperature" && typeof value === "number") {
+    return `${kelvinToCelsius(value).toFixed(2)} °C`;
+  }
+  if (typeof value === "number") return formatNumber(value);
+  if (typeof value === "object" && value !== null) return JSON.stringify(value);
+  return String(value ?? "");
+}
+
 function buildEditValuesFromProperties(
   displayProperties: Record<string, unknown>,
 ): Record<string, string> {
@@ -85,6 +96,9 @@ export function PropertiesPanel() {
   const removeNode = useConfigStore((s) => s.removeNode);
   const removeConnection = useConfigStore((s) => s.removeConnection);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
+  const previewId = useScenarioStore((s) => s.previewId);
+  const previewNodes = useScenarioStore((s) => s.previewNodes);
+  const previewConnections = useScenarioStore((s) => s.previewConnections);
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -183,6 +197,22 @@ export function PropertiesPanel() {
   const properties = entity ? (entity.properties as Record<string, unknown>) : {};
   const displayProperties = unfoldInitialConditions(properties);
 
+  // A selected scenario's effective (base + overlay) properties for this same
+  // element — lets the Inputs pane preview a scenario's overrides (e.g. a
+  // reactor's length) the moment it's selected, even before Run Sweep has
+  // solved it. Falls back to the base properties when nothing is previewed,
+  // or when this element has no counterpart in the preview (shouldn't happen
+  // in practice — the preview mirrors the whole network — but is not fatal).
+  const previewList = isNode ? previewNodes : previewConnections;
+  const previewEntity = previewId ? previewList?.find((e) => e.id === id) : undefined;
+  const previewDisplayProperties = previewEntity
+    ? unfoldInitialConditions(previewEntity.properties as Record<string, unknown>)
+    : displayProperties;
+  // While editing, always show/edit the base config's own values — a scenario
+  // overlay is a separate, scoped edit (via "Edit scenario YAML"), not
+  // something a Save here should fold into the base network.
+  const renderProperties = isEditing ? displayProperties : previewDisplayProperties;
+
   // Stream-point nodes (inter-stage diamonds) and legacy terminal OutletSink nodes
   // are computed from upstream reactors.  OutletSink + terminal_sink is deprecated;
   // remove isTerminalSink when OutletSink is dropped from STONE.
@@ -198,7 +228,7 @@ export function PropertiesPanel() {
     const cond = schemaMeta?.[key]?.visibleWhen;
     if (!cond) return true;
     return Object.entries(cond).every(([dep, expected]) => {
-      const current = isEditing ? editValues[dep] : properties[dep];
+      const current = isEditing ? editValues[dep] : renderProperties[dep];
       return String(current ?? "") === String(expected);
     });
   };
@@ -272,6 +302,14 @@ export function PropertiesPanel() {
         <div>
           <h3 className="font-semibold text-sm text-foreground">{id}</h3>
           <span className="text-xs text-muted-foreground">{entityType}</span>
+          {previewId && !isEditing && (
+            <div
+              className="text-[10px] text-amber-600 dark:text-amber-400"
+              title="Values below are this scenario's effective overrides — Edit still edits the base network."
+            >
+              Previewing scenario <span className="font-mono">{previewId}</span>
+            </div>
+          )}
         </div>
         {!isComputedStream && (
           <div className="flex gap-1">
@@ -301,9 +339,16 @@ export function PropertiesPanel() {
         <div className="border-t border-border pt-2 mt-1">
           <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
           <div className="divide-y divide-border">
-            {Object.entries(displayProperties)
+            {Object.entries(renderProperties)
               .filter(([key]) => isFieldVisible(key))
-              .map(([key, value]) => (
+              .map(([key, value]) => {
+            // Only meaningful outside edit mode — editing always shows the
+            // base config's own value (renderProperties === displayProperties then).
+            const isOverridden =
+              !isEditing &&
+              Boolean(previewEntity) &&
+              JSON.stringify(value) !== JSON.stringify(displayProperties[key]);
+            return (
             <div key={key} className="py-1.5 flex items-center justify-between gap-2">
               <span
                 className={`text-xs text-muted-foreground truncate ${
@@ -338,19 +383,25 @@ export function PropertiesPanel() {
                   />
                 )
               ) : (
-                <span className="text-xs font-mono text-foreground">
-                  {key === "temperature" && typeof value === "number"
-                    ? `${kelvinToCelsius(value).toFixed(2)} °C`
-                    : typeof value === "number"
-                      ? formatNumber(value)
-                      : typeof value === "object" && value !== null
-                        ? JSON.stringify(value)
-                        : String(value ?? "")}
+                <span
+                  className={`text-xs font-mono ${
+                    isOverridden
+                      ? "text-amber-600 dark:text-amber-400 font-semibold"
+                      : "text-foreground"
+                  }`}
+                  title={
+                    isOverridden
+                      ? `Base value: ${formatDisplayValue(key, displayProperties[key])}`
+                      : undefined
+                  }
+                >
+                  {formatDisplayValue(key, value)}
                 </span>
               )}
             </div>
-          ))}
-          {Object.keys(displayProperties).length === 0 && (
+            );
+          })}
+          {Object.keys(renderProperties).length === 0 && (
             <p className="text-xs text-muted-foreground py-1 italic">No properties</p>
           )}
           </div>
