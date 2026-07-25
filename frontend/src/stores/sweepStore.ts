@@ -64,7 +64,7 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
         // The active scenario may have only just finished solving — re-fetch
         // it now that it's actually in the store, replacing whatever
         // "calculating" placeholder was showing.
-        const { activeId, scenarios, setActive } = useScenarioStore.getState();
+        const { activeId, scenarios = [], setActive } = useScenarioStore.getState();
         if (activeId && scenarios.some((s) => s.id === activeId)) {
           void setActive(activeId);
         } else if (scenarios.length > 0) {
