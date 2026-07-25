@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { FileCode, X } from "lucide-react";
 import { useConfigStore } from "@/stores/configStore";
+import { useScenarioStore } from "@/stores/scenarioStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { parseYaml, syncConfig } from "@/api/configs";
@@ -42,14 +43,19 @@ export function YamlPane() {
 
   const refresh = useCallback(() => {
     setSyncError(null);
-    if (!originalYaml) {
-      setSyncError("No configuration available to edit.");
-      return;
-    }
+    // No graph to sync (e.g. Boulder started with no preloaded config): show
+    // whatever original YAML there is — possibly "", which mounts an empty
+    // but editable pane rather than blocking on a "nothing to edit" error.
     if (config.nodes.length === 0) {
       setValue(originalYaml);
       setBaseline(originalYaml);
       setSyncWarnings([]);
+      return;
+    }
+    // A live graph exists but there's no original YAML to merge it into —
+    // this is the only case syncConfig genuinely can't handle.
+    if (!originalYaml) {
+      setSyncError("No configuration available to edit.");
       return;
     }
     setSyncing(true);
@@ -91,6 +97,10 @@ export function YamlPane() {
       setConfig(resp.config, undefined, value);
       justSavedRef.current = true;
       setBaseline(value);
+      // The backend may have just adopted this Save as its preloaded config
+      // (if none was set yet) — bump scenarioRevision so RunControl re-checks
+      // Run Sweep availability instead of showing stale info.
+      void useScenarioStore.getState().refresh();
       toast.success("YAML config updated");
     } catch (err) {
       toast.error(`Invalid YAML: ${err instanceof Error ? err.message : String(err)}`);
