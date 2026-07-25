@@ -281,3 +281,37 @@ class TestGuiActionCacheContext:
             )
             assert ctx.has_cached_result is False
             assert ctx.cache_fingerprint is not None
+
+
+class TestGuiActionNetworkImage:
+    """_build_context forwards a client-captured network graph PNG."""
+
+    def test_plain_base64_is_forwarded_as_is(self):
+        from boulder.api.routes.gui_actions import GuiActionRunRequest, _build_context
+
+        class _Req:
+            app = type("_App", (), {"state": type("_State", (), {})()})()
+
+        ctx = _build_context(_Req(), GuiActionRunRequest(network_image_png="QUJD"))
+        assert ctx.network_image_b64 == "QUJD"
+
+    def test_data_uri_prefix_is_stripped(self):
+        from boulder.api.routes.gui_actions import GuiActionRunRequest, _build_context
+
+        class _Req:
+            app = type("_App", (), {"state": type("_State", (), {})()})()
+
+        ctx = _build_context(
+            _Req(),
+            GuiActionRunRequest(network_image_png="data:image/png;base64,QUJD"),
+        )
+        assert ctx.network_image_b64 == "QUJD"
+
+    def test_absent_when_not_provided(self):
+        from boulder.api.routes.gui_actions import GuiActionRunRequest, _build_context
+
+        class _Req:
+            app = type("_App", (), {"state": type("_State", (), {})()})()
+
+        ctx = _build_context(_Req(), GuiActionRunRequest())
+        assert ctx.network_image_b64 is None
