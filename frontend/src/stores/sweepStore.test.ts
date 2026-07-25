@@ -185,4 +185,47 @@ describe("sweepStore", () => {
 
     expect(mockGetSweepStatus).not.toHaveBeenCalled();
   });
+
+  it("run()'s completion auto-selects the first scenario when nothing was active", async () => {
+    vi.useFakeTimers();
+    mockActiveId = null;
+    mockScenarios = [{ id: "BASELINE" }, { id: "C600_P300" }];
+    mockStartSweep.mockResolvedValue({ status: "running", total: 2 });
+    mockGetSweepStatus.mockResolvedValueOnce({ status: "done", current: 2, total: 2 });
+
+    useSweepRunStore.getState().run({ total: 2 });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockSetActive).toHaveBeenCalledWith("BASELINE");
+  });
+
+  it("run()'s completion re-fetches the existing active scenario instead of switching", async () => {
+    vi.useFakeTimers();
+    mockActiveId = "C600_P300";
+    mockScenarios = [{ id: "BASELINE" }, { id: "C600_P300" }];
+    mockStartSweep.mockResolvedValue({ status: "running", total: 2 });
+    mockGetSweepStatus.mockResolvedValueOnce({ status: "done", current: 2, total: 2 });
+
+    useSweepRunStore.getState().run({ total: 2 });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockSetActive).toHaveBeenCalledWith("C600_P300");
+    expect(mockSetActive).toHaveBeenCalledOnce();
+  });
+
+  it("run()'s completion does nothing when there is no active scenario and none finished", async () => {
+    vi.useFakeTimers();
+    mockActiveId = null;
+    mockScenarios = [];
+    mockStartSweep.mockResolvedValue({ status: "running", total: 1 });
+    mockGetSweepStatus.mockResolvedValueOnce({ status: "done", current: 1, total: 1 });
+
+    useSweepRunStore.getState().run({ total: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(mockSetActive).not.toHaveBeenCalled();
+  });
 });

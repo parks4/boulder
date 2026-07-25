@@ -4,6 +4,8 @@ import { useConfigStore } from "@/stores/configStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { useSimulationStore } from "@/stores/simulationStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 import { parseYaml, syncConfig } from "@/api/configs";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
@@ -26,6 +28,9 @@ export function YamlPane() {
   const setConfig = useConfigStore((s) => s.setConfig);
   const closeYamlPane = useLayoutStore((s) => s.closeYamlPane);
   const theme = useThemeStore((s) => s.theme);
+  const isSimulating = useSimulationStore((s) => s.isRunning);
+  const isSweeping = useSweepRunStore((s) => s.sweeping);
+  const isCalculating = isSimulating || isSweeping;
 
   const [value, setValue] = useState("");
   const [baseline, setBaseline] = useState("");
@@ -91,6 +96,10 @@ export function YamlPane() {
   }, [refresh]);
 
   const handleSave = useCallback(async () => {
+    if (isCalculating) {
+      toast.error("Wait for the current calculation to finish before saving YAML changes.");
+      return;
+    }
     setSaving(true);
     try {
       const resp = await parseYaml(value);
@@ -107,21 +116,21 @@ export function YamlPane() {
     } finally {
       setSaving(false);
     }
-  }, [value, setConfig]);
+  }, [value, setConfig, isCalculating]);
 
-  const canSave = isDirty && !saving && !syncing && !syncError;
+  const canSave = isDirty && !saving && !syncing && !syncError && !isCalculating;
 
   // Ctrl/Cmd+S saves instead of triggering the browser's "Save Page As".
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        if (canSave) void handleSave();
+        if (canSave || (isDirty && isCalculating)) void handleSave();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canSave, handleSave]);
+  }, [canSave, handleSave, isDirty, isCalculating]);
 
   const handleCancel = () => {
     setValue(baseline);
@@ -155,6 +164,15 @@ export function YamlPane() {
         </Button>
       </div>
 
+      {isCalculating && (
+        <div
+          id="yaml-locked-banner"
+          className="px-3 py-2 text-xs bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300 shrink-0"
+        >
+          A calculation is running — the YAML is locked until it finishes.
+        </div>
+      )}
+
       {syncWarnings.length > 0 && (
         <div
           id="sync-warnings-banner"
@@ -186,6 +204,7 @@ export function YamlPane() {
                 id="config-yaml-editor"
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
+                readOnly={isCalculating}
                 className="w-full h-full p-4 font-mono text-sm bg-background text-foreground resize-none"
               />
             }
@@ -200,6 +219,7 @@ export function YamlPane() {
                 minimap: { enabled: false },
                 wordWrap: "on",
                 fontSize: 13,
+                readOnly: isCalculating,
               }}
             />
           </Suspense>
@@ -219,7 +239,7 @@ export function YamlPane() {
           disabled={!canSave}
           variant="primary"
           size="sm"
-          title="Save (Ctrl+S)"
+          title={isCalculating ? "Wait for the current calculation to finish" : "Save (Ctrl+S)"}
         >
           {saving ? "Saving…" : "Save"}
         </Button>

@@ -67,6 +67,11 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
         const { activeId, scenarios, setActive } = useScenarioStore.getState();
         if (activeId && scenarios.some((s) => s.id === activeId)) {
           void setActive(activeId);
+        } else if (scenarios.length > 0) {
+          // Nothing was selected before the sweep ran (e.g. the first sweep
+          // in a session) — auto-select a scenario so the results view
+          // populates instead of staying blank behind the Scenario Pane.
+          void setActive(scenarios[0].id);
         }
       })();
     } else if (st.status === "error") {
