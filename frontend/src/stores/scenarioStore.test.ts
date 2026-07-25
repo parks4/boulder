@@ -18,6 +18,7 @@ const mockRenameScenario = vi.fn();
 const mockDeleteScenario = vi.fn();
 const mockFetchScenario = vi.fn();
 const mockClearScenarioCache = vi.fn();
+const mockFetchScenarioPreview = vi.fn();
 
 vi.mock("@/api/scenarios", () => ({
   listScenarios: (...args: unknown[]) => mockListScenarios(...args),
@@ -26,6 +27,7 @@ vi.mock("@/api/scenarios", () => ({
   deleteScenario: (...args: unknown[]) => mockDeleteScenario(...args),
   fetchScenario: (...args: unknown[]) => mockFetchScenario(...args),
   clearScenarioCache: (...args: unknown[]) => mockClearScenarioCache(...args),
+  fetchScenarioPreview: (...args: unknown[]) => mockFetchScenarioPreview(...args),
   updateScenario: vi.fn(),
 }));
 
@@ -43,6 +45,11 @@ describe("scenarioStore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetchPreloadedConfig.mockResolvedValue({ preloaded: false });
+    mockFetchScenarioPreview.mockResolvedValue({
+      scenario_id: "unset",
+      nodes: [],
+      connections: [],
+    });
     useScenarioStore.setState({
       available: false,
       scenarios: [],
@@ -52,6 +59,12 @@ describe("scenarioStore", () => {
       error: null,
       revision: 0,
       createdAt: undefined,
+      previewId: null,
+      previewNodes: null,
+      previewConnections: null,
+      previewLoading: false,
+      previewError: null,
+      previewSeq: 0,
     });
   });
 
@@ -147,6 +160,91 @@ describe("scenarioStore", () => {
     expect(useScenarioStore.getState().activeId).toBe("pending_id");
     expect(useScenarioStore.getState().error).toBeNull();
     expect(mockFetchScenario).not.toHaveBeenCalled();
+  });
+
+  it("deleteScenario clears the preview when the deleted scenario was being previewed", async () => {
+    useScenarioStore.setState({
+      previewId: "A",
+      previewNodes: [{ id: "r1", type: "x", properties: {} }],
+      previewConnections: [],
+    });
+    mockDeleteScenario.mockResolvedValue({ ok: true, scenario_id: "A" });
+    mockListScenarios.mockResolvedValue({ available: false, scenarios: [], authored_ids: [] });
+
+    await useScenarioStore.getState().deleteScenario("A");
+
+    const state = useScenarioStore.getState();
+    expect(state.previewId).toBeNull();
+    expect(state.previewNodes).toBeNull();
+  });
+
+  it("setActive on an authored-but-uncomputed scenario loads its preview without fetching a trajectory", async () => {
+    mockFetchScenarioPreview.mockResolvedValue({
+      scenario_id: "C600_P300",
+      nodes: [{ id: "reactor1", type: "IdealGasReactor", properties: { length: 0.6 } }],
+      connections: [],
+    });
+
+    await useScenarioStore.getState().setActive("C600_P300");
+
+    expect(mockFetchScenario).not.toHaveBeenCalled();
+    const state = useScenarioStore.getState();
+    expect(state.activeId).toBe("C600_P300");
+    expect(state.previewId).toBe("C600_P300");
+    expect(state.previewNodes).toEqual([
+      { id: "reactor1", type: "IdealGasReactor", properties: { length: 0.6 } },
+    ]);
+  });
+
+  it("setActive on a computed scenario loads its preview alongside the trajectory", async () => {
+    useScenarioStore.setState({ scenarios: [{ id: "A", t0_K: 300, label: "A" }] });
+    mockFetchScenario.mockResolvedValue({ reactors_series: {} });
+    mockFetchScenarioPreview.mockResolvedValue({
+      scenario_id: "A",
+      nodes: [{ id: "r1", type: "IdealGasReactor", properties: { length: 1.2 } }],
+      connections: [],
+    });
+
+    await useScenarioStore.getState().setActive("A");
+
+    expect(mockFetchScenario).toHaveBeenCalledWith("A");
+    expect(useScenarioStore.getState().previewNodes).toEqual([
+      { id: "r1", type: "IdealGasReactor", properties: { length: 1.2 } },
+    ]);
+  });
+
+  it("loadPreview surfaces a fetch failure in previewError without throwing", async () => {
+    mockFetchScenarioPreview.mockRejectedValue(new Error("boom"));
+
+    await useScenarioStore.getState().setActive("nope");
+
+    expect(useScenarioStore.getState().previewError).toBe("boom");
+  });
+
+  it("loadPreview ignores a stale response superseded by a newer selection", async () => {
+    let resolveFirst: (v: unknown) => void = () => {};
+    const firstPromise = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+    mockFetchScenarioPreview.mockImplementationOnce(() => firstPromise);
+    mockFetchScenarioPreview.mockImplementationOnce(() =>
+      Promise.resolve({
+        scenario_id: "B",
+        nodes: [{ id: "r1", type: "x", properties: { length: 2 } }],
+        connections: [],
+      }),
+    );
+
+    const p1 = useScenarioStore.getState().setActive("A");
+    const p2 = useScenarioStore.getState().setActive("B");
+    resolveFirst({
+      scenario_id: "A",
+      nodes: [{ id: "r1", type: "x", properties: { length: 1 } }],
+      connections: [],
+    });
+    await Promise.all([p1, p2]);
+
+    expect(useScenarioStore.getState().previewId).toBe("B");
   });
 
   it("createScenario pushes the freshly-written config YAML into configStore", async () => {

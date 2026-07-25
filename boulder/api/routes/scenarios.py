@@ -225,6 +225,74 @@ async def get_scenario_source(scenario_id: str, request: Request) -> Dict[str, A
     return {"scenario_id": scenario_id, "yaml": yaml_text}
 
 
+def _raw_base_config(request: Request) -> Optional[Dict[str, Any]]:
+    """Return the inheritance-resolved base config dict (keeps `scenarios:`/`sweep:`).
+
+    Prefers the in-memory snapshot (kept fresh by `_reload_preloaded_state` after
+    every scenario write); falls back to a fresh disk load so the preview route
+    also works against a config path set directly (e.g. in tests) without going
+    through a scenario CRUD call first.
+    """
+    raw = getattr(request.app.state, "preloaded_raw", None)
+    if raw:
+        return raw
+    cfg_path = _config_path(request)
+    if cfg_path is None or not cfg_path.is_file():
+        return None
+    from ...runner import BoulderRunner
+
+    runner_cls = getattr(request.app.state, "runner_class", None) or BoulderRunner
+    return runner_cls.load(str(cfg_path))
+
+
+@router.get("/{scenario_id}/preview")
+async def get_scenario_preview(scenario_id: str, request: Request) -> Dict[str, Any]:
+    """Return the effective node/connection properties for one authored scenario.
+
+    Lets the Inputs pane show a scenario's parameter overrides (e.g. a reactor's
+    ``length``) the moment it's selected — even before Run Sweep has produced a
+    trajectory for it. Mirrors :func:`boulder.runset.expand_scenarios`'s base ⊕
+    overlay merge for a single scenario id, using the overlay's own values as-is:
+    an inner ``sweep:`` block's axis values are not expanded here (this is a
+    static preview of the authored overlay, not a resolved run-set point).
+    """
+    raw = _raw_base_config(request)
+    if not raw:
+        raise HTTPException(status_code=404, detail="No configuration loaded")
+
+    from ...runner import BoulderRunner
+    from ...runset import BASELINE_SCENARIO_ID, deep_merge
+
+    scenario_map = raw.get("scenarios") or {}
+    if scenario_id != BASELINE_SCENARIO_ID and scenario_id not in scenario_map:
+        raise HTTPException(status_code=404, detail=f"Unknown scenario {scenario_id!r}")
+
+    base_clean = {
+        k: v for k, v in raw.items() if k not in ("scenarios", "sweep", "sweeps")
+    }
+    overlay = (
+        dict(scenario_map[scenario_id]) if scenario_id != BASELINE_SCENARIO_ID else {}
+    )
+    overlay.pop("sweep", None)
+    overlay.pop("sweeps", None)
+    merged = deep_merge(base_clean, overlay)
+
+    runner_cls = getattr(request.app.state, "runner_class", None) or BoulderRunner
+    try:
+        normalized = runner_cls.normalize(merged)
+    except Exception as exc:  # noqa: BLE001 — surfaced as a 422 to the preview caller
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not preview scenario {scenario_id!r}: {exc}",
+        ) from exc
+
+    return {
+        "scenario_id": scenario_id,
+        "nodes": normalized.get("nodes", []),
+        "connections": normalized.get("connections", []),
+    }
+
+
 @router.post("")
 async def create_scenario(
     body: CreateScenarioRequest, request: Request

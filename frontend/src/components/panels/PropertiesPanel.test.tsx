@@ -70,6 +70,22 @@ vi.mock("@/stores/configStore", () => ({
   },
 }));
 
+let mockPreviewId: string | null = null;
+let mockPreviewNodes: Array<{ id: string; properties: Record<string, unknown> }> | null = null;
+let mockPreviewConnections: Array<{ id: string; properties: Record<string, unknown> }> | null =
+  null;
+
+vi.mock("@/stores/scenarioStore", () => ({
+  useScenarioStore: (selector: (s: unknown) => unknown) => {
+    const store = {
+      previewId: mockPreviewId,
+      previewNodes: mockPreviewNodes,
+      previewConnections: mockPreviewConnections,
+    };
+    return selector(store);
+  },
+}));
+
 describe("PropertiesPanel delete confirmation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -359,5 +375,91 @@ describe("PropertiesPanel object-valued properties", () => {
     expect(plotIndex).toBeGreaterThan(-1);
     expect(plotIndex).toBeGreaterThan(temperatureIndex);
     expect(plotIndex).toBeGreaterThan(pressureIndex);
+  });
+});
+
+describe("PropertiesPanel scenario preview", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInitialConditionsEditNonce = 0;
+    mockSelectedElement = {
+      type: "node",
+      data: { id: "reactor_1", type: "IdealGasReactor" },
+    };
+    mockConfig = {
+      nodes: [
+        {
+          id: "reactor_1",
+          type: "IdealGasReactor",
+          properties: { temperature: 1273.15, length: 0.3 },
+        },
+      ],
+      connections: [],
+    };
+    mockPreviewId = null;
+    mockPreviewNodes = null;
+    mockPreviewConnections = null;
+  });
+
+  it("shows no preview badge and no override styling when nothing is previewed", () => {
+    render(<PropertiesPanel />);
+
+    expect(screen.queryByText(/Previewing scenario/)).not.toBeInTheDocument();
+    expect(screen.getByText("0.30")).toBeInTheDocument();
+  });
+
+  it("shows a scenario's overridden value and a preview badge once it's selected", () => {
+    mockPreviewId = "C600_P300";
+    mockPreviewNodes = [
+      { id: "reactor_1", properties: { temperature: 1273.15, length: 0.6 } },
+    ];
+    mockPreviewConnections = [];
+
+    render(<PropertiesPanel />);
+
+    expect(screen.getByText(/Previewing scenario/)).toBeInTheDocument();
+    expect(screen.getByText("C600_P300")).toBeInTheDocument();
+    expect(screen.getByText("0.60")).toBeInTheDocument();
+    expect(screen.queryByText("0.30")).not.toBeInTheDocument();
+  });
+
+  it("does not highlight a field the scenario leaves unchanged", () => {
+    mockPreviewId = "C600_P300";
+    // Same length as the base — only temperature differs.
+    mockPreviewNodes = [
+      { id: "reactor_1", properties: { temperature: 900, length: 0.3 } },
+    ];
+    mockPreviewConnections = [];
+
+    render(<PropertiesPanel />);
+
+    const lengthValue = screen.getByText("0.30");
+    expect(lengthValue.className).not.toMatch(/amber/);
+  });
+
+  it("highlights an overridden field distinctly from an unchanged one", () => {
+    mockPreviewId = "C600_P300";
+    mockPreviewNodes = [
+      { id: "reactor_1", properties: { temperature: 1273.15, length: 0.6 } },
+    ];
+    mockPreviewConnections = [];
+
+    render(<PropertiesPanel />);
+
+    expect(screen.getByText("0.60").className).toMatch(/amber/);
+  });
+
+  it("editing still shows/edits the base value, not the previewed scenario's override", () => {
+    mockPreviewId = "C600_P300";
+    mockPreviewNodes = [
+      { id: "reactor_1", properties: { temperature: 1273.15, length: 0.6 } },
+    ];
+    mockPreviewConnections = [];
+
+    render(<PropertiesPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByDisplayValue("0.3")).toBeInTheDocument();
+    expect(screen.queryByText(/Previewing scenario/)).not.toBeInTheDocument();
   });
 });
