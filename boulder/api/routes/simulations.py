@@ -305,6 +305,7 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
                 "times": progress.times,
                 "reactors_series": progress.reactors_series,
                 "total_time": progress.total_time,
+                "completed_stage_ids": progress.completed_stage_ids,
             }
         )
 

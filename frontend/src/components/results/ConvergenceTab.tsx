@@ -3,10 +3,57 @@ import Plot from "react-plotly.js";
 import { coerceNumericSeries, pressureYAxis } from "@/lib/plotAxis";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useThemeStore } from "@/stores/themeStore";
-import type { SimulationProgress } from "@/types/simulation";
+import type { NodeConservation, SimulationProgress } from "@/types/simulation";
 
 interface Props {
   data: SimulationProgress;
+}
+
+/** Compact mass/energy conservation summary, shown above the per-kind convergence view. */
+function ConservationSummary({ conservation }: { conservation: NodeConservation }) {
+  const massOk = conservation.mass_closes;
+  const energyOk = conservation.energy_closes;
+  const allOk = massOk && energyOk;
+  return (
+    <div
+      className={`rounded border p-3 text-sm ${
+        allOk
+          ? "border-emerald-600/30 bg-emerald-600/5"
+          : "border-amber-600/40 bg-amber-600/10"
+      }`}
+    >
+      <p className="font-medium mb-1">
+        {allOk ? "✓ Mass & energy conservation OK" : "⚠ Conservation check failed"}
+      </p>
+      <table className="w-full max-w-sm text-sm">
+        <tbody>
+          <tr>
+            <td className="pr-4 text-muted-foreground">Mass</td>
+            <td className="pr-2">{conservation.mass_in_kg_s.toPrecision(4)} kg/s in</td>
+            <td className="pr-2">{conservation.mass_out_kg_s.toPrecision(4)} kg/s out</td>
+            <td className={massOk ? "text-emerald-600" : "text-amber-600 font-medium"}>
+              {massOk ? "OK" : "FAILED"}
+            </td>
+          </tr>
+          <tr>
+            <td className="pr-4 text-muted-foreground">Energy</td>
+            <td className="pr-2">{conservation.energy_in_kw.toFixed(2)} kW in</td>
+            <td className="pr-2">{conservation.energy_out_kw.toFixed(2)} kW out</td>
+            <td className={energyOk ? "text-emerald-600" : "text-amber-600 font-medium"}>
+              {energyOk ? "OK" : "FAILED"}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      {!allOk && (
+        <p className="text-xs text-muted-foreground mt-1">
+          A residence-time-sized reactor stage that hasn't reached steady
+          state often shows an energy imbalance here — try a longer stage
+          advance time.
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function ConvergenceTab({ data }: Props) {
@@ -81,12 +128,18 @@ export function ConvergenceTab({ data }: Props) {
   }
 
   const gridcolor = theme === "dark" ? "#333" : "#e0e0e0";
+  const conservationBanner = series?.conservation ? (
+    <ConservationSummary conservation={series.conservation} />
+  ) : null;
 
   if (series?.is_residence) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Physical residence-time profile is in the <strong>Plots</strong> tab.
-      </p>
+      <>
+        {conservationBanner}
+        <p className="text-sm text-muted-foreground">
+          Physical residence-time profile is in the <strong>Plots</strong> tab.
+        </p>
+      </>
     );
   }
 
@@ -97,6 +150,7 @@ export function ConvergenceTab({ data }: Props) {
 
     return (
       <div className="space-y-4">
+        {conservationBanner}
         <p className="text-sm text-muted-foreground">
           Forward-Backward Sweep convergence — heat loss at each iteration.
         </p>
@@ -163,6 +217,7 @@ export function ConvergenceTab({ data }: Props) {
 
     return (
       <div className="space-y-4">
+        {conservationBanner}
         <p className="text-sm text-muted-foreground">
           Transient approach to steady state (PSR time integration).
         </p>
@@ -280,6 +335,7 @@ export function ConvergenceTab({ data }: Props) {
     }));
     return (
       <div className="space-y-4">
+        {conservationBanner}
         <p className="text-sm text-muted-foreground">
           Staged solve: the stage solver switched between internal models at
           the times below (dotted lines on the trend).
@@ -343,9 +399,12 @@ export function ConvergenceTab({ data }: Props) {
 
   // --- All other reactor types ---
   return (
-    <p className="text-sm text-muted-foreground">
-      No convergence data available for this reactor type.
-    </p>
+    <>
+      {conservationBanner}
+      <p className="text-sm text-muted-foreground">
+        No convergence data available for this reactor type.
+      </p>
+    </>
   );
 }
 

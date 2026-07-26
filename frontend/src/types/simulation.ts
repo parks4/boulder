@@ -32,6 +32,22 @@ export interface ReactorSeries {
    */
   model_sequence?: string[];
   switch_times_s?: number[];
+  /**
+   * Post-solve mass/energy conservation check for this node, if the backend
+   * provides one. Absent for boundary nodes (pure source/sink) and for
+   * reactor kinds the check couldn't run for.
+   */
+  conservation?: NodeConservation;
+}
+
+/** Per-node mass/energy balance: sum(in) vs sum(out) at the solved state. */
+export interface NodeConservation {
+  mass_in_kg_s: number;
+  mass_out_kg_s: number;
+  energy_in_kw: number;
+  energy_out_kw: number;
+  mass_closes: boolean;
+  energy_closes: boolean;
 }
 
 /** Connection (e.g. MFC) report from backend: mass and volumetric flow rates. */
@@ -51,6 +67,13 @@ export interface SimulationProgress {
   /** Staged-solver build counters — updated after each stage completes. */
   stages_done?: number;
   n_stages?: number;
+  /**
+   * Stage ids that have finished solving, in completion order. Stages solve
+   * strictly sequentially, so the first stage id (in config.groups
+   * declaration order) not yet in this list is the one currently running —
+   * drives the live per-node "calculating" indicator on the graph.
+   */
+  completed_stage_ids?: string[];
   times: number[];
   reactors_series: Record<string, ReactorSeries>;
   reactor_reports?: Record<string, unknown>;

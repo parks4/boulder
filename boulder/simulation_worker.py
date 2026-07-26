@@ -72,6 +72,14 @@ class SimulationProgress:
     stages_done: int = 0
     n_stages: int = 0
 
+    # Stage ids that have finished solving, in completion order (append-only,
+    # reset per run via a fresh SimulationProgress()). Lets the client map a
+    # node's ``group`` (== stage id) to a live per-node status on the graph
+    # (calculating / resolved) without needing a separate "stage started"
+    # event -- stages solve strictly sequentially, so the first stage id not
+    # yet in this list is the one currently running.
+    completed_stage_ids: List[str] = field(default_factory=list)
+
     # Status flags
     is_running: bool = False
     is_complete: bool = False
@@ -169,6 +177,7 @@ class SimulationWorker:
                 ),
                 stages_done=self.progress.stages_done,
                 n_stages=self.progress.n_stages,
+                completed_stage_ids=list(self.progress.completed_stage_ids),
                 is_running=self.progress.is_running,
                 is_complete=self.progress.is_complete,
                 error_message=self.progress.error_message,
@@ -220,6 +229,7 @@ class SimulationWorker:
                 with self._lock:
                     self.progress.stages_done = n_done
                     self.progress.n_stages = n_total
+                    self.progress.completed_stage_ids.append(stage_id)
 
             # Build the network first
             network = converter.build_network(
