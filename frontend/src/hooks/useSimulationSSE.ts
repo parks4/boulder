@@ -1,8 +1,19 @@
 import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useConfigStore } from "@/stores/configStore";
 import type { SimulationProgress, SimulationResults } from "@/types/simulation";
 // useConfigStore is accessed via .getState() inside callbacks to avoid stale closures.
+
+/** Node ids where the post-solve mass/energy conservation check failed. */
+function conservationFailingNodes(data: SimulationResults): string[] {
+  return Object.entries(data.reactors_series ?? {})
+    .filter(([, series]) => {
+      const c = series.conservation;
+      return c && (!c.mass_closes || !c.energy_closes);
+    })
+    .map(([id]) => id);
+}
 
 /**
  * Hook that connects to the simulation SSE stream and updates the store.
@@ -37,6 +48,15 @@ export function useSimulationSSE() {
       try {
         const data = JSON.parse(e.data) as SimulationResults;
         setResults(data);
+
+        const failingNodes = conservationFailingNodes(data);
+        if (failingNodes.length > 0) {
+          toast.warning(
+            `Mass/energy conservation check failed at ${failingNodes.length} ` +
+              `node(s): ${failingNodes.join(", ")}. See the Convergence tab for ` +
+              "each node. Calculation Note export is blocked until this is resolved.",
+          );
+        }
 
         // Single source of truth: atomically replace nodes + connections with the
         // authoritative post-build lists from the backend.  Both lists are always
