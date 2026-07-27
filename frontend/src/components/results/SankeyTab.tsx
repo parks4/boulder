@@ -1,5 +1,6 @@
 import Plot from "react-plotly.js";
 import { mapSankeyNodeColors } from "@/lib/cytoscapeNodeColor";
+import { hasSankeyData } from "@/lib/sankeyData";
 import { useThemeStore } from "@/stores/themeStore";
 import type { SimulationResults } from "@/types/simulation";
 
@@ -43,7 +44,7 @@ function mapSankeyLinkColors(
 export function SankeyTab({ results }: Props) {
   const theme = useThemeStore((s) => s.theme);
 
-  if (!results.sankey_links || !results.sankey_nodes) {
+  if (!hasSankeyData(results)) {
     return <p className="text-sm text-muted-foreground">No Sankey data available.</p>;
   }
 
