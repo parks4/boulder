@@ -41,6 +41,126 @@ def _copy_reactors_series(
     return out
 
 
+def generate_reactor_reports(converter: Any, results: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate reactor reports for thermo analysis.
+
+    Free function (not a method — reads only *converter*/*results*) so any
+    solve path can populate ``reactor_reports`` the same way the live GUI
+    solve does, e.g. :func:`boulder.sweep_runner._solve`.
+    """
+    reactor_reports = {}
+
+    try:
+        # Generate reports for each reactor
+        for reactor_id, reactor in converter.reactors.items():
+            phase = reactor.phase
+            if isinstance(reactor, ct.Reservoir):
+                # Handle Reservoirs - they maintain fixed thermodynamic conditions
+                current_T = phase.T
+                current_P = phase.P
+                current_T_c = current_T - 273.15
+
+                reactor_reports[reactor_id] = {
+                    "T": current_T,
+                    "P": current_P,
+                    "X": {
+                        name: phase.X[i] for i, name in enumerate(phase.species_names)
+                    },
+                    "species_names": phase.species_names,
+                    "molecular_weights": phase.molecular_weights.tolist(),
+                    "mass_fractions": phase.Y.tolist(),
+                    # Generate formatted reports for UI display
+                    "reactor_report": f"Temperature: {current_T_c:.2f} °C (Fixed)\nPressure: "
+                    f"{current_P:.2e} Pa (Fixed)\nType: Reservoir (Infinite Capacity)",
+                    # Use the reactor's own phase to ensure mechanism matches reactor
+                    "thermo_report": phase.report(),
+                }
+                continue
+
+            # Get final state data for regular reactors
+            if reactor_id in results["reactors"]:
+                reactor_data = results["reactors"][reactor_id]
+                if reactor_data["T"] and reactor_data["P"]:
+                    # Use final state
+                    final_T = reactor_data["T"][-1]
+                    final_P = reactor_data["P"][-1]
+                    final_X = {s: reactor_data["X"][s][-1] for s in reactor_data["X"]}
+
+                    # Generate thermo report (display temperature in °C)
+                    final_T_c = final_T - 273.15
+                    reactor_reports[reactor_id] = {
+                        "T": final_T,
+                        "P": final_P,
+                        "X": final_X,
+                        "species_names": phase.species_names,
+                        "molecular_weights": phase.molecular_weights.tolist(),
+                        "mass_fractions": phase.Y.tolist(),
+                        # Generate formatted reports for UI display
+                        "reactor_report": f"Temperature: {final_T_c:.2f} °C\nPressure: "
+                        f"{final_P:.2e} Pa\nVolume: {reactor.volume:.2e} m³",
+                        # Use the reactor's own phase to ensure mechanism matches reactor
+                        "thermo_report": phase.report(),
+                    }
+
+    except Exception as e:
+        logger.warning(f"Failed to generate reactor reports: {e}")
+
+    return reactor_reports
+
+
+def generate_connection_reports(converter: Any) -> Dict[str, Any]:
+    """Generate connection (MFC) reports with mass and volumetric flow rates.
+
+    Free function (not a method — reads only *converter*) so any solve path
+    can populate ``connection_reports`` the same way the live GUI solve does,
+    e.g. :func:`boulder.sweep_runner._solve`.
+
+    Volumetric flow real: at source T, P. Normal: DIN 1343 (0 °C, 101325 Pa).
+    """
+    R_GAS = 8.314462618  # J/(mol·K)
+    T_NORMAL_K = 273.15
+    P_NORMAL_PA = 101325.0
+
+    connection_reports: Dict[str, Any] = {}
+    try:
+        reactor_id_by_obj = {r: rid for rid, r in converter.reactors.items()}
+        for conn_id, device in converter.connections.items():
+            if not isinstance(device, ct.MassFlowController):
+                continue
+            upstream = device.upstream
+            thermo = upstream.phase
+            T = float(thermo.T)
+            P = float(thermo.P)
+            # Cantera molecular_weights in kg/kmol; X is mole fractions
+            M_kg_kmol = sum(
+                float(thermo.X[i]) * float(thermo.molecular_weights[i])
+                for i in range(thermo.n_species)
+            )
+            M_kg_mol = M_kg_kmol / 1000.0
+            rho = (P * M_kg_mol) / (R_GAS * T)
+            rho_normal = (P_NORMAL_PA * M_kg_mol) / (R_GAS * T_NORMAL_K)
+            mfr = float(device.mass_flow_rate)
+            if rho > 0:
+                Q_real = mfr / rho
+            else:
+                Q_real = 0.0
+            if rho_normal > 0:
+                Q_normal = mfr / rho_normal
+            else:
+                Q_normal = 0.0
+            connection_reports[conn_id] = {
+                "mass_flow_rate": mfr,
+                "volumetric_flow_real_m3_s": Q_real,
+                "volumetric_flow_normal_m3_s": Q_normal,
+                "source_id": reactor_id_by_obj.get(upstream),
+                "target_id": reactor_id_by_obj.get(device.downstream),
+            }
+    except Exception as e:
+        logger.warning(f"Failed to generate connection reports: {e}")
+
+    return connection_reports
+
+
 @dataclass
 class SimulationProgress:
     """Thread-safe container for simulation progress data."""
@@ -287,7 +407,7 @@ class SimulationWorker:
                             "time": self.progress.times,
                             "reactors": self.progress.reactors_series,
                         }
-                        self.progress.reactor_reports = self._generate_reactor_reports(
+                        self.progress.reactor_reports = generate_reactor_reports(
                             converter, interim_results
                         )
                     except Exception as stream_err:
@@ -326,8 +446,8 @@ class SimulationWorker:
 
             # Finalize results
             logger.info(f"Simulation completed: {len(results['time'])} time points")
-            reactor_reports = self._generate_reactor_reports(converter, results)
-            connection_reports = self._generate_connection_reports(converter)
+            reactor_reports = generate_reactor_reports(converter, results)
+            connection_reports = generate_connection_reports(converter)
             with self._lock:
                 self.progress.times = results["time"]
                 self.progress.reactors_series = results["reactors"]
@@ -506,120 +626,6 @@ class SimulationWorker:
             logger.warning("Cache persistence failed (OSError): %s", exc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Cache persistence failed: %s", exc)
-
-    def _generate_reactor_reports(
-        self, converter: Any, results: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Generate reactor reports for thermo analysis."""
-        reactor_reports = {}
-
-        try:
-            # Generate reports for each reactor
-            for reactor_id, reactor in converter.reactors.items():
-                phase = reactor.phase
-                if isinstance(reactor, ct.Reservoir):
-                    # Handle Reservoirs - they maintain fixed thermodynamic conditions
-                    current_T = phase.T
-                    current_P = phase.P
-                    current_T_c = current_T - 273.15
-
-                    reactor_reports[reactor_id] = {
-                        "T": current_T,
-                        "P": current_P,
-                        "X": {
-                            name: phase.X[i]
-                            for i, name in enumerate(phase.species_names)
-                        },
-                        "species_names": phase.species_names,
-                        "molecular_weights": phase.molecular_weights,
-                        "mass_fractions": phase.Y.copy(),
-                        # Generate formatted reports for UI display
-                        "reactor_report": f"Temperature: {current_T_c:.2f} °C (Fixed)\nPressure: "
-                        f"{current_P:.2e} Pa (Fixed)\nType: Reservoir (Infinite Capacity)",
-                        # Use the reactor's own phase to ensure mechanism matches reactor
-                        "thermo_report": phase.report(),
-                    }
-                    continue
-
-                # Get final state data for regular reactors
-                if reactor_id in results["reactors"]:
-                    reactor_data = results["reactors"][reactor_id]
-                    if reactor_data["T"] and reactor_data["P"]:
-                        # Use final state
-                        final_T = reactor_data["T"][-1]
-                        final_P = reactor_data["P"][-1]
-                        final_X = {
-                            s: reactor_data["X"][s][-1] for s in reactor_data["X"]
-                        }
-
-                        # Generate thermo report (display temperature in °C)
-                        final_T_c = final_T - 273.15
-                        reactor_reports[reactor_id] = {
-                            "T": final_T,
-                            "P": final_P,
-                            "X": final_X,
-                            "species_names": phase.species_names,
-                            "molecular_weights": phase.molecular_weights,
-                            "mass_fractions": phase.Y.copy(),
-                            # Generate formatted reports for UI display
-                            "reactor_report": f"Temperature: {final_T_c:.2f} °C\nPressure: "
-                            f"{final_P:.2e} Pa\nVolume: {reactor.volume:.2e} m³",
-                            # Use the reactor's own phase to ensure mechanism matches reactor
-                            "thermo_report": phase.report(),
-                        }
-
-        except Exception as e:
-            logger.warning(f"Failed to generate reactor reports: {e}")
-
-        return reactor_reports
-
-    def _generate_connection_reports(self, converter: Any) -> Dict[str, Any]:
-        """Generate connection (MFC) reports with mass and volumetric flow rates.
-
-        Volumetric flow real: at source T, P. Normal: DIN 1343 (0 °C, 101325 Pa).
-        """
-        R_GAS = 8.314462618  # J/(mol·K)
-        T_NORMAL_K = 273.15
-        P_NORMAL_PA = 101325.0
-
-        connection_reports: Dict[str, Any] = {}
-        try:
-            reactor_id_by_obj = {r: rid for rid, r in converter.reactors.items()}
-            for conn_id, device in converter.connections.items():
-                if not isinstance(device, ct.MassFlowController):
-                    continue
-                upstream = device.upstream
-                thermo = upstream.phase
-                T = float(thermo.T)
-                P = float(thermo.P)
-                # Cantera molecular_weights in kg/kmol; X is mole fractions
-                M_kg_kmol = sum(
-                    float(thermo.X[i]) * float(thermo.molecular_weights[i])
-                    for i in range(thermo.n_species)
-                )
-                M_kg_mol = M_kg_kmol / 1000.0
-                rho = (P * M_kg_mol) / (R_GAS * T)
-                rho_normal = (P_NORMAL_PA * M_kg_mol) / (R_GAS * T_NORMAL_K)
-                mfr = float(device.mass_flow_rate)
-                if rho > 0:
-                    Q_real = mfr / rho
-                else:
-                    Q_real = 0.0
-                if rho_normal > 0:
-                    Q_normal = mfr / rho_normal
-                else:
-                    Q_normal = 0.0
-                connection_reports[conn_id] = {
-                    "mass_flow_rate": mfr,
-                    "volumetric_flow_real_m3_s": Q_real,
-                    "volumetric_flow_normal_m3_s": Q_normal,
-                    "source_id": reactor_id_by_obj.get(upstream),
-                    "target_id": reactor_id_by_obj.get(device.downstream),
-                }
-        except Exception as e:
-            logger.warning(f"Failed to generate connection reports: {e}")
-
-        return connection_reports
 
 
 # Global worker instance

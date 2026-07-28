@@ -24,6 +24,11 @@ export interface SweepStatus {
    * in-flight scenario at once without a shape change.
    */
   scenario_progress?: Record<string, { stage: number | null; stage_total: number | null }>;
+  /**
+   * Latest non-empty stdout line from the sweep runner, verbatim — shown under
+   * the "Calculating…" spinner so a slow solve says what it's currently doing.
+   */
+  last_line?: string | null;
 }
 
 /** Whether the preloaded config has a runnable sweep, and how many scenarios. */

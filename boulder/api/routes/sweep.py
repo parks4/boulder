@@ -203,6 +203,10 @@ async def sweep_run(
         # future parallel sweep runner can hold more than one entry at once
         # without changing this shape.
         "scenario_progress": {},
+        # Most recent non-empty stdout line from the runner, verbatim — the
+        # frontend shows it under the "Calculating…" spinner so a long solve
+        # says *what* it is doing, not just that it is busy.
+        "last_line": None,
     }
     request.app.state.sweep_job = state
     # Surface on the server console by default — at least that the run started.
@@ -254,6 +258,7 @@ async def sweep_run(
                             progress["stage"] = int(stage_match.group(2))
                             progress["stage_total"] = int(stage_match.group(3))
                 if line:
+                    state["last_line"] = line
                     tail.append(line)
                     del tail[:-30]
                     # Echo the runner's progress to the server console.
@@ -264,6 +269,7 @@ async def sweep_run(
             # skipped" line clearing it — nothing is "calculating" once the
             # subprocess itself has exited, one way or another.
             state["scenario_progress"] = {}
+            state["last_line"] = None
             if proc.returncode == 0:
                 state["status"] = "done"
                 state["message"] = "Sweep complete"

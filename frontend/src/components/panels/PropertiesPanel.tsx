@@ -334,14 +334,6 @@ export function PropertiesPanel() {
               </Tooltip>
             )}
           </div>
-          {previewId && !isEditing && (
-            <div
-              className="text-[10px] text-amber-600 dark:text-amber-400"
-              title="Values below are this scenario's effective overrides — Edit still edits the base network."
-            >
-              Previewing scenario <span className="font-mono">{previewId}</span>
-            </div>
-          )}
         </div>
         {!isComputedStream && (
           <div className="flex gap-1">
@@ -369,7 +361,17 @@ export function PropertiesPanel() {
 
       {!isComputedStream && (
         <div className="border-t border-border pt-2 mt-1">
-          <p className="text-xs text-muted-foreground mb-1.5">Initial conditions</p>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs text-muted-foreground">Initial conditions</p>
+            {previewId && !isEditing && (
+              <span
+                className="text-[10px] text-amber-600 dark:text-amber-400"
+                title="Values below are this scenario's effective overrides — Edit still edits the base network."
+              >
+                Previewing scenario <span className="font-mono">{previewId}</span>
+              </span>
+            )}
+          </div>
           <div className="divide-y divide-border">
             {Object.entries(renderProperties)
               .filter(([key]) => isFieldVisible(key))

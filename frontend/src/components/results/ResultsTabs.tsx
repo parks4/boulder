@@ -37,6 +37,7 @@ export function ResultsTabs() {
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
   const activeScenarioId = useScenarioStore((s) => s.activeId);
   const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
+  const sweepLastLine = useSweepRunStore((s) => s.lastLine);
   const defaultResultsTab = results && hasSankeyData(results) ? "Sankey" : "Plots";
   /** Resolved tab for UI: explicit choice, else Sankey/Plots per available data. */
   const displayTab = activeTab ?? defaultResultsTab;
@@ -194,6 +195,7 @@ export function ResultsTabs() {
       <SweepCalculatingCard
         scenarioId={activeScenarioId}
         stage={scenarioProgress[activeScenarioId]}
+        lastLine={sweepLastLine}
       />
     );
   }
