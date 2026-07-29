@@ -460,20 +460,27 @@ export function ReactorGraph() {
         },
       },
       {
-        // Blue tint on a stage box: either it's the one currently being
-        // solved during a sweep (calc_status='calculating', set by the
-        // sweep-progress effect below) or the displayed scenario has results
-        // for it (calc_status='computed', set by the results-sync effect —
-        // covers both a fresh solve and a scenario loaded from cache, since
-        // both populate `results` the same way). Distinct from the
-        // per-reactor warning/error badges.
-        selector:
-          "node[isGroup][calc_status = 'calculating'], node[isGroup][calc_status = 'computed']",
+        // The stage box currently being solved during a sweep, set by the
+        // sweep-progress effect below (calc_status='calculating', distinct
+        // from the per-reactor warning/error badges — stages solve strictly
+        // sequentially, so at most one box is ever tinted at a time).
+        selector: "node[isGroup][calc_status = 'calculating']",
         style: {
           "background-opacity": 0.15,
           "background-color": "#3b82f6",
           "border-width": 3,
           "border-color": "#3b82f6",
+        },
+      },
+      {
+        // Same blue for the individual reactor shapes themselves (not just
+        // the surrounding stage box) once they have results — a solid fill
+        // rather than the group's translucent tint, since these are already
+        // opaque shapes. Excludes anything flagged 'warning'/'error': a
+        // problem badge reads clearer on the plain default background.
+        selector: "node[^isGroup][calc_status = 'computed']",
+        style: {
+          "background-color": "#3b82f6",
         },
       },
       {
@@ -1631,21 +1638,30 @@ export function ReactorGraph() {
     const cy = cyRef.current;
     if (!cy) return;
 
-    const setStatus = (n: cytoscape.NodeSingular, status: keyof typeof CALC_STATUS_BADGES | null) => {
+    const setStatus = (
+      n: cytoscape.NodeSingular,
+      status: keyof typeof CALC_STATUS_BADGES | "computed" | null,
+    ) => {
       n.data("calc_status", status);
-      n.data("calc_status_icon", status ? CALC_STATUS_BADGES[status] : undefined);
+      n.data(
+        "calc_status_icon",
+        status === "warning" || status === "error" ? CALC_STATUS_BADGES[status] : undefined,
+      );
     };
 
     if (results) {
+      // Stage boxes are only tinted while actively solving (see the
+      // sweeping branch below) — clear any leftover 'calculating' tint now
+      // that results are in.
       cy.nodes("[isGroup]").forEach((n) => {
-        n.data("calc_status", "computed");
+        n.data("calc_status", null);
       });
       cy.nodes("[^isGroup]").forEach((n) => {
         const conservation = results.reactors_series?.[n.id()]?.conservation;
         const failed = conservation
           ? !conservation.mass_closes || !conservation.energy_closes
           : false;
-        setStatus(n, failed ? "warning" : null);
+        setStatus(n, failed ? "warning" : "computed");
       });
       return;
     }
