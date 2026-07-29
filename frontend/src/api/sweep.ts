@@ -23,7 +23,10 @@ export interface SweepStatus {
    * field so a future parallel sweep runner can report more than one
    * in-flight scenario at once without a shape change.
    */
-  scenario_progress?: Record<string, { stage: number | null; stage_total: number | null }>;
+  scenario_progress?: Record<
+    string,
+    { stage: number | null; stage_total: number | null; stage_id: string | null }
+  >;
   /**
    * Latest non-empty stdout line from the sweep runner, verbatim — shown under
    * the "Calculating…" spinner so a slow solve says what it's currently doing.

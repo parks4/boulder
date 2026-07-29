@@ -1,3 +1,4 @@
+import { memo } from "react";
 import Plot from "react-plotly.js";
 import { mapSankeyNodeColors } from "@/lib/cytoscapeNodeColor";
 import { hasSankeyData } from "@/lib/sankeyData";
@@ -41,7 +42,15 @@ function mapSankeyLinkColors(
   });
 }
 
-export function SankeyTab({ results }: Props) {
+/**
+ * Memoized: ResultsTabs re-renders every ~1s while a sweep is polling
+ * (scenarioProgress/lastLine churn) even when this scenario's own results
+ * haven't changed. Plotly rebuilds its whole SVG on every render — a plain
+ * component would redraw (visibly flicker) on every one of those unrelated
+ * ticks. Skipping re-render when `results` itself hasn't changed keeps it
+ * static except when there's actually new data to show.
+ */
+export const SankeyTab = memo(function SankeyTab({ results }: Props) {
   const theme = useThemeStore((s) => s.theme);
 
   if (!hasSankeyData(results)) {
@@ -105,4 +114,4 @@ export function SankeyTab({ results }: Props) {
       className="w-full"
     />
   );
-}
+});

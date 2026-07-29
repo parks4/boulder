@@ -4,7 +4,7 @@
 ("scenario N/M (id)", or "... (id): cached, skipped" for a cache hit), and
 `boulder.staged_solver`'s per-stage INFO logs reach the same captured
 subprocess output. `sweep.py`'s stdout parser turns those lines into
-`scenario_progress`: a `{scenario_id: {stage, stage_total}}` map (keyed by id,
+`scenario_progress`: a `{scenario_id: {stage, stage_total, stage_id}}` map (keyed by id,
 not a single "current scenario" scalar, so a future parallel sweep runner can
 hold more than one entry at once without a shape change) that
 `GET /api/sweep/status` passes straight through.
@@ -107,7 +107,9 @@ def test_scenario_progress_tracks_stage_then_clears_on_skip(tmp_path: Path) -> N
 
             assert after_stage_line.wait(timeout=2), "stage line was never processed"
             job = app.state.sweep_job
-            assert job["scenario_progress"] == {"a": {"stage": 1, "stage_total": 3}}
+            assert job["scenario_progress"] == {
+                "a": {"stage": 1, "stage_total": 3, "stage_id": "default"}
+            }
             assert job["last_line"] == (
                 "2026-01-01 00:00:00 - boulder.staged_solver - INFO - "
                 "Staged solve: stage 'default' (1/3, 3 reactors)"
@@ -158,7 +160,7 @@ def test_scenario_progress_clears_once_the_process_exits_mid_solve(
 
             assert after_stage_line.wait(timeout=2), "stage line was never processed"
             assert app.state.sweep_job["scenario_progress"] == {
-                "a": {"stage": 1, "stage_total": 1}
+                "a": {"stage": 1, "stage_total": 1, "stage_id": "default"}
             }
 
             resume_after_stage.set()  # let stdout end -> proc.wait() -> "done"
