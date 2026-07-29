@@ -97,3 +97,21 @@ async def get_branding() -> Dict[str, Any]:
     except Exception:  # noqa: BLE001 - branding must never break the UI
         branding = None
     return {"branding": branding}
+
+
+@router.get("/species-colors")
+async def get_species_colors() -> Dict[str, Any]:
+    """Return the species -> hex color palette set by a plugin, if any.
+
+    Boulder has no built-in notion of which color belongs to which species;
+    a host plugin may register one (the same palette already used to color
+    the Sankey diagram's species bands, via ``plugins.sankey_link_colors``)
+    so other charts can render a given species consistently.
+    """
+    from ...cantera_converter import get_plugins
+
+    try:
+        species_colors = get_plugins().sankey_link_colors
+    except Exception:  # noqa: BLE001 - this must never break the UI
+        species_colors = None
+    return {"species_colors": species_colors or {}}
