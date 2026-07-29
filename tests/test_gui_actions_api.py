@@ -89,6 +89,39 @@ class TestGuiActionsApi:
         assert echo["label"] == "Echo Export"
         assert echo["requires_simulation"] is False
         assert echo["description"] is None
+        assert echo["estimated_seconds_per_scenario"] is None
+
+    def test_list_actions_includes_estimated_seconds_per_scenario_when_overridden(self):
+        """A plugin declaring a per-scenario cost exposes it via GET /api/gui-actions.
+
+        Boulder has no notion of what the action does or why it costs what it
+        does -- it only relays the number so a host-agnostic ETA toast can use
+        it, together with the generic sweep/scenario count.
+        """
+
+        class _TimedAction(GuiActionPlugin):
+            @property
+            def action_id(self) -> str:
+                return "test_timed_action"
+
+            @property
+            def label(self) -> str:
+                return "Timed Export"
+
+            @property
+            def estimated_seconds_per_scenario(self) -> float:
+                return 5.0
+
+            def run(self, context: GuiActionContext) -> GuiActionResult:
+                return GuiActionResult(content=b"ok", filename="out.txt")
+
+        register_gui_action(_TimedAction())
+        app = create_app()
+        with TestClient(app) as client:
+            resp = client.get("/api/gui-actions")
+            assert resp.status_code == 200
+            item = next(i for i in resp.json() if i["id"] == "test_timed_action")
+            assert item["estimated_seconds_per_scenario"] == 5.0
 
     def test_list_actions_includes_description_when_overridden(self):
         """An action overriding `description` exposes it via GET /api/gui-actions."""

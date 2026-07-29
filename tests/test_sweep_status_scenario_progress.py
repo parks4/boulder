@@ -8,6 +8,10 @@ subprocess output. `sweep.py`'s stdout parser turns those lines into
 not a single "current scenario" scalar, so a future parallel sweep runner can
 hold more than one entry at once without a shape change) that
 `GET /api/sweep/status` passes straight through.
+
+Also covers `last_line`: the runner's most recent non-empty stdout line, kept
+verbatim for the frontend's "Calculating…" detail line and cleared once the
+subprocess exits.
 """
 
 from __future__ import annotations
@@ -66,6 +70,7 @@ def test_scenario_progress_tracks_stage_then_clears_on_skip(tmp_path: Path) -> N
 
     A subsequent "cached, skipped" scenario line clears the map instead of
     ever showing that scenario as "calculating" (a cache hit is instant).
+    `last_line` holds the runner's latest stdout line verbatim while solving.
     """
     client, app = _client_with_local_runner(tmp_path)
     after_stage_line = threading.Event()
@@ -103,6 +108,10 @@ def test_scenario_progress_tracks_stage_then_clears_on_skip(tmp_path: Path) -> N
             assert after_stage_line.wait(timeout=2), "stage line was never processed"
             job = app.state.sweep_job
             assert job["scenario_progress"] == {"a": {"stage": 1, "stage_total": 3}}
+            assert job["last_line"] == (
+                "2026-01-01 00:00:00 - boulder.staged_solver - INFO - "
+                "Staged solve: stage 'default' (1/3, 3 reactors)"
+            )
 
             resume_after_stage.set()
             assert after_skip_line.wait(timeout=2), "skip line was never processed"
@@ -160,5 +169,6 @@ def test_scenario_progress_clears_once_the_process_exits_mid_solve(
                 time.sleep(0.05)
             assert app.state.sweep_job["status"] == "done"
             assert app.state.sweep_job["scenario_progress"] == {}
+            assert app.state.sweep_job["last_line"] is None
     finally:
         client.__exit__(None, None, None)

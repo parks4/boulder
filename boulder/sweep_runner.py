@@ -46,6 +46,7 @@ from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
 from .config import normalize_config
 from .payload_store import write_payload
 from .runset import expand_scenarios, load_yaml_with_inheritance, resolve_store_path
+from .simulation_worker import generate_connection_reports, generate_reactor_reports
 
 
 def _mechanism_of(raw: Dict[str, Any]) -> str:
@@ -59,7 +60,7 @@ def _default_resolve_mechanism(plugins: BoulderPlugins) -> Callable[[str], str]:
     Used whenever a caller doesn't pass ``resolve_mechanism`` explicitly, so a
     host that registers its own converter subclass (for its own mechanism
     search convention) gets consistent resolution everywhere -- the actual
-    solve (:func:`_solve`), the cache fingerprint, and what's persisted to the
+    solve (:func:`solve_scenario`), the cache fingerprint, and what's persisted to the
     store -- without every call site needing to know about the plugin. Falls
     back to the base :class:`DualCanteraConverter`'s passthrough
     (``resolve_mechanism`` returns its argument unchanged) when no converter
@@ -108,7 +109,7 @@ def scenario_fingerprint(
     return compute_fingerprint(config, mechanism=mechanism, extra=extra)
 
 
-def _prepare(
+def prepare_scenario(
     raw_cfg: Dict[str, Any],
     resolve_mechanism: Optional[Callable[[str], str]],
 ) -> Tuple[Dict[str, Any], str, str]:
@@ -116,6 +117,9 @@ def _prepare(
 
     The fingerprint (Boulder's cache key) lets the run skip scenarios that are
     already cached unchanged — computed without building/solving the network.
+    Public: shared with any out-of-process caller that needs to solve exactly
+    one scenario the same way this runner does (e.g. an "Export" GUI action
+    solving a cache-miss scenario on demand).
     """
     from .result_cache import compute_fingerprint  # noqa: PLC0415
 
@@ -131,15 +135,17 @@ def _prepare(
     return config, mechanism, fingerprint
 
 
-def _solve(
+def solve_scenario(
     config: Dict[str, Any], mechanism: str
 ) -> Tuple[Dict[str, Any], str, DualCanteraConverter]:
     """Solve one normalized scenario config → (gui_payload, mechanism, converter).
 
     The solved ``converter`` is returned (not discarded) so callers can build a
     :class:`~boulder.simulation_result.SimulationResult` from it or hand it to
-    cache contributors — see the ``on_solved`` hook of :func:`run`.
+    cache contributors — see the ``on_solved`` hook of :func:`run`. Public for
+    the same reason as :func:`prepare_scenario`.
     """
+    started = time.perf_counter()
     plugins = get_plugins()
     converter_cls = plugins.converter_class or DualCanteraConverter
     conv = converter_cls(mechanism=mechanism or None, plugins=plugins)
@@ -170,13 +176,18 @@ def _solve(
         "error_message": None,
         "times": results.get("time", []),
         "reactors_series": results.get("reactors", {}),
-        "reactor_reports": {},
-        "connection_reports": {},
+        # Same report generators the live GUI solve uses (simulation_worker) —
+        # a scenario opened from the Scenario Pane must show the same Thermo
+        # tab content as a plain "Run Simulation".
+        "reactor_reports": generate_reactor_reports(conv, results),
+        "connection_reports": generate_connection_reports(conv),
         "code_str": code,
         "summary": results.get("summary", []),
         "sankey_links": results.get("sankey_links"),
         "sankey_nodes": results.get("sankey_nodes"),
-        "elapsed_time": None,
+        # Wall-clock for build_network + solve, so a cached scenario can report
+        # what it cost to produce (the live GUI solve fills this in too).
+        "elapsed_time": time.perf_counter() - started,
         "updated_nodes": None,
         "updated_connections": None,
     }
@@ -293,7 +304,7 @@ def run(
     mechanism = _mechanism_of(raw)
     n_cached = 0
     for i, (sid, cfg) in enumerate(runs):
-        config, mech_name, fingerprint = _prepare(cfg, resolve_mechanism)
+        config, mech_name, fingerprint = prepare_scenario(cfg, resolve_mechanism)
         label = str((cfg.get("metadata") or {}).get("scenario_name") or sid)
         if cached_fps.get(sid) == fingerprint:
             n_cached += 1
@@ -306,7 +317,7 @@ def run(
                 attrs["order"] = int(i)
             continue
         print(f"scenario {i + 1}/{total} ({sid})", flush=True)
-        gui, resolved_mech, conv = _solve(config, mech_name)
+        gui, resolved_mech, conv = solve_scenario(config, mech_name)
         stored_mech = _resolve(resolved_mech)
         write_payload(store, gui, stored_mech, group=sid, fresh=False)
         with h5py.File(str(store), "a") as handle:

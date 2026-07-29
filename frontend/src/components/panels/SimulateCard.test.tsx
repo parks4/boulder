@@ -51,8 +51,14 @@ const mockFetchGuiActions = fetchGuiActions as ReturnType<typeof vi.fn>;
 const mockRunGuiAction = runGuiAction as ReturnType<typeof vi.fn>;
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), loading: vi.fn() },
 }));
+
+vi.mock("@/api/sweep", () => ({
+  getSweepInfo: vi.fn().mockResolvedValue({ n_scenarios: 4 }),
+}));
+
+import { toast } from "sonner";
 
 const mockSetConfig = vi.fn();
 const mockSyncYaml = vi.fn().mockResolvedValue(undefined);
@@ -167,5 +173,53 @@ describe("SimulateCard", () => {
 
     expect(mockSyncYaml).toHaveBeenCalled();
     expect(mockRunGuiAction).toHaveBeenCalledOnce();
+  });
+
+  it("shows a scenario-count ETA for any action declaring estimated_seconds_per_scenario", async () => {
+    // Deliberately not a Calculation Note id/label — this must be driven
+    // purely by the generic field, with no plugin-specific knowledge here.
+    mockFetchGuiActions.mockResolvedValueOnce([
+      {
+        id: "some_other_plugin_action",
+        label: "Some Other Export",
+        requires_simulation: true,
+        is_available: true,
+        estimated_seconds_per_scenario: 5,
+      },
+    ]);
+    render(<SimulateCard />);
+    await act(async () => {});
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /some other export/i }));
+    });
+
+    expect(toast.loading).toHaveBeenCalledWith(
+      expect.stringContaining('"Some Other Export"'),
+      expect.objectContaining({ id: "some_other_plugin_action" }),
+    );
+    expect(toast.loading).toHaveBeenCalledWith(
+      expect.stringMatching(/4 scenarios.*~20s expected/),
+      expect.anything(),
+    );
+    // The success toast replaces the same estimate rather than stacking.
+    expect(toast.success).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ id: "some_other_plugin_action" }),
+    );
+  });
+
+  it("does not show a scenario-count ETA for an action with no estimate", async () => {
+    mockFetchGuiActions.mockResolvedValueOnce([
+      { id: "other_action", label: "Some Other Export", requires_simulation: false, is_available: true },
+    ]);
+    render(<SimulateCard />);
+    await act(async () => {});
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /some other export/i }));
+    });
+
+    expect(toast.loading).not.toHaveBeenCalled();
   });
 });

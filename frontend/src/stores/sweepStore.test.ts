@@ -53,6 +53,7 @@ describe("sweepStore", () => {
       sweeping: false,
       progress: { current: 0, total: 0 },
       scenarioProgress: {},
+      lastLine: null,
     });
   });
 
@@ -116,7 +117,7 @@ describe("sweepStore", () => {
     expect(mockToastError).toHaveBeenCalledWith("A sweep is already running");
   });
 
-  it("run()'s poll tick populates scenarioProgress from the status payload", async () => {
+  it("run()'s poll tick populates scenarioProgress and lastLine from the status payload", async () => {
     vi.useFakeTimers();
     mockStartSweep.mockResolvedValue({ status: "running", total: 1 });
     mockGetSweepStatus
@@ -125,6 +126,7 @@ describe("sweepStore", () => {
         current: 1,
         total: 2,
         scenario_progress: { cold_feed: { stage: 1, stage_total: 3 } },
+        last_line: "Staged solve: stage 'default' (1/3, 3 reactors)",
       })
       .mockResolvedValueOnce({ status: "done", current: 2, total: 2 });
 
@@ -135,10 +137,14 @@ describe("sweepStore", () => {
     expect(useSweepRunStore.getState().scenarioProgress).toEqual({
       cold_feed: { stage: 1, stageTotal: 3 },
     });
+    expect(useSweepRunStore.getState().lastLine).toBe(
+      "Staged solve: stage 'default' (1/3, 3 reactors)",
+    );
 
     await vi.advanceTimersByTimeAsync(1000);
     // Cleared once the sweep finishes.
     expect(useSweepRunStore.getState().scenarioProgress).toEqual({});
+    expect(useSweepRunStore.getState().lastLine).toBeNull();
   });
 
   it("hydrate() attaches to an already-running sweep and polls it to completion", async () => {

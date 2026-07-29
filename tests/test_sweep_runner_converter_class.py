@@ -15,7 +15,7 @@ from typing import Any, Dict, Optional
 from boulder.cantera_converter import BoulderPlugins, DualCanteraConverter
 from boulder.sweep_runner import (
     _default_resolve_mechanism,
-    _prepare,
+    prepare_scenario,
     scenario_fingerprint,
 )
 
@@ -104,9 +104,13 @@ class TestPrepareUsesConverterClass:
         plugins = BoulderPlugins(converter_class=_FakeHostConverter)
         monkeypatch.setattr(sweep_runner, "get_plugins", lambda: plugins)
 
-        config, mechanism, fingerprint = _prepare(_config("custom_mech.yaml"), None)
-        assert mechanism == "custom_mech.yaml"  # raw name preserved for _solve
+        config, mechanism, fingerprint = prepare_scenario(
+            _config("custom_mech.yaml"), None
+        )
+        assert mechanism == "custom_mech.yaml"  # raw name preserved for solve_scenario
         # fingerprint hashed the *resolved* identity -- verify by comparing
         # against an explicit passthrough resolver.
-        _, _, fp_plain = _prepare(_config("custom_mech.yaml"), lambda name: name)
+        _, _, fp_plain = prepare_scenario(
+            _config("custom_mech.yaml"), lambda name: name
+        )
         assert fingerprint != fp_plain

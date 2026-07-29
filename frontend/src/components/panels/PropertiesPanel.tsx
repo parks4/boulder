@@ -156,12 +156,25 @@ export function PropertiesPanel() {
     }
   }, [selectedElement, initialConditionsEditNonce, config]);
 
+  // The kind of the selected element. A selection made from the graph carries
+  // `type` in its cytoscape data, but a programmatic one need not — selecting
+  // a scenario auto-selects a reactor by id alone (see scenarioStore's
+  // setActive). The config entry always has the kind, so fall back to it;
+  // otherwise both the heading below and the schema lookup here come up empty
+  // whenever a scenario is being previewed.
+  const selectedConfigEntity =
+    selectedElement && !selectedElement.data.isGroup
+      ? (selectedElement.type === "node"
+          ? config.nodes.find((n) => n.id === String(selectedElement.data.id))
+          : config.connections.find((c) => c.id === String(selectedElement.data.id)))
+      : undefined;
+
   // Field metadata from the kind's registered schema (descriptions, enum
   // options, conditional visibility). Fetched before any early return so
   // the hook order stays stable.
   const schemaKind =
     selectedElement && !selectedElement.data.isGroup
-      ? String(selectedElement.data.type ?? "")
+      ? String(selectedElement.data.type ?? selectedConfigEntity?.type ?? "")
       : "";
   const schemaMeta = useKindSchema(schemaKind);
   const { reactors, connections } = useKinds();
@@ -185,7 +198,7 @@ export function PropertiesPanel() {
 
   const isNode = selectedElement.type === "node";
   const id = String(selectedElement.data.id);
-  const entityType = String(selectedElement.data.type ?? "");
+  const entityType = schemaKind;
   const kindDoc = (isNode ? reactors : connections).find((k) => k.kind === entityType);
 
   // Group compound box (a stage) selected — show the Stage panel instead.
@@ -334,14 +347,6 @@ export function PropertiesPanel() {
               </Tooltip>
             )}
           </div>
-          {previewId && !isEditing && (
-            <div
-              className="text-[10px] text-amber-600 dark:text-amber-400"
-              title="Values below are this scenario's effective overrides — Edit still edits the base network."
-            >
-              Previewing scenario <span className="font-mono">{previewId}</span>
-            </div>
-          )}
         </div>
         {!isComputedStream && (
           <div className="flex gap-1">

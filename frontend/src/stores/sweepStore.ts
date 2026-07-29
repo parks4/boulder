@@ -12,6 +12,11 @@ interface SweepRunState {
    */
   scenarioProgress: Record<string, { stage: number | null; stageTotal: number | null }>;
   /**
+   * Latest console line from the sweep runner (mirrors `SweepStatus.last_line`),
+   * or null when nothing is running — the detail line under the spinner.
+   */
+  lastLine: string | null;
+  /**
    * Start a sweep job and poll it to completion, toasting the outcome and
    * refreshing the Scenario Pane. Backs RunControl's "Run Sweep" — a single
    * shared job so any other caller can't disagree about whether a sweep is
@@ -52,11 +57,12 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
         sweeping: true,
         progress: { current: st.current ?? 0, total: st.total ?? 0 },
         scenarioProgress,
+        lastLine: st.last_line ?? null,
       });
       return;
     }
     stopPolling();
-    set({ sweeping: false, scenarioProgress: {} });
+    set({ sweeping: false, scenarioProgress: {}, lastLine: null });
     if (st.status === "done") {
       toast.success("Sweep complete — scenarios updated");
       void (async () => {
@@ -97,6 +103,7 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
     sweeping: false,
     progress: { current: 0, total: 0 },
     scenarioProgress: {},
+    lastLine: null,
 
     run: (options) => {
       if (get().sweeping) {

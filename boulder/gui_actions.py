@@ -66,6 +66,19 @@ class GuiActionPlugin(ABC):
         """Optional tooltip text shown next to the action's button."""
         return None
 
+    @property
+    def estimated_seconds_per_scenario(self) -> Optional[float]:
+        """Optional per-scenario cost estimate, for a run-started ETA toast.
+
+        None (default) shows no ETA. A plugin whose cost scales with the
+        run-set size (e.g. one cached bundle read per scenario) can return a
+        rough per-scenario seconds figure here; the Simulate panel multiplies
+        it by the run-set's scenario count (from the generic sweep/scenario
+        expansion, not anything plugin-specific) to show "~Ns expected"
+        before running.
+        """
+        return None
+
     def is_listed(self, context: GuiActionContext) -> bool:
         """Return True when this action should appear in the Simulate panel."""
         return True
