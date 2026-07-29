@@ -6,6 +6,7 @@ import { useSolverStore } from "@/stores/solverStore";
 import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
 import { startSimulation } from "@/api/simulations";
 import { checkSimulationCache } from "@/api/resultCache";
+import { getSweepInfo } from "@/api/sweep";
 import { Button } from "@/components/ui/Button";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { RunControl } from "./RunControl";
@@ -178,7 +179,28 @@ export function SimulateCard() {
   const handleGuiAction = useCallback(
     async (action: GuiActionMeta) => {
       setRunningActionId(action.id);
+      // An action whose cost scales with the run-set (estimated_seconds_per_
+      // scenario set) gets a loading/success/error toast sharing one id, so
+      // the estimate is replaced in place rather than stacked as a separate
+      // toast. Boulder has no notion of what the action *does* here — the
+      // ETA text uses only its own label and the generic sweep/scenario
+      // count, both plugin-agnostic.
+      const perScenario = action.estimated_seconds_per_scenario;
+      const toastId = perScenario ? action.id : undefined;
       try {
+        if (perScenario) {
+          // A config with no scenarios:/sweep: block still expands to the
+          // one base scenario (see boulder.runset.expand_scenarios).
+          const n = await getSweepInfo()
+            .then((info) => Math.max(1, info.n_scenarios))
+            .catch(() => 1);
+          const secs = Math.round(n * perScenario);
+          toast.loading(
+            `Running "${action.label}" for ${n} scenario${n === 1 ? "" : "s"}` +
+              ` — ~${secs}s expected`,
+            { id: toastId },
+          );
+        }
         try {
           await syncYaml();
         } catch {
@@ -198,10 +220,10 @@ export function SimulateCard() {
         a.download = downloadName;
         a.click();
         URL.revokeObjectURL(url);
-        toast.success(`${action.label} downloaded`);
+        toast.success(`${action.label} downloaded`, { id: toastId });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        toast.error(`${action.label} failed: ${msg}`);
+        toast.error(`${action.label} failed: ${msg}`, { id: toastId });
       } finally {
         setRunningActionId(null);
       }

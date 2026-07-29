@@ -145,6 +145,7 @@ def solve_scenario(
     cache contributors — see the ``on_solved`` hook of :func:`run`. Public for
     the same reason as :func:`prepare_scenario`.
     """
+    started = time.perf_counter()
     plugins = get_plugins()
     converter_cls = plugins.converter_class or DualCanteraConverter
     conv = converter_cls(mechanism=mechanism or None, plugins=plugins)
@@ -184,7 +185,9 @@ def solve_scenario(
         "summary": results.get("summary", []),
         "sankey_links": results.get("sankey_links"),
         "sankey_nodes": results.get("sankey_nodes"),
-        "elapsed_time": None,
+        # Wall-clock for build_network + solve, so a cached scenario can report
+        # what it cost to produce (the live GUI solve fills this in too).
+        "elapsed_time": time.perf_counter() - started,
         "updated_nodes": None,
         "updated_connections": None,
     }
