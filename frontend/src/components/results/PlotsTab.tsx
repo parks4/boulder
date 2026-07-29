@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from "react";
 import Plot from "react-plotly.js";
+import { useSpeciesColors } from "@/hooks/useSpeciesColors";
 import { coerceNumericSeries, pressureYAxis } from "@/lib/plotAxis";
+import { getSpeciesColor } from "@/lib/speciesColor";
 import { useConfigStore } from "@/stores/configStore";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useThemeStore } from "@/stores/themeStore";
@@ -30,6 +32,7 @@ export function PlotsTab({ data }: Props) {
   const selectedElement = useSelectionStore((s) => s.selectedElement);
   const theme = useThemeStore((s) => s.theme);
   const configNodes = useConfigStore((s) => s.config.nodes);
+  const speciesColors = useSpeciesColors();
 
   // Shared x-range: zoom/pan on any plot synchronizes all of them
   // (double-click autoscale resets the whole set).
@@ -159,23 +162,23 @@ export function PlotsTab({ data }: Props) {
     const coordLabel = isResidence ? "Residence time" : "Position";
     const profileTraceMode = traceModeForSamples(xAxis.length);
 
-    const moleFractionTraces = mainSpeciesMole.map((species) => ({
+    const moleFractionTraces = mainSpeciesMole.map((species, i) => ({
       x: xAxis,
       y: reactorSeries.X?.[species] ?? [],
       type: "scatter" as const,
       mode: profileTraceMode,
       name: species,
-      line: { width: 2 },
+      line: { width: 2, color: getSpeciesColor(species, theme, i, speciesColors) },
       visible: traceVisibility(species, plotConfig.hideSpecies),
     }));
 
-    const massFractionTraces = mainSpeciesMass.map((species) => ({
+    const massFractionTraces = mainSpeciesMass.map((species, i) => ({
       x: xAxis,
       y: reactorSeries.Y?.[species] ?? [],
       type: "scatter" as const,
       mode: profileTraceMode,
       name: species,
-      line: { width: 2 },
+      line: { width: 2, color: getSpeciesColor(species, theme, i, speciesColors) },
       visible: traceVisibility(species, plotConfig.hideSpecies),
     }));
 
@@ -345,6 +348,13 @@ export function PlotsTab({ data }: Props) {
                 type: "pie",
                 textinfo: "label+percent",
                 hoverinfo: "label+value+percent",
+                marker: {
+                  colors: moleLabelsAll.map((label, i) =>
+                    label === "Other"
+                      ? "#cccccc"
+                      : getSpeciesColor(label, theme, i, speciesColors),
+                  ),
+                },
               },
             ]}
             layout={{
@@ -368,6 +378,13 @@ export function PlotsTab({ data }: Props) {
                 type: "pie",
                 textinfo: "label+percent",
                 hoverinfo: "label+value+percent",
+                marker: {
+                  colors: massLabelsAll.map((label, i) =>
+                    label === "Other"
+                      ? "#cccccc"
+                      : getSpeciesColor(label, theme, i, speciesColors),
+                  ),
+                },
               },
             ]}
             layout={{
@@ -390,23 +407,23 @@ export function PlotsTab({ data }: Props) {
   const times = data.times;
   const timeTraceMode = traceModeForSamples(times.length);
 
-  const moleFractionTraces = mainSpeciesMole.map((species) => ({
+  const moleFractionTraces = mainSpeciesMole.map((species, i) => ({
     x: times,
     y: reactorSeries?.X?.[species] ?? [],
     type: "scatter" as const,
     mode: timeTraceMode,
     name: species,
-    line: { width: 2 },
+    line: { width: 2, color: getSpeciesColor(species, theme, i, speciesColors) },
     visible: traceVisibility(species, plotConfig.hideSpecies),
   }));
 
-  const massFractionTraces = mainSpeciesMass.map((species) => ({
+  const massFractionTraces = mainSpeciesMass.map((species, i) => ({
     x: times,
     y: reactorSeries?.Y?.[species] ?? [],
     type: "scatter" as const,
     mode: timeTraceMode,
     name: species,
-    line: { width: 2 },
+    line: { width: 2, color: getSpeciesColor(species, theme, i, speciesColors) },
     visible: traceVisibility(species, plotConfig.hideSpecies),
   }));
 
