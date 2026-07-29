@@ -10,45 +10,34 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 
 /**
- * Per-node calc/conservation status badges (top-right corner), drawn as
- * self-contained SVG data URIs (no new asset files / dependencies). Applied
- * via node.data("calc_status", ...) — see the results-sync effect below —
- * and matching "[calc_status = ...]" Cytoscape stylesheet rules.
+ * Per-node problem badges (top-right corner), drawn as self-contained SVG
+ * data URIs (no new asset files / dependencies). Applied via
+ * node.data("calc_status", ...) — see the results-sync effect below — and
+ * matching "[calc_status = ...]" Cytoscape stylesheet rules.
+ *
+ * Only problem states get a badge: a node that solved cleanly is left
+ * unmarked, so the graph stays quiet unless something needs attention.
  */
 const CALC_STATUS_BADGES = {
-  // Rotating ring: this node's stage is the one currently solving. Pure SVG
-  // <animateTransform> spin, no JS-driven animation loop needed.
-  calculating:
-    "data:image/svg+xml;utf8," +
-    encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
-        '<circle cx="12" cy="12" r="9" fill="none" stroke="#3b82f6" stroke-width="3" ' +
-        'stroke-dasharray="38 18" stroke-linecap="round">' +
-        '<animateTransform attributeName="transform" type="rotate" ' +
-        'from="0 12 12" to="360 12 12" dur="0.9s" repeatCount="indefinite"/>' +
-        "</circle>" +
-        "</svg>",
-    ),
-  // Green checkmark: this node's stage solved and (once the full solve
-  // completes) its conservation check passed.
-  resolved_ok:
-    "data:image/svg+xml;utf8," +
-    encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
-        '<circle cx="12" cy="12" r="11" fill="#22c55e"/>' +
-        '<path d="M7 12.5 L10.5 16 L17 8.5" fill="none" stroke="white" ' +
-        'stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
-        "</svg>",
-    ),
   // Amber warning triangle: solve completed but this node's mass/energy
   // conservation check failed.
-  resolved_warning:
+  warning:
     "data:image/svg+xml;utf8," +
     encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
         '<path d="M12 2 L23 21 L1 21 Z" fill="#f59e0b" stroke="#7c2d12" stroke-width="1"/>' +
         '<text x="12" y="18" font-size="13" font-weight="bold" text-anchor="middle" ' +
         'fill="#1a1a1a">!</text>' +
+        "</svg>",
+    ),
+  // Red disc: the solve failed while this node's stage was the one running.
+  error:
+    "data:image/svg+xml;utf8," +
+    encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
+        '<circle cx="12" cy="12" r="11" fill="#dc2626" stroke="#7f1d1d" stroke-width="1"/>' +
+        '<text x="12" y="17.5" font-size="15" font-weight="bold" text-anchor="middle" ' +
+        'fill="#fff">!</text>' +
         "</svg>",
     ),
 } as const;
@@ -139,6 +128,7 @@ export function ReactorGraph() {
   const results = useSimulationStore((s) => s.results);
   const progress = useSimulationStore((s) => s.progress);
   const isRunning = useSimulationStore((s) => s.isRunning);
+  const error = useSimulationStore((s) => s.error);
   const theme = useThemeStore((s) => s.theme);
   const [graphHeight, setGraphHeight] = useState(loadStoredGraphHeight);
 
@@ -443,8 +433,7 @@ export function ReactorGraph() {
           content: "data(label)",
           "text-valign": "center",
           "text-halign": "center",
-          "background-color":
-            "mapData(temperature, 300, 2273, deepskyblue, tomato)",
+          "background-color": isDark ? "#5b6472" : "#9aa3af",
           "text-outline-color": "#555",
           "text-outline-width": 2,
           color: "#fff",
@@ -510,22 +499,19 @@ export function ReactorGraph() {
         style: { shape: "diamond", width: "60px", height: "60px" },
       },
       {
-        // Live calc/conservation status badge, top-right corner, via
-        // Cytoscape's multi-background-image support. Set live by the
-        // progress/results-sync effect below (not part of buildElements(),
-        // since it reflects solve state, not authored topology) — see
-        // CALC_STATUS_BADGES for what each value means.
-        selector:
-          "[calc_status = 'calculating'], [calc_status = 'resolved_ok'], "
-          + "[calc_status = 'resolved_warning']",
+        // Warning / error badge, top-right corner, via Cytoscape's
+        // multi-background-image support. Set by the results-sync effect
+        // below (not part of buildElements(), since it reflects solve state,
+        // not authored topology) — see CALC_STATUS_BADGES.
+        selector: "[calc_status = 'warning'], [calc_status = 'error']",
         style: {
           "background-image": "data(calc_status_icon)",
           "background-fit": "none",
           "background-clip": "none",
-          "background-width": "22px",
-          "background-height": "22px",
-          "background-position-x": "88%",
-          "background-position-y": "8%",
+          "background-width": "36px",
+          "background-height": "36px",
+          "background-position-x": "92%",
+          "background-position-y": "4%",
         },
       },
       {
@@ -1608,17 +1594,17 @@ export function ReactorGraph() {
     cy.style(buildStylesheet() as any);
   }, [buildStylesheet]);
 
-  // Mirror each node's live calc/conservation status onto its Cytoscape data
-  // (see the calc_status stylesheet rule above and CALC_STATUS_BADGES).
-  // A targeted .data() update, not a topology rebuild: this reflects solve
-  // state, so it must not disturb node positions or trigger a dagre pass.
+  // Mirror each node's problem status onto its Cytoscape data (see the
+  // calc_status stylesheet rule above and CALC_STATUS_BADGES). A targeted
+  // .data() update, not a topology rebuild: this reflects solve state, so it
+  // must not disturb node positions or trigger a dagre pass.
   //
-  // While running: a node's stage is either already solved (progress.
-  // completed_stage_ids), currently solving (the first stage, in
-  // config.groups declaration order, not yet in that list — stages solve
-  // strictly sequentially, so there is no separate "stage started" event),
-  // or not yet reached (no badge). Once complete: every node is resolved,
-  // overridden to a warning if its conservation check failed.
+  // Only failures are badged. On completion: a warning on each node whose
+  // conservation check failed. On a failed solve: an error on the node(s) in
+  // the stage that was running when it died — stages solve strictly
+  // sequentially, so that is the first stage (in config.groups declaration
+  // order) missing from progress.completed_stage_ids. Everything else,
+  // including a solve still in flight, stays unmarked.
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
@@ -1634,31 +1620,24 @@ export function ReactorGraph() {
         const failed = conservation
           ? !conservation.mass_closes || !conservation.energy_closes
           : false;
-        setStatus(n, failed ? "resolved_warning" : "resolved_ok");
+        setStatus(n, failed ? "warning" : null);
       });
       return;
     }
 
-    if (isRunning && progress) {
-      const completed = new Set(progress.completed_stage_ids ?? []);
-      const stageOrder = Object.keys(config.groups ?? {});
-      const currentStageId = stageOrder.find((id) => !completed.has(id));
+    if (error && !isRunning) {
+      const completed = new Set(progress?.completed_stage_ids ?? []);
+      const failedStageId = Object.keys(config.groups ?? {}).find((id) => !completed.has(id));
       cy.nodes().forEach((n) => {
         const group = n.data("parent") as string | undefined;
         const stageId = group?.startsWith("group:") ? group.slice("group:".length) : undefined;
-        if (stageId && completed.has(stageId)) {
-          setStatus(n, "resolved_ok");
-        } else if (stageId && stageId === currentStageId) {
-          setStatus(n, "calculating");
-        } else {
-          setStatus(n, null);
-        }
+        setStatus(n, stageId && stageId === failedStageId ? "error" : null);
       });
       return;
     }
 
     cy.nodes().forEach((n) => setStatus(n, null));
-  }, [results, progress, isRunning, config.groups]);
+  }, [results, progress, isRunning, error, config.groups]);
 
   // Keep Cytoscape canvas in sync when the pane is resized
   useEffect(() => {
