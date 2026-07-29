@@ -10,7 +10,10 @@ interface SweepRunState {
    * Scenarios currently being solved, keyed by id (mirrors
    * `SweepStatus.scenario_progress` — see that type for why it's a map).
    */
-  scenarioProgress: Record<string, { stage: number | null; stageTotal: number | null }>;
+  scenarioProgress: Record<
+    string,
+    { stage: number | null; stageTotal: number | null; stageId: string | null }
+  >;
   /**
    * Latest console line from the sweep runner (mirrors `SweepStatus.last_line`),
    * or null when nothing is running — the detail line under the spinner.
@@ -36,11 +39,22 @@ interface SweepRunState {
 // React; only one ever exists regardless of how many components call run().
 let pollHandle: ReturnType<typeof setInterval> | null = null;
 
+// Most recent `current` this poll loop has observed (module-level like
+// pollHandle above — bookkeeping for the loop, not UI state). `current` is
+// set to N the moment scenario N/total *starts* (see boulder/api/routes/
+// sweep.py's console-line parser) -- so current advancing from N to N+1
+// means scenario N just finished, not N+1. null means "no status observed
+// yet this run" -- the first-ever observation must never refresh on its
+// own, since current going from unset to 1 (scenario 1 starting) means
+// nothing has finished.
+let lastSeenCurrent: number | null = null;
+
 function stopPolling(): void {
   if (pollHandle !== null) {
     clearInterval(pollHandle);
     pollHandle = null;
   }
+  lastSeenCurrent = null;
 }
 
 export const useSweepRunStore = create<SweepRunState>((set, get) => {
@@ -51,7 +65,7 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
     if (st.status === "running") {
       const scenarioProgress: SweepRunState["scenarioProgress"] = {};
       for (const [id, p] of Object.entries(st.scenario_progress ?? {})) {
-        scenarioProgress[id] = { stage: p.stage, stageTotal: p.stage_total };
+        scenarioProgress[id] = { stage: p.stage, stageTotal: p.stage_total, stageId: p.stage_id };
       }
       set({
         sweeping: true,
@@ -59,6 +73,16 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
         scenarioProgress,
         lastLine: st.last_line ?? null,
       });
+      // A finished scenario's own row should stop reading "Not computed
+      // yet" the moment it's done, not only once the whole sweep finishes
+      // minutes later — refresh as soon as `current` advances past the
+      // last value seen (skipping the very first observation: current
+      // going from unset to 1 means scenario 1 is only just starting).
+      const cur = st.current ?? 0;
+      if (lastSeenCurrent !== null && cur > lastSeenCurrent) {
+        void useScenarioStore.getState().refresh();
+      }
+      lastSeenCurrent = cur;
       return;
     }
     stopPolling();

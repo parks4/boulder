@@ -249,12 +249,21 @@ async def sweep_run(
                         # whole map. A parallel runner would add/remove keys
                         # here instead of replacing.
                         state["scenario_progress"] = (
-                            {sid: {"stage": None, "stage_total": None}} if sid else {}
+                            {
+                                sid: {
+                                    "stage": None,
+                                    "stage_total": None,
+                                    "stage_id": None,
+                                }
+                            }
+                            if sid
+                            else {}
                         )
                 else:
                     stage_match = _STAGE_RE.search(line)
                     if stage_match:
                         for progress in state["scenario_progress"].values():
+                            progress["stage_id"] = stage_match.group(1)
                             progress["stage"] = int(stage_match.group(2))
                             progress["stage_total"] = int(stage_match.group(3))
                 if line:

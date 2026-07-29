@@ -78,6 +78,10 @@ describe("sweepStore", () => {
 
     await vi.advanceTimersByTimeAsync(1000); // second poll tick -> done
     expect(useSweepRunStore.getState().sweeping).toBe(false);
+    // Just the completion refresh: current:1 on the first-ever tick means
+    // scenario 1 is only just starting (nothing finished yet), and the
+    // sweep goes straight from there to "done" -- see the dedicated
+    // mid-sweep-refresh test below for the actual N -> N+1 transition case.
     expect(mockRefresh).toHaveBeenCalledOnce();
     expect(mockToastSuccess).toHaveBeenCalledOnce();
   });
@@ -147,6 +151,34 @@ describe("sweepStore", () => {
     expect(useSweepRunStore.getState().lastLine).toBeNull();
   });
 
+  it("refreshes the Scenario Pane as soon as each scenario finishes, not only at the end", async () => {
+    vi.useFakeTimers();
+    mockStartSweep.mockResolvedValue({ status: "running", total: 3 });
+    mockGetSweepStatus
+      // Scenario 1 in flight -- nothing finished yet, no refresh due.
+      .mockResolvedValueOnce({ status: "running", current: 1, total: 3 })
+      // Still scenario 1 (same `current`) -- must not refresh again for it.
+      .mockResolvedValueOnce({ status: "running", current: 1, total: 3 })
+      // Scenario 1 just finished, scenario 2 starting -- one refresh due.
+      .mockResolvedValueOnce({ status: "running", current: 2, total: 3 })
+      .mockResolvedValueOnce({ status: "done", current: 3, total: 3 });
+
+    useSweepRunStore.getState().run({ total: 3 });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mockRefresh).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1000); // repeat of current=1 -- no new refresh
+    expect(mockRefresh).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1000); // current 1 -> 2
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000); // done: current 2 -> 3
+    expect(mockRefresh).toHaveBeenCalledTimes(2);
+  });
+
   it("hydrate() attaches to an already-running sweep and polls it to completion", async () => {
     vi.useFakeTimers();
     mockGetSweepStatus
@@ -169,7 +201,12 @@ describe("sweepStore", () => {
 
     await vi.advanceTimersByTimeAsync(1000); // poll tick -> done
     expect(useSweepRunStore.getState().sweeping).toBe(false);
-    expect(mockRefresh).toHaveBeenCalledOnce();
+    // Just the completion refresh: the initial hydrate() snapshot (current:
+    // 1) is the first observation this session has made, so it can't tell
+    // whether anything finished before it started watching -- current only
+    // advances to 2 (scenario 1 done) on the very next, final tick, which
+    // goes straight to "done" and refreshes unconditionally there anyway.
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
   });
 
   it("hydrate() is a no-op when nothing is running", async () => {

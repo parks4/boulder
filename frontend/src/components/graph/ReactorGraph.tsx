@@ -8,6 +8,7 @@ import { useResultsTabStore } from "@/stores/resultsTabStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 
 /**
  * Per-node problem badges (top-right corner), drawn as self-contained SVG
@@ -129,6 +130,8 @@ export function ReactorGraph() {
   const progress = useSimulationStore((s) => s.progress);
   const isRunning = useSimulationStore((s) => s.isRunning);
   const error = useSimulationStore((s) => s.error);
+  const sweeping = useSweepRunStore((s) => s.sweeping);
+  const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
   const theme = useThemeStore((s) => s.theme);
   const [graphHeight, setGraphHeight] = useState(loadStoredGraphHeight);
 
@@ -454,6 +457,19 @@ export function ReactorGraph() {
           "text-valign": "top",
           "text-halign": "center",
           padding: "20px",
+        },
+      },
+      {
+        // The stage box currently being solved during a sweep, set by the
+        // sweep-progress effect below (calc_status='calculating', distinct
+        // from the per-reactor warning/error badges — stages solve strictly
+        // sequentially, so at most one box is ever tinted at a time).
+        selector: "node[isGroup][calc_status = 'calculating']",
+        style: {
+          "background-opacity": 0.15,
+          "background-color": "#3b82f6",
+          "border-width": 3,
+          "border-color": "#3b82f6",
         },
       },
       {
@@ -1603,8 +1619,10 @@ export function ReactorGraph() {
   // conservation check failed. On a failed solve: an error on the node(s) in
   // the stage that was running when it died — stages solve strictly
   // sequentially, so that is the first stage (in config.groups declaration
-  // order) missing from progress.completed_stage_ids. Everything else,
-  // including a solve still in flight, stays unmarked.
+  // order) missing from progress.completed_stage_ids. During a sweep, the
+  // stage box currently being solved is tinted blue instead — a single
+  // combined effect (not two effects touching the same calc_status field)
+  // so there is one place that decides what "clear everything" means.
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
@@ -1636,8 +1654,19 @@ export function ReactorGraph() {
       return;
     }
 
+    if (sweeping) {
+      // Serial sweep runner: at most one scenario, hence one stage, is ever
+      // in flight — take whichever entry scenario_progress holds.
+      const currentStageId = Object.values(scenarioProgress)[0]?.stageId ?? null;
+      cy.nodes("[isGroup]").forEach((n) => {
+        n.data("calc_status", currentStageId && n.id() === `group:${currentStageId}` ? "calculating" : null);
+      });
+      cy.nodes("[^isGroup]").forEach((n) => setStatus(n, null));
+      return;
+    }
+
     cy.nodes().forEach((n) => setStatus(n, null));
-  }, [results, progress, isRunning, error, config.groups]);
+  }, [results, progress, isRunning, error, config.groups, sweeping, scenarioProgress]);
 
   // Keep Cytoscape canvas in sync when the pane is resized
   useEffect(() => {
