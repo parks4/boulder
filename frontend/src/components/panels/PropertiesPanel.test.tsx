@@ -86,10 +86,20 @@ vi.mock("@/stores/scenarioStore", () => ({
   },
 }));
 
+let mockKinds: {
+  reactors: { kind: string; doc_url: string | null; description: string | null }[];
+  connections: { kind: string; doc_url: string | null; description: string | null }[];
+} = { reactors: [], connections: [] };
+
+vi.mock("@/hooks/useKinds", () => ({
+  useKinds: () => mockKinds,
+}));
+
 describe("PropertiesPanel delete confirmation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInitialConditionsEditNonce = 0;
+    mockKinds = { reactors: [], connections: [] };
     mockSelectedElement = {
       type: "node",
       data: { id: "reactor_1", type: "IdealGasReactor" },
@@ -261,6 +271,7 @@ describe("PropertiesPanel edit-on-double-click", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInitialConditionsEditNonce = 0;
+    mockKinds = { reactors: [], connections: [] };
     mockSelectedElement = {
       type: "node",
       data: { id: "reactor_1", type: "IdealGasReactor" },
@@ -304,6 +315,7 @@ describe("PropertiesPanel object-valued properties", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInitialConditionsEditNonce = 0;
+    mockKinds = { reactors: [], connections: [] };
     mockSelectedElement = {
       type: "node",
       data: { id: "reactor_1", type: "ConstPressureReactor" },
@@ -378,10 +390,126 @@ describe("PropertiesPanel object-valued properties", () => {
   });
 });
 
+describe("PropertiesPanel Cantera doc-link tooltip", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInitialConditionsEditNonce = 0;
+    mockKinds = { reactors: [], connections: [] };
+    mockPreviewId = null;
+    mockPreviewNodes = null;
+    mockPreviewConnections = null;
+  });
+
+  it("shows a Cantera doc link for a selected reactor kind on hover", () => {
+    mockKinds = {
+      reactors: [
+        {
+          kind: "IdealGasReactor",
+          doc_url: "https://cantera.org/stable/python/zerodim.html#cantera.IdealGasReactor",
+          description: "Ideal-gas, constant-volume reactor.",
+        },
+      ],
+      connections: [],
+    };
+    mockSelectedElement = {
+      type: "node",
+      data: { id: "reactor_1", type: "IdealGasReactor" },
+    };
+    mockConfig = {
+      nodes: [
+        {
+          id: "reactor_1",
+          type: "IdealGasReactor",
+          properties: { temperature: 1273.15, pressure: 101325 },
+        },
+      ],
+      connections: [],
+    };
+
+    render(<PropertiesPanel />);
+
+    const trigger = screen.getByLabelText("About IdealGasReactor");
+    fireEvent.mouseEnter(trigger.parentElement!);
+    const link = screen.getByRole("link", { name: "Cantera docs" });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://cantera.org/stable/python/zerodim.html#cantera.IdealGasReactor",
+    );
+    expect(screen.getByText("Ideal-gas, constant-volume reactor.")).toBeInTheDocument();
+  });
+
+  it("shows a Cantera doc link for a selected connection kind on hover", () => {
+    mockKinds = {
+      reactors: [],
+      connections: [
+        {
+          kind: "MassFlowController",
+          doc_url: "https://cantera.org/stable/python/zerodim.html#cantera.MassFlowController",
+          description: "Imposes a fixed or time-varying mass flow rate between two reactors.",
+        },
+      ],
+    };
+    mockSelectedElement = {
+      type: "edge",
+      data: {
+        id: "mfc_1",
+        type: "MassFlowController",
+        source: "reactor_1",
+        target: "reactor_2",
+      },
+    };
+    mockConfig = {
+      nodes: [],
+      connections: [
+        {
+          id: "mfc_1",
+          type: "MassFlowController",
+          source: "reactor_1",
+          target: "reactor_2",
+          properties: { mdot: 0.001 },
+        },
+      ],
+    };
+
+    render(<PropertiesPanel />);
+
+    const trigger = screen.getByLabelText("About MassFlowController");
+    fireEvent.mouseEnter(trigger.parentElement!);
+    const link = screen.getByRole("link", { name: "Cantera docs" });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://cantera.org/stable/python/zerodim.html#cantera.MassFlowController",
+    );
+  });
+
+  it("omits the doc-link icon when the kind has no doc_url (e.g. plugin types)", () => {
+    mockKinds = {
+      reactors: [
+        { kind: "_TestPluginReactor", doc_url: null, description: null },
+      ],
+      connections: [],
+    };
+    mockSelectedElement = {
+      type: "node",
+      data: { id: "plugin_r", type: "_TestPluginReactor" },
+    };
+    mockConfig = {
+      nodes: [{ id: "plugin_r", type: "_TestPluginReactor", properties: {} }],
+      connections: [],
+    };
+
+    render(<PropertiesPanel />);
+
+    expect(screen.queryByLabelText("About _TestPluginReactor")).not.toBeInTheDocument();
+    expect(screen.getByText("_TestPluginReactor")).toBeInTheDocument();
+  });
+});
+
 describe("PropertiesPanel scenario preview", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInitialConditionsEditNonce = 0;
+    mockKinds = { reactors: [], connections: [] };
     mockSelectedElement = {
       type: "node",
       data: { id: "reactor_1", type: "IdealGasReactor" },
