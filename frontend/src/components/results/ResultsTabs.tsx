@@ -7,6 +7,7 @@ import { useResultsTabStore } from "@/stores/resultsTabStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
 import { fetchPlugins, renderPlugin } from "@/api/plugins";
+import { hasSankeyData } from "@/lib/sankeyData";
 import { Button } from "@/components/ui/Button";
 import { PlotsTab } from "./PlotsTab";
 import { ConvergenceTab } from "./ConvergenceTab";
@@ -36,8 +37,9 @@ export function ResultsTabs() {
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
   const activeScenarioId = useScenarioStore((s) => s.activeId);
   const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
-  /** Resolved tab for UI: explicit choice, else Sankey when results exist, else Plots. */
-  const displayTab = activeTab ?? (results ? "Sankey" : "Plots");
+  const defaultResultsTab = results && hasSankeyData(results) ? "Sankey" : "Plots";
+  /** Resolved tab for UI: explicit choice, else Sankey/Plots per available data. */
+  const displayTab = activeTab ?? defaultResultsTab;
   const [plugins, setPlugins] = useState<PluginMeta[]>([]);
   const [pluginData, setPluginData] = useState<Record<string, PluginRenderData>>({});
   const [pluginLoading, setPluginLoading] = useState<Record<string, boolean>>({});
@@ -73,17 +75,31 @@ export function ResultsTabs() {
     if (!results || activeTab !== null || selectedElement) return;
     if (autoOpenedForRef.current === resultsVersionRef.current) return;
     const pref = plugins.find((p) => p.preferred);
-    if (!pref) return;
-    const kinds = pref.supported_node_types ?? null;
-    const node = config.nodes.find(
-      (n) => !kinds || kinds.includes(String(n.type)),
-    );
-    if (!node && pref.requires_selection) return;
-    autoOpenedForRef.current = resultsVersionRef.current;
-    if (node) {
-      setSelectedElement({ type: "node", data: { id: node.id, type: node.type } });
+    if (pref) {
+      const kinds = pref.supported_node_types ?? null;
+      const node = config.nodes.find(
+        (n) => !kinds || kinds.includes(String(n.type)),
+      );
+      if (!node && pref.requires_selection) return;
+      autoOpenedForRef.current = resultsVersionRef.current;
+      if (node) {
+        setSelectedElement({ type: "node", data: { id: node.id, type: node.type } });
+      }
+      setActiveTab(pref.label);
+      return;
     }
-    setActiveTab(pref.label);
+
+    if (!hasSankeyData(results)) {
+      const series = results.reactors_series ?? {};
+      const ids = Object.keys(series);
+      if (ids.length === 0) return;
+      autoOpenedForRef.current = resultsVersionRef.current;
+      const node = config.nodes.find((n) => n.id === ids[0]);
+      setSelectedElement({
+        type: "node",
+        data: { id: ids[0], type: node?.type },
+      });
+    }
   }, [
     results,
     plugins,
@@ -193,11 +209,7 @@ export function ResultsTabs() {
   ];
   // If the active tab just disappeared (its plugin's selection was cleared),
   // fall back to a safe base tab instead of rendering an empty pane.
-  const safeTab: Tab = tabs.includes(displayTab)
-    ? displayTab
-    : results
-      ? "Sankey"
-      : "Plots";
+  const safeTab: Tab = tabs.includes(displayTab) ? displayTab : defaultResultsTab;
 
   return (
     <div id="simulation-results-card" className="rounded-lg border border-border bg-card">

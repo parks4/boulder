@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 interface ResultsTabState {
-  /** null = no explicit choice: show Plots while streaming, Sankey once final results exist. */
+  /** null = no explicit choice: Plots while streaming; Sankey or Plots once results exist. */
   activeTab: string | null;
   setActiveTab: (tab: string) => void;
 }
