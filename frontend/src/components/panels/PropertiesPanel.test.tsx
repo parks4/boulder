@@ -529,14 +529,13 @@ describe("PropertiesPanel scenario preview", () => {
     mockPreviewConnections = null;
   });
 
-  it("shows no preview badge and no override styling when nothing is previewed", () => {
+  it("shows no override styling when nothing is previewed", () => {
     render(<PropertiesPanel />);
 
-    expect(screen.queryByText(/Previewing scenario/)).not.toBeInTheDocument();
     expect(screen.getByText("0.30")).toBeInTheDocument();
   });
 
-  it("shows a scenario's overridden value and a preview badge once it's selected", () => {
+  it("shows a scenario's overridden value once it's selected", () => {
     mockPreviewId = "C600_P300";
     mockPreviewNodes = [
       { id: "reactor_1", properties: { temperature: 1273.15, length: 0.6 } },
@@ -545,10 +544,40 @@ describe("PropertiesPanel scenario preview", () => {
 
     render(<PropertiesPanel />);
 
-    expect(screen.getByText(/Previewing scenario/)).toBeInTheDocument();
-    expect(screen.getByText("C600_P300")).toBeInTheDocument();
     expect(screen.getByText("0.60")).toBeInTheDocument();
     expect(screen.queryByText("0.30")).not.toBeInTheDocument();
+  });
+
+  it("never names the previewed scenario in this panel", () => {
+    // The panel shows the element's own identity (id + kind); which scenario
+    // is being previewed belongs to the Scenario Pane, not here. Overridden
+    // values are still flagged per-field by the amber styling below.
+    mockPreviewId = "C600_P300";
+    mockPreviewNodes = [
+      { id: "reactor_1", properties: { temperature: 1273.15, length: 0.6 } },
+    ];
+    mockPreviewConnections = [];
+
+    render(<PropertiesPanel />);
+
+    expect(screen.queryByText(/Previewing scenario/)).not.toBeInTheDocument();
+    expect(screen.queryByText("C600_P300")).not.toBeInTheDocument();
+  });
+
+  it("still shows the element kind when a scenario auto-selected it by id alone", () => {
+    // scenarioStore.setActive selects a reactor with `data: {id}` only -- no
+    // `type` -- so the kind must come from the config entry or the heading
+    // renders blank while previewing.
+    mockSelectedElement = { type: "node", data: { id: "reactor_1" } };
+    mockPreviewId = "C600_P300";
+    mockPreviewNodes = [
+      { id: "reactor_1", properties: { temperature: 1273.15, length: 0.6 } },
+    ];
+    mockPreviewConnections = [];
+
+    render(<PropertiesPanel />);
+
+    expect(screen.getByText("IdealGasReactor")).toBeInTheDocument();
   });
 
   it("does not highlight a field the scenario leaves unchanged", () => {
@@ -588,6 +617,5 @@ describe("PropertiesPanel scenario preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     expect(screen.getByDisplayValue("0.3")).toBeInTheDocument();
-    expect(screen.queryByText(/Previewing scenario/)).not.toBeInTheDocument();
   });
 });
