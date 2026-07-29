@@ -460,11 +460,15 @@ export function ReactorGraph() {
         },
       },
       {
-        // The stage box currently being solved during a sweep, set by the
-        // sweep-progress effect below (calc_status='calculating', distinct
-        // from the per-reactor warning/error badges — stages solve strictly
-        // sequentially, so at most one box is ever tinted at a time).
-        selector: "node[isGroup][calc_status = 'calculating']",
+        // Blue tint on a stage box: either it's the one currently being
+        // solved during a sweep (calc_status='calculating', set by the
+        // sweep-progress effect below) or the displayed scenario has results
+        // for it (calc_status='computed', set by the results-sync effect —
+        // covers both a fresh solve and a scenario loaded from cache, since
+        // both populate `results` the same way). Distinct from the
+        // per-reactor warning/error badges.
+        selector:
+          "node[isGroup][calc_status = 'calculating'], node[isGroup][calc_status = 'computed']",
         style: {
           "background-opacity": 0.15,
           "background-color": "#3b82f6",
@@ -1633,7 +1637,10 @@ export function ReactorGraph() {
     };
 
     if (results) {
-      cy.nodes().forEach((n) => {
+      cy.nodes("[isGroup]").forEach((n) => {
+        n.data("calc_status", "computed");
+      });
+      cy.nodes("[^isGroup]").forEach((n) => {
         const conservation = results.reactors_series?.[n.id()]?.conservation;
         const failed = conservation
           ? !conservation.mass_closes || !conservation.energy_closes
