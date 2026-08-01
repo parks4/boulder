@@ -143,11 +143,14 @@ describe("ScenarioPane", () => {
     expect(mockOpenYamlPane).not.toHaveBeenCalled();
   });
 
-  it("BASELINE has no delete button", () => {
+  it("BASELINE gets a disabled (barred) delete slot instead of a working delete button", () => {
     mockAuthoredIds = ["BASELINE", "A"];
     render(<ScenarioPane />);
-    // Only the non-baseline row ("A") gets a delete button.
+    // Only the non-baseline row ("A") gets a real delete button...
     expect(screen.getAllByTitle("Delete scenario")).toHaveLength(1);
+    // ...but BASELINE still occupies the same icon slot, so rows stay aligned.
+    const barred = screen.getByTitle(/cannot be deleted/);
+    expect(barred.tagName).not.toBe("BUTTON");
   });
 
   it("BASELINE's pencil opens the full YAML pane, not the scoped editor", () => {

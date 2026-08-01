@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import { Eraser, Pencil, Plus, Trash2 } from "lucide-react";
+import { Ban, Eraser, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
@@ -302,7 +302,17 @@ export function ScenarioPane() {
                 >
                   <Pencil size={12} />
                 </button>
-                {row.id !== BASELINE_SCENARIO_ID && (
+                {row.id === BASELINE_SCENARIO_ID ? (
+                  // Same slot as the delete button below (kept present, not
+                  // removed, so every row's icon column stays aligned) --
+                  // BASELINE has no overlay of its own to delete.
+                  <span
+                    title="BASELINE cannot be deleted (it's the base config's own unmodified run, not an authored scenario)"
+                    className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 cursor-not-allowed"
+                  >
+                    <Ban size={12} />
+                  </span>
+                ) : (
                   <button
                     type="button"
                     onClick={() => void handleDelete(row.id, s !== null)}
