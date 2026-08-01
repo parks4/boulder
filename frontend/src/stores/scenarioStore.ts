@@ -183,7 +183,10 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     // finished yet) — just record the selection, no fetch. `GET /api/scenarios/
     // {id}` would 404 for it; the Scenario Pane / results area read `activeId`
     // directly to show a "calculating"/"pending" state for this case instead.
+    // Clear any previous scenario's results too, or ReactorGraph keeps
+    // painting the flowsheet with the last-fetched scenario's stale status.
     if (!get().scenarios.some((s) => s.id === id)) {
+      useSimulationStore.getState().clearResults();
       return;
     }
     set({ loading: true });

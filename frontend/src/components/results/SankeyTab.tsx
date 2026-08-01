@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import Plot from "react-plotly.js";
 import { mapSankeyNodeColors } from "@/lib/cytoscapeNodeColor";
 import { hasSankeyData } from "@/lib/sankeyData";
@@ -42,6 +42,14 @@ function mapSankeyLinkColors(
   });
 }
 
+// plotly.js hardcodes a 500ms grow-in transition for sankey node/link traces
+// (src/traces/sankey/constants.js), applied unconditionally in its d3
+// render code — there is no data/layout/config option that reaches it
+// (`transition` config, `staticPlot`, etc. don't touch it). Rendering the
+// plot hidden for slightly longer than that lets the animation play out
+// off-screen instead of flashing on every new scenario/result.
+const SANKEY_POP_IN_MS = 550;
+
 /**
  * Memoized: ResultsTabs re-renders every ~1s while a sweep is polling
  * (scenarioProgress/lastLine churn) even when this scenario's own results
@@ -52,6 +60,15 @@ function mapSankeyLinkColors(
  */
 export const SankeyTab = memo(function SankeyTab({ results }: Props) {
   const theme = useThemeStore((s) => s.theme);
+
+  // Hidden (not unmounted, so Plotly still sizes and lays it out normally)
+  // until plotly's built-in pop-in transition would have finished.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    setSettled(false);
+    const t = setTimeout(() => setSettled(true), SANKEY_POP_IN_MS);
+    return () => clearTimeout(t);
+  }, [results]);
 
   if (!hasSankeyData(results)) {
     return <p className="text-sm text-muted-foreground">No Sankey data available.</p>;
@@ -90,28 +107,30 @@ export const SankeyTab = memo(function SankeyTab({ results }: Props) {
   );
 
   return (
-    <Plot
-      data={[
-        {
-          type: "sankey" as const,
-          node: {
-            label: results.sankey_nodes,
-            color: nodeColors,
-            pad: 15,
-            thickness: 20,
-          },
-          link: linkTrace,
-        } as Plotly.Data,
-      ]}
-      layout={{
-        paper_bgcolor: "transparent",
-        font: { color: theme === "dark" ? "#ccc" : "#333" },
-        margin: { t: 20, b: 20, l: 20, r: 20 },
-        height: 400,
-      }}
-      config={{ responsive: true, displayModeBar: false }}
-      useResizeHandler
-      className="w-full"
-    />
+    <div style={{ visibility: settled ? "visible" : "hidden" }}>
+      <Plot
+        data={[
+          {
+            type: "sankey" as const,
+            node: {
+              label: results.sankey_nodes,
+              color: nodeColors,
+              pad: 15,
+              thickness: 20,
+            },
+            link: linkTrace,
+          } as Plotly.Data,
+        ]}
+        layout={{
+          paper_bgcolor: "transparent",
+          font: { color: theme === "dark" ? "#ccc" : "#333" },
+          margin: { t: 20, b: 20, l: 20, r: 20 },
+          height: 400,
+        }}
+        config={{ responsive: true, displayModeBar: false }}
+        useResizeHandler
+        className="w-full"
+      />
+    </div>
   );
 });

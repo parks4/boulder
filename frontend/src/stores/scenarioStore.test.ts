@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useScenarioStore } from "./scenarioStore";
+import { useSimulationStore } from "./simulationStore";
 
 const mockListScenarios = vi.fn();
 const mockCreateScenario = vi.fn();
@@ -160,6 +161,15 @@ describe("scenarioStore", () => {
     expect(useScenarioStore.getState().activeId).toBe("pending_id");
     expect(useScenarioStore.getState().error).toBeNull();
     expect(mockFetchScenario).not.toHaveBeenCalled();
+  });
+
+  it("setActive on an id not yet computed clears a previous scenario's stale results, so ReactorGraph stops showing them as computed", async () => {
+    useScenarioStore.setState({ scenarios: [{ id: "A", t0_K: 300, label: "A" }] });
+    useSimulationStore.getState().setResults({ reactors_series: {}, code_str: "" } as never);
+
+    await useScenarioStore.getState().setActive("pending_id");
+
+    expect(useSimulationStore.getState().results).toBeNull();
   });
 
   it("deleteScenario clears the preview when the deleted scenario was being previewed", async () => {
