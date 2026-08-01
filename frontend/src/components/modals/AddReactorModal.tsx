@@ -132,7 +132,7 @@ export function AddReactorModal({ open, onClose, defaultGroup }: Props) {
                       rel="noreferrer"
                       className="underline text-primary"
                     >
-                      Cantera docs
+                      Docs
                     </a>
                   </span>
                 }

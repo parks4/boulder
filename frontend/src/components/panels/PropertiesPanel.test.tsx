@@ -430,7 +430,7 @@ describe("PropertiesPanel Cantera doc-link tooltip", () => {
 
     const trigger = screen.getByLabelText("About IdealGasReactor");
     fireEvent.mouseEnter(trigger.parentElement!);
-    const link = screen.getByRole("link", { name: "Cantera docs" });
+    const link = screen.getByRole("link", { name: "Docs" });
     expect(link).toHaveAttribute(
       "href",
       "https://cantera.org/stable/python/zerodim.html#cantera.IdealGasReactor",
@@ -475,7 +475,7 @@ describe("PropertiesPanel Cantera doc-link tooltip", () => {
 
     const trigger = screen.getByLabelText("About MassFlowController");
     fireEvent.mouseEnter(trigger.parentElement!);
-    const link = screen.getByRole("link", { name: "Cantera docs" });
+    const link = screen.getByRole("link", { name: "Docs" });
     expect(link).toHaveAttribute(
       "href",
       "https://cantera.org/stable/python/zerodim.html#cantera.MassFlowController",

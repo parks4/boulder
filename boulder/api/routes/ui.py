@@ -56,19 +56,28 @@ async def get_kinds() -> Dict[str, Any]:
 
     Combines Boulder's built-in kinds (with a Cantera doc link/description
     from :mod:`boulder.cantera_docs`) with any kind a loaded plugin has
-    registered via ``schema_registry.register_reactor_builder``/
+    registered via ``schema_registry.register_reactor_builder`` (doc link
+    only if the plugin passed ``doc_url``/``doc_description``) or
     ``register_connection_schema`` (no doc link — plugins document their own
-    kinds). Powers the Add Reactor/Add Connection modals so the type
-    dropdown always reflects what this build can actually construct.
+    connection kinds). Powers the Add Reactor/Add Connection modals so the
+    type dropdown always reflects what this build can actually construct.
     """
     from ...cantera_docs import CONNECTION_DOCS, REACTOR_DOCS
-    from ...schema_registry import registered_connection_kinds, registered_kinds
+    from ...schema_registry import (
+        get_schema_entry,
+        registered_connection_kinds,
+        registered_kinds,
+    )
 
     reactors = [
         {"kind": kind, "doc_url": doc["doc_url"], "description": doc["description"]}
         for kind, doc in REACTOR_DOCS.items()
     ] + [
-        {"kind": kind, "doc_url": None, "description": None}
+        {
+            "kind": kind,
+            "doc_url": (entry := get_schema_entry(kind)) and entry.doc_url,
+            "description": entry and entry.doc_description,
+        }
         for kind in registered_kinds()
         if kind not in REACTOR_DOCS
     ]
