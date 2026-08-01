@@ -104,6 +104,17 @@ vi.mock("@/api/scenarios", () => ({
   updateScenarioEntity: (...args: unknown[]) => mockUpdateScenarioEntity(...args),
 }));
 
+let mockIsRunning = false;
+vi.mock("@/stores/simulationStore", () => ({
+  useSimulationStore: (selector: (s: unknown) => unknown) =>
+    selector({ isRunning: mockIsRunning }),
+}));
+
+let mockSweeping = false;
+vi.mock("@/stores/sweepStore", () => ({
+  useSweepRunStore: (selector: (s: unknown) => unknown) => selector({ sweeping: mockSweeping }),
+}));
+
 let mockKinds: {
   reactors: { kind: string; doc_url: string | null; description: string | null }[];
   connections: { kind: string; doc_url: string | null; description: string | null }[];
@@ -547,6 +558,8 @@ describe("PropertiesPanel scenario preview", () => {
     mockPreviewConnections = null;
     mockActiveScenarioId = null;
     mockPreviewErrorAfterLoad = null;
+    mockIsRunning = false;
+    mockSweeping = false;
   });
 
   it("shows no override styling when nothing is previewed", () => {
@@ -692,6 +705,24 @@ describe("PropertiesPanel scenario preview", () => {
     expect(mockUpdateScenarioEntity).not.toHaveBeenCalled();
     expect(toast.info).toHaveBeenCalledWith(
       expect.stringContaining("No changes to save"),
+    );
+  });
+
+  it("blocks saving a scenario overlay edit while a sweep is running", () => {
+    // Unlike the base network (a local, deferred-to-sync edit), this writes
+    // straight to the scenario's YAML on disk -- unsafe while a sweep
+    // subprocess may be reading that same file.
+    mockActiveScenarioId = "C1T";
+    mockSweeping = true;
+
+    render(<PropertiesPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByDisplayValue("0.3"), { target: { value: "0.6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mockUpdateScenarioEntity).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("Wait for the current calculation to finish"),
     );
   });
 });

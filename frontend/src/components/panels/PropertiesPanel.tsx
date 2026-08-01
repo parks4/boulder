@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { useSimulationStore } from "@/stores/simulationStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 import { BASELINE_SCENARIO_ID, updateScenarioEntity } from "@/api/scenarios";
 import type { NormalizedConfig } from "@/types/config";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
@@ -105,6 +107,8 @@ export function PropertiesPanel() {
   const activeScenarioId = useScenarioStore((s) => s.activeId);
   const loadScenarioPreview = useScenarioStore((s) => s.loadPreview);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
+  const isSimulating = useSimulationStore((s) => s.isRunning);
+  const isSweeping = useSweepRunStore((s) => s.sweeping);
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -300,6 +304,14 @@ export function PropertiesPanel() {
     // that merely round-tripped through the edit form don't get duplicated
     // into the overlay.
     if (activeScenarioId && activeScenarioId !== BASELINE_SCENARIO_ID) {
+      // Unlike the base network (a local, deferred-to-sync edit -- see the
+      // fallback branch below), this writes straight to the scenario's YAML
+      // on disk. A sweep subprocess may be reading that same file for this
+      // (or a later) scenario right now -- same guard the YAML panes use.
+      if (isSimulating || isSweeping) {
+        toast.error("Wait for the current calculation to finish before editing a scenario.");
+        return;
+      }
       const changed: Record<string, unknown> = {};
       for (const [key, val] of Object.entries(updated)) {
         if (JSON.stringify(val) !== JSON.stringify(properties[key])) {
