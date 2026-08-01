@@ -104,6 +104,7 @@ export function PropertiesPanel() {
   const previewConnections = useScenarioStore((s) => s.previewConnections);
   const activeScenarioId = useScenarioStore((s) => s.activeId);
   const loadScenarioPreview = useScenarioStore((s) => s.loadPreview);
+  const refreshScenarios = useScenarioStore((s) => s.refresh);
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -310,10 +311,26 @@ export function PropertiesPanel() {
         return;
       }
       updateScenarioEntity(activeScenarioId, id, changed)
-        .then(() => {
+        .then(async () => {
           setIsEditing(false);
-          toast.success(`Scenario "${activeScenarioId}" overlay updated`);
-          void loadScenarioPreview(activeScenarioId);
+          // Bumps scenarioStore.revision -- lets a scenario YAML pane left
+          // open on this same scenario notice this out-of-band edit and
+          // refetch its content instead of showing stale text.
+          void refreshScenarios();
+          // The write itself can succeed while leaving the scenario's
+          // *merged* config invalid (e.g. a cross-node consistency rule) --
+          // loadPreview swallows that into previewError rather than
+          // rejecting, so it must be checked explicitly or the failure is
+          // silent: the edit looks like it didn't "take" with no clue why.
+          await loadScenarioPreview(activeScenarioId);
+          const previewError = useScenarioStore.getState().previewError;
+          if (previewError) {
+            toast.error(
+              `Scenario "${activeScenarioId}" overlay saved, but it no longer previews cleanly: ${previewError}`,
+            );
+          } else {
+            toast.success(`Scenario "${activeScenarioId}" overlay updated`);
+          }
         })
         .catch((err) => {
           toast.error(

@@ -1,7 +1,8 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { FileCode, X } from "lucide-react";
 import { fetchScenarioSource, updateScenario } from "@/api/scenarios";
 import { useThemeStore } from "@/stores/themeStore";
+import { useScenarioStore } from "@/stores/scenarioStore";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 import { useSimulationStore } from "@/stores/simulationStore";
@@ -28,7 +29,13 @@ interface Props {
  */
 export function ScenarioYamlPane({ scenarioId, baseScenarioId, onClose, onSaved }: Props) {
   const theme = useThemeStore((s) => s.theme);
+  // Bumped by any scenario write, from any source (see scenarioStore.refresh
+  // and AppShell's/this pane's own onSaved wiring) -- used below to refetch
+  // this pane's content when a *different* editor (e.g. the Properties
+  // panel) changes the same scenario while this pane is sitting open.
+  const revision = useScenarioStore((s) => s.revision);
   const [value, setValue] = useState("");
+  const [baseline, setBaseline] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -36,17 +43,30 @@ export function ScenarioYamlPane({ scenarioId, baseScenarioId, onClose, onSaved 
   const isSweeping = useSweepRunStore((s) => s.sweeping);
   const isCalculating = isSimulating || isSweeping;
 
+  const isDirty = value !== baseline;
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+
   useEffect(() => {
     if (!scenarioId) return;
+    // Don't clobber an unsaved edit just because something *else* wrote to
+    // this scenario (or any scenario) in the meantime -- same guard YamlPane
+    // uses for the base config.
+    if (isDirtyRef.current) return;
     setLoadError(null);
     setLoading(true);
     fetchScenarioSource(scenarioId)
-      .then((resp) => setValue(resp.yaml))
+      .then((resp) => {
+        setValue(resp.yaml);
+        setBaseline(resp.yaml);
+      })
       .catch((err) => {
         setLoadError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => setLoading(false));
-  }, [scenarioId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- revision is an
+    // intentional refetch trigger, not data this effect reads.
+  }, [scenarioId, revision]);
 
   if (!scenarioId) return null;
 

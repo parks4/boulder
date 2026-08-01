@@ -9,12 +9,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { toast } from "sonner";
 import { PropertiesPanel } from "./PropertiesPanel";
 
 vi.mock("sonner", () => ({
-  toast: { info: vi.fn(), success: vi.fn() },
+  toast: { info: vi.fn(), success: vi.fn(), error: vi.fn() },
 }));
 
 const mockRemoveNode = vi.fn();
@@ -74,16 +75,33 @@ let mockPreviewId: string | null = null;
 let mockPreviewNodes: Array<{ id: string; properties: Record<string, unknown> }> | null = null;
 let mockPreviewConnections: Array<{ id: string; properties: Record<string, unknown> }> | null =
   null;
+let mockActiveScenarioId: string | null = null;
+let mockPreviewErrorAfterLoad: string | null = null;
+const mockLoadScenarioPreview = vi.fn().mockResolvedValue(undefined);
+const mockRefreshScenarios = vi.fn();
 
-vi.mock("@/stores/scenarioStore", () => ({
-  useScenarioStore: (selector: (s: unknown) => unknown) => {
+vi.mock("@/stores/scenarioStore", () => {
+  const useScenarioStore = (selector: (s: unknown) => unknown) => {
     const store = {
       previewId: mockPreviewId,
       previewNodes: mockPreviewNodes,
       previewConnections: mockPreviewConnections,
+      activeId: mockActiveScenarioId,
+      loadPreview: mockLoadScenarioPreview,
+      refresh: mockRefreshScenarios,
     };
     return selector(store);
-  },
+  };
+  (useScenarioStore as unknown as { getState: () => unknown }).getState = () => ({
+    previewError: mockPreviewErrorAfterLoad,
+  });
+  return { useScenarioStore };
+});
+
+const mockUpdateScenarioEntity = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/api/scenarios", () => ({
+  BASELINE_SCENARIO_ID: "BASELINE",
+  updateScenarioEntity: (...args: unknown[]) => mockUpdateScenarioEntity(...args),
 }));
 
 let mockKinds: {
@@ -527,6 +545,8 @@ describe("PropertiesPanel scenario preview", () => {
     mockPreviewId = null;
     mockPreviewNodes = null;
     mockPreviewConnections = null;
+    mockActiveScenarioId = null;
+    mockPreviewErrorAfterLoad = null;
   });
 
   it("shows no override styling when nothing is previewed", () => {
@@ -617,5 +637,45 @@ describe("PropertiesPanel scenario preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     expect(screen.getByDisplayValue("0.3")).toBeInTheDocument();
+  });
+
+  it("saves into the active scenario's overlay (not the base) and surfaces a failed preview instead of a plain success toast", async () => {
+    mockActiveScenarioId = "C1T";
+    // The write can succeed while the resulting merged config is invalid
+    // (e.g. a cross-node consistency rule) -- loadPreview swallows that into
+    // previewError rather than rejecting, so it must be surfaced explicitly.
+    mockPreviewErrorAfterLoad = "STONE v2 error: conflicting process pressures";
+
+    render(<PropertiesPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByDisplayValue("0.3"), { target: { value: "0.6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(mockUpdateScenarioEntity).toHaveBeenCalledWith("C1T", "reactor_1", { length: 0.6 }),
+    );
+    expect(mockUpdateNode).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockLoadScenarioPreview).toHaveBeenCalledWith("C1T"));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("no longer previews cleanly"),
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("toasts a plain success when the scenario overlay save previews cleanly", async () => {
+    mockActiveScenarioId = "C1T";
+    mockPreviewErrorAfterLoad = null;
+
+    render(<PropertiesPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByDisplayValue("0.3"), { target: { value: "0.6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith('Scenario "C1T" overlay updated'),
+    );
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
