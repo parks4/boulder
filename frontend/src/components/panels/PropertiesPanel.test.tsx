@@ -678,4 +678,20 @@ describe("PropertiesPanel scenario preview", () => {
     );
     expect(toast.error).not.toHaveBeenCalled();
   });
+
+  it("saving an unchanged (base-shown) field while a scenario is active is a no-op, not a silent write", () => {
+    // Edit mode always shows the base value (0.3), not any active override
+    // -- saving it back unmodified must not call the overlay API, and must
+    // say so rather than looking identical to a successful save.
+    mockActiveScenarioId = "C1T";
+
+    render(<PropertiesPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mockUpdateScenarioEntity).not.toHaveBeenCalled();
+    expect(toast.info).toHaveBeenCalledWith(
+      expect.stringContaining("No changes to save"),
+    );
+  });
 });

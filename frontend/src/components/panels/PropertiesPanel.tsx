@@ -307,7 +307,15 @@ export function PropertiesPanel() {
         }
       }
       if (Object.keys(changed).length === 0) {
+        // Edit mode always shows/edits the base value (see handleEdit), so
+        // typing that same value back and saving looks like "reset to
+        // base" -- it isn't: the diff is against the base, so this is a
+        // true no-op and any existing override is left exactly as it was.
+        // Removing an override entirely still requires the scenario's raw
+        // YAML pane. Surfaced explicitly rather than silently doing
+        // nothing, which otherwise looks identical to a successful save.
         setIsEditing(false);
+        toast.info("No changes to save (edit the scenario's YAML directly to remove an override)");
         return;
       }
       updateScenarioEntity(activeScenarioId, id, changed)
