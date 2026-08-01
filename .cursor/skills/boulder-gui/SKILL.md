@@ -159,4 +159,5 @@ Assert invariants on `updated_nodes` / `updated_connections` when testing staged
 ## Further reading
 
 - [reference.md](reference.md) — SSE stream, upload endpoint, browser checklist
+- [boulder-scenario-editing/SKILL.md](../boulder-scenario-editing/SKILL.md) — editing a scenario's parameters via the Properties panel and its overlay YAML pane, GUI/YAML sync, edge cases
 - Repo [AGENTS.md](../../../AGENTS.md) — conda env, `make qa`, targeted tests
