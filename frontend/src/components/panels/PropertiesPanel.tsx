@@ -428,7 +428,7 @@ export function PropertiesPanel() {
                   }`}
                   title={
                     isOverridden
-                      ? `Base value: ${formatDisplayValue(key, displayProperties[key])}`
+                      ? `Baseline value: ${formatDisplayValue(key, displayProperties[key])}`
                       : undefined
                   }
                 >

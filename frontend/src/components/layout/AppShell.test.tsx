@@ -99,7 +99,14 @@ vi.mock("@/stores/layoutStore", () => ({
     yamlWidth: 420,
     openYamlPane: mockOpenYamlPane,
     closeYamlPane: vi.fn(),
+    scenarioYamlEditorId: null,
+    openScenarioYamlEditor: vi.fn(),
+    closeScenarioYamlEditor: vi.fn(),
   }),
+}));
+
+vi.mock("@/components/modals/ScenarioYamlEditorModal", () => ({
+  ScenarioYamlEditorModal: () => null,
 }));
 
 vi.mock("@/components/graph/ReactorGraph", () => ({

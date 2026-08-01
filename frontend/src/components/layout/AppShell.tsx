@@ -22,6 +22,7 @@ import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
 import { AddReactorModal } from "@/components/modals/AddReactorModal";
 import { AddMFCModal } from "@/components/modals/AddMFCModal";
+import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
@@ -41,6 +42,8 @@ export function AppShell() {
     yamlPaneOpen,
     yamlWidth,
     openYamlPane,
+    scenarioYamlEditorId,
+    closeScenarioYamlEditor,
   } = useLayoutStore();
   const scenariosAvailable = useScenarioStore((s) => s.available);
   const authoredScenarioIds = useScenarioStore((s) => s.authoredIds);
@@ -353,6 +356,11 @@ export function AppShell() {
         onClose={closeAddConnection}
         defaultGroup={connectionModal.group}
         defaultSource={connectionModal.source}
+      />
+      <ScenarioYamlEditorModal
+        scenarioId={scenarioYamlEditorId}
+        onClose={closeScenarioYamlEditor}
+        onSaved={() => void refreshScenarios()}
       />
     </div>
   );

@@ -2,6 +2,13 @@ import { apiFetch } from "./client";
 import type { SimulationResults } from "@/types/simulation";
 import type { ConfigConnection, ConfigNode } from "@/types/config";
 
+/**
+ * The unmodified base config's own synthesized run-set entry (mirrors
+ * `boulder.runset.BASELINE_SCENARIO_ID`) -- not a real `scenarios:` overlay
+ * key, so it has no overlay subtree to edit/delete like an authored scenario.
+ */
+export const BASELINE_SCENARIO_ID = "BASELINE";
+
 /** One precomputed scenario (trajectory) in the active store. */
 export interface ScenarioMeta {
   id: string;

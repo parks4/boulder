@@ -3,10 +3,10 @@ import { Eraser, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
-import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 import { SweepResultsPlot } from "./SweepResultsPlot";
-import type { ScenarioMeta } from "@/api/scenarios";
+import { BASELINE_SCENARIO_ID, type ScenarioMeta } from "@/api/scenarios";
 
 /** One row in the pane: every authored id, paired with its computed data if any. */
 interface ScenarioRow {
@@ -61,8 +61,17 @@ export function ScenarioPane() {
     clearCache,
   } = useScenarioStore();
   const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
+  const openYamlPane = useLayoutStore((s) => s.openYamlPane);
+  const openScenarioYamlEditor = useLayoutStore((s) => s.openScenarioYamlEditor);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+
+  /** BASELINE is the unmodified base config, not an authored overlay -- edit
+   * it via the full YAML pane instead of the scoped (and otherwise 404ing)
+   * scenario overlay editor. */
+  const handleEditRow = (id: string) => {
+    if (id === BASELINE_SCENARIO_ID) openYamlPane();
+    else openScenarioYamlEditor(id);
+  };
 
   // Tick so relative-time labels stay fresh without a reload.
   const [now, setNow] = useState(() => Date.now());
@@ -153,12 +162,7 @@ export function ScenarioPane() {
         <AddScenarioModal
           open={addModalOpen}
           onClose={() => setAddModalOpen(false)}
-          onCreated={(id) => setEditingId(id)}
-        />
-        <ScenarioYamlEditorModal
-          scenarioId={editingId}
-          onClose={() => setEditingId(null)}
-          onSaved={() => void refresh()}
+          onCreated={(id) => openScenarioYamlEditor(id)}
         />
       </div>
     );
@@ -288,20 +292,26 @@ export function ScenarioPane() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setEditingId(row.id)}
-                  title="Edit scenario YAML"
+                  onClick={() => handleEditRow(row.id)}
+                  title={
+                    row.id === BASELINE_SCENARIO_ID
+                      ? "Edit YAML (the base config BASELINE runs unmodified)"
+                      : "Edit scenario YAML"
+                  }
                   className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted"
                 >
                   <Pencil size={12} />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void handleDelete(row.id, s !== null)}
-                  title="Delete scenario"
-                  className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-muted"
-                >
-                  <Trash2 size={12} />
-                </button>
+                {row.id !== BASELINE_SCENARIO_ID && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete(row.id, s !== null)}
+                    title="Delete scenario"
+                    className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-muted"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
               </li>
             );
           })}
@@ -311,12 +321,7 @@ export function ScenarioPane() {
       <AddScenarioModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}
-        onCreated={(id) => setEditingId(id)}
-      />
-      <ScenarioYamlEditorModal
-        scenarioId={editingId}
-        onClose={() => setEditingId(null)}
-        onSaved={() => void refresh()}
+        onCreated={(id) => openScenarioYamlEditor(id)}
       />
     </div>
   );
