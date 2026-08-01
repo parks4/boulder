@@ -48,6 +48,8 @@ export function AppShell() {
   const scenariosAvailable = useScenarioStore((s) => s.available);
   const authoredScenarioIds = useScenarioStore((s) => s.authoredIds);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
+  const activeScenarioId = useScenarioStore((s) => s.activeId);
+  const loadScenarioPreview = useScenarioStore((s) => s.loadPreview);
   // Show the pane once a sweep has produced a store OR the config already
   // has authored (not-yet-swept) scenarios — otherwise a freshly authored
   // scenario has nowhere to appear until the user runs a sweep first.
@@ -337,7 +339,16 @@ export function AppShell() {
                 <ScenarioYamlPane
                   scenarioId={scenarioYamlEditorId}
                   onClose={closeScenarioYamlEditor}
-                  onSaved={() => void refreshScenarios()}
+                  onSaved={(savedId) => {
+                    void refreshScenarios();
+                    // The Properties panel reads previewNodes/previewConnections,
+                    // not the scenario list -- refresh those too, or an edit made
+                    // here (raw YAML) leaves it showing stale values until the
+                    // scenario is deselected and reselected.
+                    if (savedId === activeScenarioId) {
+                      void loadScenarioPreview(savedId);
+                    }
+                  }}
                 />
               ) : (
                 <YamlPane />
