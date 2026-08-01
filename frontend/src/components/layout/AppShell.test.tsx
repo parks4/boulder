@@ -70,6 +70,8 @@ vi.mock("@/components/panels/ScenarioPane", () => ({
 let mockScenariosAvailable = false;
 let mockAuthoredScenarioIds: string[] = [];
 const mockRefreshScenarios = vi.fn();
+let mockActiveScenarioId: string | null = null;
+const mockLoadScenarioPreview = vi.fn();
 
 vi.mock("@/stores/scenarioStore", () => ({
   useScenarioStore: (selector: (s: unknown) => unknown) =>
@@ -77,6 +79,8 @@ vi.mock("@/stores/scenarioStore", () => ({
       available: mockScenariosAvailable,
       authoredIds: mockAuthoredScenarioIds,
       refresh: mockRefreshScenarios,
+      activeId: mockActiveScenarioId,
+      loadPreview: mockLoadScenarioPreview,
     }),
 }));
 
@@ -87,6 +91,7 @@ vi.mock("@/stores/sweepStore", () => ({
 
 let mockYamlPaneOpen = false;
 const mockOpenYamlPane = vi.fn();
+let mockScenarioYamlEditorId: string | null = null;
 
 vi.mock("@/stores/layoutStore", () => ({
   useLayoutStore: () => ({
@@ -99,7 +104,24 @@ vi.mock("@/stores/layoutStore", () => ({
     yamlWidth: 420,
     openYamlPane: mockOpenYamlPane,
     closeYamlPane: vi.fn(),
+    scenarioYamlEditorId: mockScenarioYamlEditorId,
+    openScenarioYamlEditor: vi.fn(),
+    closeScenarioYamlEditor: vi.fn(),
   }),
+}));
+
+let capturedScenarioYamlOnSaved: ((id: string) => void) | undefined;
+vi.mock("@/components/panels/ScenarioYamlPane", () => ({
+  ScenarioYamlPane: ({
+    scenarioId,
+    onSaved,
+  }: {
+    scenarioId: string | null;
+    onSaved?: (id: string) => void;
+  }) => {
+    capturedScenarioYamlOnSaved = onSaved;
+    return <div data-testid="scenario-yaml-pane">{scenarioId}</div>;
+  },
 }));
 
 vi.mock("@/components/graph/ReactorGraph", () => ({
@@ -165,8 +187,11 @@ describe("AppShell", () => {
     mockReactorModal = { open: false };
     mockConnectionModal = { open: false };
     mockYamlPaneOpen = false;
+    mockScenarioYamlEditorId = null;
     mockScenariosAvailable = false;
     mockAuthoredScenarioIds = [];
+    mockActiveScenarioId = null;
+    capturedScenarioYamlOnSaved = undefined;
   });
 
   it("renders the sidebar cards but no header filename button or solver badge", () => {
@@ -212,6 +237,31 @@ describe("AppShell", () => {
     render(<AppShell />);
     screen.getByRole("button", { name: "Edit YAML" }).click();
     expect(mockOpenYamlPane).toHaveBeenCalledOnce();
+  });
+
+  it("renders the scenario overlay editor in the same docked slot as the YAML pane, not both at once", () => {
+    mockScenarioYamlEditorId = "C1T";
+    render(<AppShell />);
+    expect(screen.getByTestId("scenario-yaml-pane")).toHaveTextContent("C1T");
+    expect(screen.queryByTestId("yaml-pane")).not.toBeInTheDocument();
+  });
+
+  it("refreshes the active scenario's preview after saving its own overlay YAML", () => {
+    mockScenarioYamlEditorId = "C1T";
+    mockActiveScenarioId = "C1T";
+    render(<AppShell />);
+    const callsBeforeSave = mockRefreshScenarios.mock.calls.length;
+    capturedScenarioYamlOnSaved?.("C1T");
+    expect(mockRefreshScenarios.mock.calls.length).toBeGreaterThan(callsBeforeSave);
+    expect(mockLoadScenarioPreview).toHaveBeenCalledWith("C1T");
+  });
+
+  it("does not refresh the preview when the saved scenario isn't the active one", () => {
+    mockScenarioYamlEditorId = "C1T";
+    mockActiveScenarioId = "other_scenario";
+    render(<AppShell />);
+    capturedScenarioYamlOnSaved?.("C1T");
+    expect(mockLoadScenarioPreview).not.toHaveBeenCalled();
   });
 
   it("does not render the Scenario pane when there's no store and no authored scenarios", () => {

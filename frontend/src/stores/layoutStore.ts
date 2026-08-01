@@ -24,6 +24,15 @@ interface LayoutState {
   openYamlPane: () => void;
   closeYamlPane: () => void;
   setYamlWidth: (w: number) => void;
+  /**
+   * The scenario overlay editor modal (scoped to one scenario's subtree) --
+   * a single shared instance so both the Scenario Pane's per-row pencil and
+   * Network's "Edit YAML" button (when a non-baseline scenario is active)
+   * open the same editor instead of each owning its own. Null when closed.
+   */
+  scenarioYamlEditorId: string | null;
+  openScenarioYamlEditor: (id: string) => void;
+  closeScenarioYamlEditor: () => void;
 }
 
 function clampWidth(w: number, max: number = MAX_WIDTH): number {
@@ -57,6 +66,7 @@ export const useLayoutStore = create<LayoutState>((set) => {
     rightWidth: clampWidth(init.rightWidth ?? RIGHT_DEFAULT),
     yamlPaneOpen: false,
     yamlWidth: clampWidth(init.yamlWidth ?? YAML_DEFAULT, YAML_MAX_WIDTH),
+    scenarioYamlEditorId: null,
 
     toggleLeft: () =>
       set((s) => {
@@ -80,12 +90,16 @@ export const useLayoutStore = create<LayoutState>((set) => {
       save({ rightWidth });
       set({ rightWidth });
     },
-    openYamlPane: () => set({ yamlPaneOpen: true }),
+    // The two share one docked slot (see AppShell) -- opening one closes
+    // the other instead of leaving a stale editor behind it.
+    openYamlPane: () => set({ yamlPaneOpen: true, scenarioYamlEditorId: null }),
     closeYamlPane: () => set({ yamlPaneOpen: false }),
     setYamlWidth: (w) => {
       const yamlWidth = clampWidth(w, YAML_MAX_WIDTH);
       save({ yamlWidth });
       set({ yamlWidth });
     },
+    openScenarioYamlEditor: (id) => set({ scenarioYamlEditorId: id, yamlPaneOpen: false }),
+    closeScenarioYamlEditor: () => set({ scenarioYamlEditorId: null }),
   };
 });

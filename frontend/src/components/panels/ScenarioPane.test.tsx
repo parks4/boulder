@@ -1,10 +1,13 @@
 /**
  * Asserts ScenarioPane: deleting a scenario confirms first, then reports
  * whether a cached result was purged too; "Clear cache" confirms, then
- * deletes the whole store via scenarioStore.clearCache(); and the
- * previously-missing onSaved wiring (both in the empty "no scenarios yet"
- * state and the populated one) triggers a refresh after editing a scenario's
- * YAML.
+ * deletes the whole store via scenarioStore.clearCache(); and BASELINE (the
+ * base config's own unmodified run-set entry, not a real authored overlay)
+ * is treated specially -- no delete button, and its "edit" opens the full
+ * YAML pane instead of the scoped (and otherwise 404ing) overlay editor.
+ * The scoped editor modal itself now lives once in AppShell (see its own
+ * test), not owned by this pane -- only the open-editor wiring is asserted
+ * here.
  *
  * No "Regenerate cache" action here — it depended on the same host-registered
  * sweep runner as "Run Sweep" (`useSweepRunStore`/`startSweep`), which isn't
@@ -62,12 +65,14 @@ vi.mock("@/components/modals/AddScenarioModal", () => ({
   AddScenarioModal: () => null,
 }));
 
-let capturedOnSaved: (() => void) | undefined;
-vi.mock("@/components/modals/ScenarioYamlEditorModal", () => ({
-  ScenarioYamlEditorModal: ({ onSaved }: { onSaved?: () => void }) => {
-    capturedOnSaved = onSaved;
-    return null;
-  },
+const mockOpenYamlPane = vi.fn();
+const mockOpenScenarioYamlEditor = vi.fn();
+vi.mock("@/stores/layoutStore", () => ({
+  useLayoutStore: (selector: (s: unknown) => unknown) =>
+    selector({
+      openYamlPane: mockOpenYamlPane,
+      openScenarioYamlEditor: mockOpenScenarioYamlEditor,
+    }),
 }));
 
 vi.mock("./SweepResultsPlot", () => ({
@@ -78,7 +83,6 @@ describe("ScenarioPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockClearCache.mockResolvedValue({ cleared: true });
-    capturedOnSaved = undefined;
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
     mockAuthoredIds = [];
@@ -132,20 +136,29 @@ describe("ScenarioPane", () => {
     confirmSpy.mockRestore();
   });
 
-  it("wires onSaved into the scoped editor in the populated state", () => {
+  it("opens the scoped overlay editor for a regular scenario's pencil", () => {
     render(<ScenarioPane />);
-    expect(capturedOnSaved).toBeInstanceOf(Function);
-    capturedOnSaved?.();
-    expect(mockRefresh).toHaveBeenCalled();
+    fireEvent.click(screen.getByTitle("Edit scenario YAML"));
+    expect(mockOpenScenarioYamlEditor).toHaveBeenCalledWith("A");
+    expect(mockOpenYamlPane).not.toHaveBeenCalled();
   });
 
-  it("wires onSaved into the scoped editor in the empty (no scenarios yet) state too", () => {
-    mockAvailable = false;
-    mockScenarios = [];
+  it("BASELINE gets a disabled (barred) delete slot instead of a working delete button", () => {
+    mockAuthoredIds = ["BASELINE", "A"];
     render(<ScenarioPane />);
-    expect(capturedOnSaved).toBeInstanceOf(Function);
-    capturedOnSaved?.();
-    expect(mockRefresh).toHaveBeenCalled();
+    // Only the non-baseline row ("A") gets a real delete button...
+    expect(screen.getAllByTitle("Delete scenario")).toHaveLength(1);
+    // ...but BASELINE still occupies the same icon slot, so rows stay aligned.
+    const barred = screen.getByTitle(/cannot be deleted/);
+    expect(barred.tagName).not.toBe("BUTTON");
+  });
+
+  it("BASELINE's pencil opens the full YAML pane, not the scoped editor", () => {
+    mockAuthoredIds = ["BASELINE", "A"];
+    render(<ScenarioPane />);
+    fireEvent.click(screen.getByTitle(/Edit YAML \(the base config/));
+    expect(mockOpenYamlPane).toHaveBeenCalledOnce();
+    expect(mockOpenScenarioYamlEditor).not.toHaveBeenCalled();
   });
 
   it("lists authored-but-not-yet-swept scenarios before any store exists", () => {

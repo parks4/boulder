@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/Button";
 import { getSweepInfo, type SweepInfo } from "@/api/sweep";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
+import { useLayoutStore } from "@/stores/layoutStore";
 import { useShortcutNudge } from "@/hooks/useShortcutNudge";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
-import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 
 type RunMode = "sim" | "force_sim" | "sweep";
 
@@ -38,10 +38,9 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   const runSweepJob = useSweepRunStore((s) => s.run);
   const appliedDefault = useRef(false);
   const appliedAutorun = useRef(false);
-  const refreshScenarios = useScenarioStore((s) => s.refresh);
   const scenarioRevision = useScenarioStore((s) => s.revision);
   const [addScenarioOpen, setAddScenarioOpen] = useState(false);
-  const [editingScenarioId, setEditingScenarioId] = useState<string | null>(null);
+  const openScenarioYamlEditor = useLayoutStore((s) => s.openScenarioYamlEditor);
   const notifyShortcutUsage = useShortcutNudge();
 
   const loadSweepInfo = useCallback(() => {
@@ -254,12 +253,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
       <AddScenarioModal
         open={addScenarioOpen}
         onClose={() => setAddScenarioOpen(false)}
-        onCreated={(id) => setEditingScenarioId(id)}
-      />
-      <ScenarioYamlEditorModal
-        scenarioId={editingScenarioId}
-        onClose={() => setEditingScenarioId(null)}
-        onSaved={() => void refreshScenarios()}
+        onCreated={(id) => openScenarioYamlEditor(id)}
       />
     </div>
   );

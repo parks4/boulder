@@ -2,6 +2,13 @@ import { apiFetch } from "./client";
 import type { SimulationResults } from "@/types/simulation";
 import type { ConfigConnection, ConfigNode } from "@/types/config";
 
+/**
+ * The unmodified base config's own synthesized run-set entry (mirrors
+ * `boulder.runset.BASELINE_SCENARIO_ID`) -- not a real `scenarios:` overlay
+ * key, so it has no overlay subtree to edit/delete like an authored scenario.
+ */
+export const BASELINE_SCENARIO_ID = "BASELINE";
+
 /** One precomputed scenario (trajectory) in the active store. */
 export interface ScenarioMeta {
   id: string;
@@ -110,6 +117,30 @@ export function updateScenario(id: string, yaml: string) {
   return apiFetch<ScenarioSourceResponse>(
     `/scenarios/${encodeURIComponent(id)}`,
     { method: "PATCH", body: JSON.stringify({ yaml }) },
+  );
+}
+
+export interface ScenarioEntityUpdateResponse {
+  scenario_id: string;
+  id: string;
+  yaml: string;
+}
+
+/**
+ * Merge edited properties into one node/connection's overlay entry for this
+ * scenario -- backs the Properties panel's "Save" while a scenario is
+ * active, so the edit lands in the scenario's overlay instead of the base
+ * network. Whether `entityId` is a node or connection, and which stage list
+ * it belongs to, is resolved server-side from the base config itself.
+ */
+export function updateScenarioEntity(
+  scenarioId: string,
+  entityId: string,
+  properties: Record<string, unknown>,
+) {
+  return apiFetch<ScenarioEntityUpdateResponse>(
+    `/scenarios/${encodeURIComponent(scenarioId)}/entities/${encodeURIComponent(entityId)}`,
+    { method: "PATCH", body: JSON.stringify({ properties }) },
   );
 }
 

@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { useSimulationStore } from "@/stores/simulationStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
+import { BASELINE_SCENARIO_ID, updateScenarioEntity } from "@/api/scenarios";
 import type { NormalizedConfig } from "@/types/config";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
 import { useKindSchema } from "@/hooks/useKindSchema";
@@ -101,6 +104,11 @@ export function PropertiesPanel() {
   const previewId = useScenarioStore((s) => s.previewId);
   const previewNodes = useScenarioStore((s) => s.previewNodes);
   const previewConnections = useScenarioStore((s) => s.previewConnections);
+  const activeScenarioId = useScenarioStore((s) => s.activeId);
+  const loadScenarioPreview = useScenarioStore((s) => s.loadPreview);
+  const refreshScenarios = useScenarioStore((s) => s.refresh);
+  const isSimulating = useSimulationStore((s) => s.isRunning);
+  const isSweeping = useSweepRunStore((s) => s.sweeping);
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -287,6 +295,71 @@ export function PropertiesPanel() {
         updated[key] = isNaN(num) ? val : num;
       }
     }
+
+    // A real scenario (not BASELINE, which has no overlay of its own) is
+    // active: land the edit in its overlay instead of the base network --
+    // otherwise "Save" would silently change the base for every scenario,
+    // while this panel still shows the previewed scenario's (unrelated)
+    // values. Only send keys that actually changed, so untouched fields
+    // that merely round-tripped through the edit form don't get duplicated
+    // into the overlay.
+    if (activeScenarioId && activeScenarioId !== BASELINE_SCENARIO_ID) {
+      // Unlike the base network (a local, deferred-to-sync edit -- see the
+      // fallback branch below), this writes straight to the scenario's YAML
+      // on disk. A sweep subprocess may be reading that same file for this
+      // (or a later) scenario right now -- same guard the YAML panes use.
+      if (isSimulating || isSweeping) {
+        toast.error("Wait for the current calculation to finish before editing a scenario.");
+        return;
+      }
+      const changed: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(updated)) {
+        if (JSON.stringify(val) !== JSON.stringify(properties[key])) {
+          changed[key] = val;
+        }
+      }
+      if (Object.keys(changed).length === 0) {
+        // Edit mode always shows/edits the base value (see handleEdit), so
+        // typing that same value back and saving looks like "reset to
+        // base" -- it isn't: the diff is against the base, so this is a
+        // true no-op and any existing override is left exactly as it was.
+        // Removing an override entirely still requires the scenario's raw
+        // YAML pane. Surfaced explicitly rather than silently doing
+        // nothing, which otherwise looks identical to a successful save.
+        setIsEditing(false);
+        toast.info("No changes to save (edit the scenario's YAML directly to remove an override)");
+        return;
+      }
+      updateScenarioEntity(activeScenarioId, id, changed)
+        .then(async () => {
+          setIsEditing(false);
+          // Bumps scenarioStore.revision -- lets a scenario YAML pane left
+          // open on this same scenario notice this out-of-band edit and
+          // refetch its content instead of showing stale text.
+          void refreshScenarios();
+          // The write itself can succeed while leaving the scenario's
+          // *merged* config invalid (e.g. a cross-node consistency rule) --
+          // loadPreview swallows that into previewError rather than
+          // rejecting, so it must be checked explicitly or the failure is
+          // silent: the edit looks like it didn't "take" with no clue why.
+          await loadScenarioPreview(activeScenarioId);
+          const previewError = useScenarioStore.getState().previewError;
+          if (previewError) {
+            toast.error(
+              `Scenario "${activeScenarioId}" overlay saved, but it no longer previews cleanly: ${previewError}`,
+            );
+          } else {
+            toast.success(`Scenario "${activeScenarioId}" overlay updated`);
+          }
+        })
+        .catch((err) => {
+          toast.error(
+            `Could not update scenario overlay: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      return;
+    }
+
     if (isNode) {
       updateNode(id, { properties: { ...properties, ...updated } });
     } else {
@@ -428,7 +501,7 @@ export function PropertiesPanel() {
                   }`}
                   title={
                     isOverridden
-                      ? `Base value: ${formatDisplayValue(key, displayProperties[key])}`
+                      ? `Baseline value: ${formatDisplayValue(key, displayProperties[key])}`
                       : undefined
                   }
                 >

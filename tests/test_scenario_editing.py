@@ -231,6 +231,175 @@ def test_update_scenario_unknown_422(tmp_path: Path) -> None:
         client.__exit__(None, None, None)
 
 
+# --------------------------------------------------------------------------- #
+# PATCH /api/scenarios/{id}/entities/{entity_id} — structured overlay edits.
+#
+# STONE v2 is authored per-stage (or one flat `network:` list), never as a
+# generic `nodes:`/`connections:` + `properties:` shape — that only exists
+# internally after normalization. This fixture mirrors the real shape
+# (tests/fixtures/stone_v2/valid/02_staged_logical_handoff.yaml): two stages,
+# a kind-keyed node/connection, and one kind-less logical connection.
+# --------------------------------------------------------------------------- #
+
+_STAGED_YAML = """\
+phases:
+  gas:
+    mechanism: gri30.yaml
+
+stages:
+  torch_stage:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1 ms
+  psr_stage:
+    mechanism: gri30.yaml
+    solve: advance_to_steady_state
+
+torch_stage:
+- id: inlet
+  Reservoir:
+    temperature: 300 K
+    composition: CH4:1
+- id: torch
+  IdealGasReactor:
+    volume: 1 L
+- id: inlet_to_torch
+  MassFlowController:
+    mass_flow_rate: 0.1 kg/s
+  source: inlet
+  target: torch
+
+psr_stage:
+- id: psr
+  IdealGasReactor:
+    volume: 5 L
+- id: torch_to_psr
+  source: torch
+  target: psr
+
+scenarios:
+  s_case: {}
+"""
+
+
+def _write_staged_config(tmp_path: Path) -> Path:
+    cfg = tmp_path / "staged_config.yaml"
+    cfg.write_text(_STAGED_YAML, encoding="utf-8")
+    return cfg
+
+
+def test_update_scenario_entity_creates_overlay_entry(tmp_path: Path) -> None:
+    cfg = _write_staged_config(tmp_path)
+    client, app = _client_with_config(cfg)
+    try:
+        resp = client.patch(
+            "/api/scenarios/s_case/entities/torch",
+            json={"properties": {"volume": 2.0}},
+        )
+        assert resp.status_code == 200, resp.text
+        # Lands under the node's own stage list ("torch_stage"), not "network".
+        overlay = app.state.preloaded_raw["scenarios"]["s_case"]
+        torch_entry = next(n for n in overlay["torch_stage"] if n["id"] == "torch")
+        assert torch_entry["IdealGasReactor"]["volume"] == 2.0
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_update_scenario_entity_merges_into_existing_entry(tmp_path: Path) -> None:
+    """A second edit adds a key without clobbering the first override."""
+    cfg = _write_staged_config(tmp_path)
+    client, app = _client_with_config(cfg)
+    try:
+        client.patch(
+            "/api/scenarios/s_case/entities/torch",
+            json={"properties": {"volume": 2.0}},
+        )
+        resp = client.patch(
+            "/api/scenarios/s_case/entities/inlet_to_torch",
+            json={"properties": {"mass_flow_rate": 0.2}},
+        )
+        assert resp.status_code == 200, resp.text
+        overlay = app.state.preloaded_raw["scenarios"]["s_case"]
+        torch_entry = next(n for n in overlay["torch_stage"] if n["id"] == "torch")
+        assert torch_entry["IdealGasReactor"]["volume"] == 2.0
+        mfc_entry = next(
+            n for n in overlay["torch_stage"] if n["id"] == "inlet_to_torch"
+        )
+        assert mfc_entry["MassFlowController"]["mass_flow_rate"] == 0.2
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_update_scenario_entity_kindless_logical_connection(tmp_path: Path) -> None:
+    """A logical connection (no type key) gets properties directly on the item."""
+    cfg = _write_staged_config(tmp_path)
+    client, app = _client_with_config(cfg)
+    try:
+        resp = client.patch(
+            "/api/scenarios/s_case/entities/torch_to_psr",
+            json={"properties": {"logical": True}},
+        )
+        assert resp.status_code == 200, resp.text
+        overlay = app.state.preloaded_raw["scenarios"]["s_case"]
+        entry = next(n for n in overlay["psr_stage"] if n["id"] == "torch_to_psr")
+        assert entry["logical"] is True
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_update_scenario_entity_baseline_422(tmp_path: Path) -> None:
+    cfg = _write_staged_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.patch(
+            "/api/scenarios/BASELINE/entities/torch",
+            json={"properties": {"volume": 2.0}},
+        )
+        assert resp.status_code == 422
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_update_scenario_entity_unknown_scenario_422(tmp_path: Path) -> None:
+    cfg = _write_staged_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.patch(
+            "/api/scenarios/nope/entities/torch",
+            json={"properties": {"volume": 2.0}},
+        )
+        assert resp.status_code == 422
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_update_scenario_entity_unknown_entity_422(tmp_path: Path) -> None:
+    cfg = _write_staged_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.patch(
+            "/api/scenarios/s_case/entities/nope",
+            json={"properties": {"volume": 2.0}},
+        )
+        assert resp.status_code == 422
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_update_scenario_entity_empty_properties_is_noop(tmp_path: Path) -> None:
+    cfg = _write_staged_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.patch(
+            "/api/scenarios/s_case/entities/torch",
+            json={"properties": {}},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["yaml"].strip() in ("", "{}")
+    finally:
+        client.__exit__(None, None, None)
+
+
 def test_rename_scenario(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     client, _app = _client_with_config(cfg)

@@ -13,6 +13,7 @@ import { SimulateCard } from "@/components/panels/SimulateCard";
 import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
 import { ScenarioPane } from "@/components/panels/ScenarioPane";
 import { YamlPane } from "@/components/panels/YamlPane";
+import { ScenarioYamlPane } from "@/components/panels/ScenarioYamlPane";
 import { PaneToggle, PaneResizer } from "@/components/layout/paneControls";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
@@ -41,10 +42,14 @@ export function AppShell() {
     yamlPaneOpen,
     yamlWidth,
     openYamlPane,
+    scenarioYamlEditorId,
+    closeScenarioYamlEditor,
   } = useLayoutStore();
   const scenariosAvailable = useScenarioStore((s) => s.available);
   const authoredScenarioIds = useScenarioStore((s) => s.authoredIds);
   const refreshScenarios = useScenarioStore((s) => s.refresh);
+  const activeScenarioId = useScenarioStore((s) => s.activeId);
+  const loadScenarioPreview = useScenarioStore((s) => s.loadPreview);
   // Show the pane once a sweep has produced a store OR the config already
   // has authored (not-yet-swept) scenarios — otherwise a freshly authored
   // scenario has nowhere to appear until the user runs a sweep first.
@@ -320,14 +325,34 @@ export function AppShell() {
           </>
         )}
 
-        {/* YAML editor pane — opened on demand from Network's "Edit YAML",
-            docked right of the Scenario pane so it can sit alongside the
-            graph instead of blocking it. */}
-        {yamlPaneOpen && (
+        {/* YAML editor pane — opened on demand from Network's "Edit YAML" (base
+            config) or a scenario's pencil/"Edit YAML (<scenario>)" (scoped
+            overlay), docked right of the Scenario pane so it can sit
+            alongside the graph instead of blocking it. Same slot for both —
+            BASELINE and a real scenario should feel like the same feature,
+            not two different UIs (only their content differs). */}
+        {(yamlPaneOpen || scenarioYamlEditorId) && (
           <>
             <PaneResizer side="yaml" />
             <aside style={{ width: yamlWidth }} className="shrink-0 pl-1">
-              <YamlPane />
+              {scenarioYamlEditorId ? (
+                <ScenarioYamlPane
+                  scenarioId={scenarioYamlEditorId}
+                  onClose={closeScenarioYamlEditor}
+                  onSaved={(savedId) => {
+                    void refreshScenarios();
+                    // The Properties panel reads previewNodes/previewConnections,
+                    // not the scenario list -- refresh those too, or an edit made
+                    // here (raw YAML) leaves it showing stale values until the
+                    // scenario is deselected and reselected.
+                    if (savedId === activeScenarioId) {
+                      void loadScenarioPreview(savedId);
+                    }
+                  }}
+                />
+              ) : (
+                <YamlPane />
+              )}
             </aside>
           </>
         )}
