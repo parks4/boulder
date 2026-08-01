@@ -37,6 +37,35 @@ def test_lists_builtin_reactor_and_connection_kinds() -> None:
     assert connection_kinds["Valve"]["doc_url"].startswith("https://cantera.org/")
 
 
+def test_plugin_registered_reactor_kind_with_doc_url_is_surfaced() -> None:
+    plugins = get_plugins()
+    register_reactor_builder(
+        plugins,
+        "_TestPluginReactorWithDocs",
+        builder=lambda converter, node: None,
+        doc_url="https://example.com/docs#_TestPluginReactorWithDocs",
+        doc_description="A plugin reactor with its own docs.",
+    )
+    try:
+        client = TestClient(create_app())
+        resp = client.get("/api/ui/kinds")
+        assert resp.status_code == 200
+        reactor_kinds = {r["kind"]: r for r in resp.json()["reactors"]}
+        assert (
+            reactor_kinds["_TestPluginReactorWithDocs"]["doc_url"]
+            == "https://example.com/docs#_TestPluginReactorWithDocs"
+        )
+        assert (
+            reactor_kinds["_TestPluginReactorWithDocs"]["description"]
+            == "A plugin reactor with its own docs."
+        )
+    finally:
+        del plugins.reactor_builders["_TestPluginReactorWithDocs"]
+        from boulder.schema_registry import _SCHEMA_REGISTRY
+
+        _SCHEMA_REGISTRY.pop("_TestPluginReactorWithDocs", None)
+
+
 def test_plugin_registered_reactor_kind_has_no_doc_url() -> None:
     plugins = get_plugins()
     register_reactor_builder(

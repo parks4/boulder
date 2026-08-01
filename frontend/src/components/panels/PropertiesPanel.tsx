@@ -333,7 +333,7 @@ export function PropertiesPanel() {
                       rel="noreferrer"
                       className="underline text-primary"
                     >
-                      Cantera docs
+                      Docs
                     </a>
                   </span>
                 }

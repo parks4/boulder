@@ -134,7 +134,7 @@ export function AddMFCModal({ open, onClose, defaultGroup, defaultSource }: Prop
                       rel="noreferrer"
                       className="underline text-primary"
                     >
-                      Cantera docs
+                      Docs
                     </a>
                   </span>
                 }

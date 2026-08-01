@@ -69,6 +69,13 @@ class ReactorSchemaEntry:
         const-pressure base classes (both standard and ``Extensible*`` roots),
         so no explicit flag is needed for reactors that inherit from any
         Cantera const-pressure base.
+    doc_url:
+        Optional URL to the plugin's own documentation for this kind. Powers
+        the same doc-link tooltip Boulder's built-in kinds get from
+        :mod:`boulder.cantera_docs` (Properties panel, Add Reactor modal).
+    doc_description:
+        Optional one-line description shown above ``doc_url`` in that
+        tooltip.
     """
 
     kind: str
@@ -79,6 +86,8 @@ class ReactorSchemaEntry:
     default_constraints: List[Dict[str, Any]] = field(default_factory=list)
     variable_maps: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     reactor_class: Optional[Type[Any]] = None
+    doc_url: Optional[str] = None
+    doc_description: Optional[str] = None
 
 
 _SCHEMA_REGISTRY: Dict[str, ReactorSchemaEntry] = {}
@@ -95,6 +104,8 @@ def register_reactor_builder(
     default_constraints: Optional[List[Dict[str, Any]]] = None,
     variable_maps: Optional[Dict[str, Dict[str, Any]]] = None,
     reactor_class: Optional[Type[Any]] = None,
+    doc_url: Optional[str] = None,
+    doc_description: Optional[str] = None,
 ) -> None:
     """Register a reactor builder together with its declarative metadata.
 
@@ -111,6 +122,10 @@ def register_reactor_builder(
         ``True`` automatically if any ancestor name contains
         ``"ConstPressure"``.  This avoids the need for an explicit flag
         and stays correct as the class hierarchy evolves.
+    doc_url, doc_description:
+        Optional link to the plugin's own documentation for *kind* (see
+        :class:`ReactorSchemaEntry`). Omit to leave the GUI's doc-link
+        tooltip hidden for this kind, as before.
     """
     plugins.reactor_builders[kind] = builder
     entry = ReactorSchemaEntry(
@@ -122,6 +137,8 @@ def register_reactor_builder(
         default_constraints=list(default_constraints or []),
         variable_maps=dict(variable_maps or {}),
         reactor_class=reactor_class,
+        doc_url=doc_url,
+        doc_description=doc_description,
     )
     _SCHEMA_REGISTRY[kind] = entry
 
