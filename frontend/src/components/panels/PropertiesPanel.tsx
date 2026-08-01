@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useConfigStore } from "@/stores/configStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { BASELINE_SCENARIO_ID, updateScenarioEntity } from "@/api/scenarios";
 import type { NormalizedConfig } from "@/types/config";
 import { kelvinToCelsius, celsiusToKelvin, formatNumber, labelWithUnit } from "@/lib/units";
 import { useKindSchema } from "@/hooks/useKindSchema";
@@ -101,6 +102,8 @@ export function PropertiesPanel() {
   const previewId = useScenarioStore((s) => s.previewId);
   const previewNodes = useScenarioStore((s) => s.previewNodes);
   const previewConnections = useScenarioStore((s) => s.previewConnections);
+  const activeScenarioId = useScenarioStore((s) => s.activeId);
+  const loadScenarioPreview = useScenarioStore((s) => s.loadPreview);
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -287,6 +290,39 @@ export function PropertiesPanel() {
         updated[key] = isNaN(num) ? val : num;
       }
     }
+
+    // A real scenario (not BASELINE, which has no overlay of its own) is
+    // active: land the edit in its overlay instead of the base network --
+    // otherwise "Save" would silently change the base for every scenario,
+    // while this panel still shows the previewed scenario's (unrelated)
+    // values. Only send keys that actually changed, so untouched fields
+    // that merely round-tripped through the edit form don't get duplicated
+    // into the overlay.
+    if (activeScenarioId && activeScenarioId !== BASELINE_SCENARIO_ID) {
+      const changed: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(updated)) {
+        if (JSON.stringify(val) !== JSON.stringify(properties[key])) {
+          changed[key] = val;
+        }
+      }
+      if (Object.keys(changed).length === 0) {
+        setIsEditing(false);
+        return;
+      }
+      updateScenarioEntity(activeScenarioId, id, changed)
+        .then(() => {
+          setIsEditing(false);
+          toast.success(`Scenario "${activeScenarioId}" overlay updated`);
+          void loadScenarioPreview(activeScenarioId);
+        })
+        .catch((err) => {
+          toast.error(
+            `Could not update scenario overlay: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      return;
+    }
+
     if (isNode) {
       updateNode(id, { properties: { ...properties, ...updated } });
     } else {

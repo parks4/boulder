@@ -87,6 +87,7 @@ vi.mock("@/stores/sweepStore", () => ({
 
 let mockYamlPaneOpen = false;
 const mockOpenYamlPane = vi.fn();
+let mockScenarioYamlEditorId: string | null = null;
 
 vi.mock("@/stores/layoutStore", () => ({
   useLayoutStore: () => ({
@@ -99,14 +100,16 @@ vi.mock("@/stores/layoutStore", () => ({
     yamlWidth: 420,
     openYamlPane: mockOpenYamlPane,
     closeYamlPane: vi.fn(),
-    scenarioYamlEditorId: null,
+    scenarioYamlEditorId: mockScenarioYamlEditorId,
     openScenarioYamlEditor: vi.fn(),
     closeScenarioYamlEditor: vi.fn(),
   }),
 }));
 
-vi.mock("@/components/modals/ScenarioYamlEditorModal", () => ({
-  ScenarioYamlEditorModal: () => null,
+vi.mock("@/components/panels/ScenarioYamlPane", () => ({
+  ScenarioYamlPane: ({ scenarioId }: { scenarioId: string | null }) => (
+    <div data-testid="scenario-yaml-pane">{scenarioId}</div>
+  ),
 }));
 
 vi.mock("@/components/graph/ReactorGraph", () => ({
@@ -172,6 +175,7 @@ describe("AppShell", () => {
     mockReactorModal = { open: false };
     mockConnectionModal = { open: false };
     mockYamlPaneOpen = false;
+    mockScenarioYamlEditorId = null;
     mockScenariosAvailable = false;
     mockAuthoredScenarioIds = [];
   });
@@ -219,6 +223,13 @@ describe("AppShell", () => {
     render(<AppShell />);
     screen.getByRole("button", { name: "Edit YAML" }).click();
     expect(mockOpenYamlPane).toHaveBeenCalledOnce();
+  });
+
+  it("renders the scenario overlay editor in the same docked slot as the YAML pane, not both at once", () => {
+    mockScenarioYamlEditorId = "C1T";
+    render(<AppShell />);
+    expect(screen.getByTestId("scenario-yaml-pane")).toHaveTextContent("C1T");
+    expect(screen.queryByTestId("yaml-pane")).not.toBeInTheDocument();
   });
 
   it("does not render the Scenario pane when there's no store and no authored scenarios", () => {

@@ -120,6 +120,30 @@ export function updateScenario(id: string, yaml: string) {
   );
 }
 
+export interface ScenarioEntityUpdateResponse {
+  scenario_id: string;
+  id: string;
+  yaml: string;
+}
+
+/**
+ * Merge edited properties into one node/connection's overlay entry for this
+ * scenario -- backs the Properties panel's "Save" while a scenario is
+ * active, so the edit lands in the scenario's overlay instead of the base
+ * network. Whether `entityId` is a node or connection, and which stage list
+ * it belongs to, is resolved server-side from the base config itself.
+ */
+export function updateScenarioEntity(
+  scenarioId: string,
+  entityId: string,
+  properties: Record<string, unknown>,
+) {
+  return apiFetch<ScenarioEntityUpdateResponse>(
+    `/scenarios/${encodeURIComponent(scenarioId)}/entities/${encodeURIComponent(entityId)}`,
+    { method: "PATCH", body: JSON.stringify({ properties }) },
+  );
+}
+
 /** Rename a scenario's id (its `scenario:` mapping key). */
 export function renameScenario(id: string, newId: string) {
   return apiFetch<{ ok: boolean; scenario_id: string }>(

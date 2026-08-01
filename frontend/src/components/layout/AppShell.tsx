@@ -13,6 +13,7 @@ import { SimulateCard } from "@/components/panels/SimulateCard";
 import { PropertiesPanel } from "@/components/panels/PropertiesPanel";
 import { ScenarioPane } from "@/components/panels/ScenarioPane";
 import { YamlPane } from "@/components/panels/YamlPane";
+import { ScenarioYamlPane } from "@/components/panels/ScenarioYamlPane";
 import { PaneToggle, PaneResizer } from "@/components/layout/paneControls";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
@@ -22,7 +23,6 @@ import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
 import { AddReactorModal } from "@/components/modals/AddReactorModal";
 import { AddMFCModal } from "@/components/modals/AddMFCModal";
-import { ScenarioYamlEditorModal } from "@/components/modals/ScenarioYamlEditorModal";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
@@ -323,14 +323,25 @@ export function AppShell() {
           </>
         )}
 
-        {/* YAML editor pane — opened on demand from Network's "Edit YAML",
-            docked right of the Scenario pane so it can sit alongside the
-            graph instead of blocking it. */}
-        {yamlPaneOpen && (
+        {/* YAML editor pane — opened on demand from Network's "Edit YAML" (base
+            config) or a scenario's pencil/"Edit YAML (<scenario>)" (scoped
+            overlay), docked right of the Scenario pane so it can sit
+            alongside the graph instead of blocking it. Same slot for both —
+            BASELINE and a real scenario should feel like the same feature,
+            not two different UIs (only their content differs). */}
+        {(yamlPaneOpen || scenarioYamlEditorId) && (
           <>
             <PaneResizer side="yaml" />
             <aside style={{ width: yamlWidth }} className="shrink-0 pl-1">
-              <YamlPane />
+              {scenarioYamlEditorId ? (
+                <ScenarioYamlPane
+                  scenarioId={scenarioYamlEditorId}
+                  onClose={closeScenarioYamlEditor}
+                  onSaved={() => void refreshScenarios()}
+                />
+              ) : (
+                <YamlPane />
+              )}
             </aside>
           </>
         )}
@@ -356,11 +367,6 @@ export function AppShell() {
         onClose={closeAddConnection}
         defaultGroup={connectionModal.group}
         defaultSource={connectionModal.source}
-      />
-      <ScenarioYamlEditorModal
-        scenarioId={scenarioYamlEditorId}
-        onClose={closeScenarioYamlEditor}
-        onSaved={() => void refreshScenarios()}
       />
     </div>
   );

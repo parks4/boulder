@@ -171,6 +171,10 @@ class UpdateScenarioRequest(BaseModel):
     yaml: str
 
 
+class UpdateScenarioEntityRequest(BaseModel):
+    properties: Dict[str, Any]
+
+
 class RenameScenarioRequest(BaseModel):
     new_id: str
 
@@ -325,6 +329,33 @@ async def update_scenario(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     _reload_preloaded_state(request, cfg_path)
     return {"scenario_id": scenario_id, "yaml": yaml_text}
+
+
+@router.patch("/{scenario_id}/entities/{entity_id}")
+async def update_scenario_entity(
+    scenario_id: str,
+    entity_id: str,
+    body: UpdateScenarioEntityRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    """Merge edited properties into one node/connection's overlay entry.
+
+    Backs the Properties panel's "Save" while a scenario is active — edits
+    land in that scenario's overlay instead of the base network. Node vs.
+    connection, and which stage list it belongs to, is resolved from the
+    base config itself (see ``scenario_editor._entity_location``) — the
+    caller only needs the id.
+    """
+    cfg_path = _require_config_path(request)
+    try:
+        from ...scenario_editor import ScenarioEditError
+        from ...scenario_editor import update_scenario_entity as _update_entity
+
+        yaml_text = _update_entity(cfg_path, scenario_id, entity_id, body.properties)
+    except ScenarioEditError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _reload_preloaded_state(request, cfg_path)
+    return {"scenario_id": scenario_id, "id": entity_id, "yaml": yaml_text}
 
 
 @router.patch("/{scenario_id}/rename")

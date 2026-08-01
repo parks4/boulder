@@ -90,14 +90,16 @@ export const useLayoutStore = create<LayoutState>((set) => {
       save({ rightWidth });
       set({ rightWidth });
     },
-    openYamlPane: () => set({ yamlPaneOpen: true }),
+    // The two share one docked slot (see AppShell) -- opening one closes
+    // the other instead of leaving a stale editor behind it.
+    openYamlPane: () => set({ yamlPaneOpen: true, scenarioYamlEditorId: null }),
     closeYamlPane: () => set({ yamlPaneOpen: false }),
     setYamlWidth: (w) => {
       const yamlWidth = clampWidth(w, YAML_MAX_WIDTH);
       save({ yamlWidth });
       set({ yamlWidth });
     },
-    openScenarioYamlEditor: (id) => set({ scenarioYamlEditorId: id }),
+    openScenarioYamlEditor: (id) => set({ scenarioYamlEditorId: id, yamlPaneOpen: false }),
     closeScenarioYamlEditor: () => set({ scenarioYamlEditorId: null }),
   };
 });
