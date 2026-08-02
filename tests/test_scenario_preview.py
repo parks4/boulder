@@ -1,14 +1,18 @@
-"""Tests for GET /api/scenarios/{id}/preview.
+"""Tests for POST /api/scenarios/{id}/preview.
 
 Unlike `/scenarios/{id}` (a precomputed HDF5 trajectory — 404s until a sweep has
 solved it), `/preview` deep-merges an authored scenario's overlay onto the base
 config and returns the effective node/connection properties, so the GUI's Inputs
 pane can show a scenario's parameter overrides before it has ever been solved.
+Stateless: the caller sends the overlay to preview (its own `scenarioStore.
+overlays[id]`, or `{}` for BASELINE) — there's no server-side scenario lookup
+by id to 404 on anymore.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Dict
 
 import pytest
 
@@ -67,6 +71,10 @@ def _client_fully_preloaded(cfg_path: Path):
     return client, app
 
 
+def _authored_overlays(client: TestClient) -> Dict[str, Any]:
+    return client.get("/api/scenarios").json()["authored_overlays"]
+
+
 def _node(body: dict, node_id: str) -> dict:
     return next(n for n in body["nodes"] if n["id"] == node_id)
 
@@ -76,7 +84,10 @@ def test_preview_authored_scenario_overrides_property(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     client, _app = _client_with_config(cfg)
     try:
-        resp = client.get("/api/scenarios/base_case/preview")
+        overlay = _authored_overlays(client)["base_case"]
+        resp = client.post(
+            "/api/scenarios/base_case/preview", json={"overlay": overlay}
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["scenario_id"] == "base_case"
@@ -89,7 +100,7 @@ def test_preview_baseline_returns_unmodified_base_values(tmp_path: Path) -> None
     cfg = _write_config(tmp_path)
     client, _app = _client_with_config(cfg)
     try:
-        resp = client.get("/api/scenarios/BASELINE/preview")
+        resp = client.post("/api/scenarios/BASELINE/preview", json={"overlay": {}})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert _node(body, "feed")["properties"]["temperature"] == 298.15
@@ -97,12 +108,21 @@ def test_preview_baseline_returns_unmodified_base_values(tmp_path: Path) -> None
         client.__exit__(None, None, None)
 
 
-def test_preview_unknown_scenario_404(tmp_path: Path) -> None:
+def test_preview_ignores_the_path_id_and_just_renders_whatever_overlay_is_sent(
+    tmp_path: Path,
+) -> None:
+    """Stateless: there's no server-side "unknown scenario" to 404 on anymore.
+
+    The `{id}` in the path is just an echo label in the response.
+    """
     cfg = _write_config(tmp_path)
     client, _app = _client_with_config(cfg)
     try:
-        resp = client.get("/api/scenarios/nope/preview")
-        assert resp.status_code == 404
+        overlay = _authored_overlays(client)["base_case"]
+        resp = client.post("/api/scenarios/nope/preview", json={"overlay": overlay})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["scenario_id"] == "nope"
+        assert _node(resp.json(), "feed")["properties"]["temperature"] == 320.0
     finally:
         client.__exit__(None, None, None)
 
@@ -111,21 +131,24 @@ def test_preview_without_a_config_404() -> None:
     app = create_app()
     with TestClient(app) as client:
         app.state.preloaded_config_path = None
-        resp = client.get("/api/scenarios/base_case/preview")
+        resp = client.post("/api/scenarios/base_case/preview", json={"overlay": {}})
         assert resp.status_code == 404
 
 
 def test_preview_falls_back_to_disk_when_preloaded_raw_is_unset(tmp_path: Path) -> None:
     """The `preloaded_config_path`-only setup (as in scenario-editing tests) still works.
 
-    `preloaded_raw` isn't populated until a scenario CRUD call reloads it, but
-    the preview route must not depend on that having happened yet.
+    `preloaded_raw` isn't populated by these tests' minimal setup, but the
+    preview route must not depend on that having happened.
     """
     cfg = _write_config(tmp_path)
     client, app = _client_with_config(cfg)
     try:
         assert app.state.preloaded_raw is None
-        resp = client.get("/api/scenarios/base_case/preview")
+        overlay = _authored_overlays(client)["base_case"]
+        resp = client.post(
+            "/api/scenarios/base_case/preview", json={"overlay": overlay}
+        )
         assert resp.status_code == 200, resp.text
         assert _node(resp.json(), "feed")["properties"]["temperature"] == 320.0
     finally:
@@ -136,7 +159,10 @@ def test_preview_reflects_fully_preloaded_app_state(tmp_path: Path) -> None:
     cfg = _write_config(tmp_path)
     client, _app = _client_fully_preloaded(cfg)
     try:
-        resp = client.get("/api/scenarios/base_case/preview")
+        overlay = _authored_overlays(client)["base_case"]
+        resp = client.post(
+            "/api/scenarios/base_case/preview", json={"overlay": overlay}
+        )
         assert resp.status_code == 200, resp.text
         assert _node(resp.json(), "feed")["properties"]["temperature"] == 320.0
     finally:
