@@ -19,10 +19,10 @@ vi.mock("@monaco-editor/react", () => ({
 }));
 
 const mockFetchScenarioSource = vi.fn();
-const mockUpdateScenario = vi.fn().mockResolvedValue(undefined);
+const mockRenderFullYaml = vi.fn();
 vi.mock("@/api/scenarios", () => ({
   fetchScenarioSource: (...args: unknown[]) => mockFetchScenarioSource(...args),
-  updateScenario: (...args: unknown[]) => mockUpdateScenario(...args),
+  renderFullYaml: (...args: unknown[]) => mockRenderFullYaml(...args),
 }));
 
 vi.mock("@/stores/themeStore", () => ({
@@ -30,9 +30,16 @@ vi.mock("@/stores/themeStore", () => ({
 }));
 
 let mockRevision = 0;
-vi.mock("@/stores/scenarioStore", () => ({
-  useScenarioStore: (selector: (s: unknown) => unknown) => selector({ revision: mockRevision }),
-}));
+let mockOverlays: Record<string, unknown> = {};
+const mockStoreUpdateScenario = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/stores/scenarioStore", () => {
+  const useScenarioStore = (selector: (s: unknown) => unknown) =>
+    selector({ revision: mockRevision, updateScenario: mockStoreUpdateScenario });
+  (useScenarioStore as unknown as { getState: () => unknown }).getState = () => ({
+    overlays: mockOverlays,
+  });
+  return { useScenarioStore };
+});
 
 let mockIsRunning = false;
 vi.mock("@/stores/simulationStore", () => ({
@@ -57,16 +64,17 @@ describe("ScenarioYamlPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRevision = 0;
+    mockOverlays = {};
     mockIsRunning = false;
     mockSweeping = false;
     mockFetchScenarioSource.mockResolvedValue({ scenario_id: "C1T", yaml: "torch_eff: 0.85\n" });
-    mockUpdateScenario.mockResolvedValue(undefined);
+    mockStoreUpdateScenario.mockResolvedValue(undefined);
   });
 
   it("fetches the scenario's overlay text when opened", async () => {
     render(<ScenarioYamlPane scenarioId="C1T" onClose={vi.fn()} />);
 
-    expect(mockFetchScenarioSource).toHaveBeenCalledWith("C1T");
+    expect(mockFetchScenarioSource).toHaveBeenCalledWith("C1T", {});
     expect(await editorValue()).toHaveValue("torch_eff: 0.85\n");
   });
 
@@ -107,7 +115,9 @@ describe("ScenarioYamlPane", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(mockUpdateScenario).toHaveBeenCalledWith("C1T", "torch_eff: 0.99\n"));
+    await waitFor(() =>
+      expect(mockStoreUpdateScenario).toHaveBeenCalledWith("C1T", "torch_eff: 0.99\n"),
+    );
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith("C1T"));
   });
 
@@ -118,5 +128,28 @@ describe("ScenarioYamlPane", () => {
 
     expect(screen.getByText(/locked until it finishes/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("downloads the full merged YAML (base + this scenario's overlay)", async () => {
+    mockOverlays = { C1T: { torch_eff: 0.99 } };
+    mockRenderFullYaml.mockResolvedValue({
+      scenario_id: "C1T",
+      yaml: "network:\n- id: torch\n  torch_eff: 0.99\n",
+    });
+    const createObjectURL = vi.fn(() => "blob:mock-url");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    render(<ScenarioYamlPane scenarioId="C1T" onClose={vi.fn()} />);
+    await editorValue();
+
+    fireEvent.click(screen.getByRole("button", { name: "Download full YAML" }));
+
+    await waitFor(() =>
+      expect(mockRenderFullYaml).toHaveBeenCalledWith("C1T", { torch_eff: 0.99 }),
+    );
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledOnce());
+    clickSpy.mockRestore();
   });
 });

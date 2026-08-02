@@ -77,8 +77,9 @@ let mockPreviewConnections: Array<{ id: string; properties: Record<string, unkno
   null;
 let mockActiveScenarioId: string | null = null;
 let mockPreviewErrorAfterLoad: string | null = null;
+let mockScenarioOverlays: Record<string, unknown> = {};
 const mockLoadScenarioPreview = vi.fn().mockResolvedValue(undefined);
-const mockRefreshScenarios = vi.fn();
+const mockApplyOverlays = vi.fn();
 
 vi.mock("@/stores/scenarioStore", () => {
   const useScenarioStore = (selector: (s: unknown) => unknown) => {
@@ -87,8 +88,9 @@ vi.mock("@/stores/scenarioStore", () => {
       previewNodes: mockPreviewNodes,
       previewConnections: mockPreviewConnections,
       activeId: mockActiveScenarioId,
+      overlays: mockScenarioOverlays,
+      applyOverlays: mockApplyOverlays,
       loadPreview: mockLoadScenarioPreview,
-      refresh: mockRefreshScenarios,
     };
     return selector(store);
   };
@@ -98,7 +100,7 @@ vi.mock("@/stores/scenarioStore", () => {
   return { useScenarioStore };
 });
 
-const mockUpdateScenarioEntity = vi.fn().mockResolvedValue(undefined);
+const mockUpdateScenarioEntity = vi.fn().mockResolvedValue({ overlays: {} });
 vi.mock("@/api/scenarios", () => ({
   BASELINE_SCENARIO_ID: "BASELINE",
   updateScenarioEntity: (...args: unknown[]) => mockUpdateScenarioEntity(...args),
@@ -558,6 +560,7 @@ describe("PropertiesPanel scenario preview", () => {
     mockPreviewConnections = null;
     mockActiveScenarioId = null;
     mockPreviewErrorAfterLoad = null;
+    mockScenarioOverlays = {};
     mockIsRunning = false;
     mockSweeping = false;
   });
@@ -639,7 +642,7 @@ describe("PropertiesPanel scenario preview", () => {
     expect(screen.getByText("0.60").className).toMatch(/amber/);
   });
 
-  it("editing still shows/edits the base value, not the previewed scenario's override", () => {
+  it("editing shows/edits the previewed scenario's override, not the base value", () => {
     mockPreviewId = "C600_P300";
     mockPreviewNodes = [
       { id: "reactor_1", properties: { temperature: 1273.15, length: 0.6 } },
@@ -649,11 +652,13 @@ describe("PropertiesPanel scenario preview", () => {
     render(<PropertiesPanel />);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
-    expect(screen.getByDisplayValue("0.3")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("0.6")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("0.3")).not.toBeInTheDocument();
   });
 
   it("saves into the active scenario's overlay (not the base) and surfaces a failed preview instead of a plain success toast", async () => {
     mockActiveScenarioId = "C1T";
+    mockScenarioOverlays = { C1T: {} };
     // The write can succeed while the resulting merged config is invalid
     // (e.g. a cross-node consistency rule) -- loadPreview swallows that into
     // previewError rather than rejecting, so it must be surfaced explicitly.
@@ -665,9 +670,15 @@ describe("PropertiesPanel scenario preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(mockUpdateScenarioEntity).toHaveBeenCalledWith("C1T", "reactor_1", { length: 0.6 }),
+      expect(mockUpdateScenarioEntity).toHaveBeenCalledWith(
+        { C1T: {} },
+        "C1T",
+        "reactor_1",
+        { length: 0.6 },
+      ),
     );
     expect(mockUpdateNode).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockApplyOverlays).toHaveBeenCalledWith({}));
     await waitFor(() => expect(mockLoadScenarioPreview).toHaveBeenCalledWith("C1T"));
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
@@ -692,8 +703,8 @@ describe("PropertiesPanel scenario preview", () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it("saving an unchanged (base-shown) field while a scenario is active is a no-op, not a silent write", () => {
-    // Edit mode always shows the base value (0.3), not any active override
+  it("saving an unchanged field while a scenario is active is a no-op, not a silent write", () => {
+    // No override is previewed here, so edit mode shows the base value (0.3)
     // -- saving it back unmodified must not call the overlay API, and must
     // say so rather than looking identical to a successful save.
     mockActiveScenarioId = "C1T";
@@ -709,9 +720,9 @@ describe("PropertiesPanel scenario preview", () => {
   });
 
   it("blocks saving a scenario overlay edit while a sweep is running", () => {
-    // Unlike the base network (a local, deferred-to-sync edit), this writes
-    // straight to the scenario's YAML on disk -- unsafe while a sweep
-    // subprocess may be reading that same file.
+    // A running sweep's in-flight results reflect the overlay's *current*
+    // values -- editing mid-sweep would be confusing even though it can't
+    // race the sweep (which already captured its own overlay snapshot).
     mockActiveScenarioId = "C1T";
     mockSweeping = true;
 

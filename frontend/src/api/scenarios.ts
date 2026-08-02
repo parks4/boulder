@@ -9,6 +9,9 @@ import type { ConfigConnection, ConfigNode } from "@/types/config";
  */
 export const BASELINE_SCENARIO_ID = "BASELINE";
 
+/** A scenario overlay -- whatever subtree lives under `scenarios.<id>:` in STONE. */
+export type ScenarioOverlay = Record<string, unknown>;
+
 /** One precomputed scenario (trajectory) in the active store. */
 export interface ScenarioMeta {
   id: string;
@@ -39,6 +42,12 @@ export interface ScenarioListResponse {
    * ones a sweep has already run).
    */
   authored_ids?: string[];
+  /**
+   * The `scenarios:` block as loaded at server startup — the one-time seed
+   * for this store's own `overlays` state. Scenario authoring is in-memory
+   * from here on (see `scenarioStore.ts`); this is never re-fetched.
+   */
+  authored_overlays?: Record<string, ScenarioOverlay>;
 }
 
 /** List the scenarios available in the server's active store (fast — attrs only). */
@@ -67,9 +76,13 @@ export function focusScenario(id: string) {
 export const SCENARIO_FOCUS_STREAM_URL = "/api/scenarios/focus/stream";
 
 // ---------------------------------------------------------------------------
-// Scenario authoring — create/edit/delete a `scenario:` overlay on disk.
-// Unlike the read helpers above (precomputed HDF5 trajectories), these edit
-// the source config file so the next Run Sweep picks up the change.
+// Scenario authoring — create/edit/delete a scenario overlay, in memory only.
+//
+// Nothing here writes to disk: every call below is a stateless transform —
+// it sends the *current* overlays map (this store's own state) and gets back
+// the *new* one. The backend never keeps a copy between calls, exactly like
+// `/configs/parse` already treats the base config. The only way to get a
+// scenario onto disk is `renderFullYaml` + a client-side download.
 // ---------------------------------------------------------------------------
 
 export interface ScenarioSourceResponse {
@@ -77,10 +90,11 @@ export interface ScenarioSourceResponse {
   yaml: string;
 }
 
-/** Fetch one scenario overlay's raw YAML text (for the scoped editor). */
-export function fetchScenarioSource(id: string) {
+/** Render one scenario overlay's YAML text (for the scoped editor). */
+export function fetchScenarioSource(id: string, overlay: ScenarioOverlay) {
   return apiFetch<ScenarioSourceResponse>(
     `/scenarios/${encodeURIComponent(id)}/source`,
+    { method: "POST", body: JSON.stringify({ overlay }) },
   );
 }
 
@@ -92,31 +106,60 @@ export interface ScenarioPreviewResponse {
 
 /**
  * Fetch one scenario's effective node/connection properties (base config
- * deep-merged with its overlay) — works before Run Sweep has ever solved it,
- * unlike `fetchScenario` (which 404s until a trajectory is cached).
+ * deep-merged with *overlay*) — works before Run Sweep has ever solved it,
+ * unlike `fetchScenario` (which 404s until a trajectory is cached). Send an
+ * empty overlay for BASELINE.
  */
-export function fetchScenarioPreview(id: string) {
+export function fetchScenarioPreview(id: string, overlay: ScenarioOverlay) {
   return apiFetch<ScenarioPreviewResponse>(
     `/scenarios/${encodeURIComponent(id)}/preview`,
+    { method: "POST", body: JSON.stringify({ overlay }) },
   );
 }
 
+/**
+ * Render the full merged config (base ⊕ *overlay*) as YAML text — backs the
+ * Scenario YAML pane's "Download full YAML" button, the one sanctioned way
+ * to get an edited scenario onto disk.
+ */
+export function renderFullYaml(id: string, overlay: ScenarioOverlay) {
+  return apiFetch<ScenarioSourceResponse>(
+    `/scenarios/${encodeURIComponent(id)}/render-full`,
+    { method: "POST", body: JSON.stringify({ overlay }) },
+  );
+}
+
+export interface ScenarioMutationResponse extends ScenarioSourceResponse {
+  overlays: Record<string, ScenarioOverlay>;
+}
+
 /** Create a new scenario overlay — blank, or cloned from an existing one. */
-export function createScenario(scenarioId: string, baseScenarioId?: string) {
-  return apiFetch<ScenarioSourceResponse>("/scenarios", {
+export function createScenario(
+  overlays: Record<string, ScenarioOverlay>,
+  scenarioId: string,
+  baseScenarioId?: string,
+  description?: string,
+) {
+  return apiFetch<ScenarioMutationResponse>("/scenarios", {
     method: "POST",
     body: JSON.stringify({
+      overlays,
       scenario_id: scenarioId,
       base_scenario_id: baseScenarioId ?? null,
+      description: description || null,
     }),
   });
 }
 
-/** Save edits to a scenario overlay's YAML text. */
-export function updateScenario(id: string, yaml: string) {
-  return apiFetch<ScenarioSourceResponse>(
+/** Apply edits to a scenario overlay's YAML text. */
+export function updateScenario(
+  overlays: Record<string, ScenarioOverlay>,
+  id: string,
+  yaml: string,
+) {
+  return apiFetch<ScenarioMutationResponse>(
     `/scenarios/${encodeURIComponent(id)}`,
-    { method: "PATCH", body: JSON.stringify({ yaml }) },
+    { method: "PATCH", body: JSON.stringify({ overlays, yaml }) },
   );
 }
 
@@ -124,6 +167,7 @@ export interface ScenarioEntityUpdateResponse {
   scenario_id: string;
   id: string;
   yaml: string;
+  overlays: Record<string, ScenarioOverlay>;
 }
 
 /**
@@ -134,22 +178,40 @@ export interface ScenarioEntityUpdateResponse {
  * it belongs to, is resolved server-side from the base config itself.
  */
 export function updateScenarioEntity(
+  overlays: Record<string, ScenarioOverlay>,
   scenarioId: string,
   entityId: string,
   properties: Record<string, unknown>,
 ) {
   return apiFetch<ScenarioEntityUpdateResponse>(
     `/scenarios/${encodeURIComponent(scenarioId)}/entities/${encodeURIComponent(entityId)}`,
-    { method: "PATCH", body: JSON.stringify({ properties }) },
+    { method: "PATCH", body: JSON.stringify({ overlays, properties }) },
   );
 }
 
-/** Rename a scenario's id (its `scenario:` mapping key). */
-export function renameScenario(id: string, newId: string) {
-  return apiFetch<{ ok: boolean; scenario_id: string }>(
+export interface RenameScenarioResponse {
+  ok: boolean;
+  scenario_id: string;
+  overlays: Record<string, ScenarioOverlay>;
+}
+
+/** Rename a scenario's id (its overlays-map key). */
+export function renameScenario(
+  overlays: Record<string, ScenarioOverlay>,
+  id: string,
+  newId: string,
+) {
+  return apiFetch<RenameScenarioResponse>(
     `/scenarios/${encodeURIComponent(id)}/rename`,
-    { method: "PATCH", body: JSON.stringify({ new_id: newId }) },
+    { method: "PATCH", body: JSON.stringify({ overlays, new_id: newId }) },
   );
+}
+
+export interface DeleteScenarioResponse {
+  ok: boolean;
+  scenario_id: string;
+  cache_purged: boolean;
+  overlays: Record<string, ScenarioOverlay>;
 }
 
 /**
@@ -157,18 +219,18 @@ export function renameScenario(id: string, newId: string) {
  * if the active store has one — `cache_purged` reports whether there was
  * actually a cached result to clear.
  */
-export function deleteScenario(id: string) {
-  return apiFetch<{ ok: boolean; scenario_id: string; cache_purged: boolean }>(
-    `/scenarios/${encodeURIComponent(id)}`,
-    { method: "DELETE" },
-  );
+export function deleteScenario(overlays: Record<string, ScenarioOverlay>, id: string) {
+  return apiFetch<DeleteScenarioResponse>(`/scenarios/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ overlays }),
+  });
 }
 
 /**
  * Clear every scenario's cached trajectory (deletes the whole HDF5 store).
- * Scenario definitions in the config are untouched — the next Run Sweep
- * recomputes them from scratch. `cleared` reports whether there was
- * actually a store on disk to remove.
+ * Scenario definitions are untouched — this only ever affected the results
+ * cache. `cleared` reports whether there was actually a store on disk to
+ * remove.
  */
 export function clearScenarioCache() {
   return apiFetch<{ ok: boolean; cleared: boolean }>("/scenarios/clear-cache", {
