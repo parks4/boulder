@@ -135,7 +135,8 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
         return;
       }
       set({ sweeping: true, progress: { current: 0, total: options?.total ?? 0 } });
-      startSweep({ noCache: options?.noCache })
+      const scenarios = useScenarioStore.getState().overlays;
+      startSweep({ scenarios, noCache: options?.noCache })
         .then(() => startPolling())
         .catch((e) => {
           set({ sweeping: false });

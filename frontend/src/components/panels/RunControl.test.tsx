@@ -25,14 +25,20 @@ vi.mock("sonner", () => ({
 }));
 
 let mockScenarioRevision = 0;
+let mockAuthoredIdsLength = 0;
 const mockRefresh = vi.fn();
 vi.mock("@/stores/scenarioStore", () => {
   // sweepStore (a real module, exercised via useSweepRunStore below) reads
   // this through the static `.getState()` accessor, not the selector-hook
   // call form the rest of this test file uses -- both need to work.
-  const hook = (selector: (s: unknown) => unknown) =>
-    selector({ refresh: mockRefresh, revision: mockScenarioRevision });
-  hook.getState = () => ({ refresh: mockRefresh, revision: mockScenarioRevision });
+  const state = () => ({
+    refresh: mockRefresh,
+    revision: mockScenarioRevision,
+    overlays: {},
+    authoredIds: Array.from({ length: mockAuthoredIdsLength }, (_, i) => String(i)),
+  });
+  const hook = (selector: (s: unknown) => unknown) => selector(state());
+  hook.getState = state;
   return { useScenarioStore: hook };
 });
 
@@ -43,6 +49,7 @@ describe("RunControl", () => {
     vi.clearAllMocks();
     mockGetSweepInfo.mockResolvedValue({ can_run: false, reason: "No sweep" });
     mockScenarioRevision = 0;
+    mockAuthoredIdsLength = 0;
     useSweepRunStore.setState({ sweeping: false, progress: { current: 0, total: 0 } });
   });
 
@@ -157,12 +164,28 @@ describe("RunControl", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /run sweep/i }));
 
-      expect(mockStartSweep).toHaveBeenCalledWith({ noCache: undefined });
+      expect(mockStartSweep).toHaveBeenCalledWith({ scenarios: {}, noCache: undefined });
       await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(1000);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("enables Run Sweep from a session-created scenario even before the backend's snapshot catches up", async () => {
+    // Scenario authoring is in-memory now (scenarioStore.overlays) -- a
+    // scenario created this session isn't reflected in getSweepInfo's
+    // startup-snapshot-based response until a reload, so the live
+    // authoredIds count must be able to enable the button on its own.
+    mockGetSweepInfo.mockResolvedValue({ can_run: false, reason: "No sweep" });
+    mockAuthoredIdsLength = 2; // BASELINE + one session-created scenario
+    render(
+      <RunControl onRunSimulation={onRunSimulation} isRunning={false} runDisabled={false} />,
+    );
+    await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByLabelText("Choose run action"));
+    expect(screen.getByRole("menuitemradio", { name: /run sweep/i })).not.toBeDisabled();
   });
 
   it("re-fetches sweep info when a scenario is added/edited/renamed/deleted elsewhere", async () => {

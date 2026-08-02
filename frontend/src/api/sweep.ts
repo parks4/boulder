@@ -1,4 +1,5 @@
 import { apiFetch } from "./client";
+import type { ScenarioOverlay } from "./scenarios";
 
 export interface SweepInfo {
   available: boolean;
@@ -40,16 +41,24 @@ export function getSweepInfo() {
 }
 
 /**
- * Start the sweep as a background batch job on the server.
+ * Start the sweep, in-process, on the server.
  *
- * `noCache` forces a full recompute: the server sets `BOULDER_NO_CACHE=1`
- * for the runner subprocess, so every scenario is re-solved instead of
- * skipping ones whose fingerprint is unchanged.
+ * `scenarios` is the caller's current in-memory scenario overlays map (see
+ * `scenarioStore.ts`) — the base config comes from the server's own startup
+ * snapshot, but overlays no longer live on disk, so they must be sent here
+ * for the sweep to see any edits made this session. `noCache` forces a full
+ * recompute, ignoring each scenario's fingerprint cache.
  */
-export function startSweep(options?: { noCache?: boolean }) {
+export function startSweep(options?: {
+  scenarios?: Record<string, ScenarioOverlay>;
+  noCache?: boolean;
+}) {
   return apiFetch<{ status: string; total: number }>("/sweep/run", {
     method: "POST",
-    body: JSON.stringify({ no_cache: options?.noCache ?? false }),
+    body: JSON.stringify({
+      scenarios: options?.scenarios ?? {},
+      no_cache: options?.noCache ?? false,
+    }),
   });
 }
 

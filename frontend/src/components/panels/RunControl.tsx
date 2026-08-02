@@ -39,6 +39,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   const appliedDefault = useRef(false);
   const appliedAutorun = useRef(false);
   const scenarioRevision = useScenarioStore((s) => s.revision);
+  const authoredScenarioCount = useScenarioStore((s) => s.authoredIds.length);
   const [addScenarioOpen, setAddScenarioOpen] = useState(false);
   const openScenarioYamlEditor = useLayoutStore((s) => s.openScenarioYamlEditor);
   const notifyShortcutUsage = useShortcutNudge();
@@ -88,7 +89,13 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
     };
   }, [menuOpen]);
 
-  const canSweep = Boolean(sweep?.can_run);
+  // `sweep` reflects the config's startup snapshot (scenario authoring is
+  // in-memory now — see scenarioStore.ts's `overlays`), so a scenario
+  // created this session wouldn't otherwise be counted until a page reload.
+  // `authoredScenarioCount` covers that; `sweep?.can_run` still covers a
+  // host-defined `sweep:` block with no scenario overlays at all.
+  const canSweep = Boolean(sweep?.can_run) || authoredScenarioCount > 0;
+  const nScenarios = Math.max(sweep?.n_scenarios ?? 0, authoredScenarioCount);
   // If sweep is unavailable, fall back to simulation (force_sim is kept as-is).
   const effectiveMode: RunMode =
     runMode === "sweep" && canSweep
@@ -102,8 +109,8 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   // via scenarioStore.refresh() on completion -- no separate wiring needed
   // here, and it stays in sync even when a sweep is started elsewhere.
   const handleRunSweep = useCallback(() => {
-    runSweepJob({ total: sweep?.n_scenarios ?? 0 });
-  }, [runSweepJob, sweep]);
+    runSweepJob({ total: nScenarios });
+  }, [runSweepJob, nScenarios]);
 
   // `--run`: auto-start the run once, as soon as it is actually runnable.
   useEffect(() => {
@@ -136,7 +143,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
     effectiveMode === "sweep"
       ? sweeping
         ? `Sweeping… ${progress.current}/${progress.total}`
-        : `Run Sweep (${sweep?.n_scenarios ?? 0} scenarios)`
+        : `Run Sweep (${nScenarios} scenarios)`
       : effectiveMode === "force_sim"
         ? isRunning
           ? "Running…"

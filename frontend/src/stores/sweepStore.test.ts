@@ -18,11 +18,13 @@ const mockRefresh = vi.fn();
 const mockSetActive = vi.fn();
 let mockActiveId: string | null = null;
 let mockScenarios: Array<{ id: string }> = [];
+let mockOverlays: Record<string, unknown> = {};
 vi.mock("./scenarioStore", () => ({
   useScenarioStore: {
     getState: () => ({
       refresh: mockRefresh,
       setActive: mockSetActive,
+      overlays: mockOverlays,
       get activeId() {
         return mockActiveId;
       },
@@ -49,6 +51,7 @@ describe("sweepStore", () => {
     vi.clearAllMocks();
     mockActiveId = null;
     mockScenarios = [];
+    mockOverlays = {};
     useSweepRunStore.setState({
       sweeping: false,
       progress: { current: 0, total: 0 },
@@ -100,13 +103,17 @@ describe("sweepStore", () => {
     expect(mockRefresh).not.toHaveBeenCalled();
   });
 
-  it("run() passes noCache through to startSweep, forcing a full recompute", async () => {
+  it("run() passes noCache and the current scenario overlays through to startSweep", async () => {
     vi.useFakeTimers();
+    mockOverlays = { a: { torch_eff: 0.5 } };
     mockStartSweep.mockResolvedValue({ status: "running", total: 1 });
     mockGetSweepStatus.mockResolvedValueOnce({ status: "done", current: 1, total: 1 });
 
     useSweepRunStore.getState().run({ total: 1, noCache: true });
-    expect(mockStartSweep).toHaveBeenCalledWith({ noCache: true });
+    expect(mockStartSweep).toHaveBeenCalledWith({
+      scenarios: { a: { torch_eff: 0.5 } },
+      noCache: true,
+    });
 
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(1000);
