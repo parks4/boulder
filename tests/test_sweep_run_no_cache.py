@@ -75,6 +75,29 @@ class _FakeWorker:
         return self.progress
 
 
+class _StubConverter:
+    """Records that it was actually constructed.
+
+    Proves the sweep used `app.state.converter_class` (a host's own
+    converter, e.g. Bloc's) instead of silently falling back to plain
+    `DualCanteraConverter`, which doesn't know how to resolve a host's own
+    mechanism names and would fail for real (`CanteraError: findInputFile`)
+    outside these mocked tests.
+    """
+
+    instances: List["_StubConverter"] = []
+
+    def __init__(self, mechanism: Any = None, plugins: Any = None) -> None:
+        # Passthrough -- a fictional resolved path would make write_payload's
+        # own mechanism-file hashing fail for real; the instance count below
+        # is sufficient proof this class (not DualCanteraConverter) was used.
+        self.mechanism = mechanism
+        _StubConverter.instances.append(self)
+
+    def resolve_mechanism(self, name: str) -> str:
+        return name
+
+
 def test_sweep_run_reuses_the_cache_when_unchanged(tmp_path: Path) -> None:
     """A second run of the same config skips every scenario (fingerprint match)."""
     client, app = _client_with_config(tmp_path)
@@ -158,4 +181,90 @@ def test_sweep_run_rejects_a_second_run_while_one_is_in_flight(tmp_path: Path) -
                 time.sleep(0.05)
             assert app.state.sweep_job.get("status") == "done"
     finally:
+        client.__exit__(None, None, None)
+
+
+def test_sweep_run_uses_app_state_converter_class_for_mechanism_resolution(
+    tmp_path: Path,
+) -> None:
+    """A host's own converter class must be used to resolve mechanism names.
+
+    That class is set on `app.state` at startup (e.g. by Bloc's CLI) -- it
+    must not be silently dropped in favor of plain `DualCanteraConverter`,
+    which doesn't know a host's mechanism search convention and would fail
+    for real (`CanteraError: findInputFile`) outside these mocks.
+    """
+    client, app = _client_with_config(tmp_path)
+    app.state.converter_class = _StubConverter
+    _StubConverter.instances.clear()
+
+    try:
+        with patch(
+            "boulder.api.routes.sweep.SimulationWorker",
+            side_effect=lambda: _FakeWorker(),
+        ):
+            resp = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
+            assert resp.status_code == 200, resp.text
+            _wait_until(lambda: app.state.sweep_job.get("status") == "done")
+
+        # Two runs: BASELINE + "a" -- both must have gone through _StubConverter.
+        assert len(_StubConverter.instances) == 2
+    finally:
+        _StubConverter.instances.clear()
+        client.__exit__(None, None, None)
+
+
+def test_sweep_run_stores_a_resolved_mechanism_not_convs_raw_attribute(
+    tmp_path: Path,
+) -> None:
+    """`write_payload` must get a resolved mechanism, not `conv`'s raw one.
+
+    `conv.mechanism` never updates after construction -- it stays whatever
+    bare name/spec the converter was built with, even though construction
+    itself resolves and loads the real one internally (see
+    `DualCanteraConverter.__init__`). `write_payload`'s own `ct.Solution(...)`
+    call needs a real, resolved path -- passing `conv.mechanism` straight
+    through fails for real for any host whose bare mechanism names aren't
+    Cantera built-ins (`CanteraError: findInputFile`).
+    """
+
+    class _PrefixResolvingConverter(_StubConverter):
+        def resolve_mechanism(self, name: str) -> str:
+            return f"/resolved/{name}"
+
+    client, app = _client_with_config(tmp_path)
+    app.state.converter_class = _PrefixResolvingConverter
+    _StubConverter.instances.clear()
+    captured_mechanisms: List[str] = []
+
+    def _fake_write_payload(
+        store: Path, gui: Any, mechanism: str, **kwargs: Any
+    ) -> None:
+        captured_mechanisms.append(mechanism)
+        import h5py
+
+        with h5py.File(str(store), "a") as handle:
+            if kwargs.get("group") not in handle:
+                grp = handle.create_group(kwargs["group"])
+                grp.create_dataset("payload_json", data=b"{}")
+
+    try:
+        with (
+            patch(
+                "boulder.api.routes.sweep.SimulationWorker",
+                side_effect=lambda: _FakeWorker(),
+            ),
+            patch(
+                "boulder.api.routes.sweep.write_payload",
+                side_effect=_fake_write_payload,
+            ),
+        ):
+            resp = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
+            assert resp.status_code == 200, resp.text
+            _wait_until(lambda: app.state.sweep_job.get("status") == "done")
+
+        assert captured_mechanisms  # BASELINE + "a" both solved (no cache yet)
+        assert all(m == "/resolved/gri30.yaml" for m in captured_mechanisms)
+    finally:
+        _StubConverter.instances.clear()
         client.__exit__(None, None, None)

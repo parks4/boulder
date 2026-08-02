@@ -194,8 +194,24 @@ async def sweep_run(
             run_ids = {sid for sid, _ in runs}
             mechanism = _mechanism_of(raw)
             n_cached = 0
+            # The active converter class -- e.g. a host's own subclass with
+            # its own mechanism search convention -- lives on `app.state`
+            # (set once by the CLI at startup; see `boulder/api/main.py`),
+            # the same source `/api/simulations` reads. `get_plugins()` is a
+            # *different*, entry-point/env-var-driven registry that a host
+            # need not populate the same way, so it can't be relied on here.
+            converter_cls = (
+                getattr(request.app.state, "converter_class", None)
+                or DualCanteraConverter
+            )
+            # `__new__` avoids constructing a real instance (which would
+            # eagerly load a Cantera Solution) just to obtain a method
+            # reference -- same trick `_default_resolve_mechanism` uses.
+            resolve_mechanism = converter_cls.__new__(converter_cls).resolve_mechanism
             for i, (sid, cfg) in enumerate(runs):
-                config, mech_name, fingerprint = prepare_scenario(cfg, None)
+                config, mech_name, fingerprint = prepare_scenario(
+                    cfg, resolve_mechanism
+                )
                 label = str((cfg.get("metadata") or {}).get("scenario_name") or sid)
                 state["current"] = i + 1
 
@@ -220,9 +236,7 @@ async def sweep_run(
                 state["last_line"] = line
                 print(f"[sweep] {line}", flush=True)
 
-                plugins = get_plugins()
-                converter_cls = plugins.converter_class or DualCanteraConverter
-                conv = converter_cls(mechanism=mech_name or None, plugins=plugins)
+                conv = converter_cls(mechanism=mech_name or None, plugins=get_plugins())
                 settings = config.get("settings") or {}
                 sim_t = float(settings.get("end_time") or 0.0) or 1.0
                 dt = float(settings.get("dt") or 0.0) or (sim_t / 10.0)
@@ -273,7 +287,13 @@ async def sweep_run(
                     "updated_nodes": progress.updated_nodes,
                     "updated_connections": progress.updated_connections,
                 }
-                stored_mech = conv.mechanism
+                # `conv.mechanism` is whatever bare name/spec the converter was
+                # constructed with -- resolving it (again) to a real, absolute
+                # path is exactly what `resolve_mechanism` is for; `conv`
+                # itself never updates `.mechanism` after resolving it
+                # internally to load its own `ct.Solution`, so skipping this
+                # would hand `write_payload` an unresolved name it can't load.
+                stored_mech = resolve_mechanism(conv.mechanism)
                 write_payload(store, gui, stored_mech, group=sid, fresh=False)
                 with h5py.File(str(store), "a") as handle:
                     attrs = handle[sid].attrs
@@ -290,10 +310,13 @@ async def sweep_run(
                     flush=True,
                 )
 
+            resolved_mechanism = (
+                resolve_mechanism(mechanism) if mechanism else mechanism
+            )
             with h5py.File(str(store), "a") as handle:
                 cfg_path = getattr(request.app.state, "preloaded_config_path", None)
                 handle.attrs["map_config"] = Path(cfg_path).name if cfg_path else ""
-                handle.attrs["mechanism"] = mechanism
+                handle.attrs["mechanism"] = resolved_mechanism
                 handle.attrs["mechanism_name"] = (
                     Path(mechanism).name if mechanism else ""
                 )
