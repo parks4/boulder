@@ -584,6 +584,23 @@ describe("PropertiesPanel scenario preview", () => {
     expect(screen.queryByText("0.30")).not.toBeInTheDocument();
   });
 
+  it("BASELINE always shows the live base value, never a (possibly stale) preview snapshot", () => {
+    // BASELINE has no overlay of its own -- its "preview" would always just
+    // restate the base config, so this panel must not prefer a
+    // server-fetched snapshot over the live base value, which reflects
+    // local base-network edits the preview fetch has no way to see.
+    mockPreviewId = "BASELINE";
+    mockPreviewNodes = [
+      { id: "reactor_1", properties: { temperature: 1273.15, length: 0.99 } },
+    ];
+    mockPreviewConnections = [];
+
+    render(<PropertiesPanel />);
+
+    expect(screen.getByText("0.30")).toBeInTheDocument();
+    expect(screen.queryByText("0.99")).not.toBeInTheDocument();
+  });
+
   it("never names the previewed scenario in this panel", () => {
     // The panel shows the element's own identity (id + kind); which scenario
     // is being previewed belongs to the Scenario Pane, not here. Overridden
