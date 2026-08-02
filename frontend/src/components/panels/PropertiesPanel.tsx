@@ -227,10 +227,18 @@ export function PropertiesPanel() {
   // element — lets the Inputs pane preview a scenario's overrides (e.g. a
   // reactor's length) the moment it's selected, even before Run Sweep has
   // solved it. Falls back to the base properties when nothing is previewed,
-  // or when this element has no counterpart in the preview (shouldn't happen
-  // in practice — the preview mirrors the whole network — but is not fatal).
+  // when this element has no counterpart in the preview (shouldn't happen in
+  // practice — the preview mirrors the whole network — but is not fatal), or
+  // when BASELINE is active: BASELINE has no overlay of its own, so its
+  // "preview" is always identical to the live base config -- going through
+  // the (server-computed, fetch-once) preview instead of the live base
+  // properties would show a stale value after editing the base network
+  // while BASELINE happens to be the active selection.
   const previewList = isNode ? previewNodes : previewConnections;
-  const previewEntity = previewId ? previewList?.find((e) => e.id === id) : undefined;
+  const previewEntity =
+    previewId && previewId !== BASELINE_SCENARIO_ID
+      ? previewList?.find((e) => e.id === id)
+      : undefined;
   const previewDisplayProperties = previewEntity
     ? unfoldInitialConditions(previewEntity.properties as Record<string, unknown>)
     : displayProperties;
