@@ -87,14 +87,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
         "BOULDER_CONFIG"
     )
-    app.state.preloaded_config = None
+    # ------------------------------------------------------------------
+    # Every ``preloaded_*`` attribute below is a **startup snapshot**: it is
+    # written once, here, from the file named by ``BOULDER_CONFIG_PATH``, and
+    # is then frozen for the process lifetime. Read them as if they were named
+    # ``initial_*``.
+    #
+    # They deliberately do NOT track live edits. Saving the YAML pane calls
+    # ``adopt_live_config``, which **no-ops when a real file was preloaded**
+    # (see ``boulder/api/live_config.py``) -- the browser's own store becomes
+    # the current config instead. That is why ``/api/simulations`` takes the
+    # config from the *request body* rather than from here.
+    #
+    # Consequences to keep in mind when adding a route:
+    #   * Anything served from these attrs reflects the file as it was at
+    #     startup, not what the user currently sees in the editor.
+    #   * ``preloaded_raw`` is additionally the base that every scenario
+    #     overlay is merged onto (Run Sweep, scenario preview), so it must
+    #     stay byte-identical to the file -- never hand it to a function that
+    #     mutates its argument. ``normalize_config`` does exactly that; pass
+    #     it a ``copy.deepcopy`` (see below, and
+    #     ``tests/test_preloaded_raw_snapshot.py``).
+    # ------------------------------------------------------------------
+    app.state.preloaded_config = None  # normalized + validated startup snapshot
     app.state.preloaded_yaml = None
     app.state.preloaded_filename = None
     app.state.preloaded_config_path = None  # full path for script generation
     app.state.preloaded_result = None
     app.state.preloaded_fingerprint = None
     app.state.scenario_store_path = None
-    app.state.preloaded_raw = None  # inheritance-resolved config (keeps sweeps:)
+    # Inheritance-resolved but *un-normalized* startup snapshot (keeps sweeps:).
+    app.state.preloaded_raw = None
     app.state.sweep_job = None
     # ``--sweep`` GUI mode (BOULDER_SWEEP_MODE): default the split button to Run Sweep.
     app.state.sweep_default = bool(os.environ.get("BOULDER_SWEEP_MODE"))
