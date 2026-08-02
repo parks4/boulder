@@ -160,9 +160,9 @@ class TestParseYamlAdoptsLiveConfig:
     def test_sweep_info_reflects_scenarios_after_parse(self):
         """GET /api/sweep sees a browser-pasted `scenarios:` block after Save.
 
-        `can_run` still correctly requires an actual runner (none registered
-        here) -- but `available`/`n_scenarios` must reflect the live config
-        instead of staying stuck at the pre-adoption "no file" defaults.
+        `available`/`n_scenarios`/`can_run` must reflect the live config
+        instead of staying stuck at the pre-adoption "no file" defaults. Run
+        Sweep runs in-process now -- no external runner to register/check for.
         """
         client, app = _client()
         try:
@@ -174,8 +174,8 @@ class TestParseYamlAdoptsLiveConfig:
             assert info["available"] is True
             # Union run-set size: the baseline config + the one named scenario.
             assert info["n_scenarios"] == 2
-            assert info["can_run"] is False  # no sweep_runner plugin registered
-            assert info["reason"] == "No scenario runner available"
+            assert info["can_run"] is True
+            assert info["reason"] == "Run 2 scenarios"
         finally:
             client.__exit__(None, None, None)
 
