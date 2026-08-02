@@ -154,6 +154,21 @@ Two **profiles** of this one encoding:
 | Holds | one result (1..n reactors, groups `r0`,`r1`,…) | many single-reactor results, one group per scenario |
 | Producer / reader | `result_cache.save_result` / `load_result*` | `api/routes/sweep.py` (GUI) or `sweep_runner.py` (CLI) / `api/routes/scenarios.py` |
 
+**Mechanism provenance vs. cache identity** — two different things, easily confused:
+
+- The scenario store's per-group **`mechanism_sha256` attr is provenance only**, and is written by
+  `payload_store._resolve_mechanism`, which hashes the file *only when the mechanism resolves to an
+  existing path*. For a **Cantera built-in** (`gri30.yaml`) it stores the bare name and an **empty
+  hash** — so a stored result records *which* built-in it used, but not its exact content.
+- **Cache invalidation does not depend on that attr.** `result_cache._mechanism_identity` keys a
+  built-in as `builtin:<name>@cantera-<version>`, so upgrading Cantera *does* invalidate cached
+  results that used a built-in.
+- **Known, accepted limitation:** a built-in whose content changed *without* a Cantera version bump
+  would not invalidate the cache. Built-in mechanisms are not expected to change within a release, so
+  this is tolerated rather than defended against. Filling in the hash is feasible if provenance ever
+  matters — a built-in is locatable by scanning `cantera.get_data_directories()` for the name — but it
+  would only strengthen the recorded provenance, not cache correctness.
+
 #### Run-set expansion and the sweep runners (GUI in-process, CLI out-of-process)
 
 `runset.py` is the reference implementation of the STONE `scenarios:`/`sweep:` semantics
