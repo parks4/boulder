@@ -105,8 +105,9 @@ export function PropertiesPanel() {
   const previewNodes = useScenarioStore((s) => s.previewNodes);
   const previewConnections = useScenarioStore((s) => s.previewConnections);
   const activeScenarioId = useScenarioStore((s) => s.activeId);
+  const scenarioOverlays = useScenarioStore((s) => s.overlays);
+  const applyScenarioOverlays = useScenarioStore((s) => s.applyOverlays);
   const loadScenarioPreview = useScenarioStore((s) => s.loadPreview);
-  const refreshScenarios = useScenarioStore((s) => s.refresh);
   const isSimulating = useSimulationStore((s) => s.isRunning);
   const isSweeping = useSweepRunStore((s) => s.sweeping);
   const [isEditing, setIsEditing] = useState(false);
@@ -233,10 +234,12 @@ export function PropertiesPanel() {
   const previewDisplayProperties = previewEntity
     ? unfoldInitialConditions(previewEntity.properties as Record<string, unknown>)
     : displayProperties;
-  // While editing, always show/edit the base config's own values — a scenario
-  // overlay is a separate, scoped edit (via "Edit scenario YAML"), not
-  // something a Save here should fold into the base network.
-  const renderProperties = isEditing ? displayProperties : previewDisplayProperties;
+  // What's shown, editing or not, is always the *currently effective* value
+  // (base, or the active scenario's override if there is one) -- Save now
+  // folds into that same scenario's overlay (see handleSave), so editing the
+  // base value while a 0.20 override is in effect would silently show the
+  // wrong starting point.
+  const renderProperties = previewDisplayProperties;
 
   // Stream-point nodes (inter-stage diamonds) and legacy terminal OutletSink nodes
   // are computed from upstream reactors.  OutletSink + terminal_sink is deprecated;
@@ -270,7 +273,7 @@ export function PropertiesPanel() {
 
   // Start editing
   const handleEdit = () => {
-    setEditValues(buildEditValuesFromProperties(displayProperties));
+    setEditValues(buildEditValuesFromProperties(previewDisplayProperties));
     setIsEditing(true);
   };
 
@@ -278,7 +281,7 @@ export function PropertiesPanel() {
   const handleSave = () => {
     const updated: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(editValues)) {
-      const original = properties[key];
+      const original = previewDisplayProperties[key];
       if (key === "temperature") {
         updated[key] = celsiusToKelvin(parseFloat(val) || 0);
       } else if (typeof original === "object" && original !== null) {
@@ -298,45 +301,47 @@ export function PropertiesPanel() {
 
     // A real scenario (not BASELINE, which has no overlay of its own) is
     // active: land the edit in its overlay instead of the base network --
-    // otherwise "Save" would silently change the base for every scenario,
-    // while this panel still shows the previewed scenario's (unrelated)
-    // values. Only send keys that actually changed, so untouched fields
-    // that merely round-tripped through the edit form don't get duplicated
-    // into the overlay.
+    // otherwise "Save" would silently change the base for every scenario.
+    // Only send keys that actually changed, so untouched fields that merely
+    // round-tripped through the edit form don't get duplicated into the
+    // overlay.
     if (activeScenarioId && activeScenarioId !== BASELINE_SCENARIO_ID) {
-      // Unlike the base network (a local, deferred-to-sync edit -- see the
-      // fallback branch below), this writes straight to the scenario's YAML
-      // on disk. A sweep subprocess may be reading that same file for this
-      // (or a later) scenario right now -- same guard the YAML panes use.
+      // A running sweep already captured its own snapshot of every overlay
+      // when it started, so editing mid-sweep can't race it -- but the
+      // sweep's in-flight results still reflect the *old* values, which
+      // would be confusing to edit against. Same guard the YAML panes use.
       if (isSimulating || isSweeping) {
         toast.error("Wait for the current calculation to finish before editing a scenario.");
         return;
       }
       const changed: Record<string, unknown> = {};
       for (const [key, val] of Object.entries(updated)) {
-        if (JSON.stringify(val) !== JSON.stringify(properties[key])) {
+        if (JSON.stringify(val) !== JSON.stringify(previewDisplayProperties[key])) {
           changed[key] = val;
         }
       }
       if (Object.keys(changed).length === 0) {
-        // Edit mode always shows/edits the base value (see handleEdit), so
-        // typing that same value back and saving looks like "reset to
-        // base" -- it isn't: the diff is against the base, so this is a
-        // true no-op and any existing override is left exactly as it was.
-        // Removing an override entirely still requires the scenario's raw
-        // YAML pane. Surfaced explicitly rather than silently doing
-        // nothing, which otherwise looks identical to a successful save.
+        // Diffed against what was actually shown/edited (the scenario's
+        // current effective value -- base or an existing override, per
+        // handleEdit) -- an unmodified Save is a true no-op here, distinct
+        // from the case where an override already existed and got typed
+        // back to the *base* value (that lands in `changed` above and is
+        // sent, redundantly setting the overlay to match base -- harmless,
+        // and clears the amber "overridden" styling since the effective
+        // value now equals base again). Surfaced explicitly rather than
+        // silently doing nothing, which otherwise looks identical to a
+        // successful save.
         setIsEditing(false);
-        toast.info("No changes to save (edit the scenario's YAML directly to remove an override)");
+        toast.info("No changes to save");
         return;
       }
-      updateScenarioEntity(activeScenarioId, id, changed)
-        .then(async () => {
+      updateScenarioEntity(scenarioOverlays, activeScenarioId, id, changed)
+        .then(async (resp) => {
           setIsEditing(false);
           // Bumps scenarioStore.revision -- lets a scenario YAML pane left
           // open on this same scenario notice this out-of-band edit and
           // refetch its content instead of showing stale text.
-          void refreshScenarios();
+          applyScenarioOverlays(resp.overlays);
           // The write itself can succeed while leaving the scenario's
           // *merged* config invalid (e.g. a cross-node consistency rule) --
           // loadPreview swallows that into previewError rather than

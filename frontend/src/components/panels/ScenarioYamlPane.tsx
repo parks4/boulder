@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { FileCode, X } from "lucide-react";
-import { fetchScenarioSource, updateScenario } from "@/api/scenarios";
+import { fetchScenarioSource, renderFullYaml } from "@/api/scenarios";
 import { useThemeStore } from "@/stores/themeStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { Button } from "@/components/ui/Button";
@@ -23,21 +23,24 @@ interface Props {
  * Scoped scenario editor — same docked-pane chrome as `YamlPane` (so editing
  * BASELINE vs. a scenario feels like the same feature, not two different
  * UIs), but limited to one scenario's overlay subtree (`scenarios.<id>`)
- * instead of the whole config file. Editing here never touches the base
- * network, so there's nothing to sync against a live structured config: the
- * overlay text is the whole story.
+ * instead of the whole config file. Nothing here touches disk — "Save"
+ * updates this session's in-memory overlay (`scenarioStore.overlays`) only;
+ * "Download full YAML" is the one way to get a complete, ready-to-run config
+ * out of an edited scenario.
  */
 export function ScenarioYamlPane({ scenarioId, baseScenarioId, onClose, onSaved }: Props) {
   const theme = useThemeStore((s) => s.theme);
-  // Bumped by any scenario write, from any source (see scenarioStore.refresh
-  // and AppShell's/this pane's own onSaved wiring) -- used below to refetch
-  // this pane's content when a *different* editor (e.g. the Properties
-  // panel) changes the same scenario while this pane is sitting open.
+  // Bumped by any scenario write, from any source (see scenarioStore's
+  // applyOverlays and this pane's own onSaved wiring) -- used below to
+  // refetch this pane's content when a *different* editor (e.g. the
+  // Properties panel) changes the same scenario while this pane is open.
   const revision = useScenarioStore((s) => s.revision);
+  const updateScenario = useScenarioStore((s) => s.updateScenario);
   const [value, setValue] = useState("");
   const [baseline, setBaseline] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const isSimulating = useSimulationStore((s) => s.isRunning);
   const isSweeping = useSweepRunStore((s) => s.sweeping);
@@ -55,7 +58,8 @@ export function ScenarioYamlPane({ scenarioId, baseScenarioId, onClose, onSaved 
     if (isDirtyRef.current) return;
     setLoadError(null);
     setLoading(true);
-    fetchScenarioSource(scenarioId)
+    const overlay = useScenarioStore.getState().overlays[scenarioId] ?? {};
+    fetchScenarioSource(scenarioId, overlay)
       .then((resp) => {
         setValue(resp.yaml);
         setBaseline(resp.yaml);
@@ -78,15 +82,37 @@ export function ScenarioYamlPane({ scenarioId, baseScenarioId, onClose, onSaved 
     setSaving(true);
     try {
       await updateScenario(scenarioId, value);
-      toast.success(`Scenario "${scenarioId}" saved`);
+      toast.success(`Scenario "${scenarioId}" updated`);
       onSaved?.(scenarioId);
       onClose();
     } catch (err) {
       toast.error(
-        `Could not save scenario: ${err instanceof Error ? err.message : String(err)}`,
+        `Could not update scenario: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDownloadFullYaml = async () => {
+    setDownloading(true);
+    try {
+      const overlay = useScenarioStore.getState().overlays[scenarioId] ?? {};
+      const resp = await renderFullYaml(scenarioId, overlay);
+      const blob = new Blob([resp.yaml], { type: "text/yaml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${scenarioId}.yaml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Downloaded ${scenarioId}.yaml`);
+    } catch (err) {
+      toast.error(
+        `Could not render full YAML: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -160,6 +186,16 @@ export function ScenarioYamlPane({ scenarioId, baseScenarioId, onClose, onSaved 
       </div>
 
       <div className="flex justify-end gap-2 p-3 border-t border-border shrink-0">
+        <Button
+          id="download-full-scenario-yaml-btn"
+          onClick={() => void handleDownloadFullYaml()}
+          disabled={downloading || loading || !!loadError}
+          variant="muted"
+          size="sm"
+          title="Download the full config (base + this scenario's overlay) as one YAML file"
+        >
+          {downloading ? "Rendering…" : "Download full YAML"}
+        </Button>
         <Button onClick={onClose} variant="secondary" size="sm">
           Cancel
         </Button>

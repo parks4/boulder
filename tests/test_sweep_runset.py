@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from boulder.api.routes.sweep import _run_set_size, has_run_set, resolve_store_path
+from boulder.api.routes.sweep import has_run_set, resolve_store_path
+from boulder.runset import run_set_size
 
 
 def test_sweep_only_counts_cartesian():
     raw = {"sweep": {"T": {"values": [1, 2, 3]}, "P": {"values": [10, 20]}}}
-    assert _run_set_size(raw) == 6  # 3 × 2
+    assert run_set_size(raw) == 6  # 3 × 2
 
 
 def test_scenario_only_counts_entries():
     raw = {"scenarios": {"a": {}, "b": {}, "c": {}}}
     # BASELINE (the unmodified base) + 3 named entries = 4.
-    assert _run_set_size(raw) == 4
+    assert run_set_size(raw) == 4
 
 
 def test_union_not_cartesian():
@@ -24,7 +25,7 @@ def test_union_not_cartesian():
         "scenarios": {"hot": {}, "cold": {}},
     }
     # BASELINE + 2 global sweep points + 2 scenarios = 5 (not a cross product).
-    assert _run_set_size(raw) == 5
+    assert run_set_size(raw) == 5
 
 
 def test_scenario_local_sweep_multiplies_only_itself():
@@ -35,11 +36,11 @@ def test_scenario_local_sweep_multiplies_only_itself():
         }
     }
     # BASELINE (1) + plain (1) + swept's inner sweep (3) = 5.
-    assert _run_set_size(raw) == 5
+    assert run_set_size(raw) == 5
 
 
 def test_empty_is_zero():
-    assert _run_set_size({}) == 0
+    assert run_set_size({}) == 0
 
 
 def test_has_run_set_true_for_scenario_block():
@@ -51,19 +52,21 @@ def test_has_run_set_true_for_sweep_block():
     assert has_run_set({"sweeps": {"T": {"values": [1]}}}, None) is True
 
 
-def test_has_run_set_false_without_block_or_runner(tmp_path: Path):
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text("metadata: {}\n", encoding="utf-8")
-    assert has_run_set({}, str(cfg)) is False
+def test_has_run_set_false_without_a_block():
+    assert has_run_set({}, None) is False
 
 
-def test_has_run_set_true_for_local_run_sweep_script(tmp_path: Path):
+def test_has_run_set_ignores_a_local_run_sweep_script(tmp_path: Path):
+    """Run Sweep runs in-process now (no subprocess).
+
+    A host's own `run_sweep.py` script next to the config is no longer a
+    run-set source on its own; only an inline `scenarios:`/`sweep:`/`sweeps:`
+    block counts.
+    """
     cfg = tmp_path / "config.yaml"
     cfg.write_text("metadata: {}\n", encoding="utf-8")
     (tmp_path / "run_sweep.py").write_text("", encoding="utf-8")
-    # No inline scenarios:/sweep: block at all — the local runner script alone
-    # is enough (host-defined run-set, e.g. the CH4 reactor-map sandbox).
-    assert has_run_set({}, str(cfg)) is True
+    assert has_run_set({}, str(cfg)) is False
 
 
 def test_resolve_store_path_defaults_next_to_config(tmp_path: Path):

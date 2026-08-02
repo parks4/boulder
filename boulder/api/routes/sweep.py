@@ -1,31 +1,46 @@
-"""Run-sweep API: execute a config's ``sweeps:`` as a background batch job.
+"""Run-sweep API: execute a config's ``scenarios:``/``sweep:`` run-set.
 
-A sweep is a heavy, host-specific batch (build + solve every scenario, write the
-scenario store), so it is run out-of-process by invoking a ``run_sweep.py`` script
-located next to the config. Progress is parsed from the subprocess stdout
-(``scenario N/M``); the frontend polls :func:`sweep_status` and refreshes the
-Scenario Pane on completion.
+Runs in-process, in a background thread, reusing the exact same solve path
+``/api/simulations`` uses for a single run (:class:`~boulder.simulation_worker.
+SimulationWorker`) — one scenario after another, not a second bespoke
+pipeline. Progress is written into ``app.state.sweep_job`` as it goes; the
+frontend polls :func:`sweep_status` and refreshes the Scenario Pane on
+completion.
+
+The base config comes from the one-time startup snapshot
+(``app.state.preloaded_raw``, unchanged for the process lifetime); the
+scenario overlays come from the request body — the caller's (``scenarioStore``)
+current in-memory overlays map, since scenario authoring no longer writes to
+disk (see ``boulder.scenario_editor``). Only the *results* — the HDF5 scenario
+store — are written to disk here, same as before.
 
 Endpoints (prefix ``/api/sweep``):
   GET  ""        -> availability / scenario count / can_run / running
-  POST "/run"    -> start the sweep subprocess (409 if one is already running)
+  POST "/run"    -> start the sweep (409 if one is already running)
   GET  "/status" -> current job status (idle | running | done | error)
 """
 
 from __future__ import annotations
 
-import os
-import re
-import subprocess
-import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import h5py
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from ...cantera_converter import DualCanteraConverter, get_plugins
+from ...payload_store import write_payload
 from ...runset import resolve_store_path, run_set_size, sweeps_of
+from ...simulation_worker import SimulationWorker
+from ...sweep_runner import (
+    _mechanism_of,
+    existing_fingerprints,
+    prepare_scenario,
+    prune_stale_groups,
+)
 
 __all__ = ["has_run_set", "resolve_store_path", "router"]
 
@@ -35,60 +50,25 @@ router = APIRouter()
 class SweepRunRequest(BaseModel):
     """Body for ``POST /run``. Defaults match the plain "Run Sweep" click."""
 
-    #: Force a full recompute: set BOULDER_NO_CACHE=1 for the subprocess so a
-    #: cache-aware host runner discards its collection store and re-solves
-    #: every scenario instead of skipping unchanged ones.
+    #: The caller's current in-memory scenario overlays map
+    #: (``{scenario_id: overlay_dict}``) — see ``boulder.scenario_editor``.
+    scenarios: Dict[str, Any] = Field(default_factory=dict)
+    #: Force a full recompute: discard the collection store and re-solve every
+    #: scenario instead of skipping ones whose fingerprint is unchanged.
     no_cache: bool = False
-
-
-_SCENARIO_RE = re.compile(r"scenario\s+(\d+)\s*/\s*(\d+)", re.IGNORECASE)
-#: Captures the scenario id `sweep_runner.run()` already prints in parens,
-#: e.g. "scenario 3/8 (cold_feed)" or "scenario 3/8 (cold_feed): cached, skipped".
-_SCENARIO_ID_RE = re.compile(r"scenario\s+\d+\s*/\s*\d+\s*\(([^)]+)\)", re.IGNORECASE)
-_SCENARIO_SKIP_RE = re.compile(
-    r"scenario\s+\d+\s*/\s*\d+\s*\([^)]+\)\s*:\s*cached,\s*skipped", re.IGNORECASE
-)
-#: `boulder.staged_solver`'s per-stage progress log line, e.g.
-#: "Staged solve: stage 'default' (1/3, 3 reactors)".
-_STAGE_RE = re.compile(
-    r"Staged solve:\s*stage\s+'([^']*)'\s*\((\d+)\s*/\s*(\d+)", re.IGNORECASE
-)
-_RUNNER_NAME = "run_sweep.py"
-
-
-# Run-set sizing lives in boulder.runset (the reference implementation of the
-# scenarios:/sweep: union semantics) — the old local mirror is gone.
-_run_set_size = run_set_size
-
-
-def _local_runner_path_for(config_path: Optional[str]) -> Optional[Path]:
-    """Return the ``run_sweep.py`` next to *config_path*, if present."""
-    if not config_path:
-        return None
-    local = Path(config_path).resolve().parent / _RUNNER_NAME
-    return local if local.is_file() else None
 
 
 def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     """Return whether *raw* (the inheritance-resolved config) declares a run-set.
 
-    True when it has an inline ``scenarios:``/``sweep:``/``sweeps:`` block, or a
-    ``run_sweep.py`` sits next to the config (a host-defined run-set: the runner
-    script decides the cases — e.g. adaptive/bisection sweeps a static ``sweep:``
-    block can't express). Pure function of ``(raw, config_path)`` so both the
-    request-scoped sweep routes and the app-startup lifespan can share one
-    detection rule instead of re-deciding "is this a sweep config?" twice.
+    True when it has an inline ``scenarios:``/``sweep:``/``sweeps:`` block.
+    Pure function of ``raw`` so both the request-scoped sweep routes and the
+    app-startup lifespan can share one detection rule. ``config_path`` is
+    accepted for signature compatibility with existing callers; it is not
+    otherwise used (Run Sweep runs in-process now — there is no external
+    runner script to look for next to the config).
     """
-    if raw.get("scenarios") or sweeps_of(raw):
-        return True
-    return _local_runner_path_for(config_path) is not None
-
-
-def _local_runner_path(request: Request) -> Optional[Path]:
-    """Return the ``run_sweep.py`` next to the preloaded config, if present."""
-    return _local_runner_path_for(
-        getattr(request.app.state, "preloaded_config_path", None)
-    )
+    return bool(raw.get("scenarios") or sweeps_of(raw))
 
 
 def _has_run_set(request: Request) -> bool:
@@ -101,6 +81,17 @@ def _raw(request: Request) -> Dict[str, Any]:
     return getattr(request.app.state, "preloaded_raw", None) or {}
 
 
+def _merged_raw(request: Request, scenarios: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the base config snapshot with *scenarios* (the caller's overlays) merged in.
+
+    The base structure itself is the frozen startup snapshot — not re-read or
+    kept in sync with base-network edits, same as every other scenario route
+    in this module (see ``boulder.api.routes.scenarios._raw_base_config``).
+    """
+    base = {k: v for k, v in _raw(request).items() if k != "scenarios"}
+    return {**base, "scenarios": scenarios}
+
+
 def _store_path(request: Request) -> Optional[Path]:
     """Return the collection store the run-set writes to (request-scoped wrapper)."""
     return resolve_store_path(
@@ -108,56 +99,31 @@ def _store_path(request: Request) -> Optional[Path]:
     )
 
 
-def _runner_command(request: Request) -> Optional[Dict[str, Any]]:
-    """Resolve how to run the run-set.
-
-    A ``run_sweep.py`` next to the config, or a host-registered ``sweep_runner``
-    command. Returns ``{argv, cwd}`` or None.
-    """
-    cfg_path = getattr(request.app.state, "preloaded_config_path", None)
-    if not cfg_path:
-        return None
-    cfg = Path(cfg_path).resolve()
-    local = cfg.parent / _RUNNER_NAME
-    if local.is_file():
-        return {
-            "argv": [sys.executable, _RUNNER_NAME, cfg.name, "--no-plot"],
-            "cwd": str(cfg.parent),
-        }
-    from ...cantera_converter import get_plugins  # noqa: PLC0415
-
-    runner = getattr(get_plugins(), "sweep_runner", None)
-    if runner:
-        return {
-            "argv": [sys.executable, *runner, str(cfg), "--no-plot"],
-            "cwd": str(cfg.parent),
-        }
-    return None
-
-
 @router.get("")
 async def sweep_info(request: Request) -> Dict[str, Any]:
-    """Report whether a run-set (scenarios and/or sweep) can be run."""
+    """Report whether a run-set (scenarios and/or sweep) can be run.
+
+    Reflects the config's startup snapshot — a scenario created in this
+    session but not yet included in a run request isn't counted here (purely
+    informational; the actual run in :func:`sweep_run` always uses whatever
+    overlays the caller sends).
+    """
     has = _has_run_set(request)
-    n = _run_set_size(_raw(request))
-    cmd = _runner_command(request)
+    n = run_set_size(_raw(request))
     job = getattr(request.app.state, "sweep_job", None)
     running = bool(job and job.get("status") == "running")
 
     if not has:
         reason = "No scenarios or sweep in this config"
-    elif cmd is None:
-        reason = "No scenario runner available"
     elif n > 0:
         reason = f"Run {n} scenarios"
     else:
-        # Host-defined run-set (run_sweep.py decides the cases).
-        reason = f"Run the scenario sweep ({_RUNNER_NAME})"
+        reason = "Run the scenario sweep"
 
     return {
         "available": has,
         "n_scenarios": n,
-        "can_run": has and cmd is not None,
+        "can_run": has,
         "reason": reason,
         "running": running,
         # ``--sweep`` GUI mode → frontend defaults the split button to Run Sweep.
@@ -171,12 +137,13 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
 async def sweep_run(
     request: Request, body: SweepRunRequest = SweepRunRequest()
 ) -> Dict[str, Any]:
-    """Start the run-set subprocess for the preloaded config.
+    """Run the run-set in-process, one scenario at a time.
 
     ``no_cache=true`` forces every scenario to re-solve from scratch.
     """
-    cmd = _runner_command(request)
-    if not _has_run_set(request) or cmd is None:
+    raw = _merged_raw(request, body.scenarios)
+    total = run_set_size(raw)
+    if total == 0:
         raise HTTPException(
             status_code=400, detail="No runnable run-set for this config"
         )
@@ -185,12 +152,16 @@ async def sweep_run(
     if job and job.get("status") == "running":
         raise HTTPException(status_code=409, detail="A sweep is already running")
 
-    total = _run_set_size(_raw(request))
     # Point the server at the store the run-set writes so the Scenario Pane shows
     # the results on refresh — even when the config declares no scenario_store.
-    store = _store_path(request)
-    if store is not None:
-        request.app.state.scenario_store_path = str(store)
+    store = resolve_store_path(
+        raw, getattr(request.app.state, "preloaded_config_path", None)
+    )
+    if store is None:
+        raise HTTPException(
+            status_code=400, detail="Could not resolve a scenario store path"
+        )
+    request.app.state.scenario_store_path = str(store)
     state: Dict[str, Any] = {
         "status": "running",
         "current": 0,
@@ -200,94 +171,142 @@ async def sweep_run(
         # Keyed by scenario id, e.g. {"cold_feed": {"stage": 1, "stage_total": 3}}.
         # A scenario id's presence here *is* "currently being solved" — a
         # deliberate map rather than a single "current scenario" scalar so a
-        # future parallel sweep runner can hold more than one entry at once
-        # without changing this shape.
+        # future parallel sweep could hold more than one entry at once without
+        # changing this shape.
         "scenario_progress": {},
-        # Most recent non-empty stdout line from the runner, verbatim — the
-        # frontend shows it under the "Calculating…" spinner so a long solve
-        # says *what* it is doing, not just that it is busy.
+        # Most recent progress line, verbatim — the frontend shows it under
+        # the "Calculating…" spinner so a long solve says *what* it is doing.
         "last_line": None,
     }
     request.app.state.sweep_job = state
-    # Surface on the server console by default — at least that the run started.
-    cache_note = " (no-cache: re-solving everything)" if body.no_cache else ""
-    print(
-        f"[sweep] starting {total} run(s){cache_note}: {' '.join(cmd['argv'])}",
-        flush=True,
-    )
+    print(f"[sweep] starting {total} run(s)", flush=True)
 
     def _worker() -> None:
         try:
-            env = os.environ.copy()
-            if body.no_cache:
-                env["BOULDER_NO_CACHE"] = "1"
-            proc = subprocess.Popen(
-                cmd["argv"],
-                cwd=cmd["cwd"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                env=env,
-            )
-            tail: list[str] = []
-            assert proc.stdout is not None
-            for raw_line in proc.stdout:
-                line = raw_line.rstrip()
-                match = _SCENARIO_RE.search(line)
-                if match:
-                    state["current"] = int(match.group(1))
-                    state["total"] = int(match.group(2))
-                    state["message"] = line.strip()
-                    if _SCENARIO_SKIP_RE.search(line):
-                        # Cache hit: instantaneous, never "calculating".
-                        state["scenario_progress"] = {}
-                    else:
-                        id_match = _SCENARIO_ID_RE.search(line)
-                        sid = id_match.group(1).strip() if id_match else None
-                        # Serial today: one scenario in flight, so replace the
-                        # whole map. A parallel runner would add/remove keys
-                        # here instead of replacing.
-                        state["scenario_progress"] = (
-                            {
-                                sid: {
-                                    "stage": None,
-                                    "stage_total": None,
-                                    "stage_id": None,
-                                }
-                            }
-                            if sid
-                            else {}
-                        )
-                else:
-                    stage_match = _STAGE_RE.search(line)
-                    if stage_match:
-                        for progress in state["scenario_progress"].values():
-                            progress["stage_id"] = stage_match.group(1)
-                            progress["stage"] = int(stage_match.group(2))
-                            progress["stage_total"] = int(stage_match.group(3))
-                if line:
+            from ...runset import expand_scenarios
+
+            store.parent.mkdir(parents=True, exist_ok=True)
+            if body.no_cache and store.exists():
+                store.unlink()
+            cached_fps = {} if body.no_cache else existing_fingerprints(store)
+
+            runs = expand_scenarios(raw)
+            run_ids = {sid for sid, _ in runs}
+            mechanism = _mechanism_of(raw)
+            n_cached = 0
+            for i, (sid, cfg) in enumerate(runs):
+                config, mech_name, fingerprint = prepare_scenario(cfg, None)
+                label = str((cfg.get("metadata") or {}).get("scenario_name") or sid)
+                state["current"] = i + 1
+
+                if cached_fps.get(sid) == fingerprint:
+                    n_cached += 1
+                    line = f"scenario {i + 1}/{total} ({sid}): cached, skipped"
+                    state["scenario_progress"] = {}
+                    state["message"] = line
                     state["last_line"] = line
-                    tail.append(line)
-                    del tail[:-30]
-                    # Echo the runner's progress to the server console.
                     print(f"[sweep] {line}", flush=True)
-            proc.wait()
-            state["returncode"] = proc.returncode
-            # The last scenario processed may not have ended with a "cached,
-            # skipped" line clearing it — nothing is "calculating" once the
-            # subprocess itself has exited, one way or another.
+                    with h5py.File(str(store), "a") as handle:
+                        attrs = handle[sid].attrs
+                        attrs["label"] = label
+                        attrs["order"] = int(i)
+                    continue
+
+                line = f"scenario {i + 1}/{total} ({sid})"
+                state["scenario_progress"] = {
+                    sid: {"stage": None, "stage_total": None, "stage_id": None}
+                }
+                state["message"] = line
+                state["last_line"] = line
+                print(f"[sweep] {line}", flush=True)
+
+                plugins = get_plugins()
+                converter_cls = plugins.converter_class or DualCanteraConverter
+                conv = converter_cls(mechanism=mech_name or None, plugins=plugins)
+                settings = config.get("settings") or {}
+                sim_t = float(settings.get("end_time") or 0.0) or 1.0
+                dt = float(settings.get("dt") or 0.0) or (sim_t / 10.0)
+
+                # Same solve path `/api/simulations` uses for a single run
+                # (SimulationWorker) -- one backend, not a sweep-specific
+                # reimplementation. Poll instead of blocking synchronously so
+                # per-stage progress (staged solves) still streams to the UI.
+                started = time.perf_counter()
+                scenario_worker = SimulationWorker()
+                scenario_worker.start_simulation(conv, config, sim_t, dt)
+                while True:
+                    progress = scenario_worker.get_progress()
+                    if progress.n_stages:
+                        state["scenario_progress"] = {
+                            sid: {
+                                "stage": progress.stages_done,
+                                "stage_total": progress.n_stages,
+                                "stage_id": (
+                                    progress.completed_stage_ids[-1]
+                                    if progress.completed_stage_ids
+                                    else None
+                                ),
+                            }
+                        }
+                    if progress.is_complete or progress.error_message:
+                        break
+                    time.sleep(0.3)
+                if not progress.is_complete:
+                    raise RuntimeError(
+                        progress.error_message or f"scenario {sid!r} failed"
+                    )
+
+                gui = {
+                    "status": "complete",
+                    "is_running": False,
+                    "is_complete": True,
+                    "error_message": None,
+                    "times": progress.times,
+                    "reactors_series": progress.reactors_series,
+                    "reactor_reports": progress.reactor_reports,
+                    "connection_reports": progress.connection_reports,
+                    "code_str": progress.code_str,
+                    "summary": progress.summary,
+                    "sankey_links": progress.sankey_links,
+                    "sankey_nodes": progress.sankey_nodes,
+                    "elapsed_time": time.perf_counter() - started,
+                    "updated_nodes": progress.updated_nodes,
+                    "updated_connections": progress.updated_connections,
+                }
+                stored_mech = conv.mechanism
+                write_payload(store, gui, stored_mech, group=sid, fresh=False)
+                with h5py.File(str(store), "a") as handle:
+                    attrs = handle[sid].attrs
+                    attrs["label"] = label
+                    attrs["order"] = int(i)
+                    attrs["fingerprint"] = fingerprint
+                    attrs["computed_at"] = float(time.time())
+
+            stale = prune_stale_groups(store, run_ids)
+            if stale:
+                print(
+                    f"[sweep] pruned {len(stale)} stale scenario group(s): "
+                    f"{', '.join(stale)}",
+                    flush=True,
+                )
+
+            with h5py.File(str(store), "a") as handle:
+                cfg_path = getattr(request.app.state, "preloaded_config_path", None)
+                handle.attrs["map_config"] = Path(cfg_path).name if cfg_path else ""
+                handle.attrs["mechanism"] = mechanism
+                handle.attrs["mechanism_name"] = (
+                    Path(mechanism).name if mechanism else ""
+                )
+                handle.attrs["created_at"] = float(time.time())
+
             state["scenario_progress"] = {}
             state["last_line"] = None
-            if proc.returncode == 0:
-                state["status"] = "done"
-                state["message"] = "Sweep complete"
-                print(f"[sweep] complete — {state['total']} run(s)", flush=True)
-            else:
-                state["status"] = "error"
-                state["message"] = "\n".join(tail[-8:]) or f"exited {proc.returncode}"
-                print(f"[sweep] FAILED (exit {proc.returncode})", flush=True)
+            state["status"] = "done"
+            state["message"] = "Sweep complete"
+            print(f"[sweep] complete — {total} run(s)", flush=True)
         except Exception as exc:  # noqa: BLE001
+            state["scenario_progress"] = {}
+            state["last_line"] = None
             state["status"] = "error"
             state["message"] = str(exc)
             print(f"[sweep] FAILED: {exc}", flush=True)

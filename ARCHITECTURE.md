@@ -152,9 +152,9 @@ Two **profiles** of this one encoding:
 |---|---|---|
 | File | `<cache>/<fp>/result.h5` (+ `meta.json` carries config_snapshot) | `results/<map>_scenarios.h5` |
 | Holds | one result (1..n reactors, groups `r0`,`r1`,…) | many single-reactor results, one group per scenario |
-| Producer / reader | `result_cache.save_result` / `load_result*` | `sweep_runner.py` (or a host `run_sweep.py`) / `api/routes/scenarios.py` |
+| Producer / reader | `result_cache.save_result` / `load_result*` | `api/routes/sweep.py` (GUI) or `sweep_runner.py` (CLI) / `api/routes/scenarios.py` |
 
-#### Run-set expansion and the generic sweep runner
+#### Run-set expansion and the sweep runners (GUI in-process, CLI out-of-process)
 
 `runset.py` is the reference implementation of the STONE `scenarios:`/`sweep:` semantics
 (STONE_SPECIFICATIONS.md §14): `expand_scenarios` (union run-set, id-keyed `deep_merge`, sweep-path
@@ -163,14 +163,21 @@ endpoint uses — same module, so the count can never drift from the expansion),
 `sweep_axis_values`, `resolve_store_path`, and `load_yaml_with_inheritance` (`from:` chains;
 `scenarios:` is deliberately not inherited, `sweep:` is).
 
-`sweep_runner.py` (`python -m boulder.sweep_runner <config.yaml>`) is the generic out-of-process
-runner behind the Run Sweep button: expand → skip runs whose per-scenario fingerprint is unchanged
-(incremental cache; `BOULDER_NO_CACHE` recreates the store) → solve via `DualCanteraConverter` →
-`write_payload` one group per scenario → prune groups whose id left the run-set. Host packages that
-need process setup (mechanism search paths), mechanism-path resolution, or extra per-scenario KPI
-attrs register their own thin wrapper via `plugins.sweep_runner` and pass the `setup` /
-`resolve_mechanism` / `scenario_attrs` hooks to `sweep_runner.run`; sweep-id naming is customized via
-`plugins.sweep_symbols`.
+The GUI's Run Sweep button (`api/routes/sweep.py`) runs **in-process**, in a background thread:
+`expand_scenarios` the caller's base-config snapshot ⊕ its current `scenarios` (the frontend's
+in-memory `scenarioStore.overlays` — scenario authoring never touches disk, see
+`boulder/scenario_editor.py`) → skip runs whose per-scenario fingerprint is unchanged (incremental
+cache; `no_cache` in the request recreates the store) → solve each one through the exact same
+`SimulationWorker` a plain "Run Simulation" uses (no separate solve implementation) →
+`write_payload` one group per scenario → prune groups whose id left the run-set.
+
+`sweep_runner.py` (`python -m boulder.sweep_runner <config.yaml>`) is a separate, disk-based,
+out-of-process runner for headless/CLI use — the GUI route above does not call it. Host packages
+needing process setup (mechanism search paths), mechanism-path resolution, or extra per-scenario KPI
+attrs for a *CLI* run pass their own `setup` / `resolve_mechanism` / `scenario_attrs` hooks directly to
+`sweep_runner.run`; sweep-id naming is customized via `plugins.sweep_symbols`. `plugins.sweep_runner`
+(a subprocess-argv override) is no longer consulted by anything — it backed only the GUI route's old
+out-of-process invocation, which the in-process rewrite above replaced.
 
 Both call `payload_store.gui_payload_from_solution_array` to rebuild the same `SimulationResults` the
 GUI renders. `CACHE_VERSION` (in `result_cache.py`) gates cache entries; `PAYLOAD_SCHEMA` (== the root

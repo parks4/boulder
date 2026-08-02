@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  BASELINE_SCENARIO_ID,
   clearScenarioCache as apiClearScenarioCache,
   createScenario as apiCreateScenario,
   deleteScenario as apiDeleteScenario,
@@ -9,48 +10,40 @@ import {
   renameScenario as apiRenameScenario,
   updateScenario as apiUpdateScenario,
   type ScenarioMeta,
+  type ScenarioOverlay,
 } from "@/api/scenarios";
-import { fetchPreloadedConfig } from "@/api/configs";
 import type { ConfigConnection, ConfigNode } from "@/types/config";
-import { useConfigStore } from "./configStore";
 import { useSimulationStore } from "./simulationStore";
 import { useSelectionStore } from "./selectionStore";
 
-/**
- * Scenario authoring (create/update/rename/delete) writes straight to the
- * config file on disk, bypassing the in-memory graph entirely — so the YAML
- * pane's `originalYaml` snapshot (fetched once on load) goes stale the
- * moment a scenario changes. Re-fetch and push just that snapshot into
- * `configStore` (not the whole `config`, which would clobber any unsaved
- * node/connection edits) so the editor picks it up on its next refresh.
- */
-async function resyncConfigYaml(): Promise<void> {
-  try {
-    const resp = await fetchPreloadedConfig();
-    if (resp.preloaded && resp.yaml !== undefined) {
-      useConfigStore.getState().setOriginalYaml(resp.yaml, resp.filename);
-    }
-  } catch {
-    // Best-effort — the YAML pane just keeps showing its last-known text.
-  }
+function idsFromOverlays(overlays: Record<string, ScenarioOverlay>): string[] {
+  const ids = Object.keys(overlays);
+  return ids.length ? [BASELINE_SCENARIO_ID, ...ids] : [];
 }
 
 interface ScenarioState {
   available: boolean;
   scenarios: ScenarioMeta[];
-  /** Every scenario id in the config, computed or not — see `authored_ids`. */
+  /** Every scenario id, computed or not -- derived from `overlays`. */
   authoredIds: string[];
+  /**
+   * This session's in-memory scenario overlays -- the sole source of truth
+   * for scenario authoring now that it no longer touches disk. Seeded once
+   * from the server's startup snapshot (the first `refresh()`) and mutated
+   * locally from then on via `applyOverlays`; the only way any of this
+   * reaches disk is the Scenario YAML pane's "Download full YAML" button.
+   */
+  overlays: Record<string, ScenarioOverlay>;
+  overlaysSeeded: boolean;
   /** Unix seconds the store was written; drives the "computed X ago" label. */
   createdAt?: number;
   activeId: string | null;
   loading: boolean;
   error: string | null;
   /**
-   * Bumped by every `refresh()` (including the ones create/update/rename/
-   * delete already trigger internally) — listen to this instead of
-   * `scenarios` when you only care "did something about the scenarios
-   * change", e.g. to re-fetch unrelated derived info like Run Sweep's
-   * scenario count.
+   * Bumped by every `refresh()`/`applyOverlays()` call — listen to this
+   * instead of `scenarios`/`overlays` when you only care "did something
+   * about the scenarios change", e.g. to re-fetch unrelated derived info.
    */
   revision: number;
 
@@ -74,17 +67,25 @@ interface ScenarioState {
   setActive: (id: string) => Promise<void>;
   /**
    * Fetch `id`'s effective node/connection properties (base ⊕ overlay) into
-   * `previewNodes`/`previewConnections`. Called by `setActive` for every
-   * selection, so callers normally don't need to call this directly.
+   * `previewNodes`/`previewConnections`, using this store's own current
+   * overlay for `id`. Called by `setActive` for every selection, so callers
+   * normally don't need to call this directly.
    */
   loadPreview: (id: string) => Promise<void>;
   /**
-   * Create a new scenario overlay (blank, or cloned from `baseId`) and mark
-   * it active for editing. Throws on failure (id collision, no config file,
-   * bad YAML) so callers can show the error inline.
+   * Apply a scenario-mutation response's overlays map — every mutator below
+   * calls this. Exposed so a caller that mutates overlays directly through
+   * the API (e.g. the Properties panel's per-entity save) can fold its
+   * result back into this store without duplicating the bookkeeping.
    */
-  createScenario: (id: string, baseId?: string) => Promise<void>;
-  /** Save edits to a scenario overlay's YAML text. */
+  applyOverlays: (overlays: Record<string, ScenarioOverlay>) => void;
+  /**
+   * Create a new scenario overlay (blank, or cloned from `baseId`) and mark
+   * it active for editing. Throws on failure (id collision, bad base id) so
+   * callers can show the error inline.
+   */
+  createScenario: (id: string, baseId?: string, description?: string) => Promise<void>;
+  /** Apply edits to a scenario overlay's YAML text. */
   updateScenario: (id: string, yaml: string) => Promise<void>;
   /** Rename a scenario's id. */
   renameScenario: (id: string, newId: string) => Promise<void>;
@@ -98,6 +99,8 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   available: false,
   scenarios: [],
   authoredIds: [],
+  overlays: {},
+  overlaysSeeded: false,
   activeId: null,
   loading: false,
   error: null,
@@ -112,56 +115,65 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   refresh: async () => {
     try {
       const resp = await listScenarios();
-      set((s) => ({
-        available: resp.available,
-        scenarios: resp.scenarios ?? [],
-        authoredIds: resp.authored_ids ?? [],
-        createdAt: resp.created_at ?? undefined,
-        revision: s.revision + 1,
-      }));
+      set((s) => {
+        // The server's `authored_overlays` is its startup snapshot -- only
+        // the seed for this store's own state, never applied again after
+        // the first call, or every refresh would clobber local edits with
+        // stale disk content.
+        const overlays = s.overlaysSeeded ? s.overlays : resp.authored_overlays ?? {};
+        return {
+          available: resp.available,
+          scenarios: resp.scenarios ?? [],
+          overlays,
+          overlaysSeeded: true,
+          authoredIds: idsFromOverlays(overlays),
+          createdAt: resp.created_at ?? undefined,
+          revision: s.revision + 1,
+        };
+      });
     } catch {
       // No store / API not ready: the pane simply stays hidden.
       set((s) => ({
         available: false,
         scenarios: [],
-        authoredIds: [],
         revision: s.revision + 1,
       }));
     }
   },
 
-  createScenario: async (id, baseId) => {
-    await apiCreateScenario(id, baseId);
+  applyOverlays: (overlays) => {
+    set((s) => ({
+      overlays,
+      overlaysSeeded: true,
+      authoredIds: idsFromOverlays(overlays),
+      revision: s.revision + 1,
+    }));
+  },
+
+  createScenario: async (id, baseId, description) => {
+    const resp = await apiCreateScenario(get().overlays, id, baseId, description);
+    get().applyOverlays(resp.overlays);
     set({ activeId: id });
-    // The scenario config now exists but has no precomputed trajectory yet
-    // (that needs a Run Sweep) — refresh so it shows up as a clone base and
-    // Run Sweep's scenario count picks it up, even though `scenarios` (the
-    // HDF5-derived list) won't include it until a sweep actually runs.
-    await get().refresh();
-    await resyncConfigYaml();
   },
 
   updateScenario: async (id, yaml) => {
-    await apiUpdateScenario(id, yaml);
-    await get().refresh();
-    await resyncConfigYaml();
+    const resp = await apiUpdateScenario(get().overlays, id, yaml);
+    get().applyOverlays(resp.overlays);
   },
 
   renameScenario: async (id, newId) => {
-    await apiRenameScenario(id, newId);
+    const resp = await apiRenameScenario(get().overlays, id, newId);
+    get().applyOverlays(resp.overlays);
     if (get().activeId === id) set({ activeId: newId });
-    await get().refresh();
-    await resyncConfigYaml();
   },
 
   deleteScenario: async (id) => {
-    const resp = await apiDeleteScenario(id);
+    const resp = await apiDeleteScenario(get().overlays, id);
+    get().applyOverlays(resp.overlays);
     if (get().activeId === id) set({ activeId: null });
     if (get().previewId === id) {
       set({ previewId: null, previewNodes: null, previewConnections: null, previewError: null });
     }
-    await get().refresh();
-    await resyncConfigYaml();
     return { cachePurged: resp.cache_purged };
   },
 
@@ -219,8 +231,9 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   loadPreview: async (id) => {
     const seq = get().previewSeq + 1;
     set({ previewSeq: seq, previewLoading: true, previewError: null });
+    const overlay = id === BASELINE_SCENARIO_ID ? {} : get().overlays[id] ?? {};
     try {
-      const preview = await fetchScenarioPreview(id);
+      const preview = await fetchScenarioPreview(id, overlay);
       if (get().previewSeq !== seq) return; // superseded by a newer selection
       set({
         previewId: id,

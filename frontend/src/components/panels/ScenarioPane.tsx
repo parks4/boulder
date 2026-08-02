@@ -267,7 +267,7 @@ export function ScenarioPane() {
                   ].join(" ")}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate">{s?.label ?? row.id}</span>
+                    <span className="font-medium truncate">{row.id}</span>
                     {isCalculating ? (
                       <span className="shrink-0 text-[10px] text-primary animate-pulse">
                         Calculating…
@@ -284,6 +284,15 @@ export function ScenarioPane() {
                       </span>
                     )}
                   </div>
+                  {/* Descriptive scenario_name, when it adds anything beyond
+                      the id -- often identical/inherited across scenarios,
+                      which made every row look the same (the id, always
+                      unique, is the primary label above). */}
+                  {s?.label && s.label !== row.id && (
+                    <div className="text-[10px] text-muted-foreground truncate">
+                      {s.label}
+                    </div>
+                  )}
                   {s?.reactor_mode && (
                     <div className="text-[10px] text-muted-foreground">
                       {s.reactor_mode}

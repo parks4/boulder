@@ -24,6 +24,7 @@ export function AddScenarioModal({ open, onClose, onCreated }: Props) {
   const createScenario = useScenarioStore((s) => s.createScenario);
   const [id, setId] = useState("");
   const [baseId, setBaseId] = useState(BLANK);
+  const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (!open) return null;
@@ -40,11 +41,16 @@ export function AddScenarioModal({ open, onClose, onCreated }: Props) {
     }
     setSubmitting(true);
     try {
-      await createScenario(trimmed, baseId === BLANK ? undefined : baseId);
+      await createScenario(
+        trimmed,
+        baseId === BLANK ? undefined : baseId,
+        description.trim() || undefined,
+      );
       toast.success(`Scenario "${trimmed}" created`);
       onCreated(trimmed);
       setId("");
       setBaseId(BLANK);
+      setDescription("");
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
@@ -73,6 +79,20 @@ export function AddScenarioModal({ open, onClose, onCreated }: Props) {
             placeholder="e.g. C1T"
             className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input border border-border text-foreground"
             autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleSubmit();
+            }}
+          />
+        </label>
+
+        <label className="block text-xs text-muted-foreground">
+          Description (optional)
+          <input
+            id="scenario-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Case 1 max: H2-NG (25 %vol H2)"
+            className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input border border-border text-foreground"
             onKeyDown={(e) => {
               if (e.key === "Enter") void handleSubmit();
             }}
