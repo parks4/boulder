@@ -6,6 +6,7 @@ registers all API routes, and serves the React frontend in production.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import time
@@ -130,7 +131,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 original_yaml = _f.read()
             actual_yaml_path = cleaned
 
-            normalized = runner_cls.normalize(config)
+            # `normalize()` mutates its argument in place (see
+            # `boulder.config.normalize_config`) -- deep-copy first so
+            # `preloaded_raw` above stays the pristine, un-normalized snapshot
+            # its own comment promises (the Run Sweep button's base config).
+            normalized = runner_cls.normalize(copy.deepcopy(config))
             validated = runner_cls.validate(normalized)
 
             app.state.preloaded_config = validated
