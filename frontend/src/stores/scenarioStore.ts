@@ -60,6 +60,18 @@ interface ScenarioState {
   previewError: string | null;
   /** Internal: guards against a stale response landing after a newer selection. */
   previewSeq: number;
+  /**
+   * Internal: guards against a stale `refresh()` response landing after a
+   * newer one. Needed because `refresh()` is called from several overlapping
+   * places during a sweep — the mid-sweep progressive refresh fires on every
+   * `current` advance, on top of the final one when the whole sweep finishes
+   * — so two in-flight requests racing is the normal case here, not an edge
+   * case. Without this, an older request that happens to resolve later wins
+   * and overwrites the newer (more complete) list, which is exactly how the
+   * last-finished scenario in a sweep could sit at "Not computed yet" even
+   * though the store already had its result.
+   */
+  refreshSeq: number;
 
   /** Fetch the scenario list for the active store (no-op-safe if none). */
   refresh: () => Promise<void>;
@@ -111,10 +123,14 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   previewLoading: false,
   previewError: null,
   previewSeq: 0,
+  refreshSeq: 0,
 
   refresh: async () => {
+    const seq = get().refreshSeq + 1;
+    set({ refreshSeq: seq });
     try {
       const resp = await listScenarios();
+      if (get().refreshSeq !== seq) return; // superseded by a newer refresh()
       set((s) => {
         // The server's `authored_overlays` is its startup snapshot -- only
         // the seed for this store's own state, never applied again after
@@ -132,6 +148,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
         };
       });
     } catch {
+      if (get().refreshSeq !== seq) return;
       // No store / API not ready: the pane simply stays hidden.
       set((s) => ({
         available: false,
