@@ -207,6 +207,60 @@ def test_host_runner_is_called_once_even_if_it_raises_a_type_error() -> None:
     assert len(calls) == 1, "runner was invoked more than once"
 
 
+def test_a_host_runner_sweep_reaches_a_terminal_status(tmp_path: Path) -> None:
+    """The job must end 'done', not sit at 'running' forever.
+
+    The host owns the store, so this path skips Boulder's own finalisation --
+    easy to skip the terminal bookkeeping with it and leave the Scenario pane
+    polling a finished sweep indefinitely.
+    """
+    import time
+    from unittest.mock import patch
+
+    import h5py
+    import pytest as _pytest
+
+    _pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from boulder.api.main import create_app
+    from boulder.runner import BoulderRunner
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+        "network:\n- id: feed\n  Reservoir:\n    temperature: 300\n"
+        "    composition: 'CH4:1'\n"
+        'sweep:\n  runner: "pkg.mod:run"\n',
+        encoding="utf-8",
+    )
+
+    def _runner(store_path: Path, progress: Any = None) -> None:
+        with h5py.File(str(store_path), "w") as handle:
+            handle.create_group("a").create_dataset("payload_json", data=b"{}")
+
+    app = create_app()
+    client = TestClient(app)
+    client.__enter__()
+    app.state.preloaded_config_path = str(cfg)
+    app.state.preloaded_raw = BoulderRunner.load(str(cfg))
+    try:
+        import boulder.cantera_converter as cc
+
+        with patch.object(cc, "resolve_dotted_path", return_value=_runner):
+            resp = client.post("/api/sweep/run", json={})
+            assert resp.status_code == 200, resp.text
+            deadline = time.time() + 10.0
+            while time.time() < deadline:
+                if app.state.sweep_job.get("status") in ("done", "error"):
+                    break
+                time.sleep(0.02)
+
+        assert app.state.sweep_job.get("status") == "done", app.state.sweep_job
+    finally:
+        client.__exit__(None, None, None)
+
+
 def test_host_runner_receives_progress_when_it_asks_for_it() -> None:
     from boulder.api.routes import sweep as sweep_route
 
