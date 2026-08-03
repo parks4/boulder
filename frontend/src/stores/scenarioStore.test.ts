@@ -58,6 +58,7 @@ describe("scenarioStore", () => {
       previewLoading: false,
       previewError: null,
       previewSeq: 0,
+      refreshSeq: 0,
     });
   });
 
@@ -351,5 +352,48 @@ describe("scenarioStore", () => {
     expect(useScenarioStore.getState().previewNodes).toEqual([
       { id: "outlet", type: "OutletSink", properties: { pressure: 300000 } },
     ]);
+  });
+
+  it("an older in-flight refresh() cannot clobber a newer one's result", async () => {
+    // sweepStore calls refresh() from two overlapping places during a sweep:
+    // a progressive mid-sweep refresh every time `current` advances, plus a
+    // final one once the whole job reaches "done". Two in-flight requests
+    // racing is the normal case here, not an edge case -- and nothing
+    // guarantees network order matches call order. If the *older* call's
+    // response happens to resolve *after* the newer one's, it must be
+    // dropped, or the last-finished scenario in a sweep can sit at
+    // "Not computed yet" even though the store already fetched its result.
+    let resolveFirst: (v: unknown) => void = () => {};
+    const firstPromise = new Promise((resolve) => {
+      resolveFirst = resolve;
+    });
+    mockListScenarios.mockImplementationOnce(() => firstPromise); // older call
+    mockListScenarios.mockImplementationOnce(() =>
+      Promise.resolve({
+        // newer call: 2 scenarios, one of them freshly finished
+        available: true,
+        scenarios: [
+          { id: "A", t0_K: 300, label: "A" },
+          { id: "B", t0_K: 310, label: "B" },
+        ],
+        authored_ids: ["BASELINE", "A", "B"],
+        authored_overlays: {},
+      }),
+    );
+
+    const older = useScenarioStore.getState().refresh(); // mid-sweep progressive refresh
+    const newer = useScenarioStore.getState().refresh(); // sweep-done refresh, started later
+    // The older call's response lands last -- e.g. it was issued while the
+    // server was busy solving the final scenario and got queued behind it.
+    resolveFirst({
+      available: true,
+      scenarios: [{ id: "A", t0_K: 300, label: "A" }], // stale: missing "B"
+      authored_ids: ["BASELINE", "A"],
+      authored_overlays: {},
+    });
+    await Promise.all([older, newer]);
+
+    // The newer call's complete list must win, regardless of resolution order.
+    expect(useScenarioStore.getState().scenarios.map((s) => s.id)).toEqual(["A", "B"]);
   });
 });
