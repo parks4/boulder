@@ -106,7 +106,7 @@ def _run_sweep(client: TestClient, app: Any) -> None:
 
     with (
         patch(
-            "boulder.api.routes.sweep.SimulationWorker",
+            "boulder.simulation_worker.SimulationWorker",
             side_effect=lambda: _FakeWorker(),
         ),
         patch(

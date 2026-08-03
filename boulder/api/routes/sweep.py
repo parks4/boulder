@@ -34,12 +34,12 @@ from pydantic import BaseModel, Field
 from ...cantera_converter import DualCanteraConverter, get_plugins
 from ...payload_store import write_payload
 from ...runset import resolve_store_path, run_set_size, sweeps_of
-from ...simulation_worker import SimulationWorker
 from ...sweep_runner import (
     _mechanism_of,
     existing_fingerprints,
     prepare_scenario,
     prune_stale_groups,
+    solve_scenario,
 )
 
 __all__ = ["has_run_set", "resolve_store_path", "router"]
@@ -240,23 +240,16 @@ async def sweep_run(
                 state["last_line"] = line
                 print(f"[sweep] {line}", flush=True)
 
-                conv = converter_cls(mechanism=mech_name or None, plugins=plugins)
-                settings = config.get("settings") or {}
-                sim_t = float(settings.get("end_time") or 0.0) or 1.0
-                dt = float(settings.get("dt") or 0.0) or (sim_t / 10.0)
-
-                # Same solve path `/api/simulations` uses for a single run
-                # (SimulationWorker) -- one backend, not a sweep-specific
-                # reimplementation. Poll instead of blocking synchronously so
-                # per-stage progress (staged solves) still streams to the UI.
-                started = time.perf_counter()
-                scenario_worker = SimulationWorker()
-                scenario_worker.start_simulation(conv, config, sim_t, dt)
-                while True:
-                    progress = scenario_worker.get_progress()
+                # One solve path shared with the CLI runner -- same
+                # SimulationWorker a plain "Run Simulation" uses, and one
+                # payload builder, so a scenario's stored result does not
+                # depend on which button produced it. `progress_cb` is how this
+                # route stays able to publish per-stage progress while the
+                # solve runs.
+                def _publish(progress: Any, _sid: str = sid) -> None:
                     if progress.n_stages:
                         state["scenario_progress"] = {
-                            sid: {
+                            _sid: {
                                 "stage": progress.stages_done,
                                 "stage_total": progress.n_stages,
                                 "stage_id": (
@@ -266,38 +259,20 @@ async def sweep_run(
                                 ),
                             }
                         }
-                    if progress.is_complete or progress.error_message:
-                        break
-                    time.sleep(0.3)
-                if not progress.is_complete:
-                    raise RuntimeError(
-                        progress.error_message or f"scenario {sid!r} failed"
-                    )
 
-                gui = {
-                    "status": "complete",
-                    "is_running": False,
-                    "is_complete": True,
-                    "error_message": None,
-                    "times": progress.times,
-                    "reactors_series": progress.reactors_series,
-                    "reactor_reports": progress.reactor_reports,
-                    "connection_reports": progress.connection_reports,
-                    "code_str": progress.code_str,
-                    "summary": progress.summary,
-                    "sankey_links": progress.sankey_links,
-                    "sankey_nodes": progress.sankey_nodes,
-                    "elapsed_time": time.perf_counter() - started,
-                    "updated_nodes": progress.updated_nodes,
-                    "updated_connections": progress.updated_connections,
-                }
+                gui, conv_mechanism, conv = solve_scenario(
+                    config,
+                    mech_name,
+                    converter_cls=converter_cls,
+                    progress_cb=_publish,
+                )
                 # `conv.mechanism` is whatever bare name/spec the converter was
                 # constructed with -- resolving it (again) to a real, absolute
                 # path is exactly what `resolve_mechanism` is for; `conv`
                 # itself never updates `.mechanism` after resolving it
                 # internally to load its own `ct.Solution`, so skipping this
                 # would hand `write_payload` an unresolved name it can't load.
-                stored_mech = resolve_mechanism(conv.mechanism)
+                stored_mech = resolve_mechanism(conv_mechanism)
                 write_payload(store, gui, stored_mech, group=sid, fresh=False)
                 # Host KPI attrs (`plugins.scenario_attrs`) -- the numbers the
                 # Scenario pane's Sweep Results plot offers as axes. Computed
