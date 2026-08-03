@@ -284,6 +284,14 @@ def run(
     if setup is not None:
         setup()
     plugins = get_plugins()
+    # Fall back to the host-registered hooks so a plain `python -m
+    # boulder.sweep_runner` records the same KPI attrs and persists the same
+    # per-scenario artifacts as the GUI's in-process sweep, which reads these
+    # straight off the plugin registry. An explicit argument always wins.
+    if scenario_attrs is None:
+        scenario_attrs = getattr(plugins, "scenario_attrs", None)
+    if on_solved is None:
+        on_solved = getattr(plugins, "on_scenario_solved", None)
     _do_resolve = resolve_mechanism or _default_resolve_mechanism(plugins)
     _resolve = lambda name: _do_resolve(name) if name else name  # noqa: E731
     raw = load_yaml_with_inheritance(cfg_path)

@@ -190,6 +190,10 @@ async def sweep_run(
                 store.unlink()
             cached_fps = {} if body.no_cache else existing_fingerprints(store)
 
+            # Bound once: the host's KPI/artifact hooks are read per scenario
+            # below, and the registry is fixed for the process lifetime.
+            plugins = get_plugins()
+
             runs = expand_scenarios(raw)
             run_ids = {sid for sid, _ in runs}
             mechanism = _mechanism_of(raw)
@@ -236,7 +240,7 @@ async def sweep_run(
                 state["last_line"] = line
                 print(f"[sweep] {line}", flush=True)
 
-                conv = converter_cls(mechanism=mech_name or None, plugins=get_plugins())
+                conv = converter_cls(mechanism=mech_name or None, plugins=plugins)
                 settings = config.get("settings") or {}
                 sim_t = float(settings.get("end_time") or 0.0) or 1.0
                 dt = float(settings.get("dt") or 0.0) or (sim_t / 10.0)
@@ -295,12 +299,55 @@ async def sweep_run(
                 # would hand `write_payload` an unresolved name it can't load.
                 stored_mech = resolve_mechanism(conv.mechanism)
                 write_payload(store, gui, stored_mech, group=sid, fresh=False)
+                # Host KPI attrs (`plugins.scenario_attrs`) -- the numbers the
+                # Scenario pane's Sweep Results plot offers as axes. Computed
+                # before the h5 handle opens so a raising hook can't leave the
+                # store open, and best-effort for the same reason `on_solved`
+                # is: a KPI failure must not lose an already-solved scenario.
+                extra_attrs: Dict[str, Any] = {}
+                if plugins.scenario_attrs is not None:
+                    try:
+                        extra_attrs = plugins.scenario_attrs(sid, cfg, gui) or {}
+                    except Exception as exc:  # noqa: BLE001
+                        print(
+                            f"[sweep] WARNING: scenario_attrs hook failed for "
+                            f"'{sid}': {exc}",
+                            flush=True,
+                        )
                 with h5py.File(str(store), "a") as handle:
                     attrs = handle[sid].attrs
                     attrs["label"] = label
                     attrs["order"] = int(i)
                     attrs["fingerprint"] = fingerprint
                     attrs["computed_at"] = float(time.time())
+                    for key, value in extra_attrs.items():
+                        attrs[key] = value
+
+                # Let the host persist per-scenario artifacts keyed by this
+                # fingerprint -- e.g. the single-run result cache, so a later
+                # "Export" reuses this solve instead of re-solving. Runs on the
+                # in-process path too, not just the out-of-process runner:
+                # otherwise a host that registers it silently gets nothing from
+                # the GUI's Run Sweep button.
+                if plugins.on_scenario_solved is not None:
+                    try:
+                        from ...simulation_result import make_simulation_result
+
+                        plugins.on_scenario_solved(
+                            sid,
+                            config,
+                            conv,
+                            make_simulation_result(conv, config),
+                            fingerprint,
+                            gui,
+                            stored_mech,
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        print(
+                            f"[sweep] WARNING: on_scenario_solved hook failed "
+                            f"for '{sid}': {exc}",
+                            flush=True,
+                        )
 
             stale = prune_stale_groups(store, run_ids)
             if stale:

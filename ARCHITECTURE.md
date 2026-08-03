@@ -187,12 +187,77 @@ cache; `no_cache` in the request recreates the store) → solve each one through
 `write_payload` one group per scenario → prune groups whose id left the run-set.
 
 `sweep_runner.py` (`python -m boulder.sweep_runner <config.yaml>`) is a separate, disk-based,
-out-of-process runner for headless/CLI use — the GUI route above does not call it. Host packages
-needing process setup (mechanism search paths), mechanism-path resolution, or extra per-scenario KPI
-attrs for a *CLI* run pass their own `setup` / `resolve_mechanism` / `scenario_attrs` hooks directly to
-`sweep_runner.run`; sweep-id naming is customized via `plugins.sweep_symbols`. `plugins.sweep_runner`
-(a subprocess-argv override) is no longer consulted by anything — it backed only the GUI route's old
-out-of-process invocation, which the in-process rewrite above replaced.
+out-of-process runner for headless/CLI use — the GUI route above does not call it. `boulder --sweep --headless` invokes it by default; `plugins.sweep_runner` overrides that argv for a host whose CLI
+sweep is genuinely different. Sweep-id naming is customized via `plugins.sweep_symbols`.
+
+**Per-scenario host hooks fire on both paths.** Two seams let a host attach to each freshly solved
+scenario (cache hits fire neither):
+
+| Plugin field | Signature | Purpose |
+|---|---|---|
+| `scenario_attrs` | `(scenario_id, merged_config, gui_payload) -> dict` | Extra **scalar** attrs on the scenario's HDF5 group — the per-run KPIs the Scenario pane's Sweep Results plot offers as axes |
+| `on_scenario_solved` | `(scenario_id, config, converter, simulation_result, fingerprint, gui_payload, mechanism) -> None` | Persist per-scenario artifacts keyed by the same fingerprint — e.g. writing each scenario into the single-run result cache so a later "Export" reuses the sweep's work instead of re-solving |
+
+`sweep_runner.run()` also accepts both as arguments (an explicit argument wins; otherwise it falls
+back to the plugin fields), so the CLI and the GUI record identical attributes. Both are best-effort:
+a raising hook is caught and logged, never aborting the run.
+
+These were originally `run()` parameters only, which meant a host could reach them *solely* through
+an out-of-process runner. Once Run Sweep moved in-process and stopped launching one, a host that
+registered them silently got nothing from the GUI button — including, in Bloc's case, result-cache
+population, so "Export Calculation Note" re-solved every scenario. Anything a host must do per
+scenario belongs on these plugin fields, not on a subprocess entry point.
+
+The Sweep Results plot (`frontend/src/components/panels/SweepResultsPlot.tsx`) renders **nothing**
+until a store has at least two numeric per-scenario attrs to plot against each other. Boulder's own
+attrs (`label`, `fingerprint`, `mechanism*`) are strings, and `order` / `computed_at` /
+`schema_version` are explicitly excluded as bookkeeping — so the plot is invisible unless a host
+supplies KPIs via `scenario_attrs`. Names it renders nicely: `t0_K` (default X axis),
+`final_temperature_K`, `final_X_<species>` (grouped as Mole Fractions), `final_Y_<species>` (Mass
+Fractions).
+
+#### Why the sweep is sequential, and what parallelising it would take
+
+The in-process sweep solves scenarios **one at a time**. Its background thread exists so the API
+stays responsive during a long run (`/api/sweep/status` keeps answering) — *not* to overlap compute.
+
+Threads cannot overlap Cantera compute: **Cantera does not release the GIL** during
+`ReactorNet.step()`/`advance()`. Measured on Cantera 3.2.0, four identical ignition solves:
+sequential 1.11 s vs. four threads 1.10 s — **1.01×**. Adding a thread pool here would buy exactly
+nothing. Real parallelism requires **processes**, whose measured payoff depends on per-scenario cost
+(4 workers, 8 cores, Windows `spawn`):
+
+| per-scenario solve | speedup with 4 processes |
+|---|---|
+| 0.26 s | 0.63× (slower — pool startup dominates) |
+| 1.0 s | 1.70× |
+| 4.2 s | 3.21× |
+| 10.4 s | 3.72× |
+
+Worker startup costs ~1.3 s (re-import Cantera, re-parse the mechanism), paid once per pool rather
+than per scenario, so it amortises over a long sweep but makes parallelism a net loss for fast ones.
+
+Parallelism is **not needed today**, but the current design deliberately keeps the door open. Preserve
+these invariants:
+
+- **`scenario_progress` is a map keyed by scenario id, not a "current scenario" scalar.** It can
+  already describe several in-flight scenarios at once, so the `/api/sweep/status` contract would not
+  change.
+- **`order` is stored as an explicit attr**, so scenarios completing out of order stay presentable in
+  authored order.
+- **Keep HDF5 writes on one thread.** Concurrent writers corrupt an HDF5 file without SWMR. Workers
+  should return payloads and let the parent write them; writes are milliseconds against multi-second
+  solves, so serialising them costs effectively nothing.
+- **Keep the per-scenario hook return values plain data.** A converter holding a live Cantera
+  `Solution` cannot cross a process boundary. Anything needing Cantera — including mechanism
+  resolution — must finish inside the worker, which is why `scenario_attrs` returns scalars rather
+  than objects.
+- **Worker count must be configurable, not `cpu_count()`.** N workers hold N copies of the mechanism;
+  a large one makes memory, not cores, the binding constraint.
+
+Going multi-process would also restore the crash isolation that the in-process rewrite gave up: a
+Cantera segfault currently takes down the whole GUI server, where the old subprocess only lost the
+child.
 
 Both call `payload_store.gui_payload_from_solution_array` to rebuild the same `SimulationResults` the
 GUI renders. `CACHE_VERSION` (in `result_cache.py`) gates cache entries; `PAYLOAD_SCHEMA` (== the root
