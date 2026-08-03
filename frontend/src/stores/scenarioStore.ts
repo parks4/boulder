@@ -179,7 +179,21 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
 
   clearCache: async () => {
     const resp = await apiClearScenarioCache();
-    set({ activeId: null });
+    // Drop the preview with the selection, as `deleteScenario` already does.
+    // Otherwise the Properties panel keeps showing the last-selected
+    // scenario's overrides -- flagged as overrides -- with no scenario
+    // selected any more and nothing left in the store to justify them.
+    //
+    // The *base run's* result deliberately survives: this clears scenario
+    // results only (see the button's tooltip), so the graph's "computed"
+    // node tint still correctly reflects the base simulation still loaded.
+    set({
+      activeId: null,
+      previewId: null,
+      previewNodes: null,
+      previewConnections: null,
+      previewError: null,
+    });
     await get().refresh();
     return { cleared: resp.cleared };
   },
@@ -230,7 +244,20 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
 
   loadPreview: async (id) => {
     const seq = get().previewSeq + 1;
-    set({ previewSeq: seq, previewLoading: true, previewError: null });
+    // Drop the previous scenario's preview *before* awaiting. Keeping it would
+    // leave the Properties panel rendering another scenario's numbers under the
+    // newly selected one -- styled as an override, with nothing marking them as
+    // stale, so a value belonging to a different case reads as this one's.
+    // Consumers fall back to the base config's values instead, which are at
+    // least not attributed to the wrong scenario, until the real preview lands.
+    set({
+      previewSeq: seq,
+      previewLoading: true,
+      previewError: null,
+      previewId: null,
+      previewNodes: null,
+      previewConnections: null,
+    });
     const overlay = id === BASELINE_SCENARIO_ID ? {} : get().overlays[id] ?? {};
     try {
       const preview = await fetchScenarioPreview(id, overlay);
