@@ -245,7 +245,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ``run_sweep.py`` next to the config, or ``--sweep`` (BOULDER_SWEEP_MODE).
     # Reuses the same detection the Run Sweep button uses (routes.sweep) so a
     # config with a run-set shows its precomputed Scenario Pane on plain
-    # ``bloc config.yaml`` — no flag required.
+    # ``<host-cli> config.yaml`` — no flag required.
     try:
         store_env = os.environ.get("BOULDER_SCENARIO_STORE")
         if store_env and store_env.strip():

@@ -49,7 +49,7 @@ class CustomStageNetwork(Protocol):
       called.  Callers MUST handle ``None`` by falling back to generic
       per-reactor state sampling.
     * ``scalars`` SHOULD contain JSON-serialisable scalars only so it
-      can be written into Excel Calculation Notes without further coercion.
+      can be written into a spreadsheet report without further coercion.
     """
 
     @property

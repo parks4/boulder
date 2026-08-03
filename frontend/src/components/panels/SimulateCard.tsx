@@ -13,14 +13,14 @@ import { RunControl } from "./RunControl";
 import type { GuiActionMeta } from "@/types/guiAction";
 import { toast } from "sonner";
 
-//: The Calculation Note export embeds a light-background capture of the
-//: live network graph on its first sheet — this is the only GUI action
-//: that needs one.
+//: One host action embeds a light-background capture of the live network
+//: graph in its output; no other GUI action needs one, so it is matched by
+//: its registered action id.
 const CALC_NOTE_ACTION_ID = "bloc_export_calculation_note";
 
 /**
  * Capture the live Cytoscape graph as a light-background PNG (base64, no
- * data URI prefix) for the Calculation Note export. Returns null when no
+ * data URI prefix) for a host's report export. Returns null when no
  * graph is mounted yet, or the capture itself fails — the export still
  * proceeds, just without a sheet-1 network image.
  */

@@ -54,7 +54,7 @@ export function useSimulationSSE() {
           toast.warning(
             `Mass/energy conservation check failed at ${failingNodes.length} ` +
               `node(s): ${failingNodes.join(", ")}. See the Convergence tab for ` +
-              "each node. Calculation Note export is blocked until this is resolved.",
+              "each node. Report export is blocked until this is resolved.",
           );
         }
 

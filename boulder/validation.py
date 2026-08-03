@@ -104,7 +104,7 @@ class OutletPort(BaseModel):
 
 
 #: Locked STONE ``metadata:`` vocabulary.  Mandatory keys identify the
-#: scenario and are consumed by reporting code (calc_note, report, ...).
+#: scenario and are consumed by a host's reporting code.
 #: Optional keys cover documentation/provenance fields we standardise so
 #: report generators can rely on them.  Anything outside this vocabulary
 #: must live under ``metadata.extra:`` — this keeps the '# [unit] desc |
@@ -285,7 +285,7 @@ class NormalizedConfigModel(BaseModel):
     # Preserve top-level `output` block (flexible shape). Validation of its content
     # is handled by feature-specific parsers; we just carry it through here.
     output: Optional[Any] = None
-    #: Calculation Note / reporting export block (host-package metadata).
+    #: Reporting/export block (host-package metadata).
     export: Optional[Any] = None
     #: Staged-solving group definitions.
     #: ``{group_id: {stage_order, mechanism, solve, advance_time}}``

@@ -2,7 +2,7 @@
 
 :class:`SimulationResult` replaces the previous loose ``sim_extra`` dict and
 per-reactor back-references to plugin internals with a single dataclass that
-every downstream consumer — Calculation Note writer, figure generators, KPI
+every downstream consumer — a host's report writer, figure generators, KPI
 extractors, UI dashboard — can depend on.
 
 Construction
