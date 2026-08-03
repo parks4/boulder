@@ -164,9 +164,44 @@ def load_yaml_with_inheritance(path: "str | Path") -> dict:
 # ---------------------------------------------------------------------------
 
 
+#: Keys inside a ``sweep:``/``sweeps:`` block that configure the run-set rather
+#: than declare an axis. Filtered out of every axis-iterating code path.
+SWEEP_RESERVED_KEYS = frozenset({"runner"})
+
+
 def sweeps_of(block: dict) -> dict:
-    """Return the sweep block of a config/overlay, accepting ``sweep:`` or ``sweeps:``."""
-    return block.get("sweeps") or block.get("sweep") or {}
+    """Return a config/overlay's sweep **axes**, accepting ``sweep:`` or ``sweeps:``.
+
+    Reserved keys (:data:`SWEEP_RESERVED_KEYS`) are stripped, so every caller
+    that treats the result as ``{axis_name: axis_spec}`` stays correct as
+    non-axis configuration is added to the block.
+    """
+    raw = block.get("sweeps") or block.get("sweep") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if k not in SWEEP_RESERVED_KEYS}
+
+
+def sweep_runner_of(block: dict) -> Optional[str]:
+    """Return a config's declared host sweep runner, or ``None``.
+
+    ``sweep.runner`` is a dotted ``"package.module:callable"`` reference to a
+    host function that produces the run-set itself, for run-sets that no
+    declarative axis can express — a sweep whose points must be solved
+    *sequentially* (each warm-started from the last, e.g. tracing a combustor's
+    extinction branch), or whose length is not known in advance.
+
+    Declaring it in the config is deliberate: Boulder used to *guess*, running
+    any file literally named ``run_sweep.py`` sitting next to the config. That
+    coupled behaviour to a filename, was invisible in the config, and silently
+    stopped working when Run Sweep moved in-process. An explicit dotted path is
+    resolvable, greppable, and testable.
+    """
+    raw = block.get("sweeps") or block.get("sweep") or {}
+    if not isinstance(raw, dict):
+        return None
+    runner = raw.get("runner")
+    return str(runner) if runner else None
 
 
 def sweep_axis_values(axis_spec: dict) -> list:
@@ -416,33 +451,58 @@ def _expand_sweep_block(
         explicit_symbol = axis_spec.get("symbol")
         if explicit_symbol:
             return str(explicit_symbol)
-        path = str(axis_spec.get("path", ""))
+        # A multi-target axis labels itself from its *first* path, so the
+        # scenario id stays short and stable no matter how many nodes it drives.
+        raw_path = axis_spec.get("path")
+        first = (
+            raw_path[0]
+            if isinstance(raw_path, (list, tuple)) and raw_path
+            else raw_path
+        )
+        path = str(first or "")
         leaf = path.rsplit(".", 1)[-1] if path else axis_name
         return symbols.get(leaf) or symbols.get(axis_name) or axis_name
 
     axes = []
     for axis_name, axis_spec in sweeps_block.items():
-        axis_path = axis_spec.get("path") if isinstance(axis_spec, dict) else None
+        raw_path = axis_spec.get("path") if isinstance(axis_spec, dict) else None
         axis_values = (
             sweep_axis_values(axis_spec) if isinstance(axis_spec, dict) else None
         )
-        if not axis_path or not axis_values:
+        if not raw_path or not axis_values:
             raise ValueError(
                 f"sweep.{axis_name} must be a dict with 'path' and either "
                 f"'values: [...]' or 'min'/'max'/'num'; got {axis_spec!r}"
             )
-        axis_path = _resolve_sweep_path(
-            axis_name, axis_path, base_for_paths, schema_entry
+        # ``path`` may name several targets, so one swept value can drive
+        # parameters that are physically the same quantity but live on
+        # different nodes -- e.g. an inlet reservoir's temperature and the
+        # isothermal reactor's initial temperature fed by it. Solving those as
+        # one axis is the whole point: sweeping only one of them would be
+        # physically inconsistent, and a cross-product of the two would mostly
+        # produce nonsense combinations.
+        raw_paths = (
+            list(raw_path) if isinstance(raw_path, (list, tuple)) else [raw_path]
         )
-        axes.append((_axis_label(axis_name, axis_spec), axis_path, list(axis_values)))
+        if not all(isinstance(p, str) and p for p in raw_paths):
+            raise ValueError(
+                f"sweep.{axis_name}.path must be a dotted string or a list of "
+                f"them; got {raw_path!r}"
+            )
+        axis_paths = tuple(
+            _resolve_sweep_path(axis_name, p, base_for_paths, schema_entry)
+            for p in raw_paths
+        )
+        axes.append((_axis_label(axis_name, axis_spec), axis_paths, list(axis_values)))
 
     points: List[Tuple[str, dict]] = []
     for combo in product(*[a[2] for a in axes]):
         label_parts: List[str] = []
         patch: dict = {}
-        for (label, axis_path, _), value in zip(axes, combo, strict=True):
+        for (label, axis_paths, _), value in zip(axes, combo, strict=True):
             label_parts.append(f"{label}={value}")
-            _set_dotted(patch, axis_path, value)
+            for axis_path in axis_paths:
+                _set_dotted(patch, axis_path, value)
         points.append(("__".join(label_parts), patch))
     return points
 
