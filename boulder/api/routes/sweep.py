@@ -33,7 +33,12 @@ from pydantic import BaseModel, Field
 
 from ...cantera_converter import DualCanteraConverter, get_plugins
 from ...payload_store import write_payload
-from ...runset import resolve_store_path, run_set_size, sweeps_of
+from ...runset import (
+    resolve_store_path,
+    run_set_size,
+    sweep_runner_of,
+    sweeps_of,
+)
 from ...sweep_runner import (
     _mechanism_of,
     existing_fingerprints,
@@ -61,14 +66,58 @@ class SweepRunRequest(BaseModel):
 def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     """Return whether *raw* (the inheritance-resolved config) declares a run-set.
 
-    True when it has an inline ``scenarios:``/``sweep:``/``sweeps:`` block.
+    True when it declares one **in the config**: an inline
+    ``scenarios:``/``sweep:``/``sweeps:`` block, or a ``sweep.runner`` dotted
+    path naming a host function that produces the run-set itself.
+
     Pure function of ``raw`` so both the request-scoped sweep routes and the
-    app-startup lifespan can share one detection rule. ``config_path`` is
-    accepted for signature compatibility with existing callers; it is not
-    otherwise used (Run Sweep runs in-process now — there is no external
-    runner script to look for next to the config).
+    app-startup lifespan share one detection rule. ``config_path`` is accepted
+    for signature compatibility; it is deliberately *not* consulted — Boulder
+    used to treat any file named ``run_sweep.py`` next to the config as a
+    run-set source, which coupled behaviour to a filename and was invisible in
+    the config itself. Declare ``sweep.runner`` instead.
     """
-    return bool(raw.get("scenarios") or sweeps_of(raw))
+    return bool(raw.get("scenarios") or sweeps_of(raw) or sweep_runner_of(raw))
+
+
+def _run_host_sweep(dotted: str, state: Dict[str, Any], store: Path) -> None:
+    """Resolve and call a ``sweep.runner`` callable, updating *state* around it.
+
+    The callable owns the run-set: it decides the points, solves them and
+    writes them into the collection store (``boulder.payload_store``). It is
+    passed the store path and may accept an optional ``progress`` callable —
+    ``(done, total, message)`` — so a host that knows its point count can drive
+    the same status UI a declarative sweep does.
+    """
+    from ...cantera_converter import resolve_dotted_path
+
+    runner = resolve_dotted_path(dotted)
+    if not callable(runner):
+        raise TypeError(f"sweep.runner {dotted!r} resolved to a non-callable")
+
+    def _progress(done: int, total: int, message: str = "") -> None:
+        state["current"] = int(done)
+        if total:
+            state["total"] = int(total)
+        line = message or f"scenario {done}/{total or '?'}"
+        state["message"] = line
+        state["last_line"] = line
+
+    # Decide by signature, not by catching TypeError: a TypeError raised
+    # *inside* the runner would otherwise look like "wrong arity" and re-run
+    # it, writing the store twice.
+    import inspect
+
+    try:
+        accepts_progress = "progress" in inspect.signature(runner).parameters
+    except (TypeError, ValueError):  # builtins / C callables expose no signature
+        accepts_progress = False
+
+    print(f"[sweep] delegating to host runner {dotted}", flush=True)
+    if accepts_progress:
+        runner(store, progress=_progress)
+    else:
+        runner(store)
 
 
 def _has_run_set(request: Request) -> bool:
@@ -142,8 +191,9 @@ async def sweep_run(
     ``no_cache=true`` forces every scenario to re-solve from scratch.
     """
     raw = _merged_raw(request, body.scenarios)
+    host_runner = sweep_runner_of(raw)
     total = run_set_size(raw)
-    if total == 0:
+    if total == 0 and not host_runner:
         raise HTTPException(
             status_code=400, detail="No runnable run-set for this config"
         )
@@ -188,6 +238,17 @@ async def sweep_run(
             store.parent.mkdir(parents=True, exist_ok=True)
             if body.no_cache and store.exists():
                 store.unlink()
+
+            if host_runner:
+                # A host-produced run-set: points that no declarative axis can
+                # express (solved sequentially, each warm-started from the
+                # last, or of a length not known until extinction). The host
+                # writes the collection store itself; Boulder only resolves the
+                # callable and reports status. Runs in-process like every other
+                # sweep -- declaring the runner replaced *spawning* it.
+                _run_host_sweep(host_runner, state, store)
+                return
+
             cached_fps = {} if body.no_cache else existing_fingerprints(store)
 
             # Bound once: the host's KPI/artifact hooks are read per scenario

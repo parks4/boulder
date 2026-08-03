@@ -1384,6 +1384,55 @@ sweep:
 `sweep:` may appear at the top level (expanded on the base) **or inside a `scenarios:` entry**
 (expanded on that scenario only). Ids are suffixed `__<axis>=<value>`.
 
+#### One axis, several targets
+
+`path:` also accepts a **list**, so one swept value is written to every listed target:
+
+```yaml
+sweep:
+  inlet_temperature:
+    path:
+      - "network[id=fuel_air_mixture_tank].Reservoir.temperature"
+      - "network[id=stirred_reactor].IdealGasMoleReactor.initial.temperature"
+    values: [650, 700, 750]
+```
+
+Use this when the targets are the *same physical quantity* on different nodes — above, an inlet
+reservoir's temperature and the initial state of the isothermal (`energy: "off"`) reactor it feeds.
+They must move together: sweeping one alone is physically inconsistent, and giving them separate
+axes would cross-multiply into mostly nonsense combinations. It stays **one** axis — three values
+give three runs, not nine — and the scenario id is unchanged, labelled from the first path.
+
+### `sweep.runner:` — a host-produced run-set
+
+When no declarative axis can express the run-set, name a callable that produces it:
+
+```yaml
+sweep:
+  runner: "my_package.sweeps.combustor:run"
+```
+
+Reach for this only when the points cannot be enumerated up front:
+
+- they must be solved **sequentially**, each warm-started from the previous (continuing along a
+  branch, e.g. down to a combustor's extinction limit), or
+- the run-set's **length is only known at runtime** (stop when a condition is met).
+
+The callable receives the resolved collection-store path and writes the scenarios itself with
+`boulder.payload_store.write_payload`. It may declare an optional `progress` parameter —
+`(done, total, message)` — to drive the same status UI a declarative sweep does:
+
+```python
+def run(store_path, progress=None): ...
+```
+
+`runner` is a reserved key inside the block: it is never interpreted as an axis, and may sit
+alongside real axes. Boulder resolves and calls it **in-process**, like every other sweep.
+
+> **Note** — Boulder previously executed any file literally named `run_sweep.py` next to the config.
+> That is gone: it tied behaviour to a filename, was invisible in the config, and broke silently.
+> Declare `sweep.runner` instead.
+
 ### Run-set semantics (union)
 
 The run set is the **union**: the top-level `sweep:` points **⊎** each `scenarios:` entry (each
