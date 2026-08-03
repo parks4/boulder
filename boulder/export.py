@@ -1,7 +1,7 @@
 """Boulder export helpers.
 
 Provides :func:`points_from_streams` for extracting P&ID stream-point data
-from a post-solve config, intended for use in Excel Calculation Note "Points"
+from a post-solve config, intended for use in a host's spreadsheet report "Points"
 sheets or other structured report outputs.
 
 Design principle — Points vs. Reactor properties
@@ -45,7 +45,7 @@ def points_from_streams(
     and volumetric flow rates.
 
     This is the single source of truth for the "Points" section of the
-    Calculation Note.  The caller (e.g. the Excel builder) receives a list of
+    report.  The caller (e.g. a spreadsheet builder) receives a list of
     dicts that can be written as rows — one row per stream point.
 
     Parameters

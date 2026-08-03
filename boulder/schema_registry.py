@@ -54,13 +54,13 @@ class ReactorSchemaEntry:
         properties accepted under the reactor kind.
     categories:
         ``{"inputs": {category: [keys]}, "outputs": {category: [keys]}}``
-        — report-level grouping used by the Calculation Note.
+        — report-level grouping used by a host's report export.
     default_constraints:
         List of plain dicts ``{key, description, operator, threshold}``
         used as pass/fail criteria when the YAML does not declare any.
     variable_maps:
         ``{"inputs": {raw_key: (tag, unit, description)}, "outputs": {...}}``
-        — human-readable mapping used when the Calculation Note renders
+        — human-readable mapping used when a host's report renders
         variable columns.  Using tuples keeps this trivially JSON-serialisable
         and matches the legacy ``TF_*_VARIABLE_MAP`` shape one-for-one.
     reactor_class:

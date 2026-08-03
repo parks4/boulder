@@ -161,14 +161,14 @@ describe("SimulateCard", () => {
 
   it("syncs YAML before running a GUI export action, so the export reflects GUI edits", async () => {
     mockFetchGuiActions.mockResolvedValueOnce([
-      { id: "calc_note", label: "Export Calculation Note", requires_simulation: false, is_available: true },
+      { id: "report", label: "Export Report", requires_simulation: false, is_available: true },
     ]);
     render(<SimulateCard />);
     await act(async () => {});
     mockSyncYaml.mockClear();
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /export calculation note/i }));
+      fireEvent.click(screen.getByRole("button", { name: /export report/i }));
     });
 
     expect(mockSyncYaml).toHaveBeenCalled();
@@ -176,7 +176,7 @@ describe("SimulateCard", () => {
   });
 
   it("shows a scenario-count ETA for any action declaring estimated_seconds_per_scenario", async () => {
-    // Deliberately not a Calculation Note id/label — this must be driven
+    // Deliberately not the network-image action's id/label — this must be driven
     // purely by the generic field, with no plugin-specific knowledge here.
     mockFetchGuiActions.mockResolvedValueOnce([
       {

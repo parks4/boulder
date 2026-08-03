@@ -76,7 +76,8 @@ class StagedReactorNet:
 
         Use this when a function strictly requires a ``ct.ReactorNet`` (e.g.
         Sankey generation, ``draw()`` customisation, or ``_extract_node_data``
-        in ``calc_note``).  For most uses, prefer the facade methods directly.
+        in a host's report export).  For most uses, prefer the facade methods
+        directly.
         """
         return self._viz_network
 
