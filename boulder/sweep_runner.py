@@ -46,7 +46,6 @@ from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
 from .config import normalize_config
 from .payload_store import write_payload
 from .runset import expand_scenarios, load_yaml_with_inheritance, resolve_store_path
-from .simulation_worker import generate_connection_reports, generate_reactor_reports
 
 
 def _mechanism_of(raw: Dict[str, Any]) -> str:
@@ -135,22 +134,13 @@ def prepare_scenario(
     return config, mechanism, fingerprint
 
 
-def solve_scenario(
-    config: Dict[str, Any], mechanism: str
-) -> Tuple[Dict[str, Any], str, DualCanteraConverter]:
-    """Solve one normalized scenario config → (gui_payload, mechanism, converter).
+def solver_window(config: Dict[str, Any]) -> Tuple[float, float]:
+    """Return ``(simulation_time, time_step)`` for one scenario's solve.
 
-    The solved ``converter`` is returned (not discarded) so callers can build a
-    :class:`~boulder.simulation_result.SimulationResult` from it or hand it to
-    cache contributors — see the ``on_solved`` hook of :func:`run`. Public for
-    the same reason as :func:`prepare_scenario`.
+    Shared so the GUI and CLI sweeps cannot disagree about how long a scenario
+    runs — a silent divergence here would make the same scenario produce
+    different trajectories depending on which button solved it.
     """
-    started = time.perf_counter()
-    plugins = get_plugins()
-    converter_cls = plugins.converter_class or DualCanteraConverter
-    conv = converter_cls(mechanism=mechanism or None, plugins=plugins)
-    conv.build_network(config)
-
     settings = config.get("settings") or {}
     sim_t = float(settings.get("end_time") or 0.0)
     if sim_t <= 0.0:
@@ -165,33 +155,100 @@ def solve_scenario(
                 flush=True,
             )
     dt = float(settings.get("dt") or 0.0) or (sim_t / 10.0)
-    results, code = conv.run_streaming_simulation(
-        simulation_time=sim_t, time_step=dt, config=config
-    )
+    return sim_t, dt
 
-    gui = {
+
+def solve_scenario(
+    config: Dict[str, Any],
+    mechanism: str,
+    *,
+    converter_cls: Optional[Type[Any]] = None,
+    progress_cb: Optional[Callable[[Any], None]] = None,
+    poll_interval: float = 0.05,
+) -> Tuple[Dict[str, Any], str, DualCanteraConverter]:
+    """Solve one normalized scenario config → (gui_payload, mechanism, converter).
+
+    **The single solve path for a sweep scenario**, used by both this module's
+    CLI runner and the GUI's in-process route (``boulder.api.routes.sweep``).
+    Goes through :class:`~boulder.simulation_worker.SimulationWorker` — the same
+    class a plain "Run Simulation" uses — so a scenario's stored payload does
+    not depend on which button produced it.
+
+    It previously called ``build_network`` / ``run_streaming_simulation``
+    directly here while the GUI route drove ``SimulationWorker`` and assembled
+    its own payload. The two hand-built payloads had already drifted:
+    ``updated_nodes``/``updated_connections`` (the nodes a staged solve
+    synthesises during build, e.g. interface reservoirs) were real on the GUI
+    path and hard-coded ``None`` here, so the same scenario drew a different
+    network graph depending on its origin.
+
+    ``converter_cls`` overrides which converter solves the scenario. The GUI
+    passes ``app.state.converter_class`` — the same source ``/api/simulations``
+    reads, set by the CLI at startup — because a host need not populate the
+    entry-point plugin registry the same way; getting this wrong is what made
+    a host's mechanism names unresolvable (parks4/boulder#135). Defaults to
+    ``plugins.converter_class``, then :class:`DualCanteraConverter`.
+
+    ``progress_cb`` is called with each :class:`SimulationProgress` poll while
+    the solve runs — the GUI uses it to publish per-stage progress; the CLI
+    passes nothing. The solved ``converter`` is returned (not discarded) so
+    callers can build a :class:`~boulder.simulation_result.SimulationResult`
+    from it or hand it to cache contributors — see :func:`run`'s ``on_solved``.
+    """
+    from .simulation_worker import SimulationWorker  # noqa: PLC0415 — cycle
+
+    started = time.perf_counter()
+    plugins = get_plugins()
+    converter_cls = converter_cls or plugins.converter_class or DualCanteraConverter
+    conv = converter_cls(mechanism=mechanism or None, plugins=plugins)
+
+    sim_t, dt = solver_window(config)
+    worker = SimulationWorker()
+    worker.start_simulation(conv, config, sim_t, dt)
+    while True:
+        progress = worker.get_progress()
+        if progress_cb is not None:
+            progress_cb(progress)
+        if progress.is_complete or progress.error_message:
+            break
+        time.sleep(poll_interval)
+    if not progress.is_complete:
+        raise RuntimeError(progress.error_message or "scenario solve failed")
+
+    return gui_payload_from_progress(progress, started), conv.mechanism, conv
+
+
+def gui_payload_from_progress(progress: Any, started: float) -> Dict[str, Any]:
+    """Build the stored ``gui`` payload from a completed solve's progress.
+
+    One builder for both sweep paths — the shape a scenario's HDF5 group is
+    written from, and what the Scenario pane renders when the scenario is
+    opened. Keep it the *only* place this dict is assembled: two copies is
+    exactly how ``updated_nodes`` came to differ between GUI and CLI sweeps.
+    """
+    return {
         "status": "complete",
         "is_running": False,
         "is_complete": True,
         "error_message": None,
-        "times": results.get("time", []),
-        "reactors_series": results.get("reactors", {}),
-        # Same report generators the live GUI solve uses (simulation_worker) —
-        # a scenario opened from the Scenario Pane must show the same Thermo
-        # tab content as a plain "Run Simulation".
-        "reactor_reports": generate_reactor_reports(conv, results),
-        "connection_reports": generate_connection_reports(conv),
-        "code_str": code,
-        "summary": results.get("summary", []),
-        "sankey_links": results.get("sankey_links"),
-        "sankey_nodes": results.get("sankey_nodes"),
+        "times": progress.times,
+        "reactors_series": progress.reactors_series,
+        # Same report generators a live "Run Simulation" uses, so a scenario
+        # opened from the Scenario Pane shows the same Thermo tab content.
+        "reactor_reports": progress.reactor_reports,
+        "connection_reports": progress.connection_reports,
+        "code_str": progress.code_str,
+        "summary": progress.summary,
+        "sankey_links": progress.sankey_links,
+        "sankey_nodes": progress.sankey_nodes,
         # Wall-clock for build_network + solve, so a cached scenario can report
-        # what it cost to produce (the live GUI solve fills this in too).
+        # what it cost to produce.
         "elapsed_time": time.perf_counter() - started,
-        "updated_nodes": None,
-        "updated_connections": None,
+        # Nodes/edges the build synthesised (staged-solve interface reservoirs,
+        # post-build hook edges) — needed for the graph to match the solver.
+        "updated_nodes": progress.updated_nodes,
+        "updated_connections": progress.updated_connections,
     }
-    return gui, conv.mechanism, conv
 
 
 def existing_fingerprints(store: Path) -> Dict[str, str]:
@@ -284,6 +341,14 @@ def run(
     if setup is not None:
         setup()
     plugins = get_plugins()
+    # Fall back to the host-registered hooks so a plain `python -m
+    # boulder.sweep_runner` records the same KPI attrs and persists the same
+    # per-scenario artifacts as the GUI's in-process sweep, which reads these
+    # straight off the plugin registry. An explicit argument always wins.
+    if scenario_attrs is None:
+        scenario_attrs = getattr(plugins, "scenario_attrs", None)
+    if on_solved is None:
+        on_solved = getattr(plugins, "on_scenario_solved", None)
     _do_resolve = resolve_mechanism or _default_resolve_mechanism(plugins)
     _resolve = lambda name: _do_resolve(name) if name else name  # noqa: E731
     raw = load_yaml_with_inheritance(cfg_path)

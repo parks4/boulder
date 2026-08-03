@@ -82,11 +82,47 @@ class BoulderPlugins:
     config_transforms: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = field(
         default_factory=list
     )
-    #: Extra ``python`` args that run a host's scenario/sweep runner for the Run
-    #: Sweep button, invoked as ``[python, *sweep_runner, <config>, "--no-plot"]``.
-    #: e.g. ``["-m", "<host_pkg>.scenario_sweep"]``. Used when no ``run_sweep.py``
-    #: sits next to the config. Registered by an external plugin package.
+    #: Extra ``python`` args that run a host's scenario/sweep runner for
+    #: ``boulder --sweep --headless``, invoked as
+    #: ``[python, *sweep_runner, <config>]``.
+    #: e.g. ``["-m", "<host_pkg>.scenario_sweep"]``.
+    #:
+    #: .. deprecated::
+    #:    The GUI's Run Sweep button runs **in-process** and never spawns this
+    #:    (see :mod:`boulder.api.routes.sweep`), so a host that registers only
+    #:    this gets none of its behaviour in the GUI. Register
+    #:    :attr:`scenario_attrs` / :attr:`on_scenario_solved` instead — they
+    #:    fire on both the in-process and out-of-process paths. The CLI falls
+    #:    back to :mod:`boulder.sweep_runner` when this is unset.
     sweep_runner: Optional[List[str]] = None
+
+    #: ``(scenario_id, merged_config, gui_payload) -> dict`` of extra **scalar**
+    #: attributes recorded on each scenario's HDF5 group after it solves — the
+    #: per-run KPIs the Scenario pane's Sweep Results plot reads. Numeric values
+    #: become selectable plot axes; the plot stays hidden until at least two
+    #: exist. Conventional names it renders nicely: ``t0_K`` (default X axis),
+    #: ``final_temperature_K``, ``final_X_<species>`` (grouped as Mole
+    #: Fractions), ``final_Y_<species>`` (Mass Fractions).
+    #:
+    #: Same contract as :func:`boulder.sweep_runner.run`'s ``scenario_attrs``
+    #: argument, which defaults to this when not passed explicitly, so the GUI
+    #: and CLI record identical attributes.
+    scenario_attrs: Optional[
+        Callable[[str, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
+    ] = None
+
+    #: ``(scenario_id, config, converter, simulation_result, fingerprint,
+    #: gui_payload, mechanism) -> None`` called once per **freshly solved**
+    #: scenario (cache hits do not fire it), right after its payload is written.
+    #: Lets a host persist per-scenario artifacts keyed by the same fingerprint
+    #: used elsewhere — e.g. writing each scenario into the single-run result
+    #: cache so a later "Export" reuses the sweep's work instead of re-solving.
+    #: Exceptions are caught and logged: one scenario's artifact failure must
+    #: not abort the sweep.
+    #:
+    #: Same contract as :func:`boulder.sweep_runner.run`'s ``on_solved``
+    #: argument, which defaults to this when not passed explicitly.
+    on_scenario_solved: Optional[Callable[..., None]] = None
 
     #: Axis-name/path-leaf → symbol mapping used by
     #: :func:`boulder.runset.expand_scenarios` to label sweep points in

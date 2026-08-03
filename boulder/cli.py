@@ -164,7 +164,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "the web UI with the run-set already running (Run Sweep, not Run "
             "Simulation). With --headless: run-set runner only, no web UI — "
             "expand, solve every run, and serialize each into the collection "
-            "store via a host-registered sweep runner "
+            "store, using boulder.sweep_runner unless a host overrides it "
             "(BoulderPlugins.sweep_runner)."
         ),
     )
@@ -575,14 +575,16 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
             sys.exit(2)
         from .cantera_converter import get_plugins
 
-        runner = getattr(get_plugins(), "sweep_runner", None)
-        if not runner:
-            print(
-                "Error: no sweep runner registered (BoulderPlugins.sweep_runner). "
-                "Install a host plugin that provides one.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        # Boulder ships a perfectly good runner (`boulder.sweep_runner`, which
+        # has its own main()); a host only needs to override it when its sweep
+        # is genuinely different. Defaulting here means plain Boulder can run
+        # `--sweep --headless` standalone, and a host that registers the
+        # `scenario_attrs` / `on_scenario_solved` plugin hooks gets them applied
+        # by the default runner without providing an entry point at all.
+        runner = getattr(get_plugins(), "sweep_runner", None) or [
+            "-m",
+            "boulder.sweep_runner",
+        ]
         import subprocess
         from pathlib import Path as _Path
 

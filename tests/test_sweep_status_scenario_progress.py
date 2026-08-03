@@ -106,7 +106,7 @@ def test_scenario_progress_tracks_stage_then_moves_to_the_next_scenario(
         return w
 
     try:
-        with patch("boulder.api.routes.sweep.SimulationWorker", side_effect=_factory):
+        with patch("boulder.simulation_worker.SimulationWorker", side_effect=_factory):
             resp = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
             assert resp.status_code == 200, resp.text
 
@@ -157,7 +157,7 @@ def test_scenario_progress_clears_if_a_scenario_errors_mid_solve(
         return w
 
     try:
-        with patch("boulder.api.routes.sweep.SimulationWorker", side_effect=_factory):
+        with patch("boulder.simulation_worker.SimulationWorker", side_effect=_factory):
             resp = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
             assert resp.status_code == 200, resp.text
 

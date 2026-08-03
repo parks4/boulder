@@ -108,7 +108,7 @@ def test_sweep_run_reuses_the_cache_when_unchanged(tmp_path: Path) -> None:
         return _FakeWorker()
 
     try:
-        with patch("boulder.api.routes.sweep.SimulationWorker", side_effect=_factory):
+        with patch("boulder.simulation_worker.SimulationWorker", side_effect=_factory):
             resp1 = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
             assert resp1.status_code == 200, resp1.text
             _wait_until(lambda: app.state.sweep_job.get("status") == "done")
@@ -132,7 +132,7 @@ def test_sweep_run_no_cache_forces_a_full_recompute(tmp_path: Path) -> None:
         return _FakeWorker()
 
     try:
-        with patch("boulder.api.routes.sweep.SimulationWorker", side_effect=_factory):
+        with patch("boulder.simulation_worker.SimulationWorker", side_effect=_factory):
             resp1 = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
             assert resp1.status_code == 200, resp1.text
             _wait_until(lambda: app.state.sweep_job.get("status") == "done")
@@ -159,7 +159,7 @@ def test_sweep_run_rejects_a_second_run_while_one_is_in_flight(tmp_path: Path) -
         return w
 
     try:
-        with patch("boulder.api.routes.sweep.SimulationWorker", side_effect=_factory):
+        with patch("boulder.simulation_worker.SimulationWorker", side_effect=_factory):
             resp1 = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
             assert resp1.status_code == 200, resp1.text
             _wait_until(lambda: app.state.sweep_job.get("status") == "running")
@@ -200,7 +200,7 @@ def test_sweep_run_uses_app_state_converter_class_for_mechanism_resolution(
 
     try:
         with patch(
-            "boulder.api.routes.sweep.SimulationWorker",
+            "boulder.simulation_worker.SimulationWorker",
             side_effect=lambda: _FakeWorker(),
         ):
             resp = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
@@ -251,7 +251,7 @@ def test_sweep_run_stores_a_resolved_mechanism_not_convs_raw_attribute(
     try:
         with (
             patch(
-                "boulder.api.routes.sweep.SimulationWorker",
+                "boulder.simulation_worker.SimulationWorker",
                 side_effect=lambda: _FakeWorker(),
             ),
             patch(
