@@ -306,4 +306,50 @@ describe("scenarioStore", () => {
 
     expect(useScenarioStore.getState().previewId).toBe("B");
   });
+
+  it("clears the previous preview before awaiting the new one", async () => {
+    // Selecting a scenario used to leave the *previous* scenario's preview in
+    // place until the fetch resolved, so the Properties panel rendered another
+    // scenario's numbers under the new selection, styled as an override with
+    // nothing marking them stale. Measured at ~80 ms against a real model, but
+    // it scales with server load, and a wrong number presented as fact is the
+    // bug regardless of how briefly it shows.
+    mockFetchScenarioPreview.mockResolvedValueOnce({
+      scenario_id: "A",
+      nodes: [{ id: "outlet", type: "OutletSink", properties: { pressure: 200000 } }],
+      connections: [],
+    });
+    await useScenarioStore.getState().setActive("A");
+    expect(useScenarioStore.getState().previewNodes).toEqual([
+      { id: "outlet", type: "OutletSink", properties: { pressure: 200000 } },
+    ]);
+
+    // Now select another scenario whose preview has not resolved yet.
+    let resolveSecond: (v: unknown) => void = () => {};
+    mockFetchScenarioPreview.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSecond = resolve;
+        }),
+    );
+    const pending = useScenarioStore.getState().setActive("B");
+
+    const midFlight = useScenarioStore.getState();
+    expect(midFlight.previewLoading).toBe(true);
+    expect(midFlight.previewNodes).toBeNull();
+    expect(midFlight.previewConnections).toBeNull();
+    expect(midFlight.previewId).toBeNull();
+
+    resolveSecond({
+      scenario_id: "B",
+      nodes: [{ id: "outlet", type: "OutletSink", properties: { pressure: 300000 } }],
+      connections: [],
+    });
+    await pending;
+
+    expect(useScenarioStore.getState().previewId).toBe("B");
+    expect(useScenarioStore.getState().previewNodes).toEqual([
+      { id: "outlet", type: "OutletSink", properties: { pressure: 300000 } },
+    ]);
+  });
 });
