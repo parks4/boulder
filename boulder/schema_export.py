@@ -14,7 +14,7 @@ Requires the optional ``playwright`` extra::
 The one exported entry point, :func:`render_network_schema_png`, is a plain
 function (config path in, PNG path out) with no CLI-specific state, so it's
 reusable directly from other Python code — e.g. a Sphinx doc build wanting a
-network diagram for a gallery, or Bloc's Calculation Note export wanting a
+network diagram for a gallery, or a host's report export wanting a
 network image when running headless with no browser to capture from.
 """
 

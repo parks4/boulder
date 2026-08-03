@@ -79,7 +79,7 @@ class _StubConverter:
     """Records that it was actually constructed.
 
     Proves the sweep used `app.state.converter_class` (a host's own
-    converter, e.g. Bloc's) instead of silently falling back to plain
+    converter subclass) instead of silently falling back to plain
     `DualCanteraConverter`, which doesn't know how to resolve a host's own
     mechanism names and would fail for real (`CanteraError: findInputFile`)
     outside these mocked tests.
@@ -189,7 +189,7 @@ def test_sweep_run_uses_app_state_converter_class_for_mechanism_resolution(
 ) -> None:
     """A host's own converter class must be used to resolve mechanism names.
 
-    That class is set on `app.state` at startup (e.g. by Bloc's CLI) -- it
+    That class is set on `app.state` at startup by the host's CLI -- it
     must not be silently dropped in favor of plain `DualCanteraConverter`,
     which doesn't know a host's mechanism search convention and would fail
     for real (`CanteraError: findInputFile`) outside these mocks.

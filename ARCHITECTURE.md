@@ -204,7 +204,7 @@ a raising hook is caught and logged, never aborting the run.
 
 These were originally `run()` parameters only, which meant a host could reach them *solely* through
 an out-of-process runner. Once Run Sweep moved in-process and stopped launching one, a host that
-registered them silently got nothing from the GUI button — including, in Bloc's case, result-cache
+registered them silently got nothing from the GUI button — including, for one host, result-cache
 population, so "Export Calculation Note" re-solved every scenario. Anything a host must do per
 scenario belongs on these plugin fields, not on a subprocess entry point.
 
