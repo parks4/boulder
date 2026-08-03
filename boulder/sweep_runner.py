@@ -45,7 +45,12 @@ import h5py
 from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
 from .config import normalize_config
 from .payload_store import write_payload
-from .runset import expand_scenarios, load_yaml_with_inheritance, resolve_store_path
+from .runset import (
+    expand_scenarios,
+    load_yaml_with_inheritance,
+    resolve_store_path,
+    sweep_point_of,
+)
 
 
 def _mechanism_of(raw: Dict[str, Any]) -> str:
@@ -391,6 +396,12 @@ def run(
             attrs["order"] = int(i)
             attrs["fingerprint"] = fingerprint
             attrs["computed_at"] = float(time.time())
+            # A declarative sweep's axis values are the run's inputs, and the
+            # Sweep Results plot's natural X axis -- recorded here so the GUI
+            # and CLI stores carry the same attrs. A host hook may override.
+            for key, value in sweep_point_of(cfg).items():
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    attrs[key] = value
             if scenario_attrs is not None:
                 for key, value in (scenario_attrs(sid, cfg, gui) or {}).items():
                     attrs[key] = value

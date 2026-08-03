@@ -36,6 +36,7 @@ from ...payload_store import write_payload
 from ...runset import (
     resolve_store_path,
     run_set_size,
+    sweep_point_of,
     sweep_runner_of,
     sweeps_of,
 )
@@ -247,6 +248,15 @@ async def sweep_run(
                 # callable and reports status. Runs in-process like every other
                 # sweep -- declaring the runner replaced *spawning* it.
                 _run_host_sweep(host_runner, state, store)
+                # The host owns the store's contents, including its root
+                # attrs, so skip Boulder's own finalisation -- but *not* the
+                # terminal bookkeeping, or the UI would poll "running" forever
+                # against a finished sweep.
+                state["scenario_progress"] = {}
+                state["last_line"] = None
+                state["status"] = "done"
+                state["message"] = "Sweep complete"
+                print("[sweep] complete — host runner finished", flush=True)
                 return
 
             cached_fps = {} if body.no_cache else existing_fingerprints(store)
@@ -340,7 +350,15 @@ async def sweep_run(
                 # before the h5 handle opens so a raising hook can't leave the
                 # store open, and best-effort for the same reason `on_solved`
                 # is: a KPI failure must not lose an already-solved scenario.
-                extra_attrs: Dict[str, Any] = {}
+                # A declarative sweep's own axis values are the run's inputs;
+                # recording them makes the Sweep Results plot usable with no
+                # host code at all (they are its natural X axis). A host's
+                # `scenario_attrs` may add to or override them.
+                extra_attrs: Dict[str, Any] = {
+                    key: value
+                    for key, value in sweep_point_of(cfg).items()
+                    if isinstance(value, (int, float)) and not isinstance(value, bool)
+                }
                 if plugins.scenario_attrs is not None:
                     try:
                         extra_attrs = plugins.scenario_attrs(sid, cfg, gui) or {}

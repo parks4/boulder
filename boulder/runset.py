@@ -499,12 +499,34 @@ def _expand_sweep_block(
     for combo in product(*[a[2] for a in axes]):
         label_parts: List[str] = []
         patch: dict = {}
+        # Record each point's axis values under `metadata.sweep_point` as well
+        # as writing them into the network. They are the run's *inputs*, and a
+        # writer of the collection store turns the numeric ones into scenario
+        # attrs -- which is what gives the Scenario pane's Sweep Results plot
+        # an X axis without every host having to supply one. Recovering them by
+        # parsing the scenario id instead would be fragile.
+        sweep_point: dict = {}
         for (label, axis_paths, _), value in zip(axes, combo, strict=True):
             label_parts.append(f"{label}={value}")
+            sweep_point[label] = value
             for axis_path in axis_paths:
                 _set_dotted(patch, axis_path, value)
+        patch.setdefault("metadata", {})["sweep_point"] = sweep_point
         points.append(("__".join(label_parts), patch))
     return points
+
+
+def sweep_point_of(config: dict) -> Dict[str, Any]:
+    """Return a merged scenario config's ``metadata.sweep_point`` axis values.
+
+    Empty for a config that is not a sweep point (a named ``scenarios:``
+    overlay, or BASELINE).
+    """
+    meta = config.get("metadata")
+    if not isinstance(meta, dict):
+        return {}
+    point = meta.get("sweep_point")
+    return dict(point) if isinstance(point, dict) else {}
 
 
 def _resolve_sweep_path(
