@@ -1,12 +1,41 @@
 ______________________________________________________________________
 
-## name: boulder-scenario-cache-lifecycle description: >- GUI test procedure for Boulder's scenario cache lifecycle: Clear Cache, Run Sweep, Run Simulation, and how the Scenario Pane's "Not computed yet" state and the network graph's node tint (grey/blue) each track (or don't track) those actions. Use when the user asks to verify scenario caching end-to-end, check Run Sweep vs. Run Simulation consistency, or the Clear Cache button's effect on the Scenario Pane and graph tint.
+## name: boulder-scenario-cache-lifecycle description: >- GUI test procedure for Boulder's result-store lifecycle: Clear Cache, Run Sweep, Run Simulation, and how the Scenario Pane's "Not computed yet" state and the network graph's node tint (grey/blue) each track (or don't track) those actions. Use when the user asks to verify scenario caching end-to-end, check Run Sweep vs. Run Simulation consistency, or the Clear Cache button's effect on the Scenario Pane and graph tint.
 
-# Boulder scenario cache lifecycle (GUI test procedure)
+# Boulder result-store lifecycle (GUI test procedure)
 
-Step-by-step procedure for verifying Boulder's scenario/sweep cache behaves
+Step-by-step procedure for verifying Boulder's result store behaves
 correctly through the GUI. Written against a config with a `scenarios:`
 block, no host plugin required — pure Boulder built-in reactor kinds only.
+
+## One store, one lookup
+
+There is a **single** result store. Every solve lands in it — a whole
+sweep or a single run — because `runset.expand_scenarios` always yields at
+least one entry, so "single-shot" and "sweep" are the same code path at
+N=1 and N=3:
+
+```
+<config_dir>/.boulder-cache/<stem>/
+    BASE.h5 | BASELINE.h5 | <scenario_id>.h5     # one file per entry
+    artifacts/<scenario_id>/...
+```
+
+The **name** is the key; the `fingerprint` attr recorded under that name is
+the staleness check. Two consequences this procedure exists to verify:
+
+- Run Simulation and Run Sweep **see each other's work**. Solving BASELINE
+  either way produces one entry, and the other action reuses it.
+- An entry holds **one** result, the latest. Re-running an unchanged entry
+  is a hit; going *back* to a previous value re-solves. Keeping a value
+  around is what authoring a scenario is for.
+
+Historically these were two separate stores (a content-addressed
+`.boulder-cache/<fingerprint>/` for single runs, a name-addressed
+`<stem>_scenarios.h5` for run-sets) which disagreed permanently about
+BASELINE. If you are reading an older description of steps 5/7 expecting a
+cache *miss* and a never-updating pane row, that is the behaviour that was
+removed.
 
 ## Example config
 
@@ -30,11 +59,11 @@ boulder configs/cstr_residence_time_scenarios.yaml --no-open
    "Not computed yet".
 
 1. **Clear Cache, defensively.** The "Clear cache" button only appears
-   once a sweep has produced a collection store — on a genuinely fresh
-   config (no prior `*_scenarios.h5`), it's simply **absent**; that's
-   correct, not a bug. Skip straight to step 3. If it *is* present (a
-   store already exists from an earlier session), click it and confirm
-   every row still reads "Not computed yet" afterward.
+   once the store has entries — on a genuinely fresh config it is simply
+   **absent**; that's correct, not a bug. Skip to step 3. If present,
+   click it and confirm every row still reads "Not computed yet".
+   It is an **icon button** (eraser) with no text: find it by
+   `button[title^="Clear cache"]`, not by text content.
 
 1. **Run Sweep.** Use the dropdown next to "Run Simulation" → "Run Sweep"
    → click the (now relabeled) primary button. Once it completes:
@@ -46,71 +75,72 @@ boulder configs/cstr_residence_time_scenarios.yaml --no-open
      `window.__boulderCy.nodes().map(n => n.style('background-color'))`
      if canvas clicks aren't available to the agent.
 
-1. **Run Sweep again, unchanged.** Re-run it with nothing edited. Every
-   scenario — **including BASELINE** — must be skipped as a cache hit:
-   `computed_at`/`fingerprint` (`GET /api/scenarios`) stay byte-identical
-   to step 3, and the server console prints `cached, skipped` for all
-   three. See "BASELINE re-solves every time" below if this fails —
-   it's a real, previously-shipped bug with a one-line fix.
+1. **Run Sweep again, unchanged.** Every scenario — **including
+   BASELINE** — must be skipped as a cache hit: `computed_at`/
+   `fingerprint` (`GET /api/scenarios`) stay byte-identical to step 3, and
+   the server console prints `cached, skipped` for all three.
 
 1. **Select BASELINE, then Run Simulation.** Click the BASELINE row, then
-   the (relabeled) "Run Simulation" primary button. **Expect a real
-   (fast) re-solve, not a cache hit** — confirm via network inspection
-   that `POST /api/simulations/check-cache` returns `{"cached": false}`.
-   This is not a bug: Run Sweep's collection store and Run Simulation's
-   single-run result cache (`.boulder-cache/`) are separate stores in
-   plain Boulder. A host can unify them by registering
-   `plugins.on_scenario_solved` (see
-   `boulder.cantera_converter.BoulderPlugins.on_scenario_solved`'s
-   docstring) — without one, expect independent caches. The model solves
-   fast enough that this can *look* like a cache hit; don't rely on
-   wall-clock time as the check, use the network request.
+   switch the dropdown back to "Run Simulation" and click. **Expect a
+   cache HIT**: `POST /api/simulations/check-cache` returns
+   `{"cached": true}`, the server logs `Cache HIT (fingerprint …)`, and
+   `computed_at` is unchanged from step 3. This is the single store doing
+   its job — Run Simulation reuses the sweep's solve.
 
 1. **Clear Cache from the Scenario Pane.** Every row reverts to
-   "Not computed yet". **The graph's nodes do *not* turn grey** if a
-   result is still loaded/displayed (e.g. right after step 5) — that's
-   deliberate (see `scenarioStore.ts::clearCache`'s comment: "the *base
-   run's* result deliberately survives... so the graph's 'computed' node
-   tint still correctly reflects the base simulation still loaded").
-   Assert the Scenario Pane rows, not node color, for this step.
+   "Not computed yet" and `GET /api/scenarios` reports zero entries.
+   **The graph's nodes do *not* turn grey** if a result is still
+   loaded/displayed — that's deliberate (see `scenarioStore.ts::clearCache`:
+   the base run's result survives, so the tint still reflects the
+   simulation still on screen). Assert the pane rows, not node colour.
 
-1. **Run Simulation for BASELINE again.** **Known limitation, not
-   verified by this step as written:** the Scenario Pane's BASELINE row
-   does **not** update after a plain Run Simulation — it stays
-   "Not computed yet" indefinitely, because Run Simulation never writes
-   into the sweep's collection store (the Scenario Pane's only data
-   source). Only **Run Sweep** updates Scenario Pane rows. If you need
-   BASELINE's row to reflect a fresh solve, use Run Sweep (step 3), not
-   Run Simulation. (Tracked as a follow-up: unifying BASELINE's status
-   across both actions needs a design decision, not a one-line fix.)
+1. **Run Simulation again.** The **BASELINE row updates to "just now"**
+   within a couple of seconds, and `GET /api/scenarios` shows exactly one
+   entry, `BASELINE`. The other two stay "Not computed yet" — correct, they
+   were not solved.
 
-## Known issues found while writing this procedure
+   Two things are being checked here at once: that a plain run writes the
+   store under the *same name* a sweep uses, and that the pane re-fetches
+   on completion.
 
-### BASELINE re-solves every time, even unchanged (fixed)
+## Known issues found while running this procedure
 
-**Symptom:** step 4 shows `BASELINE` re-solving (a new `computed_at`/
-`fingerprint`) on *every* Run Sweep, while named scenarios correctly
-cache-hit. Only reproduces when the config's own collection store
-(`<stem>_scenarios.h5`, written next to the config) lands **inside a git
-working tree that also contains Boulder's own installed source** — e.g.
-testing from Boulder's own `configs/` directory with an editable
-(`pip install -e .`) install, exactly as this procedure does.
+### A plain run stored the base under a second name (fixed)
 
-**Root cause:** Boulder's cache fingerprint includes a "source identity"
-that hashes `git status --porcelain` + `git diff HEAD` for wherever the
-`boulder` package is installed from (`result_cache._source_identity`) —
-by design, so a code change busts the cache. The very first scenario ever
-solved for a new config is fingerprinted *before* its own collection
-store file exists on disk; every fingerprint computed afterward (store
-file now present as an untracked change) reflects a different git-dirty
-state. Whichever scenario solves first (always BASELINE) gets a
-fingerprint that can never match again — a permanent, self-inflicted,
-one-time cache-bust baked in by the very act of writing the store.
+**Symptom:** step 7 grows a phantom `BASE` row while the authored
+`BASELINE` row still reads "Not computed yet" — one result, two names.
 
-**Fix:** `*_scenarios.h5` is now in `.gitignore` (this file's own commit)
-— the store never appears in `git status`, so it can never perturb its
-own fingerprint. Reproduce the bug pre-fix by removing that `.gitignore`
-line and re-running steps 3-4 from a clean git checkout.
+**Root cause:** `expand_scenarios` names the base entry `BASELINE` once a
+config declares `scenarios:`, but a plain Run Simulation hard-defaulted to
+`BASE`. The raw config never reached the worker on that path (it arrived
+only via `set_run_identity`, which a single run never called), so the
+worker could not know either the base's name *or* a declared
+`metadata.extra.cache_store` location.
+
+**Fix:** `runset.base_entry_id` is the one place the naming rule lives, and
+`POST /api/simulations` always hands the worker the raw config.
+
+### The pane did not refresh after a single run (fixed)
+
+A sweep refreshes the scenario list on completion; a plain run did not, so
+even a correctly stored BASELINE stayed "Not computed yet" on screen.
+`SimulateCard` now refreshes when results arrive.
+
+### Cache never hits while editing Boulder itself (by design)
+
+The fingerprint folds in a "source identity" that hashes
+`git status --porcelain` + `git diff HEAD` for wherever the `boulder`
+package is installed from (`result_cache._source_identity`), so a code
+change busts the cache. **Committing between two steps of this procedure
+will make step 4 or 5 re-solve** — that is the mechanism working, not a
+failure. Keep the worktree untouched for the duration of a run, or set
+`BOULDER_CACHE_IGNORE_CODE=1`.
+
+An earlier variant of this bit harder: the store used to be written *next
+to the config*, so the store file itself appeared in `git status` and
+perturbed its own fingerprint — a permanent self-inflicted cache-bust for
+whichever scenario solved first. Living under `.boulder-cache/` removes
+that by construction.
 
 ### Native `confirm()` dialogs block headless/agent clicks
 
@@ -128,8 +158,10 @@ same page context.
   canvas node selection, results tabs
 - [boulder-scenario-editing/SKILL.md](../boulder-scenario-editing/SKILL.md)
   — editing a scenario's parameters via Properties panel / YAML pane
-- `boulder/result_cache.py` — `compute_fingerprint`/`_source_identity`/
-  `_git_dirty_token`
+- `boulder/scenario_store.py` — the store: layout, identity guard, and why
+  `fingerprint` is written last
+- `boulder/result_cache.py` — identity only now:
+  `compute_fingerprint`/`_source_identity`/`_git_dirty_token`
 - `boulder/sweep_runner.py` — `prepare_scenario`, the shared
   normalize→resolve-mechanism→fingerprint pipeline both the GUI's
   in-process sweep and the CLI runner use
