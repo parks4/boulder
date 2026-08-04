@@ -137,6 +137,7 @@ Numeric values may carry explicit units:
 | `grouped_nodes.yaml` | Grouped reactors in one stage |
 | `staged_psr_pfr.yaml` | Two-stage PSR → PFR chain |
 | `surf_pfr.yaml` | `FlowReactor` + `FlowReactorSurface`: catalytic plug-flow, `solver.axis: distance` |
+| `cstr_residence_time_scenarios.yaml` | Same CSTR as `default.yaml`, plus a `scenarios:` block (short/long residence time) for exercising the Scenario Pane / Run Sweep |
 
 ## Cantera Python examples (in `docs/cantera_examples/`)
 
