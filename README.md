@@ -94,7 +94,7 @@ the CLI's `--sweep` / `--sweep --headless` flags).
 ```bash
 boulder some_file.yaml --sweep              # GUI, run-set auto-started on load
 boulder some_file.yaml --sweep --headless   # no GUI: run every scenario, write
-                                             # <config-stem>_scenarios.h5
+                                             # .boulder-cache/<config-stem>/
 ```
 
 ### Development Mode

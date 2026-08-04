@@ -557,7 +557,14 @@ alembic/versions/*.pyc
 /configs/.boulder-cache
 # On-disk simulation result cache (sidecar next to any YAML)
 .boulder-cache/
+# Run Sweep's collection store (boulder.runset.resolve_store_path's default
+# "<config-stem>_scenarios.h5" next to any YAML). Regenerable, and untracked
+# here on purpose: a tracked/dirty store file would flip the cache
+# fingerprint's git-dirty token (see result_cache._git_dirty_token) on every
+# write, permanently invalidating the very entry it just wrote.
+*_scenarios.h5
 piston.csv
 configs/cantera_examples/nanosecond_pulse_discharge_stone.yaml
 configs/cantera_examples/combustor_stone.yaml
 configs/cantera_examples/reactor2_stone.yaml
+surf_pfr_output.csv

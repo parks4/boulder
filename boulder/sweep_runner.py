@@ -6,9 +6,9 @@ Invoked out-of-process by the ``/api/sweep`` routes for any config that declares
 1. loads the raw config (``from:`` inheritance resolved),
 2. expands the union run-set with :func:`boulder.runset.expand_scenarios`,
 3. solves each run through the Boulder converter, and
-4. writes each result as a **composite** payload into the collection store
-   (``metadata.extra.scenario_store``, default ``<stem>_scenarios.h5``), one
-   ``<scenario_id>/`` group per run,
+4. writes each result into the run-set store
+   (``metadata.extra.cache_store``, default ``.boulder-cache/<stem>/``), one
+   ``<scenario_id>.h5`` file per run,
 
 printing ``scenario N/M`` per run so the sweep API can show progress. The
 Scenario Pane then lists every run and opens each instantly.
@@ -35,22 +35,19 @@ from __future__ import annotations
 
 import argparse
 import copy
-import json
 import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Type
 
-import h5py
-
+from . import scenario_store
 from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
 from .config import normalize_config
-from .payload_store import write_payload
 from .runset import (
     expand_scenarios,
     load_yaml_with_inheritance,
     node_property_attrs,
-    resolve_store_path,
+    resolve_store_dir,
     sweep_point_of,
 )
 
@@ -258,42 +255,6 @@ def gui_payload_from_progress(progress: Any, started: float) -> Dict[str, Any]:
     }
 
 
-def existing_fingerprints(store: Path) -> Dict[str, str]:
-    """Per-scenario fingerprints already in the store (group id → fingerprint).
-
-    Shared cache primitive: any writer of a collection store (this runner, a
-    host batch writer) reads its cache state through this.
-    """
-    found: Dict[str, str] = {}
-    if not store.exists():
-        return found
-    with h5py.File(str(store), "r") as handle:
-        for sid, node in handle.items():
-            if isinstance(node, h5py.Group) and "payload_json" in node:
-                fp = node.attrs.get("fingerprint")
-                if fp:
-                    found[sid] = str(fp)
-    return found
-
-
-def prune_stale_groups(store: Path, run_ids: set) -> list:
-    """Delete groups whose scenario id is no longer in the run set.
-
-    Renamed or removed scenarios would otherwise linger in the GUI's Scenario
-    Pane forever (only ``--no-cache`` recreates the file). Returns the deleted
-    group names.
-    """
-    with h5py.File(str(store), "a") as handle:
-        stale = [
-            sid
-            for sid, node in handle.items()
-            if isinstance(node, h5py.Group) and sid not in run_ids
-        ]
-        for sid in stale:
-            del handle[sid]
-    return stale
-
-
 def run(
     cfg_path: Path,
     *,
@@ -338,9 +299,8 @@ def run(
         scenario (skipped runs that hit the store cache do not fire it), right
         after the payload is written. Lets a host persist per-scenario
         artifacts keyed by the same ``fingerprint`` used elsewhere — e.g.
-        writing each scenario into the single-run result cache
-        (``save_result`` + ``run_contributors``) so a downstream "Export"
-        action can reuse the sweep's solve work instead of re-solving.
+        running its own ``run_contributors`` so a downstream "Export" action
+        can reuse the sweep's solve work instead of re-solving.
         Exceptions raised by the hook are caught and logged so one scenario's
         artifact failure does not abort the whole sweep.
 
@@ -363,23 +323,23 @@ def run(
     _do_resolve = resolve_mechanism or _default_resolve_mechanism(plugins)
     _resolve = lambda name: _do_resolve(name) if name else name  # noqa: E731
     raw = load_yaml_with_inheritance(cfg_path)
-    store = resolve_store_path(raw, cfg_path)
-    assert store is not None  # cfg_path is always set here
-    store.parent.mkdir(parents=True, exist_ok=True)
+    store_dir = resolve_store_dir(raw, cfg_path)
+    assert store_dir is not None  # cfg_path is always set here
+    identity = scenario_store.config_identity(cfg_path)
+    store_dir.mkdir(parents=True, exist_ok=True)
 
     # Incremental by default: keep the store and skip scenarios whose fingerprint
     # is unchanged. ``--no-cache`` (BOULDER_NO_CACHE) forces a full recompute.
     no_cache = bool(os.environ.get("BOULDER_NO_CACHE"))
-    if no_cache and store.exists():
-        store.unlink()
-    cached_fps = {} if no_cache else existing_fingerprints(store)
+    if no_cache:
+        scenario_store.clear(store_dir)
+        store_dir.mkdir(parents=True, exist_ok=True)
+    cached_fps = {} if no_cache else scenario_store.fingerprints(store_dir, identity)
 
     runs = expand_scenarios(raw)
     total = len(runs)
     run_ids = {sid for sid, _ in runs}
-    mechanism = _mechanism_of(raw)
     n_cached = 0
-    store_units: Dict[str, str] = {}
     for i, (sid, cfg) in enumerate(runs):
         config, mech_name, fingerprint = prepare_scenario(cfg, resolve_mechanism)
         label = str((cfg.get("metadata") or {}).get("scenario_name") or sid)
@@ -388,41 +348,43 @@ def run(
             print(f"scenario {i + 1}/{total} ({sid}): cached, skipped", flush=True)
             # Display attrs still track the YAML (reorderings / renamed labels)
             # even when the solve itself is skipped.
-            with h5py.File(str(store), "a") as handle:
-                attrs = handle[sid].attrs
-                attrs["label"] = label
-                attrs["order"] = int(i)
+            scenario_store.update_display_attrs(store_dir, sid, label=label, order=i)
             continue
         print(f"scenario {i + 1}/{total} ({sid})", flush=True)
         gui, resolved_mech, conv = solve_scenario(config, mech_name)
         stored_mech = _resolve(resolved_mech)
-        write_payload(store, gui, stored_mech, group=sid, fresh=False)
-        with h5py.File(str(store), "a") as handle:
-            attrs = handle[sid].attrs
-            attrs["label"] = label
-            attrs["order"] = int(i)
-            attrs["fingerprint"] = fingerprint
-            attrs["computed_at"] = float(time.time())
-            # A declarative sweep's axis values are the run's inputs, and the
-            # Sweep Results plot's natural X axis -- recorded here so the GUI
-            # and CLI stores carry the same attrs. A host hook may override.
-            for key, value in sweep_point_of(cfg).items():
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    attrs[key] = value
-            # Every node/connection's own numeric properties -- generic,
-            # host-agnostic "input" axis candidates for the Sweep Results plot,
-            # keyed ``in.<id>.<prop>`` (see node_property_attrs docstring).
-            for key, value in node_property_attrs(config).items():
-                attrs[key] = value
-            if scenario_attrs is not None:
-                for key, value in (scenario_attrs(sid, cfg, gui) or {}).items():
-                    # A host may pair a KPI value with its display unit as
-                    # (value, unit); the unit rides in a store-level attr
-                    # (below) since HDF5 attrs are flat scalars.
-                    if isinstance(value, tuple):
-                        value, unit = value
-                        store_units[key] = unit
-                    attrs[key] = value
+        # A declarative sweep's axis values are the run's inputs, and the Sweep
+        # Results plot's natural X axis -- recorded so the GUI and CLI stores
+        # carry the same attrs. A host hook may override.
+        entry_attrs: Dict[str, Any] = {
+            key: value
+            for key, value in sweep_point_of(cfg).items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
+        # Every node/connection's own numeric properties -- generic,
+        # host-agnostic "input" axis candidates for the Sweep Results plot,
+        # keyed ``in.<id>.<prop>`` (see node_property_attrs docstring).
+        entry_attrs.update(node_property_attrs(config))
+        if scenario_attrs is not None:
+            entry_attrs.update(scenario_attrs(sid, cfg, gui) or {})
+        # A host may pair a KPI value with its display unit as (value, unit);
+        # the number becomes the attr and the unit is recorded separately.
+        entry_units: Dict[str, str] = {}
+        for key, value in list(entry_attrs.items()):
+            if isinstance(value, tuple):
+                entry_attrs[key], entry_units[key] = value
+        scenario_store.write_entry(
+            store_dir,
+            sid,
+            gui_payload=gui,
+            mechanism=stored_mech,
+            fingerprint=fingerprint,
+            identity=identity,
+            label=label,
+            order=i,
+            units=entry_units or None,
+            extra_attrs=entry_attrs,
+        )
         if on_solved is not None:
             # Give the host a chance to persist per-scenario artifacts (e.g. a
             # calc-note bundle in the single-run result cache) keyed by this
@@ -447,23 +409,18 @@ def run(
                     flush=True,
                 )
 
-    stale = prune_stale_groups(store, run_ids)
+    stale = scenario_store.prune_entries(store_dir, run_ids)
     if stale:
-        print(f"Pruned {len(stale)} stale scenario group(s): {', '.join(stale)}")
+        print(f"Pruned {len(stale)} stale entr(ies): {', '.join(stale)}")
 
-    with h5py.File(str(store), "a") as handle:
-        handle.attrs["map_config"] = cfg_path.name
-        handle.attrs["mechanism"] = _resolve(mechanism)
-        handle.attrs["mechanism_name"] = Path(mechanism).name if mechanism else ""
-        handle.attrs["created_at"] = float(time.time())
-        if store_units:
-            handle.attrs["units"] = json.dumps(store_units)
+    # No store-level finalisation: each entry carries its own mechanism, units
+    # and computed_at, written the moment it solved.
     print(
-        f"Wrote {store} ({total} scenarios; {n_cached} cached, "
+        f"Wrote {store_dir} ({total} scenarios; {n_cached} cached, "
         f"{total - n_cached} solved)",
         flush=True,
     )
-    return store
+    return store_dir
 
 
 def main(argv: "list[str] | None" = None) -> None:

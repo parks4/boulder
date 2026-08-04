@@ -306,6 +306,11 @@ class TestSimulationRoutes:
                 self.mechanism = mechanism
 
         class DummyWorker:
+            def set_run_identity(self, scenario_id, **kwargs):
+                # The route names the run-set entry before starting it; a stub
+                # without this hides that call entirely.
+                self.scenario_id = scenario_id
+
             def start_simulation(
                 self, converter, config, simulation_time, time_step, **kwargs
             ):
@@ -340,6 +345,11 @@ class TestSimulationRoutes:
                 self.mechanism = mechanism
 
         class DummyWorker:
+            def set_run_identity(self, scenario_id, **kwargs):
+                # The route names the run-set entry before starting it; a stub
+                # without this hides that call entirely.
+                self.scenario_id = scenario_id
+
             def start_simulation(
                 self, converter, config, simulation_time, time_step, **kwargs
             ):
@@ -382,6 +392,11 @@ class TestSimulationRoutes:
                 self.mechanism = mechanism
 
         class DummyWorker:
+            def set_run_identity(self, scenario_id, **kwargs):
+                # The route names the run-set entry before starting it; a stub
+                # without this hides that call entirely.
+                self.scenario_id = scenario_id
+
             def start_simulation(
                 self, converter, config, simulation_time, time_step, **kwargs
             ):
@@ -426,6 +441,11 @@ class TestSimulationRoutes:
                 self.mechanism = mechanism
 
         class DummyWorker:
+            def set_run_identity(self, scenario_id, **kwargs):
+                # The route names the run-set entry before starting it; a stub
+                # without this hides that call entirely.
+                self.scenario_id = scenario_id
+
             def start_simulation(
                 self, converter, config, simulation_time, time_step, **kwargs
             ):

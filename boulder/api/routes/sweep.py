@@ -22,35 +22,26 @@ Endpoints (prefix ``/api/sweep``):
 
 from __future__ import annotations
 
-import json
 import threading
-import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import h5py
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ... import scenario_store
 from ...cantera_converter import DualCanteraConverter, get_plugins
-from ...payload_store import write_payload
 from ...runset import (
     node_property_attrs,
-    resolve_store_path,
+    resolve_store_dir,
     run_set_size,
     sweep_point_of,
     sweep_runner_of,
     sweeps_of,
 )
-from ...sweep_runner import (
-    _mechanism_of,
-    existing_fingerprints,
-    prepare_scenario,
-    prune_stale_groups,
-    solve_scenario,
-)
+from ...sweep_runner import prepare_scenario, solve_scenario
 
-__all__ = ["has_run_set", "resolve_store_path", "router"]
+__all__ = ["has_run_set", "router"]
 
 router = APIRouter()
 
@@ -83,14 +74,32 @@ def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     return bool(raw.get("scenarios") or sweeps_of(raw) or sweep_runner_of(raw))
 
 
-def _run_host_sweep(dotted: str, state: Dict[str, Any], store: Path) -> None:
+def _run_host_sweep(
+    dotted: str,
+    state: Dict[str, Any],
+    store_dir: Path,
+    config_path: Optional[str] = None,
+) -> None:
     """Resolve and call a ``sweep.runner`` callable, updating *state* around it.
 
-    The callable owns the run-set: it decides the points, solves them and
-    writes them into the collection store (``boulder.payload_store``). It is
-    passed the store path and may accept an optional ``progress`` callable —
-    ``(done, total, message)`` — so a host that knows its point count can drive
-    the same status UI a declarative sweep does.
+    The callable owns the run-set: it decides the points, solves them and writes
+    them into the result store. It may accept an optional ``progress`` callable
+    — ``(done, total, message)`` — so a host that knows its point count can
+    drive the same status UI a declarative sweep does.
+
+    .. versionchanged:: (store unification)
+       The first argument is now the store **directory**, not a single HDF5
+       file: results are one file per run-set entry. Write entries with
+       :func:`boulder.scenario_store.write_entry`, which records the
+       fingerprint, config identity and display attrs the Scenario pane needs —
+       hand-rolling HDF5 here will produce entries the pane refuses to read.
+
+       A runner may also declare a ``config_path`` parameter to receive the
+       config it is sweeping. It needs that to stamp entries with
+       :func:`boulder.scenario_store.config_identity`, which the pane checks
+       before serving a result: a directory alone cannot identify the config it
+       belongs to, so without this a runner physically could not write an entry
+       the pane would accept.
     """
     from ...cantera_converter import resolve_dotted_path
 
@@ -112,15 +121,18 @@ def _run_host_sweep(dotted: str, state: Dict[str, Any], store: Path) -> None:
     import inspect
 
     try:
-        accepts_progress = "progress" in inspect.signature(runner).parameters
+        declared = set(inspect.signature(runner).parameters)
     except (TypeError, ValueError):  # builtins / C callables expose no signature
-        accepts_progress = False
+        declared = set()
+
+    kwargs: Dict[str, Any] = {}
+    if "progress" in declared:
+        kwargs["progress"] = _progress
+    if "config_path" in declared:
+        kwargs["config_path"] = config_path
 
     print(f"[sweep] delegating to host runner {dotted}", flush=True)
-    if accepts_progress:
-        runner(store, progress=_progress)
-    else:
-        runner(store)
+    runner(store_dir, **kwargs)
 
 
 def _has_run_set(request: Request) -> bool:
@@ -142,13 +154,6 @@ def _merged_raw(request: Request, scenarios: Dict[str, Any]) -> Dict[str, Any]:
     """
     base = {k: v for k, v in _raw(request).items() if k != "scenarios"}
     return {**base, "scenarios": scenarios}
-
-
-def _store_path(request: Request) -> Optional[Path]:
-    """Return the collection store the run-set writes to (request-scoped wrapper)."""
-    return resolve_store_path(
-        _raw(request), getattr(request.app.state, "preloaded_config_path", None)
-    )
 
 
 @router.get("")
@@ -205,16 +210,15 @@ async def sweep_run(
     if job and job.get("status") == "running":
         raise HTTPException(status_code=409, detail="A sweep is already running")
 
-    # Point the server at the store the run-set writes so the Scenario Pane shows
-    # the results on refresh — even when the config declares no scenario_store.
-    store = resolve_store_path(
-        raw, getattr(request.app.state, "preloaded_config_path", None)
-    )
-    if store is None:
+    # The one place results live: the same directory `/api/scenarios` reads, so
+    # a finished sweep is visible to the Scenario pane without any handoff.
+    cfg_path = getattr(request.app.state, "preloaded_config_path", None)
+    store_dir = resolve_store_dir(raw, cfg_path)
+    if store_dir is None:
         raise HTTPException(
-            status_code=400, detail="Could not resolve a scenario store path"
+            status_code=400, detail="Could not resolve a result store directory"
         )
-    request.app.state.scenario_store_path = str(store)
+    identity = scenario_store.config_identity(cfg_path)
     state: Dict[str, Any] = {
         "status": "running",
         "current": 0,
@@ -238,9 +242,15 @@ async def sweep_run(
         try:
             from ...runset import expand_scenarios
 
-            store.parent.mkdir(parents=True, exist_ok=True)
-            if body.no_cache and store.exists():
-                store.unlink()
+            store_dir.mkdir(parents=True, exist_ok=True)
+            if body.no_cache:
+                # Force a full recompute of *this run-set*. Scoped to the whole
+                # store because a no-cache sweep covers every entry; a
+                # force-run of a single entry just overwrites that one file
+                # (see `simulation_worker._persist_to_cache`) and must never
+                # clear its siblings.
+                scenario_store.clear(store_dir)
+                store_dir.mkdir(parents=True, exist_ok=True)
 
             if host_runner:
                 # A host-produced run-set: points that no declarative axis can
@@ -249,7 +259,7 @@ async def sweep_run(
                 # writes the collection store itself; Boulder only resolves the
                 # callable and reports status. Runs in-process like every other
                 # sweep -- declaring the runner replaced *spawning* it.
-                _run_host_sweep(host_runner, state, store)
+                _run_host_sweep(host_runner, state, store_dir, cfg_path)
                 # The host owns the store's contents, including its root
                 # attrs, so skip Boulder's own finalisation -- but *not* the
                 # terminal bookkeeping, or the UI would poll "running" forever
@@ -261,7 +271,11 @@ async def sweep_run(
                 print("[sweep] complete — host runner finished", flush=True)
                 return
 
-            cached_fps = {} if body.no_cache else existing_fingerprints(store)
+            cached_fps = (
+                {}
+                if body.no_cache
+                else scenario_store.fingerprints(store_dir, identity)
+            )
 
             # Bound once: the host's KPI/artifact hooks are read per scenario
             # below, and the registry is fixed for the process lifetime.
@@ -269,9 +283,7 @@ async def sweep_run(
 
             runs = expand_scenarios(raw)
             run_ids = {sid for sid, _ in runs}
-            mechanism = _mechanism_of(raw)
             n_cached = 0
-            store_units: Dict[str, str] = {}
             # The active converter class -- e.g. a host's own subclass with
             # its own mechanism search convention -- lives on `app.state`
             # (set once by the CLI at startup; see `boulder/api/main.py`),
@@ -300,10 +312,11 @@ async def sweep_run(
                     state["message"] = line
                     state["last_line"] = line
                     print(f"[sweep] {line}", flush=True)
-                    with h5py.File(str(store), "a") as handle:
-                        attrs = handle[sid].attrs
-                        attrs["label"] = label
-                        attrs["order"] = int(i)
+                    # Display attrs still track the YAML (reordering, a renamed
+                    # scenario_name) even though the solve itself is skipped.
+                    scenario_store.update_display_attrs(
+                        store_dir, sid, label=label, order=i
+                    )
                     continue
 
                 line = f"scenario {i + 1}/{total} ({sid})"
@@ -347,7 +360,6 @@ async def sweep_run(
                 # internally to load its own `ct.Solution`, so skipping this
                 # would hand `write_payload` an unresolved name it can't load.
                 stored_mech = resolve_mechanism(conv_mechanism)
-                write_payload(store, gui, stored_mech, group=sid, fresh=False)
                 # Host KPI attrs (`plugins.scenario_attrs`) -- the numbers the
                 # Scenario pane's Sweep Results plot offers as axes. Computed
                 # before the h5 handle opens so a raising hook can't leave the
@@ -362,35 +374,45 @@ async def sweep_run(
                     for key, value in sweep_point_of(cfg).items()
                     if isinstance(value, (int, float)) and not isinstance(value, bool)
                 }
+                # Every node/connection's own numeric properties -- generic,
+                # host-agnostic "input" axis candidates for the Sweep Results
+                # plot, keyed ``in.<id>.<prop>`` (see node_property_attrs
+                # docstring). Added on top of whatever extra_attrs already has.
+                extra_attrs.update(node_property_attrs(config))
+                # `update`, not assignment: a host hook *adds to or overrides*
+                # these, as the comment above promises. Assigning discarded the
+                # declarative sweep's own axis values -- the plot's natural X
+                # axis -- for any host that registered the hook. Applied after
+                # `node_property_attrs` so the host wins a key collision, which
+                # is also the CLI runner's order.
                 if plugins.scenario_attrs is not None:
                     try:
-                        extra_attrs = plugins.scenario_attrs(sid, cfg, gui) or {}
+                        extra_attrs.update(plugins.scenario_attrs(sid, cfg, gui) or {})
                     except Exception as exc:  # noqa: BLE001
                         print(
                             f"[sweep] WARNING: scenario_attrs hook failed for "
                             f"'{sid}': {exc}",
                             flush=True,
                         )
-                # Every node/connection's own numeric properties -- generic,
-                # host-agnostic "input" axis candidates for the Sweep Results
-                # plot, keyed ``in.<id>.<prop>`` (see node_property_attrs
-                # docstring). Added on top of whatever extra_attrs already has.
-                extra_attrs.update(node_property_attrs(config))
-                with h5py.File(str(store), "a") as handle:
-                    attrs = handle[sid].attrs
-                    attrs["label"] = label
-                    attrs["order"] = int(i)
-                    attrs["fingerprint"] = fingerprint
-                    attrs["computed_at"] = float(time.time())
-                    for key, value in extra_attrs.items():
-                        # A host may pair a KPI value with its display unit as
-                        # (value, unit); the unit rides in a store-level attr
-                        # (written once after the loop) since HDF5 per-group
-                        # attrs are flat scalars.
-                        if isinstance(value, tuple):
-                            value, unit = value
-                            store_units[key] = unit
-                        attrs[key] = value
+                # A host may pair a KPI value with its display unit as
+                # (value, unit); the number becomes the attr and the unit is
+                # recorded separately, since HDF5 attrs are flat scalars.
+                entry_units: Dict[str, str] = {}
+                for key, value in list(extra_attrs.items()):
+                    if isinstance(value, tuple):
+                        extra_attrs[key], entry_units[key] = value
+                scenario_store.write_entry(
+                    store_dir,
+                    sid,
+                    gui_payload=gui,
+                    mechanism=stored_mech,
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    label=label,
+                    order=i,
+                    units=entry_units or None,
+                    extra_attrs=extra_attrs,
+                )
 
                 # Let the host persist per-scenario artifacts keyed by this
                 # fingerprint -- e.g. the single-run result cache, so a later
@@ -418,27 +440,14 @@ async def sweep_run(
                             flush=True,
                         )
 
-            stale = prune_stale_groups(store, run_ids)
+            stale = scenario_store.prune_entries(store_dir, run_ids)
             if stale:
                 print(
-                    f"[sweep] pruned {len(stale)} stale scenario group(s): "
-                    f"{', '.join(stale)}",
+                    f"[sweep] pruned {len(stale)} stale entr(ies): {', '.join(stale)}",
                     flush=True,
                 )
-
-            resolved_mechanism = (
-                resolve_mechanism(mechanism) if mechanism else mechanism
-            )
-            with h5py.File(str(store), "a") as handle:
-                cfg_path = getattr(request.app.state, "preloaded_config_path", None)
-                handle.attrs["map_config"] = Path(cfg_path).name if cfg_path else ""
-                handle.attrs["mechanism"] = resolved_mechanism
-                handle.attrs["mechanism_name"] = (
-                    Path(mechanism).name if mechanism else ""
-                )
-                handle.attrs["created_at"] = float(time.time())
-                if store_units:
-                    handle.attrs["units"] = json.dumps(store_units)
+            # No store-level finalisation to do: each entry already carries its
+            # own mechanism, units and computed_at, written the moment it solved.
 
             state["scenario_progress"] = {}
             state["last_line"] = None

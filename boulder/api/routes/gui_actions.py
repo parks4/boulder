@@ -24,12 +24,13 @@ class GuiActionRunRequest(BaseModel):
 
 
 def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None) -> Any:
+    from ... import scenario_store
     from ...gui_actions import GuiActionContext
     from ...result_cache import (
-        cache_dir_for,
-        lookup_cached_result,
+        compute_fingerprint,
         resolve_mechanism_for_fingerprint,
     )
+    from ...runset import resolve_store_dir
 
     preloaded_config = getattr(request.app.state, "preloaded_config", None)
     preloaded_yaml = getattr(request.app.state, "preloaded_yaml", None)
@@ -68,18 +69,27 @@ def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None)
         mechanism = resolve_mechanism_for_fingerprint(
             config, converter_class=converter_cls
         )
-        cache_root = cache_dir_for(preloaded_config_path)
         # Fingerprint the config exactly as check-cache and the run do —
         # a raw-config lookup would disagree with them for any config the
         # normalization transforms.
-        fingerprint, cached = lookup_cached_result(
-            cache_root,
-            normalize_config_for_fingerprint(config),
-            mechanism=mechanism,
-            preloaded_result=preloaded_result,
+        fingerprint = compute_fingerprint(
+            normalize_config_for_fingerprint(config), mechanism=mechanism
         )
+        store_dir = resolve_store_dir(
+            getattr(request.app.state, "preloaded_raw", None) or {},
+            preloaded_config_path,
+        )
+        # Attrs only: an action just needs to know whether a result exists, so
+        # this must not pay for reading the payload it may never use.
         cache_fingerprint = fingerprint
-        has_cached_result = cached is not None
+        has_cached_result = (
+            scenario_store.find_entry(
+                store_dir,
+                fingerprint,
+                scenario_store.config_identity(preloaded_config_path),
+            )
+            is not None
+        )
 
     network_image_b64 = body.network_image_png if body is not None else None
     if network_image_b64 and "," in network_image_b64[:64]:

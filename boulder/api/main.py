@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.preloaded_config_path = None  # full path for script generation
     app.state.preloaded_result = None
     app.state.preloaded_fingerprint = None
-    app.state.scenario_store_path = None
+    # Result-store location is derived on demand (runset.resolve_store_dir).
     # Inheritance-resolved but *un-normalized* startup snapshot (keeps sweeps:).
     app.state.preloaded_raw = None
     app.state.sweep_job = None
@@ -170,36 +170,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             # Attempt to load a matching cache entry for the preloaded config.
             try:
+                from .. import scenario_store
                 from ..result_cache import (
-                    cache_dir_for,
-                    lookup_cached_result,
+                    compute_fingerprint,
                     resolve_mechanism_for_fingerprint,
                 )
+                from ..runset import resolve_store_dir
 
-                cache_root = cache_dir_for(str(actual_yaml_path))
+                store_dir = resolve_store_dir(
+                    app.state.preloaded_raw or {}, str(actual_yaml_path)
+                )
                 if os.environ.get("BOULDER_NO_CACHE"):
                     # --no-cache: don't pick up any cached result; recompute.
                     app.state.preloaded_result = None
                     app.state.preloaded_fingerprint = None
                     print("[cache] disabled (--no-cache) — will recompute", flush=True)
-                elif cache_root is not None:
+                elif store_dir is not None:
                     mechanism = resolve_mechanism_for_fingerprint(
                         validated, converter_class=app.state.converter_class
                     )
-                    fingerprint, cached = lookup_cached_result(
-                        cache_root,
-                        validated,
-                        mechanism=mechanism,
+                    fingerprint = compute_fingerprint(validated, mechanism=mechanism)
+                    # Which run-set entry the preloaded config is (BASE, or
+                    # BASELINE once scenarios exist) is not knowable here, so
+                    # match by fingerprint rather than guessing the name. Since
+                    # `expand_scenarios` and the startup path now agree on the
+                    # fingerprint, a sweep's BASELINE answers this too.
+                    cached = scenario_store.load_matching(
+                        store_dir,
+                        fingerprint,
+                        scenario_store.config_identity(str(actual_yaml_path)),
                     )
-                    if cached is None and fingerprint is not None:
-                        from ..result_cache import find_result_by_config_snapshot
-
-                        cached = find_result_by_config_snapshot(
-                            cache_root, fingerprint, mechanism=mechanism
-                        )
                     app.state.preloaded_result = cached
-                    # Use the *actual* cache-entry fingerprint (directory name) so
-                    # that artifacts_dir_for() resolves correctly in export actions.
                     app.state.preloaded_fingerprint = (
                         cached.get("fingerprint") if cached else None
                     )
@@ -238,32 +239,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.error(f"Failed to load preloaded configuration: {e}")
 
-    # Resolve the scenario-inspector store (HDF5): explicit env override wins,
-    # else the preloaded config's ``metadata.extra.scenario_store`` (or the
-    # ``<stem>_scenarios.h5`` default) whenever there is a run-set to show —
+    # Resolve the scenario-inspector store: explicit env override wins, else
+    # the preloaded config's ``metadata.extra.cache_store`` (or the
+    # ``.boulder-cache/<stem>/`` default) whenever there is a run-set to show —
     # declared inline (``scenarios:``/``sweep:``/``sweeps:``), a host
     # ``run_sweep.py`` next to the config, or ``--sweep`` (BOULDER_SWEEP_MODE).
     # Reuses the same detection the Run Sweep button uses (routes.sweep) so a
     # config with a run-set shows its precomputed Scenario Pane on plain
     # ``<host-cli> config.yaml`` — no flag required.
+    # Nothing to resolve or cache here any more: the result store's location is
+    # pure path arithmetic over the config (``runset.resolve_store_dir``), so
+    # every route derives it on demand rather than reading a snapshot that could
+    # disagree with whatever a sweep decided. Logged once for operator
+    # visibility.
     try:
-        store_env = os.environ.get("BOULDER_SCENARIO_STORE")
-        if store_env and store_env.strip():
-            app.state.scenario_store_path = store_env.strip()
-        elif app.state.preloaded_config and app.state.preloaded_config_path:
-            from .routes.sweep import has_run_set, resolve_store_path
+        if app.state.preloaded_config_path:
+            from ..runset import resolve_store_dir
 
-            raw = app.state.preloaded_raw or {}
-            cfg_path = app.state.preloaded_config_path
-            if os.environ.get("BOULDER_SWEEP_MODE") or has_run_set(raw, cfg_path):
-                store = resolve_store_path(raw, cfg_path)
-                if store is not None:
-                    app.state.scenario_store_path = str(store)
-        if app.state.scenario_store_path:
-            logger.info("Scenario store enabled: %s", app.state.scenario_store_path)
+            _store_dir = resolve_store_dir(
+                app.state.preloaded_raw or {}, app.state.preloaded_config_path
+            )
+            if _store_dir is not None:
+                logger.info("Result store: %s", _store_dir)
     except Exception as store_err:  # noqa: BLE001
-        logger.warning("Scenario store resolution failed: %s", store_err)
-        app.state.scenario_store_path = None
+        logger.warning("Result store resolution failed: %s", store_err)
 
     # ``--run`` (BOULDER_AUTORUN): the frontend auto-starts the run once on load —
     # but only when there is nothing cached to pick up (``--no-cache`` forces it).
@@ -271,8 +270,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _no_cache = bool(os.environ.get("BOULDER_NO_CACHE"))
     _autorun_req = bool(os.environ.get("BOULDER_AUTORUN"))
     if app.state.sweep_default:
-        _store = getattr(app.state, "scenario_store_path", None)
-        _cache_present = bool(_store and Path(_store).is_file())
+        # "Is there anything cached to pick up?" now asks the one store, whose
+        # entries are what the Scenario pane would show.
+        try:
+            from .. import scenario_store
+            from ..runset import resolve_store_dir
+
+            _cache_present = bool(
+                scenario_store.list_entries(
+                    resolve_store_dir(
+                        app.state.preloaded_raw or {}, app.state.preloaded_config_path
+                    ),
+                    scenario_store.config_identity(app.state.preloaded_config_path),
+                )
+            )
+        except Exception:  # noqa: BLE001 — a broken store just means "recompute"
+            _cache_present = False
     else:
         _cache_present = getattr(app.state, "preloaded_result", None) is not None
     app.state.autorun = _autorun_req and (_no_cache or not _cache_present)

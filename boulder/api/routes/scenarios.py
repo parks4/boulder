@@ -1,14 +1,13 @@
 """Scenario inspector API: list and load precomputed reactor trajectories.
 
-Reads a self-describing HDF5 *scenario store* — one Cantera
-:class:`~cantera.SolutionArray` per scenario (named HDF5 group), with per-group
-and root attributes — and serves each scenario as a ``SimulationResults``-shaped
-payload that the frontend renders through ``setResults`` (the same path used for
-a cached solve). All scenarios share one network topology, so the GUI only swaps
-result data and never rebuilds the graph.
+Reads the result store (:mod:`boulder.scenario_store`) — one HDF5 file per
+run-set entry, each a Cantera :class:`~cantera.SolutionArray` plus attrs — and
+serves each entry as a ``SimulationResults``-shaped payload the frontend renders
+through ``setResults`` (the same path a cached solve uses). All entries share one
+network topology, so the GUI only swaps result data and never rebuilds the graph.
 
-Store location: ``app.state.scenario_store_path`` (set by the lifespan from the
-preloaded config's ``metadata.extra.scenario_store``, or ``BOULDER_SCENARIO_STORE``).
+Store location is derived on demand by :func:`boulder.runset.resolve_store_dir`;
+there is no cached path on ``app.state`` to fall out of sync.
 
 This module depends only on ``cantera`` + ``h5py`` + stdlib (no host package); the
 HDF5 schema is the contract between producer and GUI.
@@ -34,61 +33,24 @@ from pydantic import BaseModel, Field
 router = APIRouter()
 
 
-def _store_path(request: Request) -> Optional[Path]:
-    raw = getattr(request.app.state, "scenario_store_path", None)
-    return Path(raw) if raw else None
+def _store_dir(request: Request) -> Optional[Path]:
+    """Resolve this config's result-store directory.
 
-
-def _purge_cached_group(store: Optional[Path], scenario_id: str) -> bool:
-    """Remove *scenario_id*'s cached trajectory from the store, if present.
-
-    Best-effort: the scenario's *definition* is already deleted by the caller
-    by the time this runs, so a missing/unreadable store is not an error here
-    — there is just nothing left to purge. Returns whether a group was
-    actually removed (surfaced to the frontend so "Delete" can honestly say
-    whether it also cleared a cached result).
+    Derived on demand rather than cached on ``app.state``: it is pure path
+    arithmetic over the startup config snapshot, so there is no state to keep in
+    sync (and nothing to go stale if a sweep and a single run disagree about
+    where the store lives).
     """
-    if h5py is None or store is None or not store.is_file():
-        return False
-    try:
-        with h5py.File(str(store), "a") as handle:
-            if scenario_id in handle:
-                del handle[scenario_id]
-                return True
-    except OSError:
-        return False
-    return False
+    from ...runset import resolve_store_dir
+
+    return resolve_store_dir(_raw_base_config(request) or {}, _config_path(request))
 
 
-def _to_py(value: Any) -> Any:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", "replace")
-    if hasattr(value, "item"):
-        try:
-            return value.item()
-        except (ValueError, TypeError):
-            return value
-    return value
+def _identity(request: Request) -> str:
+    """Return the stamp entries must carry to be readable for this config."""
+    from ... import scenario_store
 
-
-def _root_attrs(h5_path: Path) -> Dict[str, Any]:
-    with h5py.File(str(h5_path), "r") as handle:
-        return {key: _to_py(val) for key, val in handle.attrs.items()}
-
-
-def _scenario_entries(h5_path: Path) -> List[Dict[str, Any]]:
-    """List scenario composites — top-level groups holding a ``payload_json``."""
-    entries: List[Dict[str, Any]] = []
-    with h5py.File(str(h5_path), "r") as handle:
-        for name, node in handle.items():
-            if not isinstance(node, h5py.Group) or "payload_json" not in node:
-                continue
-            entry = {key: _to_py(val) for key, val in node.attrs.items()}
-            entry["id"] = name
-            entries.append(entry)
-    # Sort by explicit order, else by initial temperature, else by id.
-    entries.sort(key=lambda e: (e.get("order", e.get("t0_K", 0.0)), e["id"]))
-    return entries
+    return scenario_store.config_identity(_config_path(request))
 
 
 def _base_scenarios_snapshot(request: Request) -> Dict[str, Any]:
@@ -119,31 +81,38 @@ async def list_scenarios(request: Request) -> Dict[str, Any]:
     Also seeds the frontend's scenario-overlay state via ``authored_overlays``
     — see :func:`_base_scenarios_snapshot`.
     """
-    store = _store_path(request)
+    from ... import scenario_store
+
+    store_dir = _store_dir(request)
+    identity = _identity(request)
     authored_overlays = _base_scenarios_snapshot(request)
     authored_ids = _authored_scenario_ids(authored_overlays)
-    if h5py is None or store is None or not store.is_file():
-        return {
-            "available": False,
-            "scenarios": [],
-            "authored_ids": authored_ids,
-            "authored_overlays": authored_overlays,
-        }
-    root = _root_attrs(store)
-    units_raw = root.get("units")
+    entries = scenario_store.list_entries(store_dir, identity)
+
+    # `available` says whether the Scenario pane has anything to show. Every
+    # config now has at least one entry (the base run), so store presence alone
+    # would light the pane up for every plain single-reactor config -- it is the
+    # *authored* scenarios that make the pane meaningful.
     return {
-        "available": True,
-        "store": store.name,
-        "mechanism": root.get("mechanism_name"),
-        "reactor_mode": root.get("reactor_mode"),
-        "created_at": root.get("created_at"),
+        "available": bool(authored_ids),
+        "store": store_dir.name if store_dir else None,
+        "mechanism": next(
+            (e.get("mechanism_name") for e in entries if e.get("mechanism_name")), None
+        ),
+        "created_at": max((e.get("computed_at", 0.0) for e in entries), default=None)
+        or None,
         # Display units for host-supplied KPI attrs (e.g. scenario_attrs
-        # returning ``(value, "%")``) -- see boulder.sweep_runner.run's
-        # scenario_attrs docstring. Auto-walked node/connection inputs
-        # (``in.<id>.<prop>`` keys) resolve their unit on the frontend
-        # instead, via the same property-name lookup the Properties panel uses.
-        "units": json.loads(units_raw) if units_raw else None,
-        "scenarios": _scenario_entries(store),
+        # returning ``(value, "%")``). Auto-walked node/connection inputs
+        # (``in.<id>.<prop>`` keys) resolve their unit on the frontend instead,
+        # via the same property-name lookup the Properties panel uses.
+        "units": scenario_store.collect_units(store_dir, identity) or None,
+        # Attrs that are bookkeeping, not plottable KPIs. Published rather than
+        # duplicated in the frontend: the two lists drifted the moment the store
+        # gained an attr (`store_version` was offered as a Sweep Results axis),
+        # and a hand-synced copy in another language is the same second source
+        # of truth this store exists to remove.
+        "non_kpi_keys": sorted(scenario_store.NON_KPI_ATTRS),
+        "scenarios": entries,
         "authored_ids": authored_ids,
         "authored_overlays": authored_overlays,
     }
@@ -154,25 +123,18 @@ async def get_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
     """Return one scenario's composite payload (multi-reactor, reports, Sankey)."""
     if h5py is None:
         raise HTTPException(status_code=503, detail="h5py unavailable")
-    store = _store_path(request)
-    if store is None or not store.is_file():
+    from ... import scenario_store
+
+    store_dir = _store_dir(request)
+    if store_dir is None:
         raise HTTPException(status_code=404, detail="No scenario store available")
 
-    entries = {e["id"]: e for e in _scenario_entries(store)}
-    if scenario_id not in entries:
+    payload = scenario_store.read_entry(store_dir, scenario_id, _identity(request))
+    if payload is None:
+        # Absent, mid-write, or belonging to another config — all "not computed"
+        # from the caller's point of view, none of them a server error.
         raise HTTPException(status_code=404, detail=f"Unknown scenario {scenario_id!r}")
-
-    root = _root_attrs(store)
-    mechanism = str(root.get("mechanism") or root.get("mechanism_name") or "")
-    try:
-        from ...payload_store import read_payload
-
-        return read_payload(store, mechanism_override=mechanism, group=scenario_id)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to restore scenario {scenario_id!r}: {exc}",
-        ) from exc
+    return payload
 
 
 # --------------------------------------------------------------------------- #
@@ -413,18 +375,16 @@ async def rename_scenario(
 
 @router.post("/clear-cache")
 async def clear_scenario_cache(request: Request) -> Dict[str, Any]:
-    """Clear every scenario's cached trajectory in the active store.
+    """Clear every entry's cached result for the active config.
 
-    Deletes the whole HDF5 store file — the same thing ``--no-cache`` does
-    before a sweep — so the next Run Sweep recomputes every scenario from
-    scratch. This only ever touched the *results cache*, not any scenario
-    definition, so it's unaffected by scenario authoring going in-memory.
+    Removes the whole store directory — every entry's file *and* the host
+    artifacts beside them, which a per-file delete would otherwise orphan. This
+    only ever touched cached *results*, never a scenario definition, so it is
+    unaffected by scenario authoring being in-memory.
     """
-    store = _store_path(request)
-    cleared = store is not None and store.is_file()
-    if store is not None and cleared:
-        store.unlink()
-    return {"ok": True, "cleared": cleared}
+    from ... import scenario_store
+
+    return {"ok": True, "cleared": scenario_store.clear(_store_dir(request))}
 
 
 @router.delete("/{scenario_id}")
@@ -434,11 +394,12 @@ async def delete_scenario(
     """Delete a scenario overlay and purge its cached trajectory, if any.
 
     The overlay is removed from the returned overlays map immediately; the
-    matching HDF5 group (if the active store has one) is deleted right away
-    too — not left for the next Run Sweep to notice and prune. ``cache_purged``
-    in the response tells the caller whether there was actually a cached
-    result to clear.
+    matching store entry (and its artifacts) is deleted right away too — not
+    left for the next Run Sweep to notice and prune. ``cache_purged`` in the
+    response tells the caller whether there was actually a cached result to
+    clear.
     """
+    from ... import scenario_store
     from ...scenario_editor import ScenarioEditError
     from ...scenario_editor import delete_scenario as _delete
 
@@ -446,7 +407,12 @@ async def delete_scenario(
         new_overlays = _delete(body.overlays, scenario_id)
     except ScenarioEditError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    cache_purged = _purge_cached_group(_store_path(request), scenario_id)
+    store_dir = _store_dir(request)
+    cache_purged = (
+        scenario_store.delete_entry(store_dir, scenario_id)
+        if store_dir is not None
+        else False
+    )
     return {
         "ok": True,
         "scenario_id": scenario_id,
@@ -489,10 +455,14 @@ async def focus_scenario(req: FocusRequest, request: Request) -> Dict[str, Any]:
     """Tell every subscribed GUI tab to load scenario ``scenario_id`` (live)."""
     if h5py is None:
         raise HTTPException(status_code=503, detail="h5py unavailable")
-    store = _store_path(request)
-    if store is None or not store.is_file():
+    from ... import scenario_store
+
+    store_dir = _store_dir(request)
+    if store_dir is None:
         raise HTTPException(status_code=404, detail="No scenario store available")
-    known = {e["id"] for e in _scenario_entries(store)}
+    known = {
+        e["id"] for e in scenario_store.list_entries(store_dir, _identity(request))
+    }
     if req.scenario_id not in known:
         raise HTTPException(
             status_code=404, detail=f"Unknown scenario {req.scenario_id!r}"

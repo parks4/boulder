@@ -70,6 +70,28 @@ def _authored_ids(client: TestClient) -> List[str]:
     return client.get("/api/scenarios").json()["authored_ids"]
 
 
+def _seed_entry(cfg_path: Path, scenario_id: str) -> Path:
+    """Write one solved entry for *cfg_path*, as a real solve would.
+
+    The store location is derived from the config path, so seeding it needs no
+    ``app.state`` wiring. Returns the store directory.
+    """
+    from boulder import scenario_store
+    from boulder.runset import resolve_store_dir
+
+    store_dir = resolve_store_dir({}, cfg_path)
+    assert store_dir is not None
+    scenario_store.write_entry(
+        store_dir,
+        scenario_id,
+        gui_payload={"status": "complete", "times": [], "reactors_series": {}},
+        mechanism="gri30.yaml",
+        fingerprint=f"fp-{scenario_id}",
+        identity=scenario_store.config_identity(cfg_path),
+    )
+    return store_dir
+
+
 def test_create_scenario_works_without_a_config_path() -> None:
     """Scenario creation is a pure function now -- no config file is required."""
     app = create_app()
@@ -522,23 +544,21 @@ def test_delete_scenario(tmp_path: Path) -> None:
 
 
 def test_delete_scenario_purges_cached_group(tmp_path: Path) -> None:
-    """Deleting a scenario immediately removes its cached HDF5 group too.
+    """Deleting a scenario immediately removes its cached entry too.
 
     Not left for the next Run Sweep to notice and prune — the Scenario Pane's
     "N cached" count and the store on disk stay in sync with the config the
     moment you click Delete.
     """
     pytest.importorskip("h5py")
-    import h5py
 
     cfg = _write_config(tmp_path)
-    client, app = _client_with_config(cfg)
+    client, _app = _client_with_config(cfg)
     try:
-        store = tmp_path / "scenarios.h5"
-        with h5py.File(str(store), "w") as handle:
-            grp = handle.create_group("base_case")
-            grp.create_dataset("payload_json", data=b"{}")
-        app.state.scenario_store_path = str(store)
+        from boulder.runset import store_entry_path
+
+        store_dir = _seed_entry(cfg, "base_case")
+        assert store_entry_path(store_dir, "base_case").is_file()
 
         overlays = _authored_overlays(client)
         resp = client.request(
@@ -546,9 +566,7 @@ def test_delete_scenario_purges_cached_group(tmp_path: Path) -> None:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["cache_purged"] is True
-
-        with h5py.File(str(store), "r") as handle:
-            assert "base_case" not in handle
+        assert not store_entry_path(store_dir, "base_case").exists()
     finally:
         client.__exit__(None, None, None)
 
@@ -579,22 +597,26 @@ def test_delete_scenario_unknown_404(tmp_path: Path) -> None:
 
 
 def test_clear_scenario_cache_deletes_the_store(tmp_path: Path) -> None:
-    """Clearing the cache removes the whole HDF5 store, not just one group."""
+    """Clearing the cache removes the whole store directory, entries and artifacts.
+
+    A per-file delete would orphan the host-contributor artifacts sitting beside
+    the entries.
+    """
     pytest.importorskip("h5py")
-    import h5py
 
     cfg = _write_config(tmp_path)
-    client, app = _client_with_config(cfg)
+    client, _app = _client_with_config(cfg)
     try:
-        store = tmp_path / "scenarios.h5"
-        with h5py.File(str(store), "w") as handle:
-            handle.create_group("base_case").create_dataset("payload_json", data=b"{}")
-        app.state.scenario_store_path = str(store)
+        store_dir = _seed_entry(cfg, "base_case")
+        artifacts = store_dir / "artifacts" / "base_case"
+        artifacts.mkdir(parents=True)
+        (artifacts / "bundle.json").write_text("{}", encoding="utf-8")
 
         resp = client.post("/api/scenarios/clear-cache")
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"ok": True, "cleared": True}
-        assert not store.exists()
+        assert not store_dir.exists()
+        assert not artifacts.exists(), "artifacts outlived the cleared store"
         # Scenario definitions are untouched -- this only ever affected the
         # results cache, never the scenario overlays themselves.
         assert _authored_ids(client) == ["BASELINE", "base_case"]
@@ -624,7 +646,12 @@ def test_list_scenarios_includes_authored_ids_without_a_store(tmp_path: Path) ->
         resp = client.get("/api/scenarios")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["available"] is False
+        # `available` now means "the Scenario pane is meaningful for this
+        # config", i.e. it declares scenarios -- not "results exist yet". Every
+        # config has a base entry now, so keying it on store presence would
+        # light the pane up for every plain single-reactor config.
+        assert body["available"] is True
+        assert body["scenarios"] == [], "nothing has been solved yet"
         assert body["authored_ids"] == ["BASELINE", "base_case"]
         assert "base_case" in body["authored_overlays"]
     finally:

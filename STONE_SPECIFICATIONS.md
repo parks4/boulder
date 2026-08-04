@@ -1280,10 +1280,10 @@ Boulder rejects v1 files with an actionable error message pointing to this docum
 
 ______________________________________________________________________
 
-## 13. Result serialization schema (`result.h5` / `*_scenarios.h5`)
+## 13. Result serialization schema (the result store's `<scenario_id>.h5`)
 
-A computed result is persisted in **one** composite-HDF5 format (`boulder/payload_store.py`), shared
-by the fingerprinted result cache and the sweep scenario store. This is an on-disk contract, not part
+A computed result is persisted in **one** composite-HDF5 format (`boulder/payload_store.py`), used by
+every entry of the result store (`boulder/scenario_store.py`). This is an on-disk contract, not part
 of the YAML a user writes — documented here alongside the config schema so tooling recognizes it.
 
 ### Core encoding — three tiers (per reactor series)
@@ -1323,14 +1323,14 @@ not restore numerics.
 name), `mechanism_sha256` (diagnostic; the cache fingerprint is the correctness guard), `mechanism_name`.
 `result_cache.CACHE_VERSION` gates cache entries (mismatch ⇒ silent miss + recompute).
 
-### Two profiles
+### One file per run-set entry
 
-- **Result file** `<cache>/<fp>/result.h5` — one result, reactor groups `r0…`, file-level
-  `payload_json`; `meta.json` carries `created_at`/versions/`mechanism`/`config_snapshot`.
-- **Collection file** `results/<map>_scenarios.h5` — many single-reactor results, one group per
-  scenario keyed by id (e.g. `T0_1273K`); root attrs add `reactor_id`, `reactor_mode`, `map_config`,
-  `created_at`, `cantera_version`; per-group attrs carry scenario KPIs (`t0_K`, `label`, `n_points`,
-  `final_temperature_K`, `solid_carbon_yield_pct`, `computed_at`).
+`.boulder-cache/<config-stem>/<scenario_id>.h5` — one result each, reactor groups `r0…`, file-level
+`payload_json`. Root attrs carry the entry's identity and display metadata: `store_version`,
+`config_identity`, `fingerprint` (written **last**, as the validity signal), optional
+`alt_fingerprints`, plus `label`, `order`, `computed_at` and any host KPI attrs (e.g. `t0_K`,
+`final_temperature_K`). A plain single run is simply the N=1 entry, named `BASE` — or `BASELINE`
+once the config declares `scenarios:`.
 
 ### Invariants
 

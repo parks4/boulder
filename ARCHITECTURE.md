@@ -146,17 +146,61 @@ stored as natively-to-Cantera as possible; everything else rides alongside as JS
 - **`payload_json` dataset** — the rest of the `SimulationResults` (Sankey, reports, summary, code,
   node/connection overlays) plus a `reactors_index` mapping each reactor to its tier/group.
 
-Two **profiles** of this one encoding:
+#### One result store, keyed by name
 
-| | Result file (cache) | Collection file (scenario store) |
-|---|---|---|
-| File | `<cache>/<fp>/result.h5` (+ `meta.json` carries config_snapshot) | `results/<map>_scenarios.h5` |
-| Holds | one result (1..n reactors, groups `r0`,`r1`,…) | many single-reactor results, one group per scenario |
-| Producer / reader | `result_cache.save_result` / `load_result*` | `api/routes/sweep.py` (GUI) or `sweep_runner.py` (CLI) / `api/routes/scenarios.py` |
+There is a single store, `boulder/scenario_store.py`. Every solve lands in it —
+a whole sweep or a single run — because `expand_scenarios` always yields at
+least one entry, so "single-shot" and "sweep" are the same code path at N=1 and
+N=3. One HDF5 file per run-set entry:
+
+```
+<config_dir>/.boulder-cache/<stem>/
+    BASE.h5 | BASELINE.h5 | <scenario_id>.h5
+    artifacts/<scenario_id>/...
+```
+
+The **name** is the key; the `fingerprint` attr under that name is the
+staleness check. One file per entry rather than one grouped file because HDF5
+is single-writer and the GUI polls the store while a solve writes it:
+per-entry files remove contention, confine a partial write to one entry, make
+invalidating one entry a file delete, and leave room to solve entries in
+parallel.
+
+Boulder previously had **two** stores answering two questions — a
+content-addressed `.boulder-cache/<fp>/` ("solved this exact config before?",
+LRU-capped at 5) and a name-addressed `<stem>_scenarios.h5` ("what is in this
+run-set, and what is each called?"). They collided on BASELINE, which lives in
+both worlds and hashed differently in each, so the Scenario pane could report a
+scenario "computed" that Run Sweep would immediately re-solve. `result_cache.py`
+kept its *identity* layer (`compute_fingerprint`, `cache_dir_for`, the
+contributor registry) and lost its *storage* layer entirely.
+
+Two invariants the store enforces, since name-addressing loses the
+collision-immunity hashing gave for free:
+
+- **Never serve another config's results.** Under a shared `$BOULDER_CACHE_DIR`
+  the directory name folds in the config's absolute path, and every file records
+  the config it belongs to; a mismatch rebuilds rather than serving a wrong
+  answer.
+- **Never serve a half-written result.** `fingerprint` is the validity signal,
+  so it is written *last*. A solve that dies midway leaves a file with no
+  fingerprint — read as "not computed", which is what it is.
+
+##### No history — that is what scenarios are for
+
+An entry holds **one** result, the latest. Re-running an unchanged entry is a
+hit; going *back* to a previous value re-solves. This is deliberate: keeping an
+old value around is what authoring a scenario is for, not what a cache is for.
+
+A plausible future feature is to **auto-create a scenario** when the user edits
+a parameter, preserving the previous value. Each such entry would be *a scenario
+like any other* — named, listed, plottable, with its own file — which is why
+dropping content-addressing does not foreclose history; it changes how history
+is expressed. **Not implemented.**
 
 **Mechanism provenance vs. cache identity** — two different things, easily confused:
 
-- The scenario store's per-group **`mechanism_sha256` attr is provenance only**, and is written by
+- The store's per-entry **`mechanism_sha256` attr is provenance only**, and is written by
   `payload_store._resolve_mechanism`, which hashes the file *only when the mechanism resolves to an
   existing path*. For a **Cantera built-in** (`gri30.yaml`) it stores the bare name and an **empty
   hash** — so a stored result records *which* built-in it used, but not its exact content.

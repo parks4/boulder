@@ -238,15 +238,16 @@ def test_sweep_run_stores_a_resolved_mechanism_not_convs_raw_attribute(
     captured_mechanisms: List[str] = []
 
     def _fake_write_payload(
-        store: Path, gui: Any, mechanism: str, **kwargs: Any
+        path: Path, gui: Any, mechanism: str, **kwargs: Any
     ) -> None:
         captured_mechanisms.append(mechanism)
         import h5py
 
-        with h5py.File(str(store), "a") as handle:
-            if kwargs.get("group") not in handle:
-                grp = handle.create_group(kwargs["group"])
-                grp.create_dataset("payload_json", data=b"{}")
+        # One file per entry now, so just make the file exist -- the store
+        # writes its own attrs on top afterwards.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(str(path), "a") as handle:
+            handle.attrs.setdefault("schema_version", 1)
 
     try:
         with (
@@ -254,8 +255,10 @@ def test_sweep_run_stores_a_resolved_mechanism_not_convs_raw_attribute(
                 "boulder.simulation_worker.SimulationWorker",
                 side_effect=lambda: _FakeWorker(),
             ),
+            # Patched at the source module: the sweep reaches `write_payload`
+            # through `scenario_store.write_entry` now, not directly.
             patch(
-                "boulder.api.routes.sweep.write_payload",
+                "boulder.payload_store.write_payload",
                 side_effect=_fake_write_payload,
             ),
         ):

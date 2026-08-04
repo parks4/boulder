@@ -1,28 +1,20 @@
-"""On-disk cache of the last simulation result.
+"""Cache *identity* — the fingerprint everything keys off — plus the contributor registry.
 
-Boulder stores the GUI results payload (times, reactor series, reports,
-Sankey, summary, updated nodes/connections) to a fingerprinted directory
-next to the loaded YAML file.  On startup, if the preloaded config
-fingerprint matches a cache entry, Boulder loads it and sends it to the
-frontend immediately so outputs are visible without re-running.
+This module no longer stores anything. Results live in exactly one place,
+:mod:`boulder.scenario_store` (one HDF5 file per run-set entry, keyed by
+**name**). What remains here is the question "is this the same computation?",
+which the store then answers "have I already done it?" against.
 
-Host packages register :class:`CacheContributorPlugin`
-implementations.  After each successful GUI solve, Boulder calls every
-registered contributor so they can write package-specific artifacts
-(e.g. a calc-note bundle JSON + figure PNGs) into the same cache entry.
-The contributor receives the solved ``converter`` so it can access
-live network objects.
+Boulder used to keep a second, content-addressed store of its own beside that
+one — ``<fingerprint>/result.h5`` + ``meta.json`` + a ``COMPLETE`` marker, LRU
+capped. Two stores meant two answers for the base run, which disagreed. The
+storage half is gone; only the identity half was ever load bearing.
 
-Cache layout
-------------
-::
-
-    <yaml_dir>/.boulder-cache/         (or $BOULDER_CACHE_DIR)
-        <fingerprint>/
-            result.h5                  GUI payload (composite HDF5, see payload_store)
-            meta.json                  created_at, versions, mechanism, config_snapshot
-            COMPLETE                   marker written last (atomic write guard)
-            artifacts/                 contributor-written files
+Host packages register :class:`CacheContributorPlugin` implementations. After
+each successful solve, Boulder calls every registered contributor so they can
+write package-specific artifacts (e.g. a calc-note bundle JSON + figure PNGs)
+into that entry's ``artifacts/<scenario_id>/`` directory. The contributor
+receives the solved ``converter`` so it can access live network objects.
 
 Fingerprint
 -----------
@@ -36,8 +28,11 @@ SHA-256 hex of canonical sorted-key JSON of:
 * ``BOULDER_PLUGINS`` env var
 * ``CACHE_VERSION`` integer
 
-:data:`CACHE_VERSION` must be bumped whenever the ``result.h5``
-or ``meta.json`` schema changes.
+:data:`CACHE_VERSION` participates in the hash, so bumping it invalidates every
+stored fingerprint at once. Bump it when a change would make an old result wrong
+rather than merely differently shaped — the payload's own format is versioned
+separately by ``payload_store.PAYLOAD_SCHEMA`` and the entry layout by
+``scenario_store.STORE_VERSION``.
 """
 
 from __future__ import annotations
@@ -46,10 +41,7 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import subprocess
-import tempfile
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -58,26 +50,11 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Bump when the payload (result.h5) / meta.json schema changes to auto-invalidate
-#: old entries. v2: payload moved from result.json → composite result.h5
-#: (native SolutionArray + JSON blob); see :mod:`boulder.payload_store`.
+#: Folded into every fingerprint, so bumping it invalidates all stored results
+#: at once. Reach for it when a change makes an old result *wrong*; a change to
+#: the payload's own format belongs in ``payload_store.PAYLOAD_SCHEMA`` and one
+#: to the entry layout in ``scenario_store.STORE_VERSION``.
 CACHE_VERSION: int = 2
-
-#: Keep at most this many cache entries per cache directory (oldest pruned first).
-#: Overridable via ``$BOULDER_CACHE_MAX_ENTRIES`` — batch/sweep runners raise it
-#: so a whole run-set fits (the default is tuned for interactive single runs).
-MAX_CACHE_ENTRIES: int = 5
-
-
-def _max_cache_entries() -> int:
-    """Cache-entry cap: ``$BOULDER_CACHE_MAX_ENTRIES`` if set, else the default."""
-    raw = os.environ.get("BOULDER_CACHE_MAX_ENTRIES", "").strip()
-    if raw:
-        try:
-            return max(1, int(raw))
-        except ValueError:
-            pass
-    return MAX_CACHE_ENTRIES
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +103,58 @@ def _coerce(obj: Any) -> Any:
 # ---------------------------------------------------------------------------
 # Fingerprinting
 # ---------------------------------------------------------------------------
+
+#: ``metadata`` keys Boulder *injects* to label a run, excluded from the hash.
+#: :func:`boulder.runset.expand_scenarios` stamps ``scenario_id`` onto every
+#: run-set entry (``BASELINE`` for the unmodified base). That is bookkeeping —
+#: it names the run without changing the physics — so hashing it gave the same
+#: solve two different fingerprints depending on whether it was reached through
+#: the run-set expansion or straight from the preloaded config, and neither
+#: path could recognise the other's cached result. Only keys Boulder writes
+#: itself belong here: user-authored metadata (``title``, ``description``, …)
+#: still participates. See ``tests/test_fingerprint_identity.py``.
+_RUN_LABEL_METADATA_KEYS = ("scenario_id",)
+
+
+def _canonical_config(config: Dict[str, Any]) -> Any:
+    """Canonicalise *config* so equivalent representations hash identically.
+
+    Two transformations, both about *representation* rather than physics:
+
+    1. Drop the injected run label (:data:`_RUN_LABEL_METADATA_KEYS`).
+    2. Drop ``None``-valued mapping keys recursively. A config that has been
+       through Pydantic validation carries explicit nulls for every unset
+       optional (``export: None``, and ``metadata``/``network_class`` on every
+       node), while one that has only been normalised simply omits them —
+       so the run-set path and the preloaded path described the identical run
+       with different dicts.
+
+    Same intent as :func:`_coerce`'s integer-float normalisation, and
+    deliberately *not* folded into it: ``_coerce`` also serialises payloads
+    elsewhere, where dropping ``None`` would discard real fields (e.g.
+    ``error_message``).
+
+    The caller's dict is never mutated.
+    """
+
+    def _strip(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {k: _strip(v) for k, v in obj.items() if v is not None}
+        if isinstance(obj, (list, tuple)):
+            return [_strip(v) for v in obj]
+        return obj
+
+    metadata = config.get("metadata")
+    if isinstance(metadata, dict) and any(
+        k in metadata for k in _RUN_LABEL_METADATA_KEYS
+    ):
+        config = {
+            **config,
+            "metadata": {
+                k: v for k, v in metadata.items() if k not in _RUN_LABEL_METADATA_KEYS
+            },
+        }
+    return _strip(config)
 
 
 def _mechanism_identity(mechanism: Optional[str]) -> str:
@@ -346,34 +375,6 @@ def resolve_mechanism_for_fingerprint(
         return raw
 
 
-def lookup_cached_result(
-    cache_root: Optional[Path],
-    config: Dict[str, Any],
-    mechanism: Optional[str] = None,
-    preloaded_result: Optional[Dict[str, Any]] = None,
-) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
-    """Compute a fingerprint and load a matching cache entry when present.
-
-    Returns
-    -------
-    tuple
-        ``(fingerprint, cached_entry)``.  *fingerprint* is always computed
-        when *cache_root* is set; *cached_entry* is ``None`` on a miss.
-    """
-    if cache_root is None:
-        return None, None
-
-    fingerprint = compute_fingerprint(config, mechanism=mechanism)
-    cached = load_result_flexible(cache_root, fingerprint)
-    if cached is None and preloaded_result is not None:
-        snapshot = preloaded_result.get("config_snapshot") or {}
-        if snapshot:
-            snapshot_fp = compute_fingerprint(snapshot, mechanism=mechanism)
-            if snapshot_fp == fingerprint:
-                cached = preloaded_result
-    return fingerprint, cached
-
-
 def compute_fingerprint(
     config: Dict[str, Any],
     mechanism: Optional[str] = None,
@@ -398,7 +399,7 @@ def compute_fingerprint(
     """
     key: Dict[str, Any] = {
         "cache_version": CACHE_VERSION,
-        "config": _coerce(config),
+        "config": _coerce(_canonical_config(config)),
         "mechanism": _mechanism_identity(mechanism),
         "boulder_source": _source_identity("boulder"),
         "cantera_version": _package_version("cantera"),
@@ -429,307 +430,6 @@ def cache_dir_for(config_path: Optional[str]) -> Optional[Path]:
     if config_path:
         return Path(config_path).parent / ".boulder-cache"
     return None
-
-
-def _entry_dir(cache_root: Path, fingerprint: str) -> Path:
-    return cache_root / fingerprint
-
-
-# ---------------------------------------------------------------------------
-# Save / load
-# ---------------------------------------------------------------------------
-
-
-def save_result(
-    cache_root: Path,
-    fingerprint: str,
-    gui_payload: Dict[str, Any],
-    config_snapshot: Dict[str, Any],
-    mechanism: Optional[str] = None,
-    meta_extra: Optional[Dict[str, Any]] = None,
-) -> Path:
-    """Atomically persist the GUI payload and config snapshot to disk.
-
-    Creates ``<cache_root>/<fingerprint>/result.h5`` (composite payload),
-    ``meta.json`` (incl. ``config_snapshot``), and the ``COMPLETE`` marker.
-    Prunes old entries to keep at most :data:`MAX_CACHE_ENTRIES`.
-
-    Parameters
-    ----------
-    cache_root:
-        Root cache directory (``<yaml_dir>/.boulder-cache`` or override).
-    fingerprint:
-        Hex digest from :func:`compute_fingerprint`.
-    gui_payload:
-        The complete GUI results dict (times, reactor_reports, etc.).
-    config_snapshot:
-        Post-solve config dict (post stream-point enrichment).
-    mechanism:
-        Mechanism string for meta logging.
-    meta_extra:
-        Additional fields written into ``meta.json`` (e.g. contributor names).
-
-    Returns
-    -------
-    Path
-        The cache entry directory.
-    """
-    cache_root.mkdir(parents=True, exist_ok=True)
-    entry = _entry_dir(cache_root, fingerprint)
-    artifacts_dir = entry / "artifacts"
-
-    # Use a temp dir inside the cache root for atomic replacement
-    tmp_dir = Path(tempfile.mkdtemp(dir=cache_root, prefix="_tmp_"))
-    try:
-        (tmp_dir / "artifacts").mkdir()
-
-        from .payload_store import write_payload
-
-        # Composite HDF5: heavy reactor series as native SolutionArrays / binary
-        # datasets, everything else (sankey, reports, summary) as a JSON blob.
-        write_payload(tmp_dir / "result.h5", _coerce(gui_payload), mechanism or "")
-
-        # config_snapshot lives in meta.json (P1) so a snapshot scan never has
-        # to restore the numeric HDF5.
-        meta: Dict[str, Any] = {
-            "fingerprint": fingerprint,
-            "cache_version": CACHE_VERSION,
-            "created_at": time.time(),
-            "boulder_version": _package_version("boulder"),
-            "cantera_version": _package_version("cantera"),
-            "mechanism": mechanism or "",
-            "config_snapshot": _coerce(config_snapshot),
-        }
-        if meta_extra:
-            meta.update(_coerce(meta_extra))
-        _write_json(tmp_dir / "meta.json", meta)
-
-        # Not yet COMPLETE — move into place first
-        if entry.exists():
-            shutil.rmtree(entry)
-        shutil.move(str(tmp_dir), str(entry))
-        artifacts_dir = entry / "artifacts"
-        artifacts_dir.mkdir(exist_ok=True)
-
-    except Exception:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
-
-    # Write COMPLETE marker atomically
-    _write_complete_marker(entry)
-
-    _prune_cache(cache_root)
-    logger.info("Cache entry written: %s/%s", cache_root.name, fingerprint[:12])
-    return entry
-
-
-def _write_json(path: Path, data: Any) -> None:
-    """Write *data* as JSON to *path* atomically via temp file + rename."""
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
-
-
-def _write_complete_marker(entry: Path) -> None:
-    """Write the COMPLETE marker atomically."""
-    marker = entry / "COMPLETE"
-    tmp = entry / "COMPLETE.tmp"
-    tmp.write_text(str(time.time()), encoding="utf-8")
-    tmp.replace(marker)
-
-
-def load_result(
-    cache_root: Path,
-    fingerprint: str,
-) -> Optional[Dict[str, Any]]:
-    """Load a cached result entry.
-
-    Returns ``None`` when the entry does not exist, is incomplete
-    (missing COMPLETE marker), or cannot be parsed.
-
-    Returns
-    -------
-    dict or None
-        Keys: ``"gui_payload"``, ``"config_snapshot"``, ``"meta"``,
-        ``"artifacts_dir"`` (Path), ``"fingerprint"`` (str).
-    """
-    entry = _entry_dir(cache_root, fingerprint)
-    if not (entry / "COMPLETE").exists():
-        return None
-    try:
-        meta = json.loads((entry / "meta.json").read_text(encoding="utf-8"))
-        if meta.get("cache_version") != CACHE_VERSION:
-            logger.debug("Cache entry version mismatch, ignoring: %s", fingerprint[:12])
-            return None
-        from .payload_store import read_payload
-
-        gui_payload = read_payload(
-            entry / "result.h5", mechanism_override=meta.get("mechanism") or None
-        )
-        return {
-            "fingerprint": fingerprint,
-            "gui_payload": gui_payload,
-            "config_snapshot": meta.get("config_snapshot", {}),
-            "meta": meta,
-            "artifacts_dir": entry / "artifacts",
-        }
-    except (OSError, json.JSONDecodeError, KeyError) as exc:
-        logger.debug("Failed to load cache entry %s: %s", fingerprint[:12], exc)
-        return None
-    except Exception as exc:  # noqa: BLE001 — restore failure ⇒ treat as cache miss
-        logger.warning(
-            "Cache entry %s payload restore failed, ignoring: %s",
-            fingerprint[:12],
-            exc,
-        )
-        return None
-
-
-def artifacts_dir_for(cache_root: Path, fingerprint: str) -> Optional[Path]:
-    """Return the artifacts directory for a valid cache entry, or None."""
-    entry = _entry_dir(cache_root, fingerprint)
-    if not (entry / "COMPLETE").exists():
-        return None
-    return entry / "artifacts"
-
-
-# ---------------------------------------------------------------------------
-# Alias support (pre-build ↔ post-build fingerprint mapping)
-# ---------------------------------------------------------------------------
-
-
-def _alias_path(cache_root: Path, alias_fp: str) -> Path:
-    """Return the path for an alias file mapping *alias_fp* to a canonical entry."""
-    return cache_root / f"_alias_{alias_fp}"
-
-
-def save_alias(cache_root: Path, alias_fp: str, canonical_fp: str) -> None:
-    """Write an alias file mapping *alias_fp* → *canonical_fp*.
-
-    Used to map post-build fingerprints to the pre-build (canonical) cache
-    entry so that :func:`load_result_flexible` finds hits regardless of
-    whether the caller provides a pre-build or post-build fingerprint.
-    """
-    cache_root.mkdir(parents=True, exist_ok=True)
-    alias_file = _alias_path(cache_root, alias_fp)
-    tmp = alias_file.with_suffix(".tmp")
-    tmp.write_text(canonical_fp, encoding="utf-8")
-    tmp.replace(alias_file)
-    logger.debug("Cache alias written: %s → %s", alias_fp[:12], canonical_fp[:12])
-
-
-def load_result_flexible(
-    cache_root: Path, fingerprint: str
-) -> Optional[Dict[str, Any]]:
-    """Load a cached result, following alias files when needed.
-
-    Tries the direct entry first; if absent, checks for a
-    ``_alias_<fingerprint>`` file written when a post-build fingerprint
-    was aliased to the canonical (pre-build) cache entry.
-
-    Returns
-    -------
-    dict or None
-        Same structure as :func:`load_result`.
-    """
-    result = load_result(cache_root, fingerprint)
-    if result is not None:
-        return result
-    alias_file = _alias_path(cache_root, fingerprint)
-    if alias_file.is_file():
-        try:
-            canonical_fp = alias_file.read_text(encoding="utf-8").strip()
-            return load_result(cache_root, canonical_fp)
-        except OSError:
-            return None
-    return None
-
-
-def find_result_by_config_snapshot(
-    cache_root: Path,
-    fingerprint: str,
-    mechanism: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    """Scan cache entries for one whose ``config_snapshot`` fingerprint matches.
-
-    This bridges the gap when the startup fingerprint (from the pre-build
-    validated config) differs from the key under which the entry was stored
-    (worker's pre-build fingerprint), but the POST-build ``config_snapshot``
-    happens to match the startup fingerprint.  This occurs because of minor
-    type differences (e.g. ``0.0`` float vs ``0`` int after JSON round-trips)
-    that the ``_coerce`` normaliser now eliminates, so new entries will hash
-    consistently.  The scan is only needed for entries written by older code.
-
-    Parameters
-    ----------
-    cache_root:
-        Root cache directory.
-    fingerprint:
-        The fingerprint to search for in stored ``config_snapshot`` fields.
-    mechanism:
-        Mechanism string used when computing the snapshot fingerprint.
-
-    Returns
-    -------
-    dict or None
-        Same structure as :func:`load_result`, or ``None`` if not found.
-    """
-    if not cache_root.exists():
-        return None
-    for entry_dir in cache_root.iterdir():
-        if not entry_dir.is_dir() or entry_dir.name.startswith("_"):
-            continue
-        if not (entry_dir / "COMPLETE").exists():
-            continue
-        try:
-            # Read config_snapshot from meta.json only — never restore the
-            # numeric HDF5 just to compare snapshots (P1).
-            meta = json.loads((entry_dir / "meta.json").read_text(encoding="utf-8"))
-            if meta.get("cache_version") != CACHE_VERSION:
-                continue
-            snapshot = meta.get("config_snapshot") or {}
-            if not snapshot:
-                continue
-            snapshot_fp = compute_fingerprint(snapshot, mechanism=mechanism)
-            if snapshot_fp == fingerprint:
-                # Match — now restore the payload for this one entry.
-                return load_result(cache_root, entry_dir.name)
-        except (OSError, json.JSONDecodeError, KeyError):
-            continue
-    return None
-
-
-def _prune_orphan_aliases(cache_root: Path) -> None:
-    """Remove alias files whose canonical cache entry no longer exists."""
-    if not cache_root.exists():
-        return
-    for alias_file in cache_root.iterdir():
-        if not alias_file.is_file() or not alias_file.name.startswith("_alias_"):
-            continue
-        try:
-            canonical_fp = alias_file.read_text(encoding="utf-8").strip()
-            target_dir = _entry_dir(cache_root, canonical_fp)
-            if not (target_dir / "COMPLETE").exists():
-                alias_file.unlink(missing_ok=True)
-                logger.debug("Pruned orphan cache alias: %s", alias_file.name[:20])
-        except OSError:
-            continue
-
-
-def _prune_cache(cache_root: Path) -> None:
-    """Remove oldest cache entries when count exceeds the cache-entry cap."""
-    limit = _max_cache_entries()
-    entries = [
-        d
-        for d in cache_root.iterdir()
-        if d.is_dir() and not d.name.startswith("_tmp_") and (d / "COMPLETE").exists()
-    ]
-    if len(entries) > limit:
-        entries.sort(key=lambda d: (d / "COMPLETE").stat().st_mtime)
-        for old in entries[: len(entries) - limit]:
-            shutil.rmtree(old, ignore_errors=True)
-            logger.debug("Pruned cache entry: %s", old.name[:12])
-    _prune_orphan_aliases(cache_root)
 
 
 # ---------------------------------------------------------------------------
