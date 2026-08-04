@@ -33,6 +33,7 @@ worse than a miss.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import time
@@ -88,6 +89,7 @@ NON_KPI_ATTRS = frozenset(
         "label",
         "order",
         "computed_at",
+        "units",
         "schema_version",
         "mechanism",
         "mechanism_name",
@@ -289,6 +291,26 @@ def is_current(
     if isinstance(alts, (str, bytes)):
         alts = [alts]
     return candidate_fingerprint in {str(_to_py(a)) for a in alts}
+
+
+def collect_units(store_dir: Optional[Path], identity: str = "") -> Dict[str, str]:
+    """Merge every entry's KPI display units into one ``{attr: unit}`` map.
+
+    A unit belongs to the *KPI* (``carbon_yield`` is a percentage whichever
+    entry reported it), not to the entry, so the per-entry maps are merged. With
+    one file per entry there is nowhere config-wide to put this, and duplicating
+    a handful of short strings is cheaper than a separate index file.
+    """
+    merged: Dict[str, str] = {}
+    for attrs in list_entries(store_dir, identity):
+        raw = attrs.get("units")
+        if not raw:
+            continue
+        try:
+            merged.update(json.loads(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    return merged
 
 
 def delete_entry(store_dir: Path, scenario_id: str) -> bool:

@@ -9,7 +9,6 @@ the open GUI to load a scenario.
 from __future__ import annotations
 
 import asyncio
-import json
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -18,18 +17,25 @@ import pytest
 pytest.importorskip("fastapi")
 pytest.importorskip("h5py")
 
-import h5py  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from boulder.api.main import create_app  # noqa: E402
 
 
-def _make_store(path: Path, ids: list[str]) -> None:
-    """Minimal composite store: one group per id, each with a payload_json."""
-    with h5py.File(str(path), "w") as handle:
-        for sid in ids:
-            grp = handle.create_group(sid)
-            grp.create_dataset("payload_json", data=json.dumps({}).encode("utf-8"))
+def _make_store(store_dir: Path, ids: list[str], identity: str) -> None:
+    """One entry file per id, written the way a real solve writes them."""
+    from boulder import scenario_store
+
+    for order, sid in enumerate(ids):
+        scenario_store.write_entry(
+            store_dir,
+            sid,
+            gui_payload={"status": "complete", "times": [], "reactors_series": {}},
+            mechanism="gri30.yaml",
+            fingerprint=f"fp-{sid}",
+            identity=identity,
+            order=order,
+        )
 
 
 @contextmanager
@@ -39,12 +45,21 @@ def _client_with_store(tmp_path: Path, ids: list[str]):
     The app handle (not ``client.app``, which is typed as the bare ASGI callable)
     gives typed access to ``app.state``.
     """
-    store = tmp_path / "scenarios.h5"
-    _make_store(store, ids)
+    from boulder import scenario_store
+    from boulder.runset import resolve_store_dir
+
+    cfg = tmp_path / "model.yaml"
+    cfg.write_text("metadata: {}\n", encoding="utf-8")
     app = create_app()
     with TestClient(app) as client:
-        # Set *after* startup — the lifespan resets scenario_store_path on entry.
-        app.state.scenario_store_path = str(store)
+        # Set *after* startup — the lifespan resets the preloaded state on entry.
+        # The store location is derived from the config path, not cached on
+        # app.state, so pointing at the config is all that's needed.
+        app.state.preloaded_config_path = str(cfg)
+        app.state.preloaded_raw = {"metadata": {}}
+        store_dir = resolve_store_dir({}, cfg)
+        assert store_dir is not None
+        _make_store(store_dir, ids, scenario_store.config_identity(cfg))
         yield client, app
 
 
