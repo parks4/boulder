@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from boulder.api.routes.sweep import has_run_set, resolve_store_path
-from boulder.runset import run_set_size
+from boulder.api.routes.sweep import has_run_set
+from boulder.runset import resolve_store_path, run_set_size
 
 
 def test_sweep_only_counts_cartesian():

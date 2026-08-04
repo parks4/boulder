@@ -145,6 +145,7 @@ def write_entry(
     label: Optional[str] = None,
     order: Optional[int] = None,
     alt_fingerprints: "Optional[tuple[str, ...]]" = None,
+    units: Optional[Dict[str, str]] = None,
     extra_attrs: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Write one solved entry, recording ``fingerprint`` last.
@@ -174,12 +175,44 @@ def write_entry(
         alts = tuple(fp for fp in (alt_fingerprints or ()) if fp and fp != fingerprint)
         if alts:
             attrs[_ATTR_ALT_FINGERPRINTS] = list(alts)
+        if units:
+            attrs["units"] = json.dumps(units)
         for key, value in (extra_attrs or {}).items():
             attrs[key] = value
         handle.flush()
         # Last, and only now: this entry is complete and valid.
         attrs[_ATTR_FINGERPRINT] = fingerprint
     return path
+
+
+def update_display_attrs(
+    store_dir: Path,
+    scenario_id: str,
+    *,
+    label: Optional[str] = None,
+    order: Optional[int] = None,
+) -> bool:
+    """Refresh an entry's *display* attrs without touching its result.
+
+    A sweep that skips an unchanged entry still wants the Scenario pane to track
+    the YAML — a reordered run-set, or a renamed ``scenario_name``. Deliberately
+    cannot touch the fingerprint or the payload: this is presentation only.
+    Returns whether the entry existed.
+    """
+    if h5py is None:
+        return False
+    path = store_entry_path(store_dir, scenario_id)
+    if not path.is_file():
+        return False
+    try:
+        with h5py.File(str(path), "a") as handle:
+            if label is not None:
+                handle.attrs["label"] = label
+            if order is not None:
+                handle.attrs["order"] = int(order)
+        return True
+    except OSError:
+        return False
 
 
 def entry_attrs(
