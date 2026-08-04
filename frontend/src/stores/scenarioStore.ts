@@ -39,6 +39,8 @@ interface ScenarioState {
   createdAt?: number;
   /** Display unit per host-supplied KPI attr key -- see `ScenarioListResponse.units`. */
   units?: Record<string, string>;
+  /** Bookkeeping attr keys the server says are not KPIs -- see `ScenarioListResponse.non_kpi_keys`. */
+  nonKpiKeys?: string[];
   activeId: string | null;
   loading: boolean;
   error: string | null;
@@ -147,6 +149,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
           authoredIds: idsFromOverlays(overlays),
           createdAt: resp.created_at ?? undefined,
           units: resp.units ?? undefined,
+          nonKpiKeys: resp.non_kpi_keys ?? undefined,
           revision: s.revision + 1,
         };
       });

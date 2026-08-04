@@ -42,6 +42,13 @@ export interface ScenarioListResponse {
    * the frontend from the property name (see `SweepResultsPlot.tsx`).
    */
   units?: Record<string, string> | null;
+  /**
+   * Attr keys that are bookkeeping, not plottable KPIs. Sent by the server
+   * (`scenario_store.NON_KPI_ATTRS`) instead of mirrored here: the local copy
+   * drifted as soon as the store gained an attr, and `store_version` showed up
+   * as a selectable Sweep Results axis.
+   */
+  non_kpi_keys?: string[] | null;
   scenarios: ScenarioMeta[];
   /**
    * Every scenario id in the config's `scenario:` mapping, regardless of

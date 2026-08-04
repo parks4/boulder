@@ -10,6 +10,9 @@ interface Props {
   scenarios: ScenarioMeta[];
   /** Display unit per host-supplied KPI attr key -- see `ScenarioListResponse.units`. */
   units?: Record<string, string>;
+  /** Bookkeeping attr keys the server excludes from KPIs; falls back to
+   * `FALLBACK_NON_AXIS_KEYS` when an older server does not send them. */
+  nonKpiKeys?: string[];
 }
 
 interface YGroup {
@@ -33,7 +36,10 @@ interface SeriesFamily {
 }
 
 /** Bookkeeping attrs every scenario carries that are never plot axis candidates. */
-const NON_AXIS_KEYS = new Set(["order", "computed_at", "schema_version"]);
+// Used only when the server does not publish `non_kpi_keys` (older builds).
+// The live list comes from `scenario_store.NON_KPI_ATTRS` -- keeping a second
+// authoritative copy here is what let `store_version` become a plot axis.
+const FALLBACK_NON_AXIS_KEYS = new Set(["order", "computed_at", "schema_version"]);
 
 const FRIENDLY_LABELS: Record<string, string> = {
   t0_K: "Temperature (K)",
@@ -85,11 +91,14 @@ function displayLabel(key: string, units: Record<string, string> | undefined): s
 }
 
 /** Numeric attr keys present on at least one scenario, excluding bookkeeping fields. */
-function numericKeys(scenarios: ScenarioMeta[]): string[] {
+function numericKeys(scenarios: ScenarioMeta[], nonKpiKeys?: string[]): string[] {
+  const excluded = nonKpiKeys?.length
+    ? new Set(nonKpiKeys)
+    : FALLBACK_NON_AXIS_KEYS;
   const keys = new Set<string>();
   for (const s of scenarios) {
     for (const [key, value] of Object.entries(s)) {
-      if (typeof value === "number" && !NON_AXIS_KEYS.has(key)) keys.add(key);
+      if (typeof value === "number" && !excluded.has(key)) keys.add(key);
     }
   }
   return Array.from(keys).sort();
@@ -173,10 +182,13 @@ function buildSeriesOptions(groups: YGroup[]): {
  * Renders nothing when the store has fewer than two numeric attrs to plot
  * against each other (e.g. a plain multi-case store with no sweep KPIs).
  */
-export function SweepResultsPlot({ scenarios, units }: Props) {
+export function SweepResultsPlot({ scenarios, units, nonKpiKeys }: Props) {
   const theme = useThemeStore((s) => s.theme);
 
-  const keys = useMemo(() => numericKeys(scenarios), [scenarios]);
+  const keys = useMemo(
+    () => numericKeys(scenarios, nonKpiKeys),
+    [scenarios, nonKpiKeys],
+  );
   const [xKey, setXKey] = useState<string | null>(null);
   /** Individually-selected Y-axis series keys. `null` means the user hasn't
    * touched the picker yet, so a sensible default (the first family, or the

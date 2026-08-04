@@ -338,3 +338,32 @@ def test_an_ordinary_id_is_used_verbatim() -> None:
     """The common case stays readable in the directory listing."""
     assert store_entry_name("BASELINE") == "BASELINE"
     assert store_entry_name("short_residence-time.2") == "short_residence-time.2"
+
+
+def test_the_api_publishes_the_non_kpi_attr_set(tmp_path: Path) -> None:
+    """The plot's exclusion list must come from the store, not a frontend copy.
+
+    A hand-mirrored list in TypeScript drifted the moment the store gained an
+    attr: `store_version` was offered as a selectable Sweep Results axis. The
+    server therefore publishes the set and the frontend consumes it.
+    """
+    import pytest as _pytest
+
+    _pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from boulder import scenario_store
+    from boulder.api.main import create_app
+
+    cfg = tmp_path / "model.yaml"
+    cfg.write_text("metadata: {}\n", encoding="utf-8")
+
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.preloaded_config_path = str(cfg)
+        published = client.get("/api/scenarios").json()["non_kpi_keys"]
+
+    assert set(published) == set(scenario_store.NON_KPI_ATTRS)
+    # The two that actually bit: bookkeeping ints a naive numeric scan plots.
+    assert "store_version" in published
+    assert "schema_version" in published

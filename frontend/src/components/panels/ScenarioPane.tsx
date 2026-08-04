@@ -53,6 +53,7 @@ export function ScenarioPane() {
     authoredIds,
     createdAt,
     units,
+    nonKpiKeys,
     activeId,
     loading,
     error,
@@ -337,7 +338,11 @@ export function ScenarioPane() {
           })}
         </ul>
       </div>
-      <SweepResultsPlot scenarios={scenarios} units={units} />
+      <SweepResultsPlot
+        scenarios={scenarios}
+        units={units}
+        nonKpiKeys={nonKpiKeys}
+      />
       <AddScenarioModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}

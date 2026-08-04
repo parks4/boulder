@@ -74,7 +74,12 @@ def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     return bool(raw.get("scenarios") or sweeps_of(raw) or sweep_runner_of(raw))
 
 
-def _run_host_sweep(dotted: str, state: Dict[str, Any], store_dir: Path) -> None:
+def _run_host_sweep(
+    dotted: str,
+    state: Dict[str, Any],
+    store_dir: Path,
+    config_path: Optional[str] = None,
+) -> None:
     """Resolve and call a ``sweep.runner`` callable, updating *state* around it.
 
     The callable owns the run-set: it decides the points, solves them and writes
@@ -88,6 +93,13 @@ def _run_host_sweep(dotted: str, state: Dict[str, Any], store_dir: Path) -> None
        :func:`boulder.scenario_store.write_entry`, which records the
        fingerprint, config identity and display attrs the Scenario pane needs —
        hand-rolling HDF5 here will produce entries the pane refuses to read.
+
+       A runner may also declare a ``config_path`` parameter to receive the
+       config it is sweeping. It needs that to stamp entries with
+       :func:`boulder.scenario_store.config_identity`, which the pane checks
+       before serving a result: a directory alone cannot identify the config it
+       belongs to, so without this a runner physically could not write an entry
+       the pane would accept.
     """
     from ...cantera_converter import resolve_dotted_path
 
@@ -109,15 +121,18 @@ def _run_host_sweep(dotted: str, state: Dict[str, Any], store_dir: Path) -> None
     import inspect
 
     try:
-        accepts_progress = "progress" in inspect.signature(runner).parameters
+        declared = set(inspect.signature(runner).parameters)
     except (TypeError, ValueError):  # builtins / C callables expose no signature
-        accepts_progress = False
+        declared = set()
+
+    kwargs: Dict[str, Any] = {}
+    if "progress" in declared:
+        kwargs["progress"] = _progress
+    if "config_path" in declared:
+        kwargs["config_path"] = config_path
 
     print(f"[sweep] delegating to host runner {dotted}", flush=True)
-    if accepts_progress:
-        runner(store_dir, progress=_progress)
-    else:
-        runner(store_dir)
+    runner(store_dir, **kwargs)
 
 
 def _has_run_set(request: Request) -> bool:
@@ -244,7 +259,7 @@ async def sweep_run(
                 # writes the collection store itself; Boulder only resolves the
                 # callable and reports status. Runs in-process like every other
                 # sweep -- declaring the runner replaced *spawning* it.
-                _run_host_sweep(host_runner, state, store_dir)
+                _run_host_sweep(host_runner, state, store_dir, cfg_path)
                 # The host owns the store's contents, including its root
                 # attrs, so skip Boulder's own finalisation -- but *not* the
                 # terminal bookkeeping, or the UI would poll "running" forever

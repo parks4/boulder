@@ -111,6 +111,12 @@ async def list_scenarios(request: Request) -> Dict[str, Any]:
         # (``in.<id>.<prop>`` keys) resolve their unit on the frontend instead,
         # via the same property-name lookup the Properties panel uses.
         "units": scenario_store.collect_units(store_dir, identity) or None,
+        # Attrs that are bookkeeping, not plottable KPIs. Published rather than
+        # duplicated in the frontend: the two lists drifted the moment the store
+        # gained an attr (`store_version` was offered as a Sweep Results axis),
+        # and a hand-synced copy in another language is the same second source
+        # of truth this store exists to remove.
+        "non_kpi_keys": sorted(scenario_store.NON_KPI_ATTRS),
         "scenarios": entries,
         "authored_ids": authored_ids,
         "authored_overlays": authored_overlays,
