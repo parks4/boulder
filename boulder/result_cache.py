@@ -127,6 +127,58 @@ def _coerce(obj: Any) -> Any:
 # Fingerprinting
 # ---------------------------------------------------------------------------
 
+#: ``metadata`` keys Boulder *injects* to label a run, excluded from the hash.
+#: :func:`boulder.runset.expand_scenarios` stamps ``scenario_id`` onto every
+#: run-set entry (``BASELINE`` for the unmodified base). That is bookkeeping —
+#: it names the run without changing the physics — so hashing it gave the same
+#: solve two different fingerprints depending on whether it was reached through
+#: the run-set expansion or straight from the preloaded config, and neither
+#: path could recognise the other's cached result. Only keys Boulder writes
+#: itself belong here: user-authored metadata (``title``, ``description``, …)
+#: still participates. See ``tests/test_fingerprint_identity.py``.
+_RUN_LABEL_METADATA_KEYS = ("scenario_id",)
+
+
+def _canonical_config(config: Dict[str, Any]) -> Any:
+    """Canonicalise *config* so equivalent representations hash identically.
+
+    Two transformations, both about *representation* rather than physics:
+
+    1. Drop the injected run label (:data:`_RUN_LABEL_METADATA_KEYS`).
+    2. Drop ``None``-valued mapping keys recursively. A config that has been
+       through Pydantic validation carries explicit nulls for every unset
+       optional (``export: None``, and ``metadata``/``network_class`` on every
+       node), while one that has only been normalised simply omits them —
+       so the run-set path and the preloaded path described the identical run
+       with different dicts.
+
+    Same intent as :func:`_coerce`'s integer-float normalisation, and
+    deliberately *not* folded into it: ``_coerce`` also serialises
+    ``gui_payload`` in :func:`save_result`, where dropping ``None`` would
+    discard real fields (e.g. ``error_message``).
+
+    The caller's dict is never mutated.
+    """
+
+    def _strip(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            return {k: _strip(v) for k, v in obj.items() if v is not None}
+        if isinstance(obj, (list, tuple)):
+            return [_strip(v) for v in obj]
+        return obj
+
+    metadata = config.get("metadata")
+    if isinstance(metadata, dict) and any(
+        k in metadata for k in _RUN_LABEL_METADATA_KEYS
+    ):
+        config = {
+            **config,
+            "metadata": {
+                k: v for k, v in metadata.items() if k not in _RUN_LABEL_METADATA_KEYS
+            },
+        }
+    return _strip(config)
+
 
 def _mechanism_identity(mechanism: Optional[str]) -> str:
     """Return a stable string identifying the mechanism for hashing.
@@ -398,7 +450,7 @@ def compute_fingerprint(
     """
     key: Dict[str, Any] = {
         "cache_version": CACHE_VERSION,
-        "config": _coerce(config),
+        "config": _coerce(_canonical_config(config)),
         "mechanism": _mechanism_identity(mechanism),
         "boulder_source": _source_identity("boulder"),
         "cantera_version": _package_version("cantera"),
