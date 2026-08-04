@@ -20,7 +20,6 @@ import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
 import { ReactorGraph } from "@/components/graph/ReactorGraph";
 import { ResultsTabs } from "@/components/results/ResultsTabs";
-import { SimulationOverlay } from "@/components/simulation/SimulationOverlay";
 import { AddReactorModal } from "@/components/modals/AddReactorModal";
 import { AddMFCModal } from "@/components/modals/AddMFCModal";
 import { Button } from "@/components/ui/Button";
@@ -358,8 +357,7 @@ export function AppShell() {
         )}
       </div>
 
-      {/* Overlays and modals */}
-      <SimulationOverlay />
+      {/* Modals */}
       <AddReactorModal
         // Remount (fresh form state) whenever it's opened with a different
         // stage, instead of syncing defaultGroup into state via an effect.

@@ -14,6 +14,7 @@ import type { SimulationResults } from "@/types/simulation";
 const mockSetSelectedElement = vi.fn();
 let mockResults: SimulationResults | null = null;
 let mockProgress: SimulationResults | null = null;
+let mockIsRunning = false;
 let mockActiveTab: string | null = null;
 let mockSelectedElement: { type: string; data: Record<string, unknown> } | null = null;
 
@@ -33,6 +34,7 @@ vi.mock("@/stores/simulationStore", () => ({
     selector({
       results: mockResults,
       progress: mockProgress,
+      isRunning: mockIsRunning,
       error: null,
     }),
 }));
@@ -107,6 +109,10 @@ vi.mock("./SweepCalculatingCard", () => ({
   SweepCalculatingCard: () => null,
 }));
 
+vi.mock("./SimulationCalculatingCard", () => ({
+  SimulationCalculatingCard: () => <div data-testid="simulation-calculating-card" />,
+}));
+
 vi.mock("./SankeyTab", () => ({
   SankeyTab: () => <div data-testid="sankey-tab" />,
 }));
@@ -122,8 +128,18 @@ describe("ResultsTabs", () => {
     vi.clearAllMocks();
     mockResults = null;
     mockProgress = null;
+    mockIsRunning = false;
     mockActiveTab = null;
     mockSelectedElement = null;
+  });
+
+  it("shows the non-blocking calculating card while a plain Run Simulation is in progress", () => {
+    mockIsRunning = true;
+
+    render(<ResultsTabs />);
+
+    expect(screen.getByTestId("simulation-calculating-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("plots-tab")).not.toBeInTheDocument();
   });
 
   it("defaults to Plots when results have no Sankey data", () => {

@@ -15,6 +15,7 @@ import { SummaryTab } from "./SummaryTab";
 import { ErrorTab } from "./ErrorTab";
 import { PluginTab } from "./PluginTab";
 import { SweepCalculatingCard } from "./SweepCalculatingCard";
+import { SimulationCalculatingCard } from "./SimulationCalculatingCard";
 import type { PluginMeta, PluginRenderData } from "@/types/plugin";
 
 const SankeyTab = lazy(() => import("./SankeyTab").then((m) => ({ default: m.SankeyTab })));
@@ -29,6 +30,7 @@ type Tab = (typeof BASE_TABS)[number] | typeof ERROR_TAB_LABEL | string;
 export function ResultsTabs() {
   const results = useSimulationStore((s) => s.results);
   const progress = useSimulationStore((s) => s.progress);
+  const isRunning = useSimulationStore((s) => s.isRunning);
   const error = useSimulationStore((s) => s.error);
   const selectedElement = useSelectionStore((s) => s.selectedElement);
   const config = useConfigStore((s) => s.config);
@@ -198,6 +200,12 @@ export function ResultsTabs() {
         lastLine={sweepLastLine}
       />
     );
+  }
+
+  // A plain Run Simulation in progress — same non-blocking treatment as a
+  // sweep scenario (see CalculatingCardShell), no full-screen overlay.
+  if (isRunning) {
+    return <SimulationCalculatingCard />;
   }
 
   const data = results ?? progress;

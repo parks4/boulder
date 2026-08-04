@@ -132,10 +132,6 @@ vi.mock("@/components/results/ResultsTabs", () => ({
   ResultsTabs: () => <div data-testid="results-tabs" />,
 }));
 
-vi.mock("@/components/simulation/SimulationOverlay", () => ({
-  SimulationOverlay: () => <div data-testid="simulation-overlay" />,
-}));
-
 let mockReactorModal: { open: boolean; group?: string | null } = { open: false };
 let mockConnectionModal: { open: boolean; group?: string | null; source?: string } = {
   open: false,
