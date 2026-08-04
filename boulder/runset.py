@@ -298,26 +298,6 @@ def run_set_size(raw: Dict[str, Any]) -> int:
     return total
 
 
-def resolve_store_path(
-    raw: Dict[str, Any], config_path: "Optional[str | Path]"
-) -> Optional[Path]:
-    """Return the collection store a run-set writes to, or ``None``.
-
-    Declared via ``metadata.extra.scenario_store`` (resolved relative to the
-    config), else the ``<config-stem>_scenarios.h5`` default next to the
-    config. ``None`` when *config_path* is unset — there is no config to
-    resolve a default against.
-    """
-    if not config_path:
-        return None
-    cfg = Path(config_path).resolve()
-    rel = ((raw.get("metadata") or {}).get("extra") or {}).get("scenario_store")
-    if rel:
-        p = Path(rel)
-        return p if p.is_absolute() else cfg.parent / p
-    return cfg.parent / f"{cfg.stem}_scenarios.h5"
-
-
 # ---------------------------------------------------------------------------
 # Result-store layout: one file per run-set entry.
 # ---------------------------------------------------------------------------

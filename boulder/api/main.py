@@ -170,36 +170,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             # Attempt to load a matching cache entry for the preloaded config.
             try:
+                from .. import scenario_store
                 from ..result_cache import (
-                    cache_dir_for,
-                    lookup_cached_result,
+                    compute_fingerprint,
                     resolve_mechanism_for_fingerprint,
                 )
+                from ..runset import resolve_store_dir
 
-                cache_root = cache_dir_for(str(actual_yaml_path))
+                store_dir = resolve_store_dir(
+                    app.state.preloaded_raw or {}, str(actual_yaml_path)
+                )
                 if os.environ.get("BOULDER_NO_CACHE"):
                     # --no-cache: don't pick up any cached result; recompute.
                     app.state.preloaded_result = None
                     app.state.preloaded_fingerprint = None
                     print("[cache] disabled (--no-cache) — will recompute", flush=True)
-                elif cache_root is not None:
+                elif store_dir is not None:
                     mechanism = resolve_mechanism_for_fingerprint(
                         validated, converter_class=app.state.converter_class
                     )
-                    fingerprint, cached = lookup_cached_result(
-                        cache_root,
-                        validated,
-                        mechanism=mechanism,
+                    fingerprint = compute_fingerprint(validated, mechanism=mechanism)
+                    # Which run-set entry the preloaded config is (BASE, or
+                    # BASELINE once scenarios exist) is not knowable here, so
+                    # match by fingerprint rather than guessing the name. Since
+                    # `expand_scenarios` and the startup path now agree on the
+                    # fingerprint, a sweep's BASELINE answers this too.
+                    cached = scenario_store.load_matching(
+                        store_dir,
+                        fingerprint,
+                        scenario_store.config_identity(str(actual_yaml_path)),
                     )
-                    if cached is None and fingerprint is not None:
-                        from ..result_cache import find_result_by_config_snapshot
-
-                        cached = find_result_by_config_snapshot(
-                            cache_root, fingerprint, mechanism=mechanism
-                        )
                     app.state.preloaded_result = cached
-                    # Use the *actual* cache-entry fingerprint (directory name) so
-                    # that artifacts_dir_for() resolves correctly in export actions.
                     app.state.preloaded_fingerprint = (
                         cached.get("fingerprint") if cached else None
                     )

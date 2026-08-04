@@ -318,12 +318,66 @@ def is_current(
     attrs = entry_attrs(store_dir, scenario_id, identity)
     if attrs is None:
         return False
+    return _answers_to(attrs, candidate_fingerprint)
+
+
+def _answers_to(attrs: Dict[str, Any], candidate_fingerprint: str) -> bool:
+    """Whether an entry's attrs match *candidate_fingerprint*, canonical or alternate."""
     if str(attrs.get(_ATTR_FINGERPRINT, "")) == candidate_fingerprint:
         return True
     alts = attrs.get(_ATTR_ALT_FINGERPRINTS) or []
     if isinstance(alts, (str, bytes)):
         alts = [alts]
     return candidate_fingerprint in {str(_to_py(a)) for a in alts}
+
+
+def find_entry(
+    store_dir: Optional[Path], fingerprint: str, identity: str = ""
+) -> Optional[Dict[str, Any]]:
+    """Return the attrs of whichever entry already holds *fingerprint*.
+
+    The one place the store is searched rather than addressed by name, and only
+    because two callers legitimately have a config but no id: the startup check
+    (which config was preloaded?) and ``check-cache`` (does this live-edited
+    config match anything?). Both then reuse that entry instead of re-solving.
+
+    Attrs only, so a "do we have this?" question costs no payload read. A
+    run-set is bounded by its config -- a handful of entries -- so the linear
+    scan is cheaper than an index that would need invalidating.
+    """
+    if not fingerprint:
+        return None
+    for attrs in list_entries(store_dir, identity):
+        if _answers_to(attrs, fingerprint):
+            return attrs
+    return None
+
+
+def load_matching(
+    store_dir: Optional[Path], fingerprint: str, identity: str = ""
+) -> Optional[Dict[str, Any]]:
+    """:func:`find_entry` plus the payload, in the shape the cache routes serve.
+
+    ``meta`` and ``artifacts_dir`` reproduce what the retired content-addressed
+    store returned, so ``GET /api/simulations/cached`` and its artifacts sibling
+    keep their response shape while the frontend still expects it.
+    """
+    if store_dir is None:
+        return None
+    attrs = find_entry(store_dir, fingerprint, identity)
+    if attrs is None:
+        return None
+    scenario_id = str(attrs.get("id") or "")
+    payload = read_entry(store_dir, scenario_id, identity)
+    if payload is None:
+        return None
+    return {
+        "id": scenario_id,
+        "fingerprint": str(attrs.get(_ATTR_FINGERPRINT, "")),
+        "gui_payload": payload,
+        "artifacts_dir": str(store_artifacts_dir(store_dir, scenario_id)),
+        "meta": {"created_at": float(attrs.get("computed_at", 0.0) or 0.0)},
+    }
 
 
 def collect_units(store_dir: Optional[Path], identity: str = "") -> Dict[str, str]:

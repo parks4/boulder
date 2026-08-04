@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
+from boulder import scenario_store  # noqa: E402
 from boulder.api.main import create_app  # noqa: E402
 from boulder.gui_actions import (  # noqa: E402
     GuiActionContext,
@@ -22,7 +23,7 @@ from boulder.gui_actions import (  # noqa: E402
     get_gui_action_registry,
     register_gui_action,
 )
-from boulder.result_cache import CACHE_VERSION, save_result  # noqa: E402
+from boulder.runset import resolve_store_dir  # noqa: E402
 
 SIMPLE_CONFIG: Dict[str, Any] = {
     "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {"T": 1000}}],
@@ -250,11 +251,13 @@ class TestGuiActionCacheContext:
         snapshot = normalize_config_for_fingerprint(SIMPLE_CONFIG)
         mechanism = resolve_mechanism_for_fingerprint(snapshot)
         fingerprint = compute_fingerprint(snapshot, mechanism=mechanism)
-        save_result(
-            cache_root=tmp_path / ".boulder-cache",
-            fingerprint=fingerprint,
+        scenario_store.write_entry(
+            resolve_store_dir({}, str(yaml_path)),
+            "BASE",
             gui_payload=SIMPLE_PAYLOAD,
-            config_snapshot=snapshot,
+            mechanism=mechanism,
+            fingerprint=fingerprint,
+            identity=scenario_store.config_identity(str(yaml_path)),
         )
 
         app = create_app()
@@ -290,7 +293,7 @@ class TestGuiActionCacheContext:
             "fingerprint": fingerprint,
             "gui_payload": SIMPLE_PAYLOAD,
             "config_snapshot": SIMPLE_CONFIG,
-            "meta": {"cache_version": CACHE_VERSION, "created_at": time.time()},
+            "meta": {"created_at": time.time()},
             "artifacts_dir": tmp_path / ".boulder-cache" / fingerprint / "artifacts",
         }
 

@@ -1,7 +1,7 @@
 """The GUI and CLI sweeps must solve a scenario through the same code.
 
 They already shared the scaffolding (`expand_scenarios`, `prepare_scenario`,
-`write_payload`, `prune_stale_groups`) and even the same converter methods, but
+`write_payload`) and even the same converter methods, but
 each assembled the stored `gui` payload itself — ~15 keys, hand-built twice.
 They had drifted: `updated_nodes` / `updated_connections` carried the real
 build-time additions on the GUI path and were hard-coded `None` on the CLI one.

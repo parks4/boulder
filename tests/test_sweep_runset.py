@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from boulder.api.routes.sweep import has_run_set
-from boulder.runset import resolve_store_path, run_set_size
+from boulder.runset import resolve_store_dir, run_set_size
 
 
 def test_sweep_only_counts_cartesian():
@@ -69,16 +69,30 @@ def test_has_run_set_ignores_a_local_run_sweep_script(tmp_path: Path):
     assert has_run_set({}, str(cfg)) is False
 
 
-def test_resolve_store_path_defaults_next_to_config(tmp_path: Path):
+def test_store_dir_defaults_under_the_cache_root(tmp_path: Path):
+    """Derived results belong in the already-git-ignored place, not beside the YAML.
+
+    Living under `.boulder-cache/` is also what keeps the store out of
+    `git status` -- an untracked store inside a git tree perturbs the
+    source-identity token the fingerprint folds in, which busted the cache on
+    every run until the layout moved.
+    """
     cfg = tmp_path / "my_map.yaml"
-    assert resolve_store_path({}, str(cfg)) == tmp_path / "my_map_scenarios.h5"
+    assert resolve_store_dir({}, str(cfg)) == tmp_path / ".boulder-cache" / "my_map"
 
 
-def test_resolve_store_path_honours_declared_relative_path(tmp_path: Path):
+def test_store_dir_honours_a_declared_relative_path(tmp_path: Path):
     cfg = tmp_path / "my_map.yaml"
-    raw = {"metadata": {"extra": {"scenario_store": "results/store.h5"}}}
-    assert resolve_store_path(raw, str(cfg)) == tmp_path / "results" / "store.h5"
+    raw = {"metadata": {"extra": {"cache_store": "results/here"}}}
+    assert resolve_store_dir(raw, str(cfg)) == tmp_path / "results" / "here"
 
 
-def test_resolve_store_path_none_without_config_path():
-    assert resolve_store_path({}, None) is None
+def test_store_dir_still_honours_the_former_key_name(tmp_path: Path):
+    """`scenario_store` predates the rename -- configs in the wild still use it."""
+    cfg = tmp_path / "my_map.yaml"
+    raw = {"metadata": {"extra": {"scenario_store": "results/here"}}}
+    assert resolve_store_dir(raw, str(cfg)) == tmp_path / "results" / "here"
+
+
+def test_store_dir_none_without_config_path():
+    assert resolve_store_dir({}, None) is None

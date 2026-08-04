@@ -40,8 +40,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Type
 
-import h5py
-
 from . import scenario_store
 from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
 from .config import normalize_config
@@ -255,42 +253,6 @@ def gui_payload_from_progress(progress: Any, started: float) -> Dict[str, Any]:
         "updated_nodes": progress.updated_nodes,
         "updated_connections": progress.updated_connections,
     }
-
-
-def existing_fingerprints(store: Path) -> Dict[str, str]:
-    """Per-scenario fingerprints already in the store (group id → fingerprint).
-
-    Shared cache primitive: any writer of a collection store (this runner, a
-    host batch writer) reads its cache state through this.
-    """
-    found: Dict[str, str] = {}
-    if not store.exists():
-        return found
-    with h5py.File(str(store), "r") as handle:
-        for sid, node in handle.items():
-            if isinstance(node, h5py.Group) and "payload_json" in node:
-                fp = node.attrs.get("fingerprint")
-                if fp:
-                    found[sid] = str(fp)
-    return found
-
-
-def prune_stale_groups(store: Path, run_ids: set) -> list:
-    """Delete groups whose scenario id is no longer in the run set.
-
-    Renamed or removed scenarios would otherwise linger in the GUI's Scenario
-    Pane forever (only ``--no-cache`` recreates the file). Returns the deleted
-    group names.
-    """
-    with h5py.File(str(store), "a") as handle:
-        stale = [
-            sid
-            for sid, node in handle.items()
-            if isinstance(node, h5py.Group) and sid not in run_ids
-        ]
-        for sid in stale:
-            del handle[sid]
-    return stale
 
 
 def run(

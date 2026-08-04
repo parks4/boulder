@@ -362,11 +362,12 @@ async def check_simulation_cache(
     Returns ``{"cached": true, "result": {...}, "fingerprint": "...", "meta": {...}}``
     or ``{"cached": false}``.
     """
+    from ... import scenario_store
     from ...result_cache import (
-        cache_dir_for,
-        lookup_cached_result,
+        compute_fingerprint,
         resolve_mechanism_for_fingerprint,
     )
+    from ...runset import resolve_store_dir
 
     # Normalize exactly like a run would (transient re-runs included).
     config = normalize_config_for_fingerprint(
@@ -380,20 +381,17 @@ async def check_simulation_cache(
     )
 
     config_path = getattr(request.app.state, "preloaded_config_path", None)
-    cache_root = cache_dir_for(config_path)
-    if cache_root is None:
+    store_dir = resolve_store_dir(
+        getattr(request.app.state, "preloaded_raw", None) or {}, config_path
+    )
+    if store_dir is None:
         logger.info("Result cache disabled (no config path); running a fresh solve.")
         return {"cached": False}
 
-    preloaded = getattr(request.app.state, "preloaded_result", None)
-    fingerprint, cached = lookup_cached_result(
-        cache_root,
-        config,
-        mechanism=mechanism,
-        preloaded_result=preloaded,
+    fingerprint = compute_fingerprint(config, mechanism=mechanism)
+    cached = scenario_store.load_matching(
+        store_dir, fingerprint, scenario_store.config_identity(config_path)
     )
-    # cache_root is set (guarded above), so the fingerprint is always computed.
-    assert fingerprint is not None
 
     if cached is None:
         logger.info(

@@ -1,45 +1,43 @@
-"""Tests for boulder.result_cache.
+"""Tests for boulder.result_cache -- now identity only, no storage.
 
-Asserts:
+The module used to own a second, content-addressed result store (save/load,
+aliases, LRU pruning). :mod:`boulder.scenario_store` is the single store now, so
+what remains here is the *identity* layer everything fingerprints through, plus
+the contributor registry:
+
 - compute_fingerprint is deterministic and changes when config or mechanism changes.
-- save_result / load_result round-trips the GUI payload and config snapshot.
-- A CACHE_VERSION mismatch causes load_result to return None (invalidation).
-- Missing COMPLETE marker causes load_result to return None (incomplete write guard).
-- Pruning removes oldest entries when MAX_CACHE_ENTRIES is exceeded.
-- GET /api/simulations/cached returns {"cached": false} when no cache exists.
+- cache_dir_for picks the cache root (sidecar, or $BOULDER_CACHE_DIR).
+- _source_identity busts the fingerprint on a dirty worktree.
 - CacheContributorPlugin subclasses register and are called during run_contributors.
+
+The cache-hit endpoints are covered here too, seeded through the store -- the
+only source of truth -- rather than by injecting ``app.state.preloaded_result``,
+which would let these pass while the real endpoint missed.
 """
 
 from __future__ import annotations
 
 import copy
-import json
 import logging
-import time
 from pathlib import Path
-from typing import Any, Dict, cast
+from typing import Any, Dict, Optional, cast
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 
+from boulder import scenario_store
 from boulder.api.routes.simulations import _resolve_run_grid
 from boulder.result_cache import (
-    CACHE_VERSION,
     CacheContributorPlugin,
     CacheContributorRegistry,
-    _entry_dir,
-    _prune_cache,
     _source_identity,
     cache_dir_for,
     compute_fingerprint,
-    load_result,
-    lookup_cached_result,
     resolve_mechanism_for_fingerprint,
     run_contributors,
-    save_alias,
-    save_result,
 )
+from boulder.runset import resolve_store_dir
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -205,165 +203,6 @@ class TestCacheDirFor:
         assert result is None
 
 
-# ---------------------------------------------------------------------------
-# save_result / load_result
-# ---------------------------------------------------------------------------
-
-
-class TestSaveLoadRoundTrip:
-    def test_round_trip(self, tmp_path: Path):
-        """save_result followed by load_result returns identical payload and snapshot."""
-        fingerprint = "a" * 64
-        save_result(
-            cache_root=tmp_path,
-            fingerprint=fingerprint,
-            gui_payload=SIMPLE_PAYLOAD,
-            config_snapshot=SIMPLE_CONFIG,
-            mechanism="gri30.yaml",
-        )
-        loaded = load_result(tmp_path, fingerprint)
-
-        assert loaded is not None
-        assert loaded["fingerprint"] == fingerprint
-        assert loaded["gui_payload"]["status"] == "complete"
-        assert loaded["config_snapshot"]["phases"]["gas"]["mechanism"] == "gri30.yaml"
-        assert isinstance(loaded["artifacts_dir"], Path)
-
-    def test_complete_marker_required(self, tmp_path: Path):
-        """load_result returns None when COMPLETE marker is absent."""
-        fingerprint = "b" * 64
-        entry = _entry_dir(tmp_path, fingerprint)
-        entry.mkdir(parents=True)
-        (entry / "result.h5").write_bytes(b"")  # content irrelevant: COMPLETE is absent
-        (entry / "meta.json").write_text(
-            json.dumps({"cache_version": CACHE_VERSION}), encoding="utf-8"
-        )
-        # No COMPLETE file written
-        assert load_result(tmp_path, fingerprint) is None
-
-    def test_version_mismatch_invalidates(self, tmp_path: Path):
-        """A stale cache_version in meta.json causes load_result to return None."""
-        fingerprint = "c" * 64
-        save_result(
-            cache_root=tmp_path,
-            fingerprint=fingerprint,
-            gui_payload=SIMPLE_PAYLOAD,
-            config_snapshot=SIMPLE_CONFIG,
-        )
-        # Overwrite meta.json with mismatched version
-        entry = _entry_dir(tmp_path, fingerprint)
-        meta_path = entry / "meta.json"
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        meta["cache_version"] = CACHE_VERSION + 99
-        meta_path.write_text(json.dumps(meta), encoding="utf-8")
-
-        assert load_result(tmp_path, fingerprint) is None
-
-    def test_missing_entry_returns_none(self, tmp_path: Path):
-        """load_result returns None for a fingerprint that was never saved."""
-        assert load_result(tmp_path, "d" * 64) is None
-
-    def test_meta_contains_versions(self, tmp_path: Path):
-        """Saved meta.json includes boulder_version and cantera_version keys."""
-        fingerprint = "e" * 64
-        save_result(
-            cache_root=tmp_path,
-            fingerprint=fingerprint,
-            gui_payload=SIMPLE_PAYLOAD,
-            config_snapshot=SIMPLE_CONFIG,
-        )
-        loaded = load_result(tmp_path, fingerprint)
-        assert loaded is not None
-        meta = loaded["meta"]
-        assert "boulder_version" in meta
-        assert "cantera_version" in meta
-        assert meta["cache_version"] == CACHE_VERSION
-
-    def test_artifacts_dir_exists(self, tmp_path: Path):
-        """The artifacts/ subdirectory exists after save_result."""
-        fingerprint = "f" * 64
-        save_result(
-            cache_root=tmp_path,
-            fingerprint=fingerprint,
-            gui_payload=SIMPLE_PAYLOAD,
-            config_snapshot=SIMPLE_CONFIG,
-        )
-        loaded = load_result(tmp_path, fingerprint)
-        assert loaded is not None
-        assert loaded["artifacts_dir"].is_dir()
-
-    def test_numpy_coercion(self, tmp_path: Path):
-        """save_result coerces numpy-like scalars to JSON-native types."""
-        import numpy as np
-
-        fingerprint = "g" * 64
-        payload_with_numpy = {
-            **SIMPLE_PAYLOAD,
-            "elapsed_time": np.float64(2.5),
-            "summary": [{"value": np.int32(42), "label": "T"}],
-        }
-        save_result(
-            cache_root=tmp_path,
-            fingerprint=fingerprint,
-            gui_payload=payload_with_numpy,
-            config_snapshot=SIMPLE_CONFIG,
-        )
-        loaded = load_result(tmp_path, fingerprint)
-        assert loaded is not None
-        assert loaded["gui_payload"]["elapsed_time"] == 2.5
-        assert loaded["gui_payload"]["summary"][0]["value"] == 42
-
-
-# ---------------------------------------------------------------------------
-# Pruning
-# ---------------------------------------------------------------------------
-
-
-class TestPruning:
-    def test_prune_keeps_max_entries(self, tmp_path: Path):
-        """Saving more than MAX_CACHE_ENTRIES entries prunes the oldest ones."""
-        from boulder.result_cache import MAX_CACHE_ENTRIES
-
-        # Write MAX_CACHE_ENTRIES + 2 entries with distinct fingerprints
-        fingerprints = []
-        for i in range(MAX_CACHE_ENTRIES + 2):
-            fp = f"{i:064x}"
-            fingerprints.append(fp)
-            save_result(
-                cache_root=tmp_path,
-                fingerprint=fp,
-                gui_payload=SIMPLE_PAYLOAD,
-                config_snapshot=SIMPLE_CONFIG,
-            )
-            time.sleep(0.01)  # ensure mtime ordering
-
-        complete_entries = [
-            d for d in tmp_path.iterdir() if d.is_dir() and (d / "COMPLETE").exists()
-        ]
-        assert len(complete_entries) == MAX_CACHE_ENTRIES
-
-    def test_env_raises_max_entries(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
-        """BOULDER_CACHE_MAX_ENTRIES lifts the cap (batch/sweep runners need it)."""
-        from boulder.result_cache import MAX_CACHE_ENTRIES
-
-        n = MAX_CACHE_ENTRIES + 4
-        monkeypatch.setenv("BOULDER_CACHE_MAX_ENTRIES", str(n + 10))
-        for i in range(n):
-            save_result(
-                cache_root=tmp_path,
-                fingerprint=f"{i:064x}",
-                gui_payload=SIMPLE_PAYLOAD,
-                config_snapshot=SIMPLE_CONFIG,
-            )
-        complete_entries = [
-            d for d in tmp_path.iterdir() if d.is_dir() and (d / "COMPLETE").exists()
-        ]
-        # All kept: the raised cap exceeds the number of entries written.
-        assert len(complete_entries) == n
-
-
 class TestSourceIdentity:
     def test_ignore_code_env_uses_package_version(
         self, monkeypatch: pytest.MonkeyPatch
@@ -422,70 +261,6 @@ class TestResolveMechanismForFingerprint:
         fp_reader = compute_fingerprint(SIMPLE_CONFIG, mechanism=mechanism)
         fp_writer = compute_fingerprint(SIMPLE_CONFIG, mechanism="h2o2.yaml")
         assert fp_reader == fp_writer
-
-
-class TestLookupCachedResult:
-    def test_hit_via_alias(self, tmp_path: Path):
-        """lookup_cached_result follows post-build alias files."""
-        canonical = compute_fingerprint(SIMPLE_CONFIG, mechanism="gri30.yaml")
-        post_build = dict(SIMPLE_CONFIG)
-        post_build["nodes"] = list(SIMPLE_CONFIG["nodes"]) + [
-            {"id": "outlet", "type": "Reservoir", "properties": {}}
-        ]
-        post_fp = compute_fingerprint(post_build, mechanism="gri30.yaml")
-        save_result(
-            cache_root=tmp_path,
-            fingerprint=canonical,
-            gui_payload=SIMPLE_PAYLOAD,
-            config_snapshot=post_build,
-        )
-        save_alias(tmp_path, post_fp, canonical)
-        fingerprint, cached = lookup_cached_result(
-            tmp_path, post_build, mechanism="gri30.yaml"
-        )
-        assert cached is not None
-        assert fingerprint == post_fp
-
-    def test_snapshot_fallback(self, tmp_path: Path):
-        """lookup_cached_result accepts a matching preloaded snapshot."""
-        fingerprint = compute_fingerprint(SIMPLE_CONFIG, mechanism="gri30.yaml")
-        preloaded = {
-            "fingerprint": fingerprint,
-            "gui_payload": SIMPLE_PAYLOAD,
-            "config_snapshot": SIMPLE_CONFIG,
-            "meta": {"cache_version": CACHE_VERSION},
-        }
-        fp, cached = lookup_cached_result(
-            tmp_path,
-            SIMPLE_CONFIG,
-            mechanism="gri30.yaml",
-            preloaded_result=preloaded,
-        )
-        assert fp == fingerprint
-        assert cached is preloaded
-
-
-class TestAliasPruning:
-    def test_orphan_alias_removed_after_entry_pruned(self, tmp_path: Path):
-        """_prune_cache deletes alias files whose canonical entry was removed."""
-        from boulder.result_cache import MAX_CACHE_ENTRIES
-
-        fingerprints = []
-        for i in range(MAX_CACHE_ENTRIES + 2):
-            fp = f"{i:064x}"
-            fingerprints.append(fp)
-            save_result(
-                cache_root=tmp_path,
-                fingerprint=fp,
-                gui_payload=SIMPLE_PAYLOAD,
-                config_snapshot=SIMPLE_CONFIG,
-            )
-            time.sleep(0.01)
-
-        orphan_alias = tmp_path / f"_alias_{'f' * 64}"
-        orphan_alias.write_text(fingerprints[0], encoding="utf-8")
-        _prune_cache(tmp_path)
-        assert not orphan_alias.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +354,35 @@ from fastapi.testclient import TestClient  # noqa: E402
 from boulder.api.main import create_app  # noqa: E402
 
 
+def _seed_store(
+    cfg: Path,
+    config: Dict[str, Any],
+    payload: Dict[str, Any],
+    *,
+    simulation_time: Optional[float] = None,
+    time_step: Optional[float] = None,
+) -> str:
+    """Solve-and-store *config* for *cfg*, the way a real run leaves it behind.
+
+    Fingerprints through the same normalisation ``check-cache`` applies, so a
+    seeded entry is one the endpoint can actually match.
+    """
+    from boulder.api.routes.simulations import normalize_config_for_fingerprint
+
+    normalized = normalize_config_for_fingerprint(config, simulation_time, time_step)
+    mechanism = resolve_mechanism_for_fingerprint(normalized)
+    fingerprint = compute_fingerprint(normalized, mechanism=mechanism)
+    scenario_store.write_entry(
+        resolve_store_dir({}, str(cfg)),
+        "BASE",
+        gui_payload=payload,
+        mechanism=mechanism,
+        fingerprint=fingerprint,
+        identity=scenario_store.config_identity(str(cfg)),
+    )
+    return fingerprint
+
+
 class TestCachedEndpoint:
     @pytest.fixture
     def client_no_cache(self):
@@ -593,32 +397,26 @@ class TestCachedEndpoint:
 
     @pytest.fixture
     def client_with_cache(self, tmp_path: Path):
-        """TestClient with a pre-populated cache entry injected after startup.
+        """TestClient whose config already has a solved entry in the store.
 
-        We set app.state inside the TestClient context manager (after lifespan
-        startup) so that the lifespan reset does not overwrite our value.
+        Seeded through the store rather than by injecting ``preloaded_result``
+        directly, because that is now the only source of truth: ``check-cache``
+        reads the store, so a hand-injected app-state entry would make these
+        tests pass while the real endpoint missed.
         """
-        from boulder.config import synthesize_default_group
+        cfg = tmp_path / "model.yaml"
+        cfg.write_text("x: 1", encoding="utf-8")
+        fingerprint = _seed_store(cfg, SIMPLE_CONFIG, SIMPLE_PAYLOAD)
 
-        fingerprint = "j" * 64
-        artifacts_dir = tmp_path / "artifacts"
-        artifacts_dir.mkdir()
-        # Real cache entries snapshot the config the worker received — i.e.
-        # AFTER default-group synthesis — and /check-cache normalizes the
-        # submitted config the same way before fingerprinting.
-        snapshot = copy.deepcopy(SIMPLE_CONFIG)
-        synthesize_default_group(snapshot)
-        cache_data = {
-            "fingerprint": fingerprint,
-            "gui_payload": SIMPLE_PAYLOAD,
-            "config_snapshot": snapshot,
-            "meta": {"cache_version": CACHE_VERSION, "created_at": time.time()},
-            "artifacts_dir": artifacts_dir,
-        }
         app = create_app()
         with TestClient(app) as client:
-            # Inject after lifespan startup
-            app.state.preloaded_result = cache_data
+            # Inject after lifespan startup, exactly as the startup check does.
+            app.state.preloaded_config_path = str(cfg)
+            app.state.preloaded_result = scenario_store.load_matching(
+                resolve_store_dir({}, str(cfg)),
+                fingerprint,
+                scenario_store.config_identity(str(cfg)),
+            )
             app.state.preloaded_fingerprint = fingerprint
             yield client
 
@@ -648,29 +446,21 @@ class TestCachedEndpoint:
         reaching the browser as the invalid-JSON bare token `NaN` instead of
         `null`. Both must run their response through the same sanitizer.
         """
-        from boulder.config import synthesize_default_group
-
         poisoned_payload = copy.deepcopy(SIMPLE_PAYLOAD)
         poisoned_payload["reactors_series"]["r1"]["k"] = [float("nan")]
-        # /check-cache fingerprints the submitted config AFTER default-group
-        # synthesis, so the cached snapshot must match that shape (same
-        # normalization used by client_with_cache above).
-        snapshot = copy.deepcopy(SIMPLE_CONFIG)
-        synthesize_default_group(snapshot)
 
-        fingerprint = "n" * 64
-        artifacts_dir = tmp_path / "artifacts_nan"
-        artifacts_dir.mkdir()
-        cache_data = {
-            "fingerprint": fingerprint,
-            "gui_payload": poisoned_payload,
-            "config_snapshot": snapshot,
-            "meta": {"cache_version": CACHE_VERSION, "created_at": time.time()},
-            "artifacts_dir": artifacts_dir,
-        }
+        cfg = tmp_path / "case.yaml"
+        cfg.write_text("x: 1", encoding="utf-8")
+        fingerprint = _seed_store(cfg, SIMPLE_CONFIG, poisoned_payload)
+
         app = create_app()
         with TestClient(app) as client:
-            app.state.preloaded_result = cache_data
+            app.state.preloaded_config_path = str(cfg)
+            app.state.preloaded_result = scenario_store.load_matching(
+                resolve_store_dir({}, str(cfg)),
+                fingerprint,
+                scenario_store.config_identity(str(cfg)),
+            )
             app.state.preloaded_fingerprint = fingerprint
 
             resp = client.get("/api/simulations/cached")
@@ -679,9 +469,6 @@ class TestCachedEndpoint:
             assert "NaN" not in body
             assert resp.json()["result"]["reactors_series"]["r1"]["k"] == [None]
 
-            cfg = tmp_path / "case.yaml"
-            cfg.write_text("x: 1", encoding="utf-8")
-            app.state.preloaded_config_path = str(cfg)
             resp2 = client.post(
                 "/api/simulations/check-cache", json={"config": SIMPLE_CONFIG}
             )
@@ -694,9 +481,11 @@ class TestCachedEndpoint:
         resp = client_with_cache.get("/api/simulations/cached/artifacts/missing.txt")
         assert resp.status_code == 404
 
-    def test_artifact_served(self, client_with_cache: TestClient, tmp_path: Path):
+    def test_artifact_served(self, client_with_cache: TestClient):
         """GET /api/simulations/cached/artifacts/<name> serves existing artifact files."""
-        artifacts_dir = tmp_path / "artifacts"
+        state = cast(FastAPI, client_with_cache.app).state
+        artifacts_dir = Path(state.preloaded_result["artifacts_dir"])
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
         test_file = artifacts_dir / "test.txt"
         test_file.write_text("hello", encoding="utf-8")
         resp = client_with_cache.get("/api/simulations/cached/artifacts/test.txt")
@@ -717,9 +506,6 @@ class TestCachedEndpoint:
 
     def test_check_cache_logs_hit(self, client_with_cache: TestClient, tmp_path: Path):
         """POST /check-cache announces a HIT clearly (the re-run cache message)."""
-        cfg = tmp_path / "case.yaml"
-        cfg.write_text("x: 1", encoding="utf-8")
-        cast(FastAPI, client_with_cache.app).state.preloaded_config_path = str(cfg)
         pkg = logging.getLogger("boulder")
         handler, messages = self._capture_boulder_log()
         pkg.addHandler(handler)
@@ -743,27 +529,16 @@ class TestCachedEndpoint:
         /check-cache call with the same overrides must produce the same
         fingerprint (and a different ``simulation_time`` must not).
         """
-        from boulder.api.routes.simulations import _resolve_run_grid
-        from boulder.config import synthesize_default_group
+        cfg = tmp_path / "case2.yaml"
+        cfg.write_text("x: 1", encoding="utf-8")
+        # Stored as a run with these overrides applied -- the grid they imply
+        # is part of what gets fingerprinted.
+        _seed_store(
+            cfg, SIMPLE_CONFIG, SIMPLE_PAYLOAD, simulation_time=5.0, time_step=0.5
+        )
 
-        snapshot = copy.deepcopy(SIMPLE_CONFIG)
-        synthesize_default_group(snapshot)
-        _resolve_run_grid(snapshot, 5.0, 0.5)
-
-        fingerprint = "k" * 64
-        artifacts_dir = tmp_path / "artifacts2"
-        artifacts_dir.mkdir()
         app = create_app()
         with TestClient(app) as client:
-            app.state.preloaded_result = {
-                "fingerprint": fingerprint,
-                "gui_payload": SIMPLE_PAYLOAD,
-                "config_snapshot": snapshot,
-                "meta": {"cache_version": CACHE_VERSION, "created_at": time.time()},
-                "artifacts_dir": artifacts_dir,
-            }
-            cfg = tmp_path / "case2.yaml"
-            cfg.write_text("x: 1", encoding="utf-8")
             app.state.preloaded_config_path = str(cfg)
 
             hit = client.post(
@@ -790,9 +565,6 @@ class TestCachedEndpoint:
 
     def test_check_cache_logs_miss(self, client_with_cache: TestClient, tmp_path: Path):
         """POST /check-cache announces a MISS when the config differs."""
-        cfg = tmp_path / "case.yaml"
-        cfg.write_text("x: 1", encoding="utf-8")
-        cast(FastAPI, client_with_cache.app).state.preloaded_config_path = str(cfg)
         other = {
             **SIMPLE_CONFIG,
             "nodes": [
