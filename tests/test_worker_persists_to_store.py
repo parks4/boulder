@@ -94,6 +94,7 @@ def test_the_solve_is_written_under_the_name_it_was_given(cfg: Path) -> None:
     _persist(worker, _StubConverter(cfg))
 
     store_dir = resolve_store_dir({}, cfg)
+    assert store_dir is not None
     attrs = store.entry_attrs(
         store_dir, "short_residence_time", store.config_identity(cfg)
     )
@@ -154,6 +155,7 @@ def test_contributors_write_under_the_entrys_own_artifacts_dir(cfg: Path) -> Non
     _persist(worker, _StubConverter(cfg, contributors=[_Contributor()]))
 
     store_dir = resolve_store_dir({}, cfg)
+    assert store_dir is not None
     assert seen["dir"] == store_artifacts_dir(store_dir, "hot")
 
 
@@ -161,7 +163,7 @@ def test_a_config_with_no_path_is_skipped_quietly(tmp_path: Path) -> None:
     """Nothing to key a store off; must not raise."""
     worker = SimulationWorker()
     converter = _StubConverter(tmp_path / "x.yaml")
-    converter._download_config_path = None
+    converter._download_config_path = None  # type: ignore[assignment]
     _persist(worker, converter)  # no exception
 
 

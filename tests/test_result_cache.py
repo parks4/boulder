@@ -372,8 +372,10 @@ def _seed_store(
     normalized = normalize_config_for_fingerprint(config, simulation_time, time_step)
     mechanism = resolve_mechanism_for_fingerprint(normalized)
     fingerprint = compute_fingerprint(normalized, mechanism=mechanism)
+    store_dir = resolve_store_dir({}, str(cfg))
+    assert store_dir is not None
     scenario_store.write_entry(
-        resolve_store_dir({}, str(cfg)),
+        store_dir,
         "BASE",
         gui_payload=payload,
         mechanism=mechanism,

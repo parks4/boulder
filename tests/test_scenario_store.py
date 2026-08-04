@@ -33,6 +33,13 @@ _PAYLOAD: Dict[str, Any] = {
 }
 
 
+def _dir(cfg: Path) -> Path:
+    """`resolve_store_dir` for a real config path -- never ``None``."""
+    resolved = resolve_store_dir({}, cfg)
+    assert resolved is not None
+    return resolved
+
+
 def _write(
     store_dir: Path, sid: str, identity: str, fingerprint: str = "fp", **kw: Any
 ) -> Path:
@@ -60,8 +67,8 @@ def test_same_stem_configs_get_separate_directories(tmp_path: Path) -> None:
         cfg.parent.mkdir(parents=True)
         cfg.write_text("metadata: {}\n", encoding="utf-8")
 
-    dir_a = resolve_store_dir({}, a)
-    dir_b = resolve_store_dir({}, b)
+    dir_a = _dir(a)
+    dir_b = _dir(b)
     assert dir_a is not None and dir_b is not None
     assert dir_a != dir_b
 
@@ -79,8 +86,8 @@ def test_shared_cache_dir_still_separates_same_stem_configs(
         cfg.parent.mkdir(parents=True)
         cfg.write_text("metadata: {}\n", encoding="utf-8")
 
-    dir_a = resolve_store_dir({}, a)
-    dir_b = resolve_store_dir({}, b)
+    dir_a = _dir(a)
+    dir_b = _dir(b)
     assert dir_a != dir_b, "same-stem configs shared a directory under a shared root"
     assert shared in dir_a.parents and shared in dir_b.parents
 
@@ -96,7 +103,7 @@ def test_neither_config_ever_reads_the_others_results(
         cfg.parent.mkdir(parents=True)
         cfg.write_text("metadata: {}\n", encoding="utf-8")
 
-    dir_a, dir_b = resolve_store_dir({}, a), resolve_store_dir({}, b)
+    dir_a, dir_b = _dir(a), _dir(b)
     id_a, id_b = store.config_identity(a), store.config_identity(b)
 
     _write(dir_a, "BASELINE", id_a, fingerprint="fp-a")
@@ -288,6 +295,7 @@ def test_an_alt_equal_to_the_canonical_one_is_not_recorded(tmp_path: Path) -> No
     d = tmp_path / "store"
     _write(d, "hot", "id", fingerprint="fp", alt_fingerprints=("fp",))
     attrs = store.entry_attrs(d, "hot", "id")
+    assert attrs is not None
     assert "alt_fingerprints" not in attrs
 
 
@@ -323,8 +331,11 @@ def test_ids_that_sanitise_alike_still_get_separate_files(tmp_path: Path) -> Non
     _write(d, "a/b", "id", fingerprint="fp-slash")
     _write(d, "a_b", "id", fingerprint="fp-underscore")
 
-    assert store.entry_attrs(d, "a/b", "id")["fingerprint"] == "fp-slash"
-    assert store.entry_attrs(d, "a_b", "id")["fingerprint"] == "fp-underscore"
+    slashed = store.entry_attrs(d, "a/b", "id")
+    underscored = store.entry_attrs(d, "a_b", "id")
+    assert slashed is not None and underscored is not None
+    assert slashed["fingerprint"] == "fp-slash"
+    assert underscored["fingerprint"] == "fp-underscore"
 
 
 def test_a_windows_reserved_id_is_still_writable(tmp_path: Path) -> None:
