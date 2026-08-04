@@ -11,7 +11,7 @@ described in :mod:`boulder.scenario_store`.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import pytest
 
@@ -367,3 +367,95 @@ def test_the_api_publishes_the_non_kpi_attr_set(tmp_path: Path) -> None:
     # The two that actually bit: bookkeeping ints a naive numeric scan plots.
     assert "store_version" in published
     assert "schema_version" in published
+
+
+def test_writing_one_entry_does_not_block_reading_another(tmp_path: Path) -> None:
+    """The reason there is one file per entry rather than one grouped file.
+
+    HDF5 is single-writer, and every solve now writes this store while the GUI
+    polls it. With a shared file a sweep would lock out the Scenario pane for
+    its whole duration; per-entry files mean a write to X and a read of Y never
+    meet.
+    """
+    import threading
+
+    from boulder import scenario_store as st
+
+    cfg = tmp_path / "model.yaml"
+    cfg.write_text("metadata: {}\n", encoding="utf-8")
+    store_dir = tmp_path / "store"
+    identity = st.config_identity(cfg)
+    payload = {"status": "complete", "times": [], "reactors_series": {}}
+
+    st.write_entry(
+        store_dir,
+        "settled",
+        gui_payload=payload,
+        mechanism="gri30.yaml",
+        fingerprint="fp-settled",
+        identity=identity,
+    )
+
+    stop = threading.Event()
+    errors: List[BaseException] = []
+
+    def _hammer_writes() -> None:
+        i = 0
+        try:
+            while not stop.is_set():
+                i += 1
+                st.write_entry(
+                    store_dir,
+                    f"busy_{i % 3}",
+                    gui_payload=payload,
+                    mechanism="gri30.yaml",
+                    fingerprint=f"fp-{i}",
+                    identity=identity,
+                )
+        except BaseException as exc:  # noqa: BLE001 — surfaced below
+            errors.append(exc)
+
+    writer = threading.Thread(target=_hammer_writes, daemon=True)
+    writer.start()
+    try:
+        # The settled entry stays readable throughout, never raising and never
+        # returning a torn value.
+        for _ in range(60):
+            attrs = st.entry_attrs(store_dir, "settled", identity)
+            assert attrs is not None, "a concurrent write hid an unrelated entry"
+            assert attrs["fingerprint"] == "fp-settled"
+    finally:
+        stop.set()
+        writer.join(timeout=10)
+
+    assert not errors, f"writer thread raised: {errors[0]!r}"
+
+
+def test_a_half_written_entry_reads_as_absent_not_as_an_error(tmp_path: Path) -> None:
+    """A crashed solve must not leave a hit, and must not 500 a reader.
+
+    `fingerprint` is written last precisely so an interrupted write is
+    indistinguishable from "not computed" -- which is what it is. Writing it
+    earlier would let every later run cache-hit onto a broken payload: strictly
+    worse than a miss.
+    """
+    import h5py
+
+    from boulder import scenario_store as st
+    from boulder.runset import store_entry_path
+
+    cfg = tmp_path / "model.yaml"
+    cfg.write_text("metadata: {}\n", encoding="utf-8")
+    store_dir = tmp_path / "store"
+    identity = st.config_identity(cfg)
+
+    # A file the payload write created but the fingerprint stamp never reached.
+    store_dir.mkdir(parents=True, exist_ok=True)
+    with h5py.File(str(store_entry_path(store_dir, "crashed")), "w") as handle:
+        handle.attrs["store_version"] = st.STORE_VERSION
+        handle.attrs["config_identity"] = identity
+
+    assert st.entry_attrs(store_dir, "crashed", identity) is None
+    assert st.read_entry(store_dir, "crashed", identity) is None
+    assert st.list_entries(store_dir, identity) == []
+    assert st.is_current(store_dir, "crashed", "any-fingerprint", identity) is False
