@@ -211,3 +211,52 @@ def test_the_entry_is_stored_before_completion_is_announced(cfg: Path) -> None:
         "reacts to `is_complete` can see a finished run with no stored entry"
     )
     assert worker.progress.is_complete is True
+
+
+def test_a_plain_solve_of_a_scenario_config_writes_BASELINE_not_BASE(
+    tmp_path: Path,
+) -> None:
+    """The base's name must match what a sweep of the same config would use.
+
+    Found in the GUI: with `scenarios:` declared, Run Sweep stored the base as
+    `BASELINE` while Run Simulation stored the identical result as `BASE`. The
+    pane then showed a phantom `BASE` row and left the authored `BASELINE` row
+    reading "Not computed yet" -- one result, two names, which is exactly what
+    a single store is supposed to make impossible.
+    """
+    from boulder.runset import BASELINE_SCENARIO_ID, base_entry_id, expand_scenarios
+
+    raw = {**_CONFIG, "scenarios": {"hot": {}, "cold": {}}}
+    cfg = tmp_path / "with_scenarios.yaml"
+    cfg.write_text("metadata: {}\n", encoding="utf-8")
+
+    # The two paths agree, and agree on the name the sweep actually emits.
+    assert base_entry_id(raw) == BASELINE_SCENARIO_ID
+    assert expand_scenarios(raw)[0][0] == BASELINE_SCENARIO_ID
+
+    worker = SimulationWorker()
+    worker._raw_config = raw
+    _persist(worker, _StubConverter(cfg))
+
+    ids = [
+        e["id"]
+        for e in store.list_entries(
+            resolve_store_dir(raw, cfg), store.config_identity(cfg)
+        )
+    ]
+    assert ids == [BASELINE_SCENARIO_ID], f"plain solve stored the base as {ids}"
+
+
+def test_a_sweep_only_config_keeps_the_plain_base_name(tmp_path: Path) -> None:
+    """A global `sweep:` emits no unmodified-base entry, so the base stays BASE.
+
+    Guards the over-broad version of the rule: treating `sweep:` like
+    `scenarios:` renamed every sweep point's `BASE__<axis>` prefix too.
+    """
+    from boulder.runset import BASE_SCENARIO_ID, base_entry_id
+
+    raw = {
+        **_CONFIG,
+        "sweep": {"T": {"path": "nodes[id=r].properties.T", "values": [1, 2]}},
+    }
+    assert base_entry_id(raw) == BASE_SCENARIO_ID

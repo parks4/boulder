@@ -237,6 +237,16 @@ async def start_simulation(
         # Pass app.state so the worker can update preloaded_result after the
         # solve completes without requiring a server restart.
         worker = SimulationWorker()
+        # Hand over the raw (un-normalized) config even though this run has no
+        # scenario id of its own: it decides *where* the store lives
+        # (`metadata.extra.cache_store`) and what the base entry is *called*
+        # (BASELINE once `scenarios:` exists). Normalisation strips both, so a
+        # worker left with no raw config wrote `BASE` into the default location
+        # while a sweep of the same config wrote `BASELINE` into the declared
+        # one -- the two paths disagreeing about a store they now share.
+        worker.set_run_identity(
+            None, raw_config=getattr(request.app.state, "preloaded_raw", None)
+        )
         worker.start_simulation(
             converter,
             config,

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import cantera as ct  # type: ignore
 
-from .runset import BASE_SCENARIO_ID
+from .runset import base_entry_id
 from .verbose_utils import get_verbose_logger
 
 logger = get_verbose_logger(__name__)
@@ -231,7 +231,7 @@ class SimulationWorker:
         self._app_state: Optional[Any] = None
         #: Which run-set entry this solve *is*, and how to label it in the
         #: Scenario pane. A plain "Run Simulation" solves the base entry
-        #: (:data:`~boulder.runset.BASE_SCENARIO_ID`); a sweep names each one.
+        #: (:data:`~boulder.runset.base_entry_id`); a sweep names each one.
         #: Set via :meth:`set_run_identity` before starting.
         self._scenario_id: Optional[str] = None
         self._scenario_label: Optional[str] = None
@@ -242,7 +242,7 @@ class SimulationWorker:
 
     def set_run_identity(
         self,
-        scenario_id: str,
+        scenario_id: Optional[str],
         *,
         label: Optional[str] = None,
         order: Optional[int] = None,
@@ -251,8 +251,14 @@ class SimulationWorker:
         """Name the run-set entry this worker is about to solve.
 
         The store keys results by name, so a solve has to know which entry it
-        is. Callers that don't set this get the base entry, which is correct for
-        a plain single run.
+        is. A sweep passes the id it is solving; a plain run passes ``None`` for
+        *scenario_id* and lets *raw_config* decide, since the base entry's name
+        depends on the config (see :func:`boulder.runset.base_entry_id`).
+
+        Pass *raw_config* -- the **un-normalized** config -- even when there is
+        no id: it also determines where the store lives
+        (``metadata.extra.cache_store``). Normalisation strips both, so a worker
+        without it silently falls back to ``BASE`` in the default location.
         """
         self._scenario_id = scenario_id
         self._scenario_label = label
@@ -564,7 +570,11 @@ class SimulationWorker:
             if store_dir is None:
                 logger.debug("No store directory (no config path); skipping persist.")
                 return
-            scenario_id = self._scenario_id or BASE_SCENARIO_ID
+            # A sweep names the entry it is solving; a plain run must derive the
+            # base's name from the config, because a config with `scenarios:`
+            # calls its base BASELINE, not BASE. Defaulting to BASE stored the
+            # same result under a second name.
+            scenario_id = self._scenario_id or base_entry_id(self._raw_config or {})
 
             progress = self.get_progress()
             # Use pre-build snapshot for fingerprinting when available so the hash

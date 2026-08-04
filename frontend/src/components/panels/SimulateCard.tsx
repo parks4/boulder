@@ -3,6 +3,7 @@ import type { Core as CytoscapeCore } from "cytoscape";
 import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSolverStore } from "@/stores/solverStore";
+import { useScenarioStore } from "@/stores/scenarioStore";
 import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
 import { startSimulation } from "@/api/simulations";
 import { checkSimulationCache } from "@/api/resultCache";
@@ -70,10 +71,18 @@ export function SimulateCard() {
     syncSolverFromConfig(config.settings);
   }, [config.settings, syncSolverFromConfig]);
 
+  // A finished single run wrote a run-set entry too (its base -- BASELINE when
+  // the config declares scenarios), so the Scenario pane is now stale. A sweep
+  // already refreshes on completion; without this a plain run left the pane
+  // reading "Not computed yet" for a scenario that had just been solved.
+  useEffect(() => {
+    if (results === null) return;
+    void useScenarioStore.getState().refresh();
+  }, [results]);
+
   // Re-fetch whenever config, simulationId, or results change.
   // After a solve completes (results becomes non-null), the server's cache
   // is populated and is_available will change for export actions.
-  // A second fetch fires after a short delay to catch the (async) cache write.
   useEffect(() => {
     let cancelled = false;
 

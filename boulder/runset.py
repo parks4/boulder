@@ -413,6 +413,31 @@ def store_artifacts_dir(store_dir: Path, scenario_id: str) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def base_entry_id(raw: Dict[str, Any]) -> str:
+    """Return the store id the *unmodified base* run is written under.
+
+    :data:`BASELINE_SCENARIO_ID` when the config declares ``scenarios:``, else
+    :data:`BASE_SCENARIO_ID` (or an explicit ``metadata.scenario_id``). Mirrors
+    the naming :func:`expand_scenarios` gives the base entry, which is the whole
+    point: both paths that can solve the base must land on the same name.
+
+    They did not. A sweep took the name from :func:`expand_scenarios`
+    (``BASELINE``) while a plain Run Simulation defaulted to ``BASE``, so the
+    same result was stored twice under two names -- the pane grew a phantom
+    ``BASE`` row while the authored ``BASELINE`` row still read "Not computed
+    yet".
+
+    A global ``sweep:`` without ``scenarios:`` deliberately does **not** count:
+    there the run-set is the sweep points themselves (ids prefixed ``BASE__``)
+    and no unmodified-base entry is emitted at all, so the base keeps its plain
+    name.
+    """
+    if raw.get("scenarios"):
+        return BASELINE_SCENARIO_ID
+    declared = (raw.get("metadata") or {}).get("scenario_id")
+    return str(declared) if declared else BASE_SCENARIO_ID
+
+
 def expand_scenarios(
     base_raw: dict,
     *,
