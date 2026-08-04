@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import json
 import os
 import time
 from pathlib import Path
@@ -48,6 +49,7 @@ from .payload_store import write_payload
 from .runset import (
     expand_scenarios,
     load_yaml_with_inheritance,
+    node_property_attrs,
     resolve_store_path,
     sweep_point_of,
 )
@@ -325,7 +327,11 @@ def run(
         ``(scenario_id, merged_config, gui_payload) -> dict`` of extra scalar
         attributes written onto the scenario's HDF5 group after each solve —
         the per-run KPIs the Sweep Results plot reads (``t0_K``,
-        ``final_X_<species>``, …).
+        ``final_X_<species>``, …). A value may be a bare number, or a
+        ``(value, unit)`` tuple to also label the KPI's display unit; units
+        are collected into a store-level ``units`` JSON attr (see
+        :func:`~boulder.runset.node_property_attrs` for the input-side
+        counterpart, recorded automatically without a host hook).
     on_solved : callable, optional
         ``(scenario_id, config, converter, simulation_result, fingerprint,
         gui_payload, mechanism) -> None`` called once per *freshly solved*
@@ -373,6 +379,7 @@ def run(
     run_ids = {sid for sid, _ in runs}
     mechanism = _mechanism_of(raw)
     n_cached = 0
+    store_units: Dict[str, str] = {}
     for i, (sid, cfg) in enumerate(runs):
         config, mech_name, fingerprint = prepare_scenario(cfg, resolve_mechanism)
         label = str((cfg.get("metadata") or {}).get("scenario_name") or sid)
@@ -402,8 +409,19 @@ def run(
             for key, value in sweep_point_of(cfg).items():
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     attrs[key] = value
+            # Every node/connection's own numeric properties -- generic,
+            # host-agnostic "input" axis candidates for the Sweep Results plot,
+            # keyed ``in.<id>.<prop>`` (see node_property_attrs docstring).
+            for key, value in node_property_attrs(config).items():
+                attrs[key] = value
             if scenario_attrs is not None:
                 for key, value in (scenario_attrs(sid, cfg, gui) or {}).items():
+                    # A host may pair a KPI value with its display unit as
+                    # (value, unit); the unit rides in a store-level attr
+                    # (below) since HDF5 attrs are flat scalars.
+                    if isinstance(value, tuple):
+                        value, unit = value
+                        store_units[key] = unit
                     attrs[key] = value
         if on_solved is not None:
             # Give the host a chance to persist per-scenario artifacts (e.g. a
@@ -438,6 +456,8 @@ def run(
         handle.attrs["mechanism"] = _resolve(mechanism)
         handle.attrs["mechanism_name"] = Path(mechanism).name if mechanism else ""
         handle.attrs["created_at"] = float(time.time())
+        if store_units:
+            handle.attrs["units"] = json.dumps(store_units)
     print(
         f"Wrote {store} ({total} scenarios; {n_cached} cached, "
         f"{total - n_cached} solved)",

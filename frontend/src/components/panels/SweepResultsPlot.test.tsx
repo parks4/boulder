@@ -154,4 +154,48 @@ describe("SweepResultsPlot", () => {
     expect(screen.getByTestId("y-axis-add-select")).toBeInTheDocument();
     expect(plotCalls.at(-1)?.data).toEqual([]);
   });
+
+  describe("input/output labeling", () => {
+    function makeKpiScenario(
+      t0_K: number,
+      extra: Record<string, number>,
+    ): ScenarioMeta {
+      return { id: `s-${t0_K}`, t0_K, label: `${t0_K} K`, ...extra };
+    }
+
+    const kpiScenarios: ScenarioMeta[] = [
+      makeKpiScenario(800, { efficiency: 75.0, "in.downstream.pressure": 1.05e5 }),
+      makeKpiScenario(900, { efficiency: 77.5, "in.downstream.pressure": 1.3e5 }),
+    ];
+
+    it("labels an auto-walked node.property key as input with its unit", () => {
+      render(<SweepResultsPlot scenarios={kpiScenarios} />);
+
+      const select = screen.getByTestId("y-axis-add-select") as HTMLSelectElement;
+      const optionValues = Array.from(select.options).map((o) => o.value);
+      // efficiency is active by default (first available series); pressure
+      // is still offered in the "add series" dropdown.
+      expect(optionValues).toContain("k:in.downstream.pressure");
+      const pressureOption = Array.from(select.options).find(
+        (o) => o.value === "k:in.downstream.pressure",
+      );
+      expect(pressureOption?.textContent).toBe("downstream.pressure (Pa, input)");
+    });
+
+    it("labels a host KPI attr as output, with its unit when supplied", () => {
+      render(<SweepResultsPlot scenarios={kpiScenarios} units={{ efficiency: "%" }} />);
+
+      expect(
+        screen.getByTestId("active-series-chip-efficiency"),
+      ).toHaveTextContent("Efficiency (%, output)");
+    });
+
+    it("omits an empty unit parenthetical when no unit is known", () => {
+      render(<SweepResultsPlot scenarios={kpiScenarios} />);
+
+      expect(
+        screen.getByTestId("active-series-chip-efficiency"),
+      ).toHaveTextContent("Efficiency (output)");
+    });
+  });
 });

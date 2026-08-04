@@ -130,12 +130,19 @@ async def list_scenarios(request: Request) -> Dict[str, Any]:
             "authored_overlays": authored_overlays,
         }
     root = _root_attrs(store)
+    units_raw = root.get("units")
     return {
         "available": True,
         "store": store.name,
         "mechanism": root.get("mechanism_name"),
         "reactor_mode": root.get("reactor_mode"),
         "created_at": root.get("created_at"),
+        # Display units for host-supplied KPI attrs (e.g. scenario_attrs
+        # returning ``(value, "%")``) -- see boulder.sweep_runner.run's
+        # scenario_attrs docstring. Auto-walked node/connection inputs
+        # (``in.<id>.<prop>`` keys) resolve their unit on the frontend
+        # instead, via the same property-name lookup the Properties panel uses.
+        "units": json.loads(units_raw) if units_raw else None,
         "scenarios": _scenario_entries(store),
         "authored_ids": authored_ids,
         "authored_overlays": authored_overlays,

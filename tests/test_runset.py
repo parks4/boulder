@@ -14,6 +14,7 @@ from boulder.runset import (
     deep_merge,
     expand_scenarios,
     load_yaml_with_inheritance,
+    node_property_attrs,
     run_set_size,
     sweep_axis_values,
 )
@@ -329,3 +330,57 @@ def test_load_yaml_with_inheritance_sweeps_inherited_scenario_not(tmp_path: Path
     assert cfg["metadata"]["scenario_id"] == "CHILD"
     assert "scenarios" not in cfg
     assert cfg["sweep"]["T"]["values"] == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# node_property_attrs
+# ---------------------------------------------------------------------------
+
+
+def test_node_property_attrs_type_keyed_style():
+    cfg = {
+        "nodes": [
+            {"id": "tank", "Reservoir": {"temperature": 300.0, "pressure": 1e5}},
+        ],
+        "connections": [
+            {
+                "id": "feed",
+                "source": "tank",
+                "target": "reactor",
+                "MassFlowController": {"mass_flow_rate": 0.01},
+            },
+        ],
+    }
+    assert node_property_attrs(cfg) == {
+        "in.tank.temperature": 300.0,
+        "in.tank.pressure": 1e5,
+        "in.feed.mass_flow_rate": 0.01,
+    }
+
+
+def test_node_property_attrs_legacy_properties_style():
+    cfg = {"nodes": [{"id": "tank", "properties": {"temperature": 300.0}}]}
+    assert node_property_attrs(cfg) == {"in.tank.temperature": 300.0}
+
+
+def test_node_property_attrs_skips_meta_keys_bools_and_nested_dicts():
+    cfg = {
+        "nodes": [
+            {
+                "id": "pfr",
+                "description": "a reactor",
+                "RefractoryReactor": {
+                    "length": 10.0,
+                    "energy": True,
+                    "insulation": {"e_insul": {"1": 0.1}},
+                },
+            },
+            {"description": "no id at all -- skipped"},
+        ]
+    }
+    assert node_property_attrs(cfg) == {"in.pfr.length": 10.0}
+
+
+def test_node_property_attrs_no_nodes_or_connections():
+    assert node_property_attrs({}) == {}
+    assert node_property_attrs({"nodes": [], "connections": []}) == {}

@@ -52,6 +52,7 @@ export function ScenarioPane() {
     scenarios,
     authoredIds,
     createdAt,
+    units,
     activeId,
     loading,
     error,
@@ -336,7 +337,7 @@ export function ScenarioPane() {
           })}
         </ul>
       </div>
-      <SweepResultsPlot scenarios={scenarios} />
+      <SweepResultsPlot scenarios={scenarios} units={units} />
       <AddScenarioModal
         open={addModalOpen}
         onClose={() => setAddModalOpen(false)}

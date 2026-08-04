@@ -89,6 +89,11 @@ export function labelWithUnit(label: string, unit?: string): string {
   return u ? `${label} [${u}]` : label;
 }
 
+/** Look up a property's canonical display unit by name, e.g. "pressure" -> "Pa". */
+export function propertyDisplayUnit(name: string): string | undefined {
+  return PROPERTY_DISPLAY_UNIT[name];
+}
+
 /**
  * Convert Pascal to bar.
  */

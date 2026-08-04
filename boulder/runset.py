@@ -529,6 +529,56 @@ def sweep_point_of(config: dict) -> Dict[str, Any]:
     return dict(point) if isinstance(point, dict) else {}
 
 
+#: Keys on a node/connection dict that are never a scalar property to record.
+_ELEMENT_META_KEYS = {"id", "description", "source", "target"}
+
+
+def _numeric_props(props: dict) -> Dict[str, Any]:
+    return {
+        k: v
+        for k, v in props.items()
+        if k not in _ELEMENT_META_KEYS
+        and not isinstance(v, bool)
+        and isinstance(v, (int, float))
+    }
+
+
+def node_property_attrs(config: dict) -> Dict[str, Any]:
+    """Flatten every numeric top-level property of every node/connection.
+
+    Walks the normalized STONE ``nodes:``/``connections:`` lists, emitting
+    ``f"in.{id}.{prop}": val`` for every numeric, non-bool leaf. Host-agnostic
+    and kind-agnostic — no schema/variable-map registration required — so the
+    Sweep Results plot's axis picker can offer every node's declared inputs
+    without a host having to enumerate them one at a time via
+    :attr:`~boulder.cantera_converter.BoulderPlugins.scenario_attrs`.
+
+    Handles both element shapes a STONE config may use: the type-keyed style
+    (``{id, TypeName: {prop: val, ...}}``) and the legacy explicit
+    ``properties:`` sub-dict style. Nested dicts/lists (e.g. per-layer
+    insulation properties) are skipped: there's no natural single scalar to
+    record for them.
+    """
+    attrs: Dict[str, Any] = {}
+    for key in ("nodes", "connections"):
+        for element in config.get(key) or []:
+            if not isinstance(element, dict):
+                continue
+            eid = element.get("id")
+            if not eid:
+                continue
+            if "properties" in element and isinstance(element["properties"], dict):
+                for prop, value in _numeric_props(element["properties"]).items():
+                    attrs[f"in.{eid}.{prop}"] = value
+                continue
+            for type_key, props in element.items():
+                if type_key in _ELEMENT_META_KEYS or not isinstance(props, dict):
+                    continue
+                for prop, value in _numeric_props(props).items():
+                    attrs[f"in.{eid}.{prop}"] = value
+    return attrs
+
+
 def _resolve_sweep_path(
     axis_name: str,
     axis_path: str,

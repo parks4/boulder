@@ -2,11 +2,14 @@ import { useMemo, useState } from "react";
 import Plot from "react-plotly.js";
 import { useThemeStore } from "@/stores/themeStore";
 import type { ScenarioMeta } from "@/api/scenarios";
+import { propertyDisplayUnit } from "@/lib/units";
 
 // TODO: overlay experimental/reference data points on this chart (planned future enhancement).
 
 interface Props {
   scenarios: ScenarioMeta[];
+  /** Display unit per host-supplied KPI attr key -- see `ScenarioListResponse.units`. */
+  units?: Record<string, string>;
 }
 
 interface YGroup {
@@ -45,6 +48,42 @@ function friendlyLabel(key: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Auto-walked node/connection input attrs are always keyed `in.<node_id>.<property>`
+ * (see `boulder.runset.node_property_attrs`) -- split back into its parts. */
+function inputKeyParts(key: string): { nodeId: string; property: string } | null {
+  if (!key.startsWith("in.")) return null;
+  const rest = key.slice(3);
+  const dot = rest.indexOf(".");
+  if (dot === -1) return null;
+  return { nodeId: rest.slice(0, dot), property: rest.slice(dot + 1) };
+}
+
+/** Human label, unit, and input/output provenance for an axis-candidate key.
+ * Input attrs (`in.<node>.<property>`) are auto-walked by Boulder with no host
+ * hook needed; everything else came from a host's `scenario_attrs`/the
+ * declarative sweep axis -- both conventionally "output" (a KPI or the swept
+ * value itself). */
+function describeKey(
+  key: string,
+  units: Record<string, string> | undefined,
+): { label: string; unit?: string; kind: "input" | "output" } {
+  const input = inputKeyParts(key);
+  if (input) {
+    return {
+      label: `${input.nodeId}.${input.property}`,
+      unit: propertyDisplayUnit(input.property),
+      kind: "input",
+    };
+  }
+  return { label: friendlyLabel(key), unit: units?.[key], kind: "output" };
+}
+
+/** `describeKey` rendered as one string, e.g. "downstream.pressure (Pa, input)". */
+function displayLabel(key: string, units: Record<string, string> | undefined): string {
+  const { label, unit, kind } = describeKey(key, units);
+  return unit ? `${label} (${unit}, ${kind})` : `${label} (${kind})`;
+}
+
 /** Numeric attr keys present on at least one scenario, excluding bookkeeping fields. */
 function numericKeys(scenarios: ScenarioMeta[]): string[] {
   const keys = new Set<string>();
@@ -59,7 +98,11 @@ function numericKeys(scenarios: ScenarioMeta[]): string[] {
 /** Group numeric keys (minus the chosen X key) into Y-axis choices: species sharing
  * a "final_X_"/"final_Y_" prefix are grouped as one Mole/Mass Fractions choice with
  * one trace per species; everything else is its own single-trace choice. */
-function buildYGroups(keys: string[], xKey: string): YGroup[] {
+function buildYGroups(
+  keys: string[],
+  xKey: string,
+  units: Record<string, string> | undefined,
+): YGroup[] {
   const moleSpecies: { key: string; traceName: string }[] = [];
   const massSpecies: { key: string; traceName: string }[] = [];
   const singles: YGroup[] = [];
@@ -73,7 +116,8 @@ function buildYGroups(keys: string[], xKey: string): YGroup[] {
     } else if (mass) {
       massSpecies.push({ key, traceName: mass[1] });
     } else {
-      singles.push({ id: key, label: friendlyLabel(key), keys: [{ key, traceName: friendlyLabel(key) }] });
+      const label = displayLabel(key, units);
+      singles.push({ id: key, label, keys: [{ key, traceName: label }] });
     }
   }
 
@@ -129,7 +173,7 @@ function buildSeriesOptions(groups: YGroup[]): {
  * Renders nothing when the store has fewer than two numeric attrs to plot
  * against each other (e.g. a plain multi-case store with no sweep KPIs).
  */
-export function SweepResultsPlot({ scenarios }: Props) {
+export function SweepResultsPlot({ scenarios, units }: Props) {
   const theme = useThemeStore((s) => s.theme);
 
   const keys = useMemo(() => numericKeys(scenarios), [scenarios]);
@@ -141,8 +185,8 @@ export function SweepResultsPlot({ scenarios }: Props) {
 
   const effectiveXKey = xKey && keys.includes(xKey) ? xKey : (keys.includes("t0_K") ? "t0_K" : keys[0]);
   const yGroups = useMemo(
-    () => (effectiveXKey ? buildYGroups(keys, effectiveXKey) : []),
-    [keys, effectiveXKey],
+    () => (effectiveXKey ? buildYGroups(keys, effectiveXKey, units) : []),
+    [keys, effectiveXKey, units],
   );
   const { options, families, labelByKey, groupLabelByKey } = useMemo(
     () => buildSeriesOptions(yGroups),
@@ -218,7 +262,7 @@ export function SweepResultsPlot({ scenarios }: Props) {
           >
             {keys.map((k) => (
               <option key={k} value={k}>
-                {friendlyLabel(k)}
+                {displayLabel(k, units)}
               </option>
             ))}
           </select>
@@ -303,7 +347,7 @@ export function SweepResultsPlot({ scenarios }: Props) {
           showlegend: true,
           legend: { x: 1, xanchor: "right" as const, y: 1 },
           xaxis: {
-            title: { text: friendlyLabel(effectiveXKey) },
+            title: { text: displayLabel(effectiveXKey, units) },
             gridcolor: theme === "dark" ? "#333" : "#e0e0e0",
           },
           yaxis: {
