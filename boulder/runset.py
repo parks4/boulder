@@ -31,6 +31,9 @@ Everything here is pure config manipulation — no solving, no I/O beyond
 from __future__ import annotations
 
 import copy
+import hashlib
+import os
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
@@ -305,6 +308,116 @@ def resolve_store_path(
         p = Path(rel)
         return p if p.is_absolute() else cfg.parent / p
     return cfg.parent / f"{cfg.stem}_scenarios.h5"
+
+
+# ---------------------------------------------------------------------------
+# Result-store layout: one file per run-set entry.
+# ---------------------------------------------------------------------------
+#
+# A run-set's results live in a directory, one HDF5 file per entry, rather than
+# one file with a group per entry. HDF5 is single-writer, and every solve --
+# a whole sweep or a single run -- writes here while the GUI polls the same
+# location for reading; per-entry files remove write contention, confine a
+# partial write to one entry, make invalidating one entry a file delete, and
+# leave room to solve entries in parallel later.
+#
+#     <store_dir>/
+#         BASE.h5 | BASELINE.h5 | <scenario_id>.h5
+#         artifacts/<scenario_id>/...        host cache-contributor files
+
+#: Characters that are unsafe in a filename on some supported platform, plus
+#: the HDF5 path separator (an id containing ``/`` would silently become a
+#: *nested* group rather than an entry).
+_UNSAFE_ID_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
+
+#: Stems Windows refuses to use as filenames regardless of extension.
+_RESERVED_STEMS = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def _sha8(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
+def store_entry_name(scenario_id: str) -> str:
+    """Return a filesystem- and HDF5-safe stem for *scenario_id*.
+
+    Scenario ids reach us straight from YAML keys and from
+    ``metadata.scenario_id``, neither of which passes through
+    ``scenario_editor._validate_id`` (that guards only GUI-authored ids). They
+    now become *filenames*, so they must be sanitised centrally here.
+
+    Sanitising alone would let distinct ids collide (``a/b`` and ``a_b`` mapping
+    to one file, silently sharing results), so whenever the safe form differs
+    from the original -- or collides with a Windows reserved stem -- a short
+    digest of the original is appended. Ids that are already safe (the
+    overwhelming majority) are used verbatim, keeping the directory readable.
+    """
+    safe = _UNSAFE_ID_CHARS.sub("_", scenario_id).strip(". ") or "entry"
+    if safe != scenario_id or safe.upper() in _RESERVED_STEMS:
+        return f"{safe}-{_sha8(scenario_id)}"
+    return safe
+
+
+def resolve_store_dir(
+    raw: Dict[str, Any], config_path: "Optional[str | Path]"
+) -> Optional[Path]:
+    """Return the directory holding this config's per-entry result files.
+
+    Declared via ``metadata.extra.cache_store`` (``scenario_store`` is still
+    honoured as its former name), resolved relative to the config when not
+    absolute. Otherwise it is a subdirectory of the cache root that
+    :func:`boulder.result_cache.cache_dir_for` picks -- normally
+    ``<config_dir>/.boulder-cache/<stem>/``, so results sit in the one already
+    git-ignored place for derived data instead of beside the YAML.
+
+    ``$BOULDER_CACHE_DIR`` makes that root *shared across configs*, which a
+    name-addressed store cannot tolerate on its own: two configs both named
+    ``case.yaml`` would otherwise share a directory and read each other's
+    entries. In that case the config's absolute path is folded into the
+    subdirectory name. (A store is additionally stamped with the config it
+    belongs to, so a mismatch rebuilds rather than serving another config's
+    results -- see :mod:`boulder.scenario_store`.)
+
+    ``None`` when *config_path* is unset — there is no config to resolve
+    against.
+    """
+    if not config_path:
+        return None
+    cfg = Path(config_path).resolve()
+    extra = (raw.get("metadata") or {}).get("extra") or {}
+    rel = extra.get("cache_store") or extra.get("scenario_store")
+    if rel:
+        p = Path(rel)
+        return p if p.is_absolute() else cfg.parent / p
+
+    from .result_cache import cache_dir_for  # noqa: PLC0415 — avoid import cycle
+
+    root = cache_dir_for(str(cfg))
+    if root is None:  # pragma: no cover — cfg is set, so cache_dir_for resolves
+        return None
+    name = cfg.stem
+    if os.environ.get("BOULDER_CACHE_DIR", "").strip():
+        # Shared root: disambiguate by the config's full path.
+        name = f"{cfg.stem}-{_sha8(str(cfg))}"
+    return root / name
+
+
+def store_entry_path(store_dir: Path, scenario_id: str) -> Path:
+    """Return the result file for *scenario_id* inside *store_dir*."""
+    return store_dir / f"{store_entry_name(scenario_id)}.h5"
+
+
+def store_artifacts_dir(store_dir: Path, scenario_id: str) -> Path:
+    """Return the host-contributor artifacts directory for *scenario_id*.
+
+    Files, not HDF5 datasets: contributors write bundles (JSON + figure PNGs),
+    which stay far easier to produce and consume as real files.
+    """
+    return store_dir / "artifacts" / store_entry_name(scenario_id)
 
 
 # ---------------------------------------------------------------------------
