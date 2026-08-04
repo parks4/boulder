@@ -45,6 +45,14 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 #: with this synthesized entry.
 BASELINE_SCENARIO_ID = "BASELINE"
 
+#: Run-set id for the base config when it declares no ``scenarios:`` block —
+#: the N=1 case, where the whole run-set is just the config itself. A config
+#: *with* a ``scenarios:`` block instead names its unmodified base run
+#: :data:`BASELINE_SCENARIO_ID`, so adding the first scenario renames the base
+#: entry (and orphans its stored result, which is regenerable).
+#: Overridden by ``metadata.scenario_id`` when the config sets one.
+BASE_SCENARIO_ID = "BASE"
+
 # ---------------------------------------------------------------------------
 # Deep merge with id-keyed list support (the STONE overlay merge).
 # ---------------------------------------------------------------------------
@@ -439,7 +447,7 @@ def expand_scenarios(
     the scenarios do not cross-multiply.
 
     When neither block is present, returns a single ``(scenario_id, base)``
-    tuple using ``metadata.scenario_id`` or ``"BASE"``.
+    tuple using ``metadata.scenario_id`` or :data:`BASE_SCENARIO_ID`.
 
     Parameters
     ----------
@@ -477,7 +485,7 @@ def expand_scenarios(
         )
 
     base_meta = base_raw.get("metadata") or {}
-    base_id = base_meta.get("scenario_id", "BASE")
+    base_id = base_meta.get("scenario_id", BASE_SCENARIO_ID)
     scenario_block = raw_scenarios or {}
     global_sweeps = sweeps_of(base_raw)
 

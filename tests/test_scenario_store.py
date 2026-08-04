@@ -249,6 +249,57 @@ def test_clear_removes_entries_and_artifacts(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Staleness: solve, or reuse?
+# --------------------------------------------------------------------------- #
+
+
+def test_is_current_only_for_the_matching_fingerprint(tmp_path: Path) -> None:
+    d = tmp_path / "store"
+    _write(d, "hot", "id", fingerprint="fp-now")
+
+    assert store.is_current(d, "hot", "fp-now", "id") is True
+    assert store.is_current(d, "hot", "fp-edited", "id") is False
+    assert store.is_current(d, "absent", "fp-now", "id") is False
+    assert store.is_current(None, "hot", "fp-now", "id") is False
+
+
+def test_the_same_entry_answers_to_its_post_build_fingerprint_too(
+    tmp_path: Path,
+) -> None:
+    """One solve, two valid descriptions of it.
+
+    The staged solver enriches the network while building, so the config the
+    frontend holds afterwards hashes differently from the pre-build config a
+    sweep derives. Both must find this entry current, or a plain Run Simulation
+    would re-solve on every click.
+    """
+    d = tmp_path / "store"
+    _write(d, "hot", "id", fingerprint="fp-pre", alt_fingerprints=("fp-post",))
+
+    assert store.is_current(d, "hot", "fp-pre", "id") is True
+    assert store.is_current(d, "hot", "fp-post", "id") is True
+    assert store.is_current(d, "hot", "fp-unrelated", "id") is False
+    # The canonical fingerprint is what a sweep compares against.
+    assert store.fingerprints(d, "id") == {"hot": "fp-pre"}
+
+
+def test_an_alt_equal_to_the_canonical_one_is_not_recorded(tmp_path: Path) -> None:
+    """No redundant attr when the build did not change the config."""
+    d = tmp_path / "store"
+    _write(d, "hot", "id", fingerprint="fp", alt_fingerprints=("fp",))
+    attrs = store.entry_attrs(d, "hot", "id")
+    assert "alt_fingerprints" not in attrs
+
+
+def test_a_foreign_config_is_never_current(tmp_path: Path) -> None:
+    """The identity guard also gates staleness, not just reads."""
+    d = tmp_path / "store"
+    _write(d, "hot", store.config_identity(tmp_path / "a.yaml"), fingerprint="fp")
+    other = store.config_identity(tmp_path / "b.yaml")
+    assert store.is_current(d, "hot", "fp", other) is False
+
+
+# --------------------------------------------------------------------------- #
 # Ids from YAML are not filename-safe
 # --------------------------------------------------------------------------- #
 

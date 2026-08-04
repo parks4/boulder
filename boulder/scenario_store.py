@@ -61,6 +61,18 @@ _ATTR_VERSION = "store_version"
 _ATTR_CONFIG_IDENTITY = "config_identity"
 _ATTR_FINGERPRINT = "fingerprint"
 
+#: Additional fingerprints the same entry also answers to.
+#:
+#: One solve can be described by more than one config: the staged solver enriches
+#: the network while building it (stream-point and interface nodes), so the
+#: config the *frontend* holds afterwards hashes differently from the pre-build
+#: config the run-set and the startup check use. :attr:`_ATTR_FINGERPRINT` stays
+#: the canonical pre-build one — what a sweep compares against — and the
+#: post-build variant is recorded here so a subsequent "is this still current?"
+#: from the browser matches too. Replaces the old separate alias entries (and
+#: their orphan pruning): the alternates live on the entry they belong to.
+_ATTR_ALT_FINGERPRINTS = "alt_fingerprints"
+
 #: Attrs that are bookkeeping rather than plottable KPIs. Anything *not* listed
 #: here and numeric becomes a selectable axis in the Sweep Results plot, so an
 #: omission shows up as a nonsense axis. Covers this module's own attrs, the
@@ -72,6 +84,7 @@ NON_KPI_ATTRS = frozenset(
         _ATTR_VERSION,
         _ATTR_CONFIG_IDENTITY,
         _ATTR_FINGERPRINT,
+        _ATTR_ALT_FINGERPRINTS,
         "label",
         "order",
         "computed_at",
@@ -129,6 +142,7 @@ def write_entry(
     identity: str,
     label: Optional[str] = None,
     order: Optional[int] = None,
+    alt_fingerprints: "Optional[tuple[str, ...]]" = None,
     extra_attrs: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """Write one solved entry, recording ``fingerprint`` last.
@@ -155,6 +169,9 @@ def write_entry(
             attrs["label"] = label
         if order is not None:
             attrs["order"] = int(order)
+        alts = tuple(fp for fp in (alt_fingerprints or ()) if fp and fp != fingerprint)
+        if alts:
+            attrs[_ATTR_ALT_FINGERPRINTS] = list(alts)
         for key, value in (extra_attrs or {}).items():
             attrs[key] = value
         handle.flush()
@@ -246,6 +263,32 @@ def fingerprints(store_dir: Optional[Path], identity: str = "") -> Dict[str, str
         if fp and sid:
             found[str(sid)] = str(fp)
     return found
+
+
+def is_current(
+    store_dir: Optional[Path],
+    scenario_id: str,
+    candidate_fingerprint: str,
+    identity: str = "",
+) -> bool:
+    """Whether *scenario_id*'s stored result already matches *candidate_fingerprint*.
+
+    The one staleness question the whole store exists to answer: solve, or reuse?
+    Matches the canonical fingerprint or any recorded alternate (see
+    :data:`_ATTR_ALT_FINGERPRINTS`), so the same entry answers to both the
+    pre-build config a sweep derives and the post-build config the browser holds.
+    """
+    if store_dir is None or not candidate_fingerprint:
+        return False
+    attrs = entry_attrs(store_dir, scenario_id, identity)
+    if attrs is None:
+        return False
+    if str(attrs.get(_ATTR_FINGERPRINT, "")) == candidate_fingerprint:
+        return True
+    alts = attrs.get(_ATTR_ALT_FINGERPRINTS) or []
+    if isinstance(alts, (str, bytes)):
+        alts = [alts]
+    return candidate_fingerprint in {str(_to_py(a)) for a in alts}
 
 
 def delete_entry(store_dir: Path, scenario_id: str) -> bool:

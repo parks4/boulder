@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import cantera as ct  # type: ignore
 
+from .runset import BASE_SCENARIO_ID
 from .verbose_utils import get_verbose_logger
 
 logger = get_verbose_logger(__name__)
@@ -228,6 +229,35 @@ class SimulationWorker:
         #: Optional reference to FastAPI app.state; updated with cache result on
         #: successful solve so GUI actions see the new cache without server restart.
         self._app_state: Optional[Any] = None
+        #: Which run-set entry this solve *is*, and how to label it in the
+        #: Scenario pane. A plain "Run Simulation" solves the base entry
+        #: (:data:`~boulder.runset.BASE_SCENARIO_ID`); a sweep names each one.
+        #: Set via :meth:`set_run_identity` before starting.
+        self._scenario_id: Optional[str] = None
+        self._scenario_label: Optional[str] = None
+        self._scenario_order: Optional[int] = None
+        #: The raw config, needed only to resolve the store location (it may
+        #: declare ``metadata.extra.cache_store``).
+        self._raw_config: Optional[Dict[str, Any]] = None
+
+    def set_run_identity(
+        self,
+        scenario_id: str,
+        *,
+        label: Optional[str] = None,
+        order: Optional[int] = None,
+        raw_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Name the run-set entry this worker is about to solve.
+
+        The store keys results by name, so a solve has to know which entry it
+        is. Callers that don't set this get the base entry, which is correct for
+        a plain single run.
+        """
+        self._scenario_id = scenario_id
+        self._scenario_label = label
+        self._scenario_order = order
+        self._raw_config = raw_config
 
     def start_simulation(
         self,
@@ -496,39 +526,40 @@ class SimulationWorker:
         code_str: str,
         pre_build_config: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Persist GUI payload + SimulationResult to disk cache (best-effort).
+        """Persist this run's result into the run-set store (best-effort).
+
+        The store keys results by **name**: this run is one entry of the config's
+        run-set (:func:`boulder.runset.expand_scenarios` always yields at least
+        one, so a plain single run is the N=1 case). Writing here is what lets a
+        Run Simulation and a Run Sweep of the same entry see each other's work,
+        instead of each keeping a private cache.
 
         Parameters
         ----------
         pre_build_config:
             Config snapshot taken *before* ``build_network`` enriched it with
-            outlet/interface nodes.  When provided, the fingerprint is computed
-            from this snapshot so it matches the fingerprint computed from the
-            validated config at startup (which is also pre-build).  The
-            post-build ``config`` is still stored as the config_snapshot.
+            outlet/interface nodes. This is the **canonical** fingerprint — the
+            one the run-set expansion and the startup check also compute. The
+            post-build config's own fingerprint is recorded alongside it as an
+            alternate, so the config the frontend holds after a solve still finds
+            this entry current on the next click.
 
         Failures are logged at WARNING level and never propagate to the caller.
         """
         try:
-            from .result_cache import (
-                cache_dir_for,
-                compute_fingerprint,
-                load_result,
-                run_contributors,
-                save_alias,
-                save_result,
-            )
+            from . import scenario_store
+            from .result_cache import compute_fingerprint, run_contributors
+            from .runset import resolve_store_dir, store_artifacts_dir
             from .simulation_result import make_simulation_result
 
             mechanism_raw = getattr(converter, "mechanism", None) or "gri30.yaml"
             mechanism = converter.resolve_mechanism(mechanism_raw)
             config_path = getattr(converter, "_download_config_path", None)
-            cache_root = cache_dir_for(config_path)
-            if cache_root is None:
-                logger.debug(
-                    "No cache root available (no config path); skipping cache."
-                )
+            store_dir = resolve_store_dir(self._raw_config or {}, config_path)
+            if store_dir is None:
+                logger.debug("No store directory (no config path); skipping persist.")
                 return
+            scenario_id = self._scenario_id or BASE_SCENARIO_ID
 
             progress = self.get_progress()
             # Use pre-build snapshot for fingerprinting when available so the hash
@@ -567,36 +598,33 @@ class SimulationWorker:
 
             simulation_result = make_simulation_result(converter, config)
 
-            entry = save_result(
-                cache_root=cache_root,
-                fingerprint=fingerprint,
+            # The post-build config describes the same solve (the staged solver
+            # added stream-point/interface nodes while building), so this entry
+            # answers to its fingerprint too -- otherwise the frontend, which
+            # holds the post-build config, would re-solve on every click.
+            post_build_fp = compute_fingerprint(config, mechanism=mechanism)
+
+            scenario_store.write_entry(
+                store_dir,
+                scenario_id,
                 gui_payload=gui_payload,
-                config_snapshot=config,
                 mechanism=mechanism,
+                fingerprint=fingerprint,
+                identity=scenario_store.config_identity(config_path),
+                label=self._scenario_label,
+                order=self._scenario_order,
+                alt_fingerprints=(post_build_fp,),
             )
 
-            # Write an alias from the post-build fingerprint → canonical entry.
-            # After a solve, the frontend stores the post-build config (with
-            # stream-point nodes added by the staged solver).  On the next
-            # "Run Simulation" click, check-cache fingerprints the post-build
-            # config, which differs from the pre-build fingerprint used here.
-            # The alias lets load_result_flexible find the entry via either key.
-            post_build_fp = compute_fingerprint(config, mechanism=mechanism)
-            if post_build_fp != fingerprint:
-                save_alias(cache_root, post_build_fp, fingerprint)
-                logger.debug(
-                    "Cache post-build alias written: %s → %s",
-                    post_build_fp[:12],
-                    fingerprint[:12],
-                )
+            artifacts_dir = store_artifacts_dir(store_dir, scenario_id)
 
-            artifacts_dir = entry / "artifacts"
-
-            # Update app.state immediately after save_result so the frontend
-            # detects the cache hit and Export can poll for the bundle instead
-            # of triggering a full re-solve.  Contributors write their artifacts
-            # next (potentially slow), but the cache entry is already addressable.
-            cached = load_result(cache_root, fingerprint)
+            # Publish the result immediately, before contributors run: the entry
+            # is already complete and addressable, and a contributor writing
+            # artifacts can be slow. Without this the frontend would not see the
+            # hit until every artifact landed.
+            cached = scenario_store.read_entry(
+                store_dir, scenario_id, scenario_store.config_identity(config_path)
+            )
             if cached is not None and self._app_state is not None:
                 try:
                     self._app_state.preloaded_result = cached
