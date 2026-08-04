@@ -34,6 +34,14 @@ export interface ScenarioListResponse {
   reactor_mode?: string | null;
   /** Unix seconds when the store (sweep) was written (fallback for all rows). */
   created_at?: number | null;
+  /**
+   * Display unit per host-supplied KPI attr key (e.g. `{ efficiency: "%" }`),
+   * for `scenario_attrs` values returned as `(value, unit)` — see
+   * `boulder.sweep_runner.run`'s docstring. Auto-walked node/connection input
+   * attrs (`in.<id>.<prop>` keys) aren't in here; their unit is resolved on
+   * the frontend from the property name (see `SweepResultsPlot.tsx`).
+   */
+  units?: Record<string, string> | null;
   scenarios: ScenarioMeta[];
   /**
    * Every scenario id in the config's `scenario:` mapping, regardless of

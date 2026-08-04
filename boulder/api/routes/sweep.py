@@ -22,6 +22,7 @@ Endpoints (prefix ``/api/sweep``):
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
@@ -34,6 +35,7 @@ from pydantic import BaseModel, Field
 from ...cantera_converter import DualCanteraConverter, get_plugins
 from ...payload_store import write_payload
 from ...runset import (
+    node_property_attrs,
     resolve_store_path,
     run_set_size,
     sweep_point_of,
@@ -269,6 +271,7 @@ async def sweep_run(
             run_ids = {sid for sid, _ in runs}
             mechanism = _mechanism_of(raw)
             n_cached = 0
+            store_units: Dict[str, str] = {}
             # The active converter class -- e.g. a host's own subclass with
             # its own mechanism search convention -- lives on `app.state`
             # (set once by the CLI at startup; see `boulder/api/main.py`),
@@ -368,6 +371,11 @@ async def sweep_run(
                             f"'{sid}': {exc}",
                             flush=True,
                         )
+                # Every node/connection's own numeric properties -- generic,
+                # host-agnostic "input" axis candidates for the Sweep Results
+                # plot, keyed ``in.<id>.<prop>`` (see node_property_attrs
+                # docstring). Added on top of whatever extra_attrs already has.
+                extra_attrs.update(node_property_attrs(config))
                 with h5py.File(str(store), "a") as handle:
                     attrs = handle[sid].attrs
                     attrs["label"] = label
@@ -375,6 +383,13 @@ async def sweep_run(
                     attrs["fingerprint"] = fingerprint
                     attrs["computed_at"] = float(time.time())
                     for key, value in extra_attrs.items():
+                        # A host may pair a KPI value with its display unit as
+                        # (value, unit); the unit rides in a store-level attr
+                        # (written once after the loop) since HDF5 per-group
+                        # attrs are flat scalars.
+                        if isinstance(value, tuple):
+                            value, unit = value
+                            store_units[key] = unit
                         attrs[key] = value
 
                 # Let the host persist per-scenario artifacts keyed by this
@@ -422,6 +437,8 @@ async def sweep_run(
                     Path(mechanism).name if mechanism else ""
                 )
                 handle.attrs["created_at"] = float(time.time())
+                if store_units:
+                    handle.attrs["units"] = json.dumps(store_units)
 
             state["scenario_progress"] = {}
             state["last_line"] = None

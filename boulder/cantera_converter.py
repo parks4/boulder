@@ -102,7 +102,13 @@ class BoulderPlugins:
     #: become selectable plot axes; the plot stays hidden until at least two
     #: exist. Conventional names it renders nicely: ``t0_K`` (default X axis),
     #: ``final_temperature_K``, ``final_X_<species>`` (grouped as Mole
-    #: Fractions), ``final_Y_<species>`` (Mass Fractions).
+    #: Fractions), ``final_Y_<species>`` (Mass Fractions). A value may also be
+    #: a ``(value, unit)`` tuple to label the KPI's display unit in the plot's
+    #: axis picker; units are collected into a store-level ``units`` JSON attr
+    #: (flat scalar values only go into each scenario's own HDF5 attrs).
+    #: Every node/connection's own numeric properties are recorded separately
+    #: and automatically, with no host hook needed — see
+    #: :func:`boulder.runset.node_property_attrs`.
     #:
     #: Same contract as :func:`boulder.sweep_runner.run`'s ``scenario_attrs``
     #: argument, which defaults to this when not passed explicitly, so the GUI

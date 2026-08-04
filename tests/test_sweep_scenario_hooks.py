@@ -17,6 +17,7 @@ Both now live on `BoulderPlugins` and fire on the in-process path too.
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
@@ -174,6 +175,61 @@ def test_on_scenario_solved_hook_fires_per_scenario(tmp_path: Path) -> None:
                 assert handle[sid].attrs["fingerprint"] == fp
     finally:
         plugins.on_scenario_solved = None
+        client.__exit__(None, None, None)
+
+
+def test_node_property_attrs_are_recorded_with_no_host_hook(tmp_path: Path) -> None:
+    """Every node's numeric properties land as `in.<id>.<prop>` with no host code."""
+    client, app = _client_with_config(tmp_path)
+    try:
+        _run_sweep(client, app)
+
+        store = Path(app.state.scenario_store_path)
+        with h5py.File(str(store), "r") as handle:
+            for sid in ("BASELINE", "a"):
+                attrs = handle[sid].attrs
+                assert attrs["in.feed.temperature"] == pytest.approx(298.15)
+                assert attrs["in.feed.pressure"] == pytest.approx(101325)
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_scenario_attrs_tuple_value_carries_a_unit(tmp_path: Path) -> None:
+    """A `(value, unit)` return records the number as usual plus a store-level unit."""
+    client, app = _client_with_config(tmp_path)
+    plugins = get_plugins()
+
+    def _attrs(sid: str, cfg: Dict[str, Any], gui: Dict[str, Any]) -> Dict[str, Any]:
+        return {"efficiency": (75.0, "%"), "t0_K": 1200.0}
+
+    plugins.scenario_attrs = _attrs
+    try:
+        _run_sweep(client, app)
+
+        store = Path(app.state.scenario_store_path)
+        with h5py.File(str(store), "r") as handle:
+            for sid in ("BASELINE", "a"):
+                attrs = handle[sid].attrs
+                # The tuple's numeric part, not the tuple itself, is the stored attr.
+                assert attrs["efficiency"] == pytest.approx(75.0)
+                assert attrs["t0_K"] == pytest.approx(1200.0)
+            units = json.loads(handle.attrs["units"])
+            assert units == {"efficiency": "%"}
+            # A bare-float attr in the same dict must not appear in `units`.
+            assert "t0_K" not in units
+    finally:
+        plugins.scenario_attrs = None
+        client.__exit__(None, None, None)
+
+
+def test_no_units_attr_written_when_no_hook_supplies_a_unit(tmp_path: Path) -> None:
+    client, app = _client_with_config(tmp_path)
+    try:
+        _run_sweep(client, app)
+        store = Path(app.state.scenario_store_path)
+        with h5py.File(str(store), "r") as handle:
+            assert "units" not in handle.attrs
+    finally:
         client.__exit__(None, None, None)
 
 

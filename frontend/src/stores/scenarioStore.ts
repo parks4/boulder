@@ -37,6 +37,8 @@ interface ScenarioState {
   overlaysSeeded: boolean;
   /** Unix seconds the store was written; drives the "computed X ago" label. */
   createdAt?: number;
+  /** Display unit per host-supplied KPI attr key -- see `ScenarioListResponse.units`. */
+  units?: Record<string, string>;
   activeId: string | null;
   loading: boolean;
   error: string | null;
@@ -144,6 +146,7 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
           overlaysSeeded: true,
           authoredIds: idsFromOverlays(overlays),
           createdAt: resp.created_at ?? undefined,
+          units: resp.units ?? undefined,
           revision: s.revision + 1,
         };
       });
