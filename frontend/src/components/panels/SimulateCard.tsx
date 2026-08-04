@@ -99,16 +99,11 @@ export function SimulateCard() {
 
     doFetch();
 
-    // When results just arrived, fire a second fetch after the background
-    // cache-write thread has had time to finish (~3 s is conservative).
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    if (results !== null) {
-      timer = setTimeout(doFetch, 3000);
-    }
-
+    // No second, timer-delayed fetch: the worker now stores the result before
+    // it reports completion, so by the time `results` arrives the store already
+    // has the entry this listing asks about.
     return () => {
       cancelled = true;
-      if (timer !== undefined) clearTimeout(timer);
     };
   }, [config, simulationId, results, fileName, syncYaml]);
 

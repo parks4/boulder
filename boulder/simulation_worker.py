@@ -478,6 +478,23 @@ class SimulationWorker:
             logger.info(f"Simulation completed: {len(results['time'])} time points")
             reactor_reports = generate_reactor_reports(converter, results)
             connection_reports = generate_connection_reports(converter)
+            # Persist BEFORE announcing completion. The frontend reacts to
+            # `is_complete` immediately -- re-listing GUI actions, which asks the
+            # store whether a result exists -- so storing afterwards raced it,
+            # and the client papered over that by re-fetching on a 3-second
+            # timer. Writing first makes "complete" mean "complete and stored".
+            # Best-effort: `_persist_to_cache` swallows its own errors, so a
+            # store failure still yields a completed simulation.
+            self._persist_to_cache(
+                converter,
+                config,
+                results,
+                reactor_reports,
+                connection_reports,
+                code_str,
+                pre_build_config=pre_build_config,
+            )
+
             with self._lock:
                 self.progress.times = results["time"]
                 self.progress.reactors_series = results["reactors"]
@@ -495,18 +512,6 @@ class SimulationWorker:
                 # Carry through final error message if present in results
                 if isinstance(results, dict) and results.get("error_message"):
                     self.progress.error_message = results.get("error_message")
-
-            # Persist results to disk cache (best-effort: never aborts the solve).
-            # Pass pre_build_config so the fingerprint matches the startup fingerprint.
-            self._persist_to_cache(
-                converter,
-                config,
-                results,
-                reactor_reports,
-                connection_reports,
-                code_str,
-                pre_build_config=pre_build_config,
-            )
 
         except Exception as e:
             logger.error(f"Simulation failed: {e}", exc_info=True)

@@ -170,3 +170,44 @@ def test_persist_failures_never_propagate(cfg: Path) -> None:
     worker = SimulationWorker()
     with patch("boulder.scenario_store.write_entry", side_effect=OSError("disk full")):
         _persist(worker, _StubConverter(cfg))  # swallowed, logged
+
+
+def test_the_entry_is_stored_before_completion_is_announced(cfg: Path) -> None:
+    """`is_complete` must not go true until the result is in the store.
+
+    The frontend reacts to completion immediately -- re-listing GUI actions,
+    which asks the store whether a result exists. Storing after announcing
+    raced that, and the client used to hide the race behind a 3-second
+    re-fetch timer. This pins the ordering so the timer stays deleted.
+    """
+    worker = SimulationWorker()
+    complete_at_persist_time: list[bool] = []
+
+    def _spy(*args: Any, **kwargs: Any) -> None:
+        complete_at_persist_time.append(worker.progress.is_complete)
+
+    class _Net:
+        pass
+
+    conv = _StubConverter(cfg)
+    conv.reactors = {}  # type: ignore[attr-defined]
+    conv.build_network = lambda *a, **k: _Net()  # type: ignore[attr-defined]
+    conv.run_streaming_simulation = lambda *a, **k: (  # type: ignore[attr-defined]
+        {"time": [0.0], "reactors": {}},
+        "# code",
+    )
+
+    with (
+        patch.object(worker, "_persist_to_cache", side_effect=_spy),
+        patch("boulder.simulation_worker.generate_reactor_reports", return_value={}),
+        patch("boulder.simulation_worker.generate_connection_reports", return_value={}),
+        # Imported inside the function, so patch it at its source module.
+        patch("boulder.live_simulation.update_live_simulation"),
+    ):
+        worker._run_simulation(conv, dict(_CONFIG), 1.0, 0.1)
+
+    assert complete_at_persist_time == [False], (
+        "the result was stored after completion was announced -- a client that "
+        "reacts to `is_complete` can see a finished run with no stored entry"
+    )
+    assert worker.progress.is_complete is True

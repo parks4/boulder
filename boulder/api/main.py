@@ -239,9 +239,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.error(f"Failed to load preloaded configuration: {e}")
 
-    # Resolve the scenario-inspector store (HDF5): explicit env override wins,
-    # else the preloaded config's ``metadata.extra.scenario_store`` (or the
-    # ``<stem>_scenarios.h5`` default) whenever there is a run-set to show —
+    # Resolve the scenario-inspector store: explicit env override wins, else
+    # the preloaded config's ``metadata.extra.cache_store`` (or the
+    # ``.boulder-cache/<stem>/`` default) whenever there is a run-set to show —
     # declared inline (``scenarios:``/``sweep:``/``sweeps:``), a host
     # ``run_sweep.py`` next to the config, or ``--sweep`` (BOULDER_SWEEP_MODE).
     # Reuses the same detection the Run Sweep button uses (routes.sweep) so a

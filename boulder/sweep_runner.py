@@ -6,9 +6,9 @@ Invoked out-of-process by the ``/api/sweep`` routes for any config that declares
 1. loads the raw config (``from:`` inheritance resolved),
 2. expands the union run-set with :func:`boulder.runset.expand_scenarios`,
 3. solves each run through the Boulder converter, and
-4. writes each result as a **composite** payload into the collection store
-   (``metadata.extra.scenario_store``, default ``<stem>_scenarios.h5``), one
-   ``<scenario_id>/`` group per run,
+4. writes each result into the run-set store
+   (``metadata.extra.cache_store``, default ``.boulder-cache/<stem>/``), one
+   ``<scenario_id>.h5`` file per run,
 
 printing ``scenario N/M`` per run so the sweep API can show progress. The
 Scenario Pane then lists every run and opens each instantly.
@@ -299,9 +299,8 @@ def run(
         scenario (skipped runs that hit the store cache do not fire it), right
         after the payload is written. Lets a host persist per-scenario
         artifacts keyed by the same ``fingerprint`` used elsewhere — e.g.
-        writing each scenario into the single-run result cache
-        (``save_result`` + ``run_contributors``) so a downstream "Export"
-        action can reuse the sweep's solve work instead of re-solving.
+        running its own ``run_contributors`` so a downstream "Export" action
+        can reuse the sweep's solve work instead of re-solving.
         Exceptions raised by the hook are caught and logged so one scenario's
         artifact failure does not abort the whole sweep.
 

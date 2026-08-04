@@ -134,9 +134,9 @@ def _canonical_config(config: Dict[str, Any]) -> Any:
        with different dicts.
 
     Same intent as :func:`_coerce`'s integer-float normalisation, and
-    deliberately *not* folded into it: ``_coerce`` also serialises
-    ``gui_payload`` in :func:`save_result`, where dropping ``None`` would
-    discard real fields (e.g. ``error_message``).
+    deliberately *not* folded into it: ``_coerce`` also serialises payloads
+    elsewhere, where dropping ``None`` would discard real fields (e.g.
+    ``error_message``).
 
     The caller's dict is never mutated.
     """
