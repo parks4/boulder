@@ -217,7 +217,6 @@ def test_a_host_runner_sweep_reaches_a_terminal_status(tmp_path: Path) -> None:
     import time
     from unittest.mock import patch
 
-    import h5py
     import pytest as _pytest
 
     _pytest.importorskip("fastapi")
@@ -235,9 +234,20 @@ def test_a_host_runner_sweep_reaches_a_terminal_status(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    def _runner(store_path: Path, progress: Any = None) -> None:
-        with h5py.File(str(store_path), "w") as handle:
-            handle.create_group("a").create_dataset("payload_json", data=b"{}")
+    def _runner(store_dir: Path, progress: Any = None) -> None:
+        # A host runner is handed the store *directory* and writes one entry per
+        # run-set point through the supported helper, which stamps the
+        # fingerprint/identity the Scenario pane requires.
+        from boulder import scenario_store
+
+        scenario_store.write_entry(
+            store_dir,
+            "a",
+            gui_payload={"status": "complete", "times": [], "reactors_series": {}},
+            mechanism="gri30.yaml",
+            fingerprint="host-fp",
+            identity=scenario_store.config_identity(cfg),
+        )
 
     app = create_app()
     client = TestClient(app)

@@ -74,14 +74,20 @@ def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     return bool(raw.get("scenarios") or sweeps_of(raw) or sweep_runner_of(raw))
 
 
-def _run_host_sweep(dotted: str, state: Dict[str, Any], store: Path) -> None:
+def _run_host_sweep(dotted: str, state: Dict[str, Any], store_dir: Path) -> None:
     """Resolve and call a ``sweep.runner`` callable, updating *state* around it.
 
-    The callable owns the run-set: it decides the points, solves them and
-    writes them into the collection store (``boulder.payload_store``). It is
-    passed the store path and may accept an optional ``progress`` callable —
-    ``(done, total, message)`` — so a host that knows its point count can drive
-    the same status UI a declarative sweep does.
+    The callable owns the run-set: it decides the points, solves them and writes
+    them into the result store. It may accept an optional ``progress`` callable
+    — ``(done, total, message)`` — so a host that knows its point count can
+    drive the same status UI a declarative sweep does.
+
+    .. versionchanged:: (store unification)
+       The first argument is now the store **directory**, not a single HDF5
+       file: results are one file per run-set entry. Write entries with
+       :func:`boulder.scenario_store.write_entry`, which records the
+       fingerprint, config identity and display attrs the Scenario pane needs —
+       hand-rolling HDF5 here will produce entries the pane refuses to read.
     """
     from ...cantera_converter import resolve_dotted_path
 
@@ -109,9 +115,9 @@ def _run_host_sweep(dotted: str, state: Dict[str, Any], store: Path) -> None:
 
     print(f"[sweep] delegating to host runner {dotted}", flush=True)
     if accepts_progress:
-        runner(store, progress=_progress)
+        runner(store_dir, progress=_progress)
     else:
-        runner(store)
+        runner(store_dir)
 
 
 def _has_run_set(request: Request) -> bool:
