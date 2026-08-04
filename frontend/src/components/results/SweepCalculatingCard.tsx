@@ -1,10 +1,9 @@
+import { CalculatingCardShell } from "./CalculatingCardShell";
+
 /**
- * Non-blocking "this scenario is mid-sweep" placeholder for the results area.
- *
- * Deliberately just an inline card (not a `fixed inset-0` overlay like
- * `SimulationOverlay`) — it only occupies the results card's own slot in
- * `<main>`, leaving the Scenario Pane and the rest of the layout fully
- * visible and interactive while a sweep is running.
+ * "This scenario is mid-sweep" placeholder for the results area — see
+ * `CalculatingCardShell` for why it's a non-blocking inline card rather than
+ * a `fixed inset-0` overlay.
  */
 export function SweepCalculatingCard({
   scenarioId,
@@ -26,21 +25,9 @@ export function SweepCalculatingCard({
       : "";
 
   return (
-    <div className="rounded-lg border border-border bg-card p-6 text-center space-y-3">
-      <div className="animate-spin rounded-full h-8 w-8 border-4 border-primary border-t-transparent mx-auto" />
-      <div className="space-y-1">
-        <p className="text-foreground font-medium">
-          Calculating &quot;{scenarioId}&quot;…{stageLabel}
-        </p>
-        {lastLine && (
-          <p
-            className="text-xs text-muted-foreground font-mono truncate"
-            title={lastLine}
-          >
-            {lastLine}
-          </p>
-        )}
-      </div>
-    </div>
+    <CalculatingCardShell
+      headline={`Calculating "${scenarioId}"…${stageLabel}`}
+      detailLine={lastLine}
+    />
   );
 }
