@@ -17,7 +17,6 @@ Both now live on `BoulderPlugins` and fire on the in-process path too.
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Tuple
@@ -96,23 +95,44 @@ def _wait_until(predicate: Callable[[], bool], timeout: float = 10.0) -> None:
     raise AssertionError("condition not met within timeout")
 
 
+def _store(app: Any):
+    """Resolve ``(store_dir, identity)`` the way every route does."""
+    from boulder import scenario_store
+    from boulder.runset import resolve_store_dir
+
+    cfg_path = app.state.preloaded_config_path
+    return (
+        resolve_store_dir(app.state.preloaded_raw or {}, cfg_path),
+        scenario_store.config_identity(cfg_path),
+    )
+
+
+def _entry_attrs(app: Any, scenario_id: str) -> Dict[str, Any]:
+    """One entry's attrs, asserting it exists."""
+    from boulder import scenario_store
+
+    store_dir, identity = _store(app)
+    attrs = scenario_store.entry_attrs(store_dir, scenario_id, identity)
+    assert attrs is not None, f"no store entry for {scenario_id!r}"
+    return attrs
+
+
 def _run_sweep(client: TestClient, app: Any) -> None:
-    def _fake_write_payload(store: Path, gui: Any, mechanism: str, **kwargs: Any):
-        # Create the group the route then writes attrs onto, without needing a
-        # real Cantera Solution.
-        with h5py.File(str(store), "a") as handle:
-            grp = kwargs.get("group")
-            if grp not in handle:
-                handle.create_group(grp).create_dataset("payload_json", data=b"{}")
+    def _fake_write_payload(path: Path, gui: Any, mechanism: str, **kwargs: Any):
+        # Make the entry file exist without needing a real Cantera Solution;
+        # the store writes its own attrs on top afterwards.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with h5py.File(str(path), "a") as handle:
+            handle.attrs.setdefault("schema_version", 1)
 
     with (
         patch(
             "boulder.simulation_worker.SimulationWorker",
             side_effect=lambda: _FakeWorker(),
         ),
-        patch(
-            "boulder.api.routes.sweep.write_payload", side_effect=_fake_write_payload
-        ),
+        # Patched at the source module: the sweep reaches `write_payload`
+        # through `scenario_store.write_entry` now, not directly.
+        patch("boulder.payload_store.write_payload", side_effect=_fake_write_payload),
     ):
         resp = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
         assert resp.status_code == 200, resp.text
@@ -134,14 +154,13 @@ def test_scenario_attrs_hook_lands_kpis_on_the_store(tmp_path: Path) -> None:
         _run_sweep(client, app)
 
         assert seen == ["BASELINE", "a"]  # fires per freshly-solved scenario
-        store = Path(app.state.scenario_store_path)
-        with h5py.File(str(store), "r") as handle:
-            for sid in ("BASELINE", "a"):
-                assert "t0_K" in handle[sid].attrs, f"{sid} missing KPI attr"
-                assert handle[sid].attrs["final_X_CH4"] == pytest.approx(0.25)
-            # Two distinct numeric attrs across scenarios is exactly the
-            # condition SweepResultsPlot needs to render at all.
-            assert handle["BASELINE"].attrs["t0_K"] != handle["a"].attrs["t0_K"]
+        for sid in ("BASELINE", "a"):
+            attrs = _entry_attrs(app, sid)
+            assert "t0_K" in attrs, f"{sid} missing KPI attr"
+            assert attrs["final_X_CH4"] == pytest.approx(0.25)
+        # Two distinct numeric attrs across scenarios is exactly the
+        # condition SweepResultsPlot needs to render at all.
+        assert _entry_attrs(app, "BASELINE")["t0_K"] != _entry_attrs(app, "a")["t0_K"]
     finally:
         plugins.scenario_attrs = None
         client.__exit__(None, None, None)
@@ -169,10 +188,8 @@ def test_on_scenario_solved_hook_fires_per_scenario(tmp_path: Path) -> None:
         assert [sid for sid, _ in calls] == ["BASELINE", "a"]
         # Every scenario is handed the same fingerprint the store recorded, so a
         # host can key its own artifacts off it.
-        store = Path(app.state.scenario_store_path)
-        with h5py.File(str(store), "r") as handle:
-            for sid, fp in calls:
-                assert handle[sid].attrs["fingerprint"] == fp
+        for sid, fp in calls:
+            assert _entry_attrs(app, sid)["fingerprint"] == fp
     finally:
         plugins.on_scenario_solved = None
         client.__exit__(None, None, None)
@@ -184,12 +201,10 @@ def test_node_property_attrs_are_recorded_with_no_host_hook(tmp_path: Path) -> N
     try:
         _run_sweep(client, app)
 
-        store = Path(app.state.scenario_store_path)
-        with h5py.File(str(store), "r") as handle:
-            for sid in ("BASELINE", "a"):
-                attrs = handle[sid].attrs
-                assert attrs["in.feed.temperature"] == pytest.approx(298.15)
-                assert attrs["in.feed.pressure"] == pytest.approx(101325)
+        for sid in ("BASELINE", "a"):
+            attrs = _entry_attrs(app, sid)
+            assert attrs["in.feed.temperature"] == pytest.approx(298.15)
+            assert attrs["in.feed.pressure"] == pytest.approx(101325)
     finally:
         client.__exit__(None, None, None)
 
@@ -206,17 +221,20 @@ def test_scenario_attrs_tuple_value_carries_a_unit(tmp_path: Path) -> None:
     try:
         _run_sweep(client, app)
 
-        store = Path(app.state.scenario_store_path)
-        with h5py.File(str(store), "r") as handle:
-            for sid in ("BASELINE", "a"):
-                attrs = handle[sid].attrs
-                # The tuple's numeric part, not the tuple itself, is the stored attr.
-                assert attrs["efficiency"] == pytest.approx(75.0)
-                assert attrs["t0_K"] == pytest.approx(1200.0)
-            units = json.loads(handle.attrs["units"])
-            assert units == {"efficiency": "%"}
-            # A bare-float attr in the same dict must not appear in `units`.
-            assert "t0_K" not in units
+        from boulder import scenario_store
+
+        for sid in ("BASELINE", "a"):
+            attrs = _entry_attrs(app, sid)
+            # The tuple's numeric part, not the tuple itself, is the stored attr.
+            assert attrs["efficiency"] == pytest.approx(75.0)
+            assert attrs["t0_K"] == pytest.approx(1200.0)
+        # Units are recorded per entry and merged on read -- a unit belongs to
+        # the KPI, not to whichever entry happened to report it.
+        store_dir, identity = _store(app)
+        units = scenario_store.collect_units(store_dir, identity)
+        assert units == {"efficiency": "%"}
+        # A bare-float attr in the same dict must not appear in `units`.
+        assert "t0_K" not in units
     finally:
         plugins.scenario_attrs = None
         client.__exit__(None, None, None)
@@ -226,9 +244,10 @@ def test_no_units_attr_written_when_no_hook_supplies_a_unit(tmp_path: Path) -> N
     client, app = _client_with_config(tmp_path)
     try:
         _run_sweep(client, app)
-        store = Path(app.state.scenario_store_path)
-        with h5py.File(str(store), "r") as handle:
-            assert "units" not in handle.attrs
+        from boulder import scenario_store
+
+        store_dir, identity = _store(app)
+        assert scenario_store.collect_units(store_dir, identity) == {}
     finally:
         client.__exit__(None, None, None)
 
@@ -247,10 +266,12 @@ def test_a_raising_hook_does_not_abort_the_sweep(tmp_path: Path) -> None:
         _run_sweep(client, app)
         assert app.state.sweep_job.get("status") == "done"
         # The scenarios themselves still landed, minus the KPI attrs.
-        store = Path(app.state.scenario_store_path)
-        with h5py.File(str(store), "r") as handle:
-            assert "BASELINE" in handle and "a" in handle
-            assert "t0_K" not in handle["BASELINE"].attrs
+        from boulder import scenario_store
+
+        store_dir, identity = _store(app)
+        listed = {e["id"] for e in scenario_store.list_entries(store_dir, identity)}
+        assert listed == {"BASELINE", "a"}
+        assert "t0_K" not in _entry_attrs(app, "BASELINE")
     finally:
         plugins.scenario_attrs = None
         plugins.on_scenario_solved = None

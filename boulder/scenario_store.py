@@ -329,10 +329,10 @@ def is_current(
 def collect_units(store_dir: Optional[Path], identity: str = "") -> Dict[str, str]:
     """Merge every entry's KPI display units into one ``{attr: unit}`` map.
 
-    A unit belongs to the *KPI* (``carbon_yield`` is a percentage whichever
-    entry reported it), not to the entry, so the per-entry maps are merged. With
-    one file per entry there is nowhere config-wide to put this, and duplicating
-    a handful of short strings is cheaper than a separate index file.
+    A unit belongs to the *KPI* — an efficiency is a percentage whichever entry
+    reported it — not to the entry, so the per-entry maps are merged. With one
+    file per entry there is nowhere config-wide to put this, and duplicating a
+    handful of short strings is cheaper than a separate index file.
     """
     merged: Dict[str, str] = {}
     for attrs in list_entries(store_dir, identity):
