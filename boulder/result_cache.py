@@ -1,28 +1,20 @@
-"""On-disk cache of the last simulation result.
+"""Cache *identity* — the fingerprint everything keys off — plus the contributor registry.
 
-Boulder stores the GUI results payload (times, reactor series, reports,
-Sankey, summary, updated nodes/connections) to a fingerprinted directory
-next to the loaded YAML file.  On startup, if the preloaded config
-fingerprint matches a cache entry, Boulder loads it and sends it to the
-frontend immediately so outputs are visible without re-running.
+This module no longer stores anything. Results live in exactly one place,
+:mod:`boulder.scenario_store` (one HDF5 file per run-set entry, keyed by
+**name**). What remains here is the question "is this the same computation?",
+which the store then answers "have I already done it?" against.
 
-Host packages register :class:`CacheContributorPlugin`
-implementations.  After each successful GUI solve, Boulder calls every
-registered contributor so they can write package-specific artifacts
-(e.g. a calc-note bundle JSON + figure PNGs) into the same cache entry.
-The contributor receives the solved ``converter`` so it can access
-live network objects.
+Boulder used to keep a second, content-addressed store of its own beside that
+one — ``<fingerprint>/result.h5`` + ``meta.json`` + a ``COMPLETE`` marker, LRU
+capped. Two stores meant two answers for the base run, which disagreed. The
+storage half is gone; only the identity half was ever load bearing.
 
-Cache layout
-------------
-::
-
-    <yaml_dir>/.boulder-cache/         (or $BOULDER_CACHE_DIR)
-        <fingerprint>/
-            result.h5                  GUI payload (composite HDF5, see payload_store)
-            meta.json                  created_at, versions, mechanism, config_snapshot
-            COMPLETE                   marker written last (atomic write guard)
-            artifacts/                 contributor-written files
+Host packages register :class:`CacheContributorPlugin` implementations. After
+each successful solve, Boulder calls every registered contributor so they can
+write package-specific artifacts (e.g. a calc-note bundle JSON + figure PNGs)
+into that entry's ``artifacts/<scenario_id>/`` directory. The contributor
+receives the solved ``converter`` so it can access live network objects.
 
 Fingerprint
 -----------
@@ -36,8 +28,11 @@ SHA-256 hex of canonical sorted-key JSON of:
 * ``BOULDER_PLUGINS`` env var
 * ``CACHE_VERSION`` integer
 
-:data:`CACHE_VERSION` must be bumped whenever the ``result.h5``
-or ``meta.json`` schema changes.
+:data:`CACHE_VERSION` participates in the hash, so bumping it invalidates every
+stored fingerprint at once. Bump it when a change would make an old result wrong
+rather than merely differently shaped — the payload's own format is versioned
+separately by ``payload_store.PAYLOAD_SCHEMA`` and the entry layout by
+``scenario_store.STORE_VERSION``.
 """
 
 from __future__ import annotations
@@ -55,9 +50,10 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-#: Bump when the payload (result.h5) / meta.json schema changes to auto-invalidate
-#: old entries. v2: payload moved from result.json → composite result.h5
-#: (native SolutionArray + JSON blob); see :mod:`boulder.payload_store`.
+#: Folded into every fingerprint, so bumping it invalidates all stored results
+#: at once. Reach for it when a change makes an old result *wrong*; a change to
+#: the payload's own format belongs in ``payload_store.PAYLOAD_SCHEMA`` and one
+#: to the entry layout in ``scenario_store.STORE_VERSION``.
 CACHE_VERSION: int = 2
 
 

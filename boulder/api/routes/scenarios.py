@@ -1,14 +1,13 @@
 """Scenario inspector API: list and load precomputed reactor trajectories.
 
-Reads a self-describing HDF5 *scenario store* — one Cantera
-:class:`~cantera.SolutionArray` per scenario (named HDF5 group), with per-group
-and root attributes — and serves each scenario as a ``SimulationResults``-shaped
-payload that the frontend renders through ``setResults`` (the same path used for
-a cached solve). All scenarios share one network topology, so the GUI only swaps
-result data and never rebuilds the graph.
+Reads the result store (:mod:`boulder.scenario_store`) — one HDF5 file per
+run-set entry, each a Cantera :class:`~cantera.SolutionArray` plus attrs — and
+serves each entry as a ``SimulationResults``-shaped payload the frontend renders
+through ``setResults`` (the same path a cached solve uses). All entries share one
+network topology, so the GUI only swaps result data and never rebuilds the graph.
 
-Store location: ``app.state.scenario_store_path`` (set by the lifespan from the
-preloaded config's ``metadata.extra.scenario_store``, or ``BOULDER_SCENARIO_STORE``).
+Store location is derived on demand by :func:`boulder.runset.resolve_store_dir`;
+there is no cached path on ``app.state`` to fall out of sync.
 
 This module depends only on ``cantera`` + ``h5py`` + stdlib (no host package); the
 HDF5 schema is the contract between producer and GUI.
@@ -32,10 +31,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter()
-
-
-def _config_path(request: Request) -> Optional[str]:
-    return getattr(request.app.state, "preloaded_config_path", None)
 
 
 def _store_dir(request: Request) -> Optional[Path]:

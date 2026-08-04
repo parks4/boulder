@@ -423,7 +423,6 @@ async def check_simulation_cache(
             "cached": True,
             "fingerprint": fingerprint,
             "result": cached.get("gui_payload", {}),
-            "config_snapshot": cached.get("config_snapshot", {}),
             "meta": meta,
         }
     )
@@ -448,7 +447,6 @@ async def get_cached_result(request: Request) -> Dict[str, Any]:
             "cached": True,
             "fingerprint": fingerprint,
             "result": cached.get("gui_payload", {}),
-            "config_snapshot": cached.get("config_snapshot", {}),
             "meta": meta,
         }
     )

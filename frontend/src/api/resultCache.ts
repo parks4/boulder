@@ -14,7 +14,6 @@ export interface CachedResultResponse {
   cached: true;
   fingerprint: string;
   result: SimulationResults;
-  config_snapshot: Record<string, unknown>;
   meta: CachedResultMeta;
 }
 

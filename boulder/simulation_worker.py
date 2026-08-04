@@ -637,8 +637,14 @@ class SimulationWorker:
             # is already complete and addressable, and a contributor writing
             # artifacts can be slow. Without this the frontend would not see the
             # hit until every artifact landed.
-            cached = scenario_store.read_entry(
-                store_dir, scenario_id, scenario_store.config_identity(config_path)
+            # `load_matching`, not `read_entry`: `app.state.preloaded_result`
+            # is a wrapper (`gui_payload`/`artifacts_dir`/`meta`), which is what
+            # the startup check publishes and what `/api/simulations/cached` and
+            # its artifacts sibling read. Publishing the bare payload here made
+            # those two disagree after every live solve -- `/cached` answered
+            # `{"cached": true, "result": {}}` and artifacts 404'd until restart.
+            cached = scenario_store.load_matching(
+                store_dir, fingerprint, scenario_store.config_identity(config_path)
             )
             if cached is not None and self._app_state is not None:
                 try:

@@ -374,20 +374,26 @@ async def sweep_run(
                     for key, value in sweep_point_of(cfg).items()
                     if isinstance(value, (int, float)) and not isinstance(value, bool)
                 }
+                # Every node/connection's own numeric properties -- generic,
+                # host-agnostic "input" axis candidates for the Sweep Results
+                # plot, keyed ``in.<id>.<prop>`` (see node_property_attrs
+                # docstring). Added on top of whatever extra_attrs already has.
+                extra_attrs.update(node_property_attrs(config))
+                # `update`, not assignment: a host hook *adds to or overrides*
+                # these, as the comment above promises. Assigning discarded the
+                # declarative sweep's own axis values -- the plot's natural X
+                # axis -- for any host that registered the hook. Applied after
+                # `node_property_attrs` so the host wins a key collision, which
+                # is also the CLI runner's order.
                 if plugins.scenario_attrs is not None:
                     try:
-                        extra_attrs = plugins.scenario_attrs(sid, cfg, gui) or {}
+                        extra_attrs.update(plugins.scenario_attrs(sid, cfg, gui) or {})
                     except Exception as exc:  # noqa: BLE001
                         print(
                             f"[sweep] WARNING: scenario_attrs hook failed for "
                             f"'{sid}': {exc}",
                             flush=True,
                         )
-                # Every node/connection's own numeric properties -- generic,
-                # host-agnostic "input" axis candidates for the Sweep Results
-                # plot, keyed ``in.<id>.<prop>`` (see node_property_attrs
-                # docstring). Added on top of whatever extra_attrs already has.
-                extra_attrs.update(node_property_attrs(config))
                 # A host may pair a KPI value with its display unit as
                 # (value, unit); the number becomes the attr and the unit is
                 # recorded separately, since HDF5 attrs are flat scalars.

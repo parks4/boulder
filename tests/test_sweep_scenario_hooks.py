@@ -117,6 +117,13 @@ def _entry_attrs(app: Any, scenario_id: str) -> Dict[str, Any]:
     return attrs
 
 
+def _touch(path: Path) -> None:
+    """Create the entry file without a real Cantera Solution."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(str(path), "a") as handle:
+        handle.attrs.setdefault("schema_version", 1)
+
+
 def _run_sweep(client: TestClient, app: Any) -> None:
     def _fake_write_payload(path: Path, gui: Any, mechanism: str, **kwargs: Any):
         # Make the entry file exist without needing a real Cantera Solution;
@@ -275,4 +282,68 @@ def test_a_raising_hook_does_not_abort_the_sweep(tmp_path: Path) -> None:
     finally:
         plugins.scenario_attrs = None
         plugins.on_scenario_solved = None
+        client.__exit__(None, None, None)
+
+
+def test_a_host_hook_adds_to_the_sweep_axis_values_rather_than_replacing_them(
+    tmp_path: Path,
+) -> None:
+    """Both must survive: the declarative axis value and the host's KPI.
+
+    The GUI path *assigned* the hook's return over the attrs it had just built
+    from the sweep point, so any host registering `scenario_attrs` silently lost
+    the sweep's own axis values -- the plot's natural X axis -- while the CLI
+    path (which merges) kept them. Same config, different attrs depending on
+    which button you pressed.
+    """
+    from boulder.runner import BoulderRunner
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "metadata:\n  description: swept\n"
+        "phases:\n  gas:\n    mechanism: gri30.yaml\n"
+        "network:\n  - id: feed\n    Reservoir:\n      temperature: 298.15\n"
+        "      pressure: 101325\n      composition: 'CH4:1'\n"
+        "sweep:\n  feed_T:\n    path: network[id=feed].Reservoir.temperature\n"
+        "    values: [400, 500]\n",
+        encoding="utf-8",
+    )
+
+    app = create_app()
+    client = TestClient(app)
+    client.__enter__()
+    app.state.preloaded_config_path = str(cfg)
+    app.state.preloaded_raw = BoulderRunner.load(str(cfg))
+    app.state.converter_class = _StubConverter
+
+    plugins = get_plugins()
+    plugins.scenario_attrs = lambda sid, cfg_, gui: {"host_kpi": 42.0}
+    try:
+        with (
+            patch(
+                "boulder.simulation_worker.SimulationWorker",
+                side_effect=lambda: _FakeWorker(),
+            ),
+            patch(
+                "boulder.payload_store.write_payload",
+                side_effect=lambda path, gui, mechanism, **kw: _touch(path),
+            ),
+        ):
+            resp = client.post("/api/sweep/run", json={})
+            assert resp.status_code == 200, resp.text
+            _wait_until(lambda: app.state.sweep_job.get("status") == "done")
+
+        from boulder import scenario_store
+
+        store_dir, identity = _store(app)
+        entries = scenario_store.list_entries(store_dir, identity)
+        assert entries, "sweep produced no entries"
+        for entry in entries:
+            assert entry["host_kpi"] == pytest.approx(42.0), "host KPI lost"
+            assert "feed_T" in entry, (
+                "the declarative sweep's axis value was discarded by the host "
+                f"hook -- attrs were {sorted(entry)}"
+            )
+    finally:
+        plugins.scenario_attrs = None
         client.__exit__(None, None, None)
