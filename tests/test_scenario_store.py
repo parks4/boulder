@@ -260,14 +260,16 @@ def test_clear_removes_entries_and_artifacts(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_is_current_only_for_the_matching_fingerprint(tmp_path: Path) -> None:
+def test_find_entry_matches_only_the_current_fingerprint(tmp_path: Path) -> None:
+    """Solve, or reuse? -- asked by fingerprint, since the caller has no id."""
     d = tmp_path / "store"
     _write(d, "hot", "id", fingerprint="fp-now")
 
-    assert store.is_current(d, "hot", "fp-now", "id") is True
-    assert store.is_current(d, "hot", "fp-edited", "id") is False
-    assert store.is_current(d, "absent", "fp-now", "id") is False
-    assert store.is_current(None, "hot", "fp-now", "id") is False
+    found = store.find_entry(d, "fp-now", "id")
+    assert found is not None and found["id"] == "hot"
+    assert store.find_entry(d, "fp-edited", "id") is None
+    assert store.find_entry(d, "", "id") is None
+    assert store.find_entry(None, "fp-now", "id") is None
 
 
 def test_the_same_entry_answers_to_its_post_build_fingerprint_too(
@@ -283,9 +285,9 @@ def test_the_same_entry_answers_to_its_post_build_fingerprint_too(
     d = tmp_path / "store"
     _write(d, "hot", "id", fingerprint="fp-pre", alt_fingerprints=("fp-post",))
 
-    assert store.is_current(d, "hot", "fp-pre", "id") is True
-    assert store.is_current(d, "hot", "fp-post", "id") is True
-    assert store.is_current(d, "hot", "fp-unrelated", "id") is False
+    assert (store.find_entry(d, "fp-pre", "id") or {}).get("id") == "hot"
+    assert (store.find_entry(d, "fp-post", "id") or {}).get("id") == "hot"
+    assert store.find_entry(d, "fp-unrelated", "id") is None
     # The canonical fingerprint is what a sweep compares against.
     assert store.fingerprints(d, "id") == {"hot": "fp-pre"}
 
@@ -304,7 +306,7 @@ def test_a_foreign_config_is_never_current(tmp_path: Path) -> None:
     d = tmp_path / "store"
     _write(d, "hot", store.config_identity(tmp_path / "a.yaml"), fingerprint="fp")
     other = store.config_identity(tmp_path / "b.yaml")
-    assert store.is_current(d, "hot", "fp", other) is False
+    assert store.find_entry(d, "fp", other) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -469,4 +471,4 @@ def test_a_half_written_entry_reads_as_absent_not_as_an_error(tmp_path: Path) ->
     assert st.entry_attrs(store_dir, "crashed", identity) is None
     assert st.read_entry(store_dir, "crashed", identity) is None
     assert st.list_entries(store_dir, identity) == []
-    assert st.is_current(store_dir, "crashed", "any-fingerprint", identity) is False
+    assert st.find_entry(store_dir, "any-fingerprint", identity) is None

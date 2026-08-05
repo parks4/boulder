@@ -127,8 +127,12 @@ def test_the_entry_answers_to_the_post_build_fingerprint_too(cfg: Path) -> None:
     post_fp = compute_fingerprint(enriched, mechanism="gri30.yaml")
     assert pre_fp != post_fp, "fixture no longer exercises the pre/post difference"
 
-    assert store.is_current(store_dir, BASE_SCENARIO_ID, pre_fp, identity) is True
-    assert store.is_current(store_dir, BASE_SCENARIO_ID, post_fp, identity) is True
+    assert (store.find_entry(store_dir, pre_fp, identity) or {}).get(
+        "id"
+    ) == BASE_SCENARIO_ID
+    assert (store.find_entry(store_dir, post_fp, identity) or {}).get(
+        "id"
+    ) == BASE_SCENARIO_ID
     # The canonical fingerprint -- the one a sweep compares -- is the pre-build one.
     assert store.fingerprints(store_dir, identity) == {BASE_SCENARIO_ID: pre_fp}
 

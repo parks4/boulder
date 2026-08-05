@@ -300,27 +300,6 @@ def fingerprints(store_dir: Optional[Path], identity: str = "") -> Dict[str, str
     return found
 
 
-def is_current(
-    store_dir: Optional[Path],
-    scenario_id: str,
-    candidate_fingerprint: str,
-    identity: str = "",
-) -> bool:
-    """Whether *scenario_id*'s stored result already matches *candidate_fingerprint*.
-
-    The one staleness question the whole store exists to answer: solve, or reuse?
-    Matches the canonical fingerprint or any recorded alternate (see
-    :data:`_ATTR_ALT_FINGERPRINTS`), so the same entry answers to both the
-    pre-build config a sweep derives and the post-build config the browser holds.
-    """
-    if store_dir is None or not candidate_fingerprint:
-        return False
-    attrs = entry_attrs(store_dir, scenario_id, identity)
-    if attrs is None:
-        return False
-    return _answers_to(attrs, candidate_fingerprint)
-
-
 def _answers_to(attrs: Dict[str, Any], candidate_fingerprint: str) -> bool:
     """Whether an entry's attrs match *candidate_fingerprint*, canonical or alternate."""
     if str(attrs.get(_ATTR_FINGERPRINT, "")) == candidate_fingerprint:
