@@ -255,6 +255,91 @@ def gui_payload_from_progress(progress: Any, started: float) -> Dict[str, Any]:
     }
 
 
+def store_solved_scenario(
+    store_dir: Path,
+    sid: str,
+    cfg: Dict[str, Any],
+    config: Dict[str, Any],
+    gui: Dict[str, Any],
+    conv: Any,
+    *,
+    order: int,
+    label: str,
+    fingerprint: str,
+    identity: str,
+    mechanism: str,
+    scenario_attrs: Optional[Callable[..., Any]] = None,
+    on_solved: Optional[Callable[..., Any]] = None,
+    warn: Optional[Callable[[str], None]] = None,
+) -> None:
+    """Record one freshly solved run-set entry: attrs, the write, the host hook.
+
+    The tail of both sweep loops -- the GUI's (``api/routes/sweep.py``) and this
+    module's headless one. They used to carry a copy each and drifted: one
+    *assigned* the host hook's return over the sweep's own axis values where the
+    other merged them, and they applied ``node_property_attrs`` on opposite
+    sides of the hook. Same config, different stored attrs depending on which
+    button you pressed. One function, so that cannot recur.
+
+    Attr precedence, lowest to highest: the declarative sweep's axis values
+    (the plot's natural X axis), then every node's own numeric properties
+    (``in.<id>.<prop>``), then the host's ``scenario_attrs``. A host may pair a
+    KPI with its display unit as ``(value, unit)``; the number becomes the attr
+    and the unit is recorded separately, since HDF5 attrs are flat scalars.
+
+    Both hooks are best-effort: a KPI or artifact failure must not lose a
+    scenario that already solved. *warn* receives the message; the default
+    prints it.
+    """
+    say = warn or (lambda msg: print(msg, flush=True))
+
+    entry_attrs: Dict[str, Any] = {
+        key: value
+        for key, value in sweep_point_of(cfg).items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+    entry_attrs.update(node_property_attrs(config))
+    if scenario_attrs is not None:
+        try:
+            entry_attrs.update(scenario_attrs(sid, cfg, gui) or {})
+        except Exception as exc:  # noqa: BLE001
+            say(f"  WARNING: scenario_attrs hook failed for '{sid}': {exc}")
+
+    entry_units: Dict[str, str] = {}
+    for key, value in list(entry_attrs.items()):
+        if isinstance(value, tuple):
+            entry_attrs[key], entry_units[key] = value
+
+    scenario_store.write_entry(
+        store_dir,
+        sid,
+        gui_payload=gui,
+        mechanism=mechanism,
+        fingerprint=fingerprint,
+        identity=identity,
+        label=label,
+        order=order,
+        units=entry_units or None,
+        extra_attrs=entry_attrs,
+    )
+
+    if on_solved is not None:
+        try:
+            from .simulation_result import make_simulation_result  # noqa: PLC0415
+
+            on_solved(
+                sid,
+                config,
+                conv,
+                make_simulation_result(conv, config),
+                fingerprint,
+                gui,
+                mechanism,
+            )
+        except Exception as exc:  # noqa: BLE001
+            say(f"  WARNING: on_solved hook failed for scenario '{sid}': {exc}")
+
+
 def run(
     cfg_path: Path,
     *,
@@ -353,61 +438,21 @@ def run(
         print(f"scenario {i + 1}/{total} ({sid})", flush=True)
         gui, resolved_mech, conv = solve_scenario(config, mech_name)
         stored_mech = _resolve(resolved_mech)
-        # A declarative sweep's axis values are the run's inputs, and the Sweep
-        # Results plot's natural X axis -- recorded so the GUI and CLI stores
-        # carry the same attrs. A host hook may override.
-        entry_attrs: Dict[str, Any] = {
-            key: value
-            for key, value in sweep_point_of(cfg).items()
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-        }
-        # Every node/connection's own numeric properties -- generic,
-        # host-agnostic "input" axis candidates for the Sweep Results plot,
-        # keyed ``in.<id>.<prop>`` (see node_property_attrs docstring).
-        entry_attrs.update(node_property_attrs(config))
-        if scenario_attrs is not None:
-            entry_attrs.update(scenario_attrs(sid, cfg, gui) or {})
-        # A host may pair a KPI value with its display unit as (value, unit);
-        # the number becomes the attr and the unit is recorded separately.
-        entry_units: Dict[str, str] = {}
-        for key, value in list(entry_attrs.items()):
-            if isinstance(value, tuple):
-                entry_attrs[key], entry_units[key] = value
-        scenario_store.write_entry(
+        store_solved_scenario(
             store_dir,
             sid,
-            gui_payload=gui,
-            mechanism=stored_mech,
+            cfg,
+            config,
+            gui,
+            conv,
+            order=i,
+            label=label,
             fingerprint=fingerprint,
             identity=identity,
-            label=label,
-            order=i,
-            units=entry_units or None,
-            extra_attrs=entry_attrs,
+            mechanism=stored_mech,
+            scenario_attrs=scenario_attrs,
+            on_solved=on_solved,
         )
-        if on_solved is not None:
-            # Give the host a chance to persist per-scenario artifacts (e.g. a
-            # calc-note bundle in the single-run result cache) keyed by this
-            # scenario's fingerprint. Best-effort: a failure here must not abort
-            # the remaining scenarios or the store write.
-            try:
-                from .simulation_result import make_simulation_result  # noqa: PLC0415
-
-                simulation_result = make_simulation_result(conv, config)
-                on_solved(
-                    sid,
-                    config,
-                    conv,
-                    simulation_result,
-                    fingerprint,
-                    gui,
-                    stored_mech,
-                )
-            except Exception as exc:  # noqa: BLE001
-                print(
-                    f"  WARNING: on_solved hook failed for scenario '{sid}': {exc}",
-                    flush=True,
-                )
 
     stale = scenario_store.prune_entries(store_dir, run_ids)
     if stale:

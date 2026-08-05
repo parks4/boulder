@@ -32,14 +32,16 @@ from pydantic import BaseModel, Field
 from ... import scenario_store
 from ...cantera_converter import DualCanteraConverter, get_plugins
 from ...runset import (
-    node_property_attrs,
     resolve_store_dir,
     run_set_size,
-    sweep_point_of,
     sweep_runner_of,
     sweeps_of,
 )
-from ...sweep_runner import prepare_scenario, solve_scenario
+from ...sweep_runner import (
+    prepare_scenario,
+    solve_scenario,
+    store_solved_scenario,
+)
 
 __all__ = ["has_run_set", "router"]
 
@@ -360,85 +362,26 @@ async def sweep_run(
                 # internally to load its own `ct.Solution`, so skipping this
                 # would hand `write_payload` an unresolved name it can't load.
                 stored_mech = resolve_mechanism(conv_mechanism)
-                # Host KPI attrs (`plugins.scenario_attrs`) -- the numbers the
-                # Scenario pane's Sweep Results plot offers as axes. Computed
-                # before the h5 handle opens so a raising hook can't leave the
-                # store open, and best-effort for the same reason `on_solved`
-                # is: a KPI failure must not lose an already-solved scenario.
-                # A declarative sweep's own axis values are the run's inputs;
-                # recording them makes the Sweep Results plot usable with no
-                # host code at all (they are its natural X axis). A host's
-                # `scenario_attrs` may add to or override them.
-                extra_attrs: Dict[str, Any] = {
-                    key: value
-                    for key, value in sweep_point_of(cfg).items()
-                    if isinstance(value, (int, float)) and not isinstance(value, bool)
-                }
-                # Every node/connection's own numeric properties -- generic,
-                # host-agnostic "input" axis candidates for the Sweep Results
-                # plot, keyed ``in.<id>.<prop>`` (see node_property_attrs
-                # docstring). Added on top of whatever extra_attrs already has.
-                extra_attrs.update(node_property_attrs(config))
-                # `update`, not assignment: a host hook *adds to or overrides*
-                # these, as the comment above promises. Assigning discarded the
-                # declarative sweep's own axis values -- the plot's natural X
-                # axis -- for any host that registered the hook. Applied after
-                # `node_property_attrs` so the host wins a key collision, which
-                # is also the CLI runner's order.
-                if plugins.scenario_attrs is not None:
-                    try:
-                        extra_attrs.update(plugins.scenario_attrs(sid, cfg, gui) or {})
-                    except Exception as exc:  # noqa: BLE001
-                        print(
-                            f"[sweep] WARNING: scenario_attrs hook failed for "
-                            f"'{sid}': {exc}",
-                            flush=True,
-                        )
-                # A host may pair a KPI value with its display unit as
-                # (value, unit); the number becomes the attr and the unit is
-                # recorded separately, since HDF5 attrs are flat scalars.
-                entry_units: Dict[str, str] = {}
-                for key, value in list(extra_attrs.items()):
-                    if isinstance(value, tuple):
-                        extra_attrs[key], entry_units[key] = value
-                scenario_store.write_entry(
+                # Attrs, the store write and the host hooks are the same
+                # tail the headless runner uses -- shared so the two cannot
+                # drift again (they had: one assigned the host hook's return
+                # over the sweep's own axis values where the other merged).
+                store_solved_scenario(
                     store_dir,
                     sid,
-                    gui_payload=gui,
-                    mechanism=stored_mech,
+                    cfg,
+                    config,
+                    gui,
+                    conv,
+                    order=i,
+                    label=label,
                     fingerprint=fingerprint,
                     identity=identity,
-                    label=label,
-                    order=i,
-                    units=entry_units or None,
-                    extra_attrs=extra_attrs,
+                    mechanism=stored_mech,
+                    scenario_attrs=plugins.scenario_attrs,
+                    on_solved=plugins.on_scenario_solved,
+                    warn=lambda msg: print(f"[sweep]{msg}", flush=True),
                 )
-
-                # Let the host persist per-scenario artifacts keyed by this
-                # fingerprint -- e.g. the single-run result cache, so a later
-                # "Export" reuses this solve instead of re-solving. Runs on the
-                # in-process path too, not just the out-of-process runner:
-                # otherwise a host that registers it silently gets nothing from
-                # the GUI's Run Sweep button.
-                if plugins.on_scenario_solved is not None:
-                    try:
-                        from ...simulation_result import make_simulation_result
-
-                        plugins.on_scenario_solved(
-                            sid,
-                            config,
-                            conv,
-                            make_simulation_result(conv, config),
-                            fingerprint,
-                            gui,
-                            stored_mech,
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        print(
-                            f"[sweep] WARNING: on_scenario_solved hook failed "
-                            f"for '{sid}': {exc}",
-                            flush=True,
-                        )
 
             stale = scenario_store.prune_entries(store_dir, run_ids)
             if stale:
