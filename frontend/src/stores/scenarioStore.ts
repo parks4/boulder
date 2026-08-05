@@ -207,9 +207,14 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     // scenario's overrides -- flagged as overrides -- with no scenario
     // selected any more and nothing left in the store to justify them.
     //
-    // The *base run's* result deliberately survives: this clears scenario
-    // results only (see the button's tooltip), so the graph's "computed"
-    // node tint still correctly reflects the base simulation still loaded.
+    // Drop the displayed results too, so the graph greys out in the same click.
+    // This used to deliberately keep them, on the grounds that clearing touched
+    // only *scenario* results and the base run survived in a second, separate
+    // cache -- so the "computed" node tint still reflected something real. There
+    // is one store now and `clear-cache` removes the whole directory, base entry
+    // included, so keeping the display would leave a computed-looking graph
+    // backed by nothing on disk.
+    useSimulationStore.getState().clearResults();
     set({
       activeId: null,
       previewId: null,
