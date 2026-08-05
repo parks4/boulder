@@ -61,6 +61,7 @@ export function ScenarioPane() {
     setActive,
     deleteScenario,
     clearCache,
+    clearEntryCache,
   } = useScenarioStore();
   const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
   const openYamlPane = useLayoutStore((s) => s.openYamlPane);
@@ -118,6 +119,27 @@ export function ScenarioPane() {
     } catch (err) {
       toast.error(
         `Could not delete scenario: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  const handleClearRowCache = async (id: string) => {
+    if (
+      !window.confirm(
+        `Clear the cached result for "${id}"? Its definition is untouched — ` +
+          "Run Sweep will recompute it next time.",
+      )
+    ) {
+      return;
+    }
+    try {
+      const { cleared } = await clearEntryCache(id);
+      toast.success(
+        cleared ? `Cached result for "${id}" cleared` : `No cached result for "${id}"`,
+      );
+    } catch (err) {
+      toast.error(
+        `Could not clear cache: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   };
@@ -246,7 +268,12 @@ export function ScenarioPane() {
             const s = row.computed;
             const ago = s ? timeAgo(s.computed_at ?? createdAt, now) : "";
             return (
-              <li key={row.id} className="group flex items-center gap-1">
+              // The action icons are an overlay (below), not siblings in a
+              // flex row: as siblings they permanently reserved an icon column
+              // even while hidden, so no row ever reached the pane's full
+              // width. They now sit on top of the status label instead, which
+              // fades out on hover.
+              <li key={row.id} className="group relative">
                 <button
                   id={`scenario-${row.id}`}
                   type="button"
@@ -261,7 +288,7 @@ export function ScenarioPane() {
                       : undefined
                   }
                   className={[
-                    "flex-1 min-w-0 text-left rounded-md px-2 py-1.5 text-xs transition-colors border",
+                    "w-full min-w-0 text-left rounded-md px-2 py-1.5 text-xs transition-colors border",
                     "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400",
                     isActive
                       ? "border-blue-500 bg-blue-500/20 text-foreground"
@@ -270,18 +297,19 @@ export function ScenarioPane() {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium truncate">{row.id}</span>
+                    {/* Hidden on hover -- the action icons take this spot. */}
                     {isCalculating ? (
-                      <span className="shrink-0 text-[10px] text-primary animate-pulse">
+                      <span className="shrink-0 text-[10px] text-primary animate-pulse group-hover:opacity-0">
                         Calculating…
                       </span>
                     ) : s ? (
                       ago && (
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                        <span className="shrink-0 text-[10px] text-muted-foreground group-hover:opacity-0">
                           {ago}
                         </span>
                       )
                     ) : (
-                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                      <span className="shrink-0 text-[10px] text-muted-foreground group-hover:opacity-0">
                         Not computed yet
                       </span>
                     )}
@@ -301,38 +329,54 @@ export function ScenarioPane() {
                     </div>
                   )}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleEditRow(row.id)}
-                  title={
-                    row.id === BASELINE_SCENARIO_ID
-                      ? "Edit YAML (the base config BASELINE runs unmodified)"
-                      : "Edit scenario YAML"
-                  }
-                  className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted"
-                >
-                  <Pencil size={12} />
-                </button>
-                {row.id === BASELINE_SCENARIO_ID ? (
-                  // Same slot as the delete button below (kept present, not
-                  // removed, so every row's icon column stays aligned) --
-                  // BASELINE has no overlay of its own to delete.
-                  <span
-                    title="BASELINE cannot be deleted (it's the base config's own unmodified run, not an authored scenario)"
-                    className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 cursor-not-allowed"
-                  >
-                    <Ban size={12} />
-                  </span>
-                ) : (
+                {/* `pointer-events-none` while hidden: the overlay covers part
+                    of the row button, so without it an invisible icon would
+                    swallow clicks meant to select the scenario. */}
+                <div className="absolute right-1 top-1 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto">
                   <button
                     type="button"
-                    onClick={() => void handleDelete(row.id, s !== null)}
-                    title="Delete scenario"
-                    className="shrink-0 p-1 rounded text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive hover:bg-muted"
+                    onClick={() => handleEditRow(row.id)}
+                    title={
+                      row.id === BASELINE_SCENARIO_ID
+                        ? "Edit YAML (the base config BASELINE runs unmodified)"
+                        : "Edit scenario YAML"
+                    }
+                    className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
                   >
-                    <Trash2 size={12} />
+                    <Pencil size={12} />
                   </button>
-                )}
+                  {/* Only a computed row has a cached trajectory to drop. */}
+                  {s && (
+                    <button
+                      type="button"
+                      onClick={() => void handleClearRowCache(row.id)}
+                      title="Clear this scenario's cached result (keeps its definition)"
+                      className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+                    >
+                      <Eraser size={12} />
+                    </button>
+                  )}
+                  {row.id === BASELINE_SCENARIO_ID ? (
+                    // Same slot as the delete button below (kept present, not
+                    // removed, so every row's icon column stays aligned) --
+                    // BASELINE has no overlay of its own to delete.
+                    <span
+                      title="BASELINE cannot be deleted (it's the base config's own unmodified run, not an authored scenario)"
+                      className="p-1 rounded text-muted-foreground cursor-not-allowed"
+                    >
+                      <Ban size={12} />
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(row.id, s !== null)}
+                      title="Delete scenario"
+                      className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-muted"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
               </li>
             );
           })}

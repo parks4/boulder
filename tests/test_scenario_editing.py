@@ -635,6 +635,35 @@ def test_clear_scenario_cache_without_a_store_reports_false(tmp_path: Path) -> N
         client.__exit__(None, None, None)
 
 
+def test_clear_one_entry_cache_keeps_the_definition(tmp_path: Path) -> None:
+    """The per-row eraser drops one entry only; the scenario stays authored."""
+    pytest.importorskip("h5py")
+    from boulder.scenario_store import store_entry_path
+
+    cfg = _write_config(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        store_dir = _seed_entry(cfg, "base_case")
+        _seed_entry(cfg, "other")
+
+        resp = client.post("/api/scenarios/base_case/clear-cache")
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {
+            "ok": True,
+            "scenario_id": "base_case",
+            "cleared": True,
+        }
+        assert not store_entry_path(store_dir, "base_case").exists()
+        assert store_entry_path(store_dir, "other").is_file(), "cleared too much"
+        assert _authored_ids(client) == ["BASELINE", "base_case"]
+
+        # Nothing left to clear the second time round.
+        resp = client.post("/api/scenarios/base_case/clear-cache")
+        assert resp.json()["cleared"] is False
+    finally:
+        client.__exit__(None, None, None)
+
+
 def test_list_scenarios_includes_authored_ids_without_a_store(tmp_path: Path) -> None:
     """authored_ids/authored_overlays reflect the YAML directly, even with no HDF5 store.
 

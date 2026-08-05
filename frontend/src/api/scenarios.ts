@@ -252,3 +252,15 @@ export function clearScenarioCache() {
     method: "POST",
   });
 }
+
+/**
+ * Clear one scenario's cached trajectory, leaving its definition alone — the
+ * per-row counterpart of `clearScenarioCache`. `cleared` reports whether there
+ * was actually a cached result to remove.
+ */
+export function clearScenarioEntryCache(id: string) {
+  return apiFetch<{ ok: boolean; scenario_id: string; cleared: boolean }>(
+    `/scenarios/${encodeURIComponent(id)}/clear-cache`,
+    { method: "POST" },
+  );
+}

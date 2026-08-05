@@ -29,6 +29,7 @@ const mockRefresh = vi.fn();
 const mockSetActive = vi.fn();
 const mockDeleteScenario = vi.fn();
 const mockClearCache = vi.fn();
+const mockClearEntryCache = vi.fn();
 let mockAvailable = true;
 let mockScenarios: Array<{ id: string; label: string; t0_K: number }> = [
   { id: "A", label: "Scenario A", t0_K: 300 },
@@ -48,6 +49,7 @@ vi.mock("@/stores/scenarioStore", () => ({
     setActive: mockSetActive,
     deleteScenario: mockDeleteScenario,
     clearCache: mockClearCache,
+    clearEntryCache: mockClearEntryCache,
   }),
 }));
 
@@ -83,6 +85,7 @@ describe("ScenarioPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockClearCache.mockResolvedValue({ cleared: true });
+    mockClearEntryCache.mockResolvedValue({ cleared: true });
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
     mockAuthoredIds = [];
@@ -134,6 +137,26 @@ describe("ScenarioPane", () => {
 
     expect(mockClearCache).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
+  });
+
+  it("a row's eraser confirms, then clears that scenario's cache only", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ScenarioPane />);
+
+    fireEvent.click(screen.getByTitle(/Clear this scenario's cached result/));
+    await Promise.resolve();
+
+    expect(mockClearEntryCache).toHaveBeenCalledWith("A");
+    expect(mockClearCache).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("an uncomputed row has no eraser — there is no cached result to clear", () => {
+    mockScenarios = [];
+    mockAuthoredIds = ["pending_a"];
+    render(<ScenarioPane />);
+
+    expect(screen.queryByTitle(/Clear this scenario's cached result/)).toBeNull();
   });
 
   it("opens the scoped overlay editor for a regular scenario's pencil", () => {
