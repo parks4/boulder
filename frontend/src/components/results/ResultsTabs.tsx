@@ -40,6 +40,7 @@ export function ResultsTabs() {
   const activeScenarioId = useScenarioStore((s) => s.activeId);
   const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
   const sweepLastLine = useSweepRunStore((s) => s.lastLine);
+  const sweepPinnedId = useSweepRunStore((s) => s.pinnedId);
   const defaultResultsTab = results && hasSankeyData(results) ? "Sankey" : "Plots";
   /** Resolved tab for UI: explicit choice, else Sankey/Plots per available data. */
   const displayTab = activeTab ?? defaultResultsTab;
@@ -192,11 +193,23 @@ export function ResultsTabs() {
   // results/progress a previously-viewed scenario left behind — non-blocking
   // (this just occupies the results card's own slot), so the Scenario Pane
   // and the rest of the layout stay fully visible and usable.
-  if (activeScenarioId != null && activeScenarioId in scenarioProgress) {
+  // Which scenario the results area is showing while a sweep runs. By default
+  // it follows the solver, so the card appears without the user having to click
+  // anything and moves on with the sweep. A mid-sweep selection pins it (see
+  // `sweepStore.pinnedId`); if that pinned scenario is itself the one solving,
+  // the card comes back and resumes following.
+  //
+  // Previously this read `activeScenarioId` alone. Nothing is selected when a
+  // sweep starts, so the condition was false and no card ever appeared -- it
+  // only showed if you happened to click the scenario being solved right then.
+  const solvingId = Object.keys(scenarioProgress).at(-1) ?? null;
+  const followedId = sweepPinnedId ?? solvingId;
+
+  if (followedId != null && followedId in scenarioProgress) {
     return (
       <SweepCalculatingCard
-        scenarioId={activeScenarioId}
-        stage={scenarioProgress[activeScenarioId]}
+        scenarioId={followedId}
+        stage={scenarioProgress[followedId]}
         lastLine={sweepLastLine}
       />
     );

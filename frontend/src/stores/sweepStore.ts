@@ -20,6 +20,18 @@ interface SweepRunState {
    */
   lastLine: string | null;
   /**
+   * A scenario the user explicitly selected *while a sweep was running*, which
+   * stops the results pane auto-following the solver. `null` means "follow the
+   * sweep". Reset when a sweep starts, so each run begins by following again.
+   *
+   * Needed because auto-follow cannot otherwise tell a user click apart from
+   * its own selection: without it, either the pane never follows (what shipped)
+   * or it yanks the view away from a scenario the user chose to look at.
+   */
+  pinnedId: string | null;
+  /** Record an explicit user selection; call only while `sweeping`. */
+  pin: (id: string) => void;
+  /**
    * Start a sweep job and poll it to completion, toasting the outcome and
    * refreshing the Scenario Pane. Backs RunControl's "Run Sweep" — a single
    * shared job so any other caller can't disagree about whether a sweep is
@@ -86,7 +98,7 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
       return;
     }
     stopPolling();
-    set({ sweeping: false, scenarioProgress: {}, lastLine: null });
+    set({ sweeping: false, scenarioProgress: {}, lastLine: null, pinnedId: null });
     if (st.status === "done") {
       toast.success("Sweep complete — scenarios updated");
       void (async () => {
@@ -128,13 +140,21 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
     progress: { current: 0, total: 0 },
     scenarioProgress: {},
     lastLine: null,
+    pinnedId: null,
+    pin: (id: string) => set({ pinnedId: id }),
 
     run: (options) => {
       if (get().sweeping) {
         toast.error("A sweep is already running");
         return;
       }
-      set({ sweeping: true, progress: { current: 0, total: options?.total ?? 0 } });
+      // A new sweep starts by following the solver again, whatever the user
+      // had pinned during the last one.
+      set({
+        sweeping: true,
+        pinnedId: null,
+        progress: { current: 0, total: options?.total ?? 0 },
+      });
       const scenarios = useScenarioStore.getState().overlays;
       startSweep({ scenarios, noCache: options?.noCache })
         .then(() => startPolling())

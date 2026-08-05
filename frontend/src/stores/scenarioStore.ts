@@ -15,6 +15,7 @@ import {
 import type { ConfigConnection, ConfigNode } from "@/types/config";
 import { useSimulationStore } from "./simulationStore";
 import { useSelectionStore } from "./selectionStore";
+import { useSweepRunStore } from "./sweepStore";
 
 function idsFromOverlays(overlays: Record<string, ScenarioOverlay>): string[] {
   const ids = Object.keys(overlays);
@@ -227,6 +228,12 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   },
 
   setActive: async (id) => {
+    // Selecting a scenario mid-sweep is the user taking the wheel: the results
+    // pane must stop following the solver and stay where they put it. Recorded
+    // on the sweep store because that is what auto-follow reads, and only while
+    // a sweep is running -- outside one there is nothing to follow.
+    const sweep = useSweepRunStore.getState();
+    if (sweep.sweeping) sweep.pin(id);
     set({ activeId: id, error: null });
     // Always preview the scenario's effective properties, computed or not —
     // this is what lets the Inputs pane show an authored-but-unswept
