@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   BASELINE_SCENARIO_ID,
   clearScenarioCache as apiClearScenarioCache,
+  clearScenarioEntryCache as apiClearScenarioEntryCache,
   createScenario as apiCreateScenario,
   deleteScenario as apiDeleteScenario,
   fetchScenario,
@@ -109,6 +110,8 @@ interface ScenarioState {
   deleteScenario: (id: string) => Promise<{ cachePurged: boolean }>;
   /** Clear every scenario's cached trajectory; resolves with whether there was a store to clear. */
   clearCache: () => Promise<{ cleared: boolean }>;
+  /** Clear one scenario's cached trajectory, keeping its definition. */
+  clearEntryCache: (id: string) => Promise<{ cleared: boolean }>;
 }
 
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
@@ -217,6 +220,18 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
       previewConnections: null,
       previewError: null,
     });
+    await get().refresh();
+    return { cleared: resp.cleared };
+  },
+
+  clearEntryCache: async (id) => {
+    const resp = await apiClearScenarioEntryCache(id);
+    // Its trajectory is gone -- stop rendering it as if still cached (same
+    // reasoning as `clearCache`, scoped to the one row).
+    if (get().activeId === id) {
+      useSimulationStore.getState().clearResults();
+      set({ activeId: null });
+    }
     await get().refresh();
     return { cleared: resp.cleared };
   },

@@ -30,6 +30,13 @@ the staleness check. Two consequences this procedure exists to verify:
   is a hit; going *back* to a previous value re-solves. Keeping a value
   around is what authoring a scenario is for.
 
+Two scopes clear it: the pane header's eraser
+(`POST /api/scenarios/clear-cache`, `button[title^="Clear cache"]`) removes
+the whole store directory, and a row's own eraser
+(`POST /api/scenarios/<id>/clear-cache`,
+`button[title^="Clear this scenario"]`) drops that one entry so the next
+Run Sweep re-solves it alone. Neither touches a scenario's definition.
+
 Historically these were two separate stores (a content-addressed
 `.boulder-cache/<fingerprint>/` for single runs, a name-addressed
 `<stem>_scenarios.h5` for run-sets) which disagreed permanently about

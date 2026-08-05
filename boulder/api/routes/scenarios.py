@@ -387,6 +387,27 @@ async def clear_scenario_cache(request: Request) -> Dict[str, Any]:
     return {"ok": True, "cleared": scenario_store.clear(_store_dir(request))}
 
 
+@router.post("/{scenario_id}/clear-cache")
+async def clear_scenario_entry_cache(
+    scenario_id: str, request: Request
+) -> Dict[str, Any]:
+    """Drop one scenario's cached result, keeping its definition.
+
+    The per-row counterpart of :func:`clear_scenario_cache`: the next Run Sweep
+    re-solves this scenario alone instead of the whole run-set. ``cleared``
+    reports whether there was actually a cached result to remove.
+    """
+    from ... import scenario_store
+
+    store_dir = _store_dir(request)
+    cleared = (
+        scenario_store.delete_entry(store_dir, scenario_id)
+        if store_dir is not None
+        else False
+    )
+    return {"ok": True, "scenario_id": scenario_id, "cleared": cleared}
+
+
 @router.delete("/{scenario_id}")
 async def delete_scenario(
     scenario_id: str, body: DeleteScenarioRequest, request: Request
