@@ -1702,6 +1702,13 @@ def synthesize_default_group(config: Dict[str, Any]) -> None:
             conn["group"] = "default"
 
 
+#: ``metadata`` key holding ``{property_name: source_node_id}`` for properties a
+#: normalisation pass filled in rather than the author declaring them. The GUI
+#: hides these from the node's inputs — see
+#: :func:`propagate_terminal_pressure_defaults`.
+DERIVED_PROPERTIES_KEY = "derived_properties"
+
+
 def propagate_terminal_pressure_defaults(config: Dict[str, Any]) -> None:
     """Propagate a declared process pressure from terminal nodes to their flow-connected peers.
 
@@ -1796,6 +1803,7 @@ def propagate_terminal_pressure_defaults(config: Dict[str, Any]) -> None:
 
         if len(distinct) == 1:
             process_pressure = next(iter(declared.values()))
+            source_id = next(iter(declared))
             for nid in component:
                 node = id_to_node[nid]
                 ntype = node.get("type", "")
@@ -1804,6 +1812,21 @@ def propagate_terminal_pressure_defaults(config: Dict[str, Any]) -> None:
                 props = node.setdefault("properties", {})
                 if props.get("pressure") is None:
                     props["pressure"] = process_pressure
+                    # Record that this value was derived, not authored. The
+                    # solver needs it materialised, but the GUI must not offer
+                    # it as an input: shown plainly it reads as a pin the user
+                    # set, it invites an edit that would either be re-derived
+                    # on the next normalise or create the very conflict this
+                    # pass raises for, and it changes between scenarios with no
+                    # visible cause because the overlay moved a *different*
+                    # node. `metadata` carries it because it is free-form on
+                    # NodeModel -- no schema change, and it reaches the browser
+                    # with the config.
+                    meta = node.setdefault("metadata", {})
+                    if isinstance(meta, dict):
+                        derived = meta.setdefault(DERIVED_PROPERTIES_KEY, {})
+                        if isinstance(derived, dict):
+                            derived["pressure"] = source_id
 
 
 def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
