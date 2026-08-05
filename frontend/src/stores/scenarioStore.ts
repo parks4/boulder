@@ -15,6 +15,7 @@ import {
 import type { ConfigConnection, ConfigNode } from "@/types/config";
 import { useSimulationStore } from "./simulationStore";
 import { useSelectionStore } from "./selectionStore";
+import { useSweepRunStore } from "./sweepStore";
 
 function idsFromOverlays(overlays: Record<string, ScenarioOverlay>): string[] {
   const ids = Object.keys(overlays);
@@ -207,9 +208,14 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     // scenario's overrides -- flagged as overrides -- with no scenario
     // selected any more and nothing left in the store to justify them.
     //
-    // The *base run's* result deliberately survives: this clears scenario
-    // results only (see the button's tooltip), so the graph's "computed"
-    // node tint still correctly reflects the base simulation still loaded.
+    // Drop the displayed results too, so the graph greys out in the same click.
+    // This used to deliberately keep them, on the grounds that clearing touched
+    // only *scenario* results and the base run survived in a second, separate
+    // cache -- so the "computed" node tint still reflected something real. There
+    // is one store now and `clear-cache` removes the whole directory, base entry
+    // included, so keeping the display would leave a computed-looking graph
+    // backed by nothing on disk.
+    useSimulationStore.getState().clearResults();
     set({
       activeId: null,
       previewId: null,
@@ -222,6 +228,12 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
   },
 
   setActive: async (id) => {
+    // Selecting a scenario mid-sweep is the user taking the wheel: the results
+    // pane must stop following the solver and stay where they put it. Recorded
+    // on the sweep store because that is what auto-follow reads, and only while
+    // a sweep is running -- outside one there is nothing to follow.
+    const sweep = useSweepRunStore.getState();
+    if (sweep.sweeping) sweep.pin(id);
     set({ activeId: id, error: null });
     // Always preview the scenario's effective properties, computed or not —
     // this is what lets the Inputs pane show an authored-but-unswept

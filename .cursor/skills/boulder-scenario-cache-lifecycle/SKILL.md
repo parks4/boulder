@@ -87,12 +87,18 @@ boulder configs/cstr_residence_time_scenarios.yaml --no-open
    `computed_at` is unchanged from step 3. This is the single store doing
    its job — Run Simulation reuses the sweep's solve.
 
-1. **Clear Cache from the Scenario Pane.** Every row reverts to
-   "Not computed yet" and `GET /api/scenarios` reports zero entries.
-   **The graph's nodes do *not* turn grey** if a result is still
-   loaded/displayed — that's deliberate (see `scenarioStore.ts::clearCache`:
-   the base run's result survives, so the tint still reflects the
-   simulation still on screen). Assert the pane rows, not node colour.
+1. **Clear Cache from the Scenario Pane.** In that one click: every row
+   reverts to "Not computed yet", `GET /api/scenarios` reports zero entries,
+   the results area empties, and the graph's nodes go **grey**.
+
+   It is an **icon button with no text** — find it by
+   `button[title^="Clear cache"]`, not by text content.
+
+   Older notes here said the nodes deliberately stay blue, because clearing
+   removed only *scenario* results while the base run survived in a second,
+   separate cache. With one store, `clear-cache` removes the whole directory
+   including the base entry, so a still-tinted graph would be backed by
+   nothing.
 
 1. **Run Simulation again.** The **BASELINE row updates to "just now"**
    within a couple of seconds, and `GET /api/scenarios` shows exactly one
@@ -119,6 +125,13 @@ worker could not know either the base's name *or* a declared
 
 **Fix:** `runset.base_entry_id` is the one place the naming rule lives, and
 `POST /api/simulations` always hands the worker the raw config.
+
+### Clear Cache left the graph blue (fixed)
+
+`clearCache` kept the displayed results on purpose, justified by the base run
+surviving in the *other* cache. Unifying the stores deleted that other cache
+without anyone re-reading the justification, so the graph stayed "computed"
+while nothing was stored. It now clears the results in the same click.
 
 ### The pane did not refresh after a single run (fixed)
 

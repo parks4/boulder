@@ -195,6 +195,24 @@ describe("scenarioStore", () => {
     expect(useScenarioStore.getState().activeId).toBeNull();
   });
 
+  it("clearCache also drops the displayed results", async () => {
+    // Otherwise the graph stays tinted "computed" and the results tabs keep
+    // showing a run whose store entry has just been deleted -- `clear-cache`
+    // removes the whole store directory, base entry included.
+    const { useSimulationStore } = await import("./simulationStore");
+    useSimulationStore.setState({
+      results: { status: "complete" } as never,
+      pythonCode: "# code",
+    });
+    mockClearScenarioCache.mockResolvedValue({ ok: true, cleared: true });
+    mockListScenarios.mockResolvedValue({ available: false, scenarios: [], authored_ids: [] });
+
+    await useScenarioStore.getState().clearCache();
+
+    expect(useSimulationStore.getState().results).toBeNull();
+    expect(useSimulationStore.getState().pythonCode).toBe("");
+  });
+
   it("setActive on an id not yet computed just selects it, without fetching", async () => {
     useScenarioStore.setState({ scenarios: [{ id: "A", t0_K: 300, label: "A" }] });
 

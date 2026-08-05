@@ -260,7 +260,17 @@ export function PropertiesPanel() {
   // sibling holds the required value (e.g. nb_reflections only for the
   // "series" reflection model). Evaluated against the live edit values while
   // editing so toggling the controlling field reveals its dependents.
+  // Properties a normalisation pass filled in rather than the author declaring
+  // them -- e.g. the process pressure propagated from a downstream OutletSink
+  // (see `boulder.config.propagate_terminal_pressure_defaults`). The solver
+  // needs them materialised on the node; the user must not see them here,
+  // where they are indistinguishable from a value that was typed and invite an
+  // edit that cannot hold.
+  const derivedProperties = ((entity?.metadata as Record<string, unknown> | undefined)
+    ?.derived_properties ?? {}) as Record<string, string>;
+
   const isFieldVisible = (key: string): boolean => {
+    if (key in derivedProperties) return false;
     const cond = schemaMeta?.[key]?.visibleWhen;
     if (!cond) return true;
     return Object.entries(cond).every(([dep, expected]) => {
