@@ -77,33 +77,68 @@ def sankey_links_for_api(
     return out
 
 
-def _get_available_species_for_sankey_from_sim(sim) -> List[str]:
-    """Dynamically determine which species to use for Sankey diagram generation from a simulation.
+#: Boulder's own fallback for which species to break out as Sankey bands, used
+#: only when no plugin has registered ``sankey_species``.  Deliberately minimal:
+#: which species are worth their own band is a property of the *process* being
+#: modelled, which the engine cannot know.  A host whose chemistry produces
+#: something else worth showing (a condensed phase, a soot/particle continuum, a
+#: different fuel) registers its own list rather than being silently limited to
+#: these two.
+_DEFAULT_SANKEY_SPECIES: List[str] = ["H2", "CH4"]
+
+
+def _sankey_species(
+    available_species: Optional[set] = None,
+    plugins: Optional["BoulderPlugins"] = None,
+) -> List[Any]:
+    """Return the species (or species groups) to break out as Sankey bands.
+
+    Reads ``plugins.sankey_species`` when a plugin has registered a list (via
+    the ``boulder.plugins`` entry point).  Falls back to
+    :data:`_DEFAULT_SANKEY_SPECIES` when the slot is unset or *plugins* is
+    ``None``.  Boulder never references any third-party package by name here.
+
+    A plugin-supplied list is passed through **untouched**: its entries need not
+    be plain species names -- they may be groups to merge, or sentinels its own
+    ``sankey_generator`` expands against each node's mechanism -- so Boulder
+    cannot filter them against *available_species* without dropping the ones it
+    does not understand.  Entries that turn out to be absent are handled by the
+    generator's own ``if_no_species`` policy.  Boulder's own fallback list *is*
+    filtered, since those are plain names it does understand.
+    """
+    if plugins is not None and plugins.sankey_species is not None:
+        return list(plugins.sankey_species)
+    if available_species is None:
+        return list(_DEFAULT_SANKEY_SPECIES)
+    return [s for s in _DEFAULT_SANKEY_SPECIES if s in available_species]
+
+
+def _get_available_species_for_sankey_from_sim(
+    sim, plugins: Optional["BoulderPlugins"] = None
+) -> List[Any]:
+    """Determine which species to break out as bands in a network's Sankey.
 
     Args:
         sim: Cantera ReactorNet simulation object
+        plugins: plugin registry to read ``sankey_species`` from. When ``None``,
+            the active registry is used.
 
     Returns
     -------
-        List of species names available in the mechanism for Sankey analysis
+        Species (or species groups) to show; empty disables species-based bands.
     """
     try:
         all_reactors = list(collect_all_reactors_and_reservoirs(sim))
         if not all_reactors:
             return []
 
-        # Define priority species for energy flow analysis (in order of preference)
-        # Only include species that are implemented in the Sankey generation code
-        priority_species = [
-            # Currently implemented species in Sankey generation
-            "H2",  # Hydrogen - implemented
-            "CH4",  # Methane - implemented
-            # Note: Other species like H2O, CO2, etc. are not yet implemented in Sankey
-            # and will cause "not implemented yet" errors, so we exclude them for now
-        ]
+        if plugins is None:
+            from .cantera_converter import get_plugins
 
-        # Check all reactors in the network to find available species
-        # Different reactors might use different mechanisms
+            plugins = get_plugins()
+
+        # Check all reactors in the network to find available species.
+        # Different reactors might use different mechanisms.
         all_available_species = set()
         for reactor in all_reactors:
             try:
@@ -113,23 +148,17 @@ def _get_available_species_for_sankey_from_sim(sim) -> List[str]:
                 logger.debug(f"Could not get species from reactor {reactor.name}: {e}")
                 continue
 
-        # Find implemented species that are available in at least one reactor
-        available_species = []
-        for species in priority_species:
-            if species in all_available_species:
-                available_species.append(species)
+        species = _sankey_species(all_available_species, plugins=plugins)
 
-        # If no implemented species found, disable species-based Sankey generation
-        # This prevents "not implemented yet" errors
-        if not available_species:
+        if not species:
             logger.info(
-                f"No implemented species found for Sankey diagram in network with "
+                f"No species to show in Sankey diagram in network with "
                 f"{len(all_available_species)} total species, disabling species-based analysis"
             )
             return []  # Empty list disables species-based Sankey generation
 
-        logger.info(f"Found implemented species for Sankey: {available_species}")
-        return available_species
+        logger.info(f"Species shown in Sankey: {species}")
+        return species
 
     except Exception as e:
         logger.warning(f"Could not determine species for Sankey diagram: {e}")
