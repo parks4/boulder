@@ -15,7 +15,11 @@ export type ScenarioOverlay = Record<string, unknown>;
 /** One precomputed scenario (trajectory) in the active store. */
 export interface ScenarioMeta {
   id: string;
-  t0_K: number;
+  /** Initial temperature -- present only when the sweep actually varies it.
+   * A sweep over any other axis (a pressure, a flow rate, ...) serves rows
+   * with no `t0_K` at all, so requiring it here did not match any guarantee
+   * the API makes. */
+  t0_K?: number;
   label: string;
   reactor_mode?: string;
   n_points?: number;

@@ -198,4 +198,77 @@ describe("SweepResultsPlot", () => {
       ).toHaveTextContent("Efficiency (output)");
     });
   });
+
+  describe("default axis orientation", () => {
+    /** No `t0_K`: the swept knob is an input attr, the KPI is an output.
+     * `carbon_yield` sorts before `in.downstream.pressure` (`c` < `i`), which
+     * is exactly the case the old first-key-alphabetically default got wrong. */
+    const kpiVsInput: ScenarioMeta[] = [
+      {
+        id: "s-1",
+        label: "1",
+        carbon_yield: 75.1,
+        "in.downstream.pressure": 1.05e5,
+      },
+      {
+        id: "s-2",
+        label: "2",
+        carbon_yield: 77.4,
+        "in.downstream.pressure": 1.3e5,
+      },
+    ];
+
+    it("puts the swept input on X and the KPI on Y, not the reverse", () => {
+      render(<SweepResultsPlot scenarios={kpiVsInput} />);
+
+      const xSelect = screen.getByTestId("x-axis-select") as HTMLSelectElement;
+      expect(xSelect.value).toBe("in.downstream.pressure");
+      expect(
+        screen.getByTestId("active-series-chip-carbon_yield"),
+      ).toBeInTheDocument();
+
+      // The plotted X values must be the pressures, ascending.
+      expect(plotCalls.at(-1)?.data[0]?.x).toEqual([1.05e5, 1.3e5]);
+      expect(plotCalls.at(-1)?.data[0]?.y).toEqual([75.1, 77.4]);
+    });
+
+    it("still prefers t0_K for X when present, so existing sweeps are unchanged", () => {
+      const withT0: ScenarioMeta[] = kpiVsInput.map((s, i) => ({
+        ...s,
+        t0_K: 800 + 100 * i,
+      }));
+      render(<SweepResultsPlot scenarios={withT0} />);
+
+      const xSelect = screen.getByTestId("x-axis-select") as HTMLSelectElement;
+      expect(xSelect.value).toBe("t0_K");
+    });
+
+    it("keeps a KPI on Y even when another input sorts ahead of it", () => {
+      const twoInputs: ScenarioMeta[] = [
+        {
+          id: "s-1",
+          label: "1",
+          "in.a.pressure": 1e5,
+          "in.b.temperature": 300,
+          yield_pct: 40,
+        },
+        {
+          id: "s-2",
+          label: "2",
+          "in.a.pressure": 2e5,
+          "in.b.temperature": 400,
+          yield_pct: 60,
+        },
+      ];
+      render(<SweepResultsPlot scenarios={twoInputs} />);
+
+      const xSelect = screen.getByTestId("x-axis-select") as HTMLSelectElement;
+      expect(xSelect.value).toBe("in.a.pressure");
+      // "in.b.temperature" sorts before "yield_pct", but it is an input:
+      // the KPI must still be what gets plotted.
+      expect(
+        screen.getByTestId("active-series-chip-yield_pct"),
+      ).toBeInTheDocument();
+    });
+  });
 });
