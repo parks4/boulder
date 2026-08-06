@@ -104,6 +104,21 @@ function numericKeys(scenarios: ScenarioMeta[], nonKpiKeys?: string[]): string[]
   return Array.from(keys).sort();
 }
 
+/** Default X axis: the swept parameter, never a KPI.
+ *
+ * A sweep answers "what does this KPI do as I vary this knob", so the knob
+ * belongs on X. Falling back to the first key alphabetically got this backwards
+ * whenever a KPI happened to sort before the swept input (e.g. a carbon-yield
+ * KPI vs. an `in.*` pressure: `c` < `i`), producing a plot of the input as a
+ * function of the output.
+ *
+ * `t0_K` stays first: it is the classic swept initial temperature, and preferring
+ * it keeps every existing sweep store rendering exactly as before. */
+function defaultXKey(keys: string[]): string | undefined {
+  if (keys.includes("t0_K")) return "t0_K";
+  return keys.find((k) => inputKeyParts(k) !== null) ?? keys[0];
+}
+
 /** Group numeric keys (minus the chosen X key) into Y-axis choices: species sharing
  * a "final_X_"/"final_Y_" prefix are grouped as one Mole/Mass Fractions choice with
  * one trace per species; everything else is its own single-trace choice. */
@@ -195,7 +210,7 @@ export function SweepResultsPlot({ scenarios, units, nonKpiKeys }: Props) {
    * first available series) is used instead. */
   const [activeKeys, setActiveKeys] = useState<string[] | null>(null);
 
-  const effectiveXKey = xKey && keys.includes(xKey) ? xKey : (keys.includes("t0_K") ? "t0_K" : keys[0]);
+  const effectiveXKey = xKey && keys.includes(xKey) ? xKey : defaultXKey(keys);
   const yGroups = useMemo(
     () => (effectiveXKey ? buildYGroups(keys, effectiveXKey, units) : []),
     [keys, effectiveXKey, units],
@@ -209,7 +224,11 @@ export function SweepResultsPlot({ scenarios, units, nonKpiKeys }: Props) {
   const effectiveActiveKeys = useMemo(() => {
     if (activeKeys !== null) return activeKeys.filter((k) => validKeys.has(k));
     if (families.length > 0) return families[0].keys;
-    if (options.length > 0) return [options[0].key];
+    // Mirror of defaultXKey: an output (KPI) belongs on Y. Without this, a
+    // second input attr sorting before the KPI would take the Y axis and the
+    // plot would show one knob against another, with the KPI nowhere.
+    const output = options.find((o) => inputKeyParts(o.key) === null);
+    if (options.length > 0) return [(output ?? options[0]).key];
     return [];
   }, [activeKeys, validKeys, families, options]);
 
@@ -270,6 +289,7 @@ export function SweepResultsPlot({ scenarios, units, nonKpiKeys }: Props) {
           <select
             className={`${selectClass} flex-1`}
             value={effectiveXKey}
+            data-testid="x-axis-select"
             onChange={(e) => setXKey(e.target.value)}
           >
             {keys.map((k) => (
