@@ -141,6 +141,54 @@ def test_scenario_progress_tracks_stage_then_moves_to_the_next_scenario(
         client.__exit__(None, None, None)
 
 
+def test_last_line_follows_the_solver_s_own_log_lines(tmp_path: Path) -> None:
+    """`last_line` tracks boulder's INFO logs, not just the scenario-start line.
+
+    Written when a scenario *started* only, the detail line under the spinner sat
+    on "scenario 1/2 (BASELINE)" for the whole solve while the console narrated
+    stage after stage. It should say whatever the solver last said.
+    """
+    import logging
+
+    client, app = _client_with_config(tmp_path)
+    workers: List[_FakeWorker] = []
+
+    def _factory() -> _FakeWorker:
+        w = _FakeWorker()
+        workers.append(w)
+        return w
+
+    try:
+        with patch("boulder.simulation_worker.SimulationWorker", side_effect=_factory):
+            resp = client.post("/api/sweep/run", json={"scenarios": {"a": {}}})
+            assert resp.status_code == 200, resp.text
+
+            _wait_until(lambda: len(workers) >= 1)
+            assert app.state.sweep_job["last_line"] == "scenario 1/2 (BASELINE)"
+
+            # Any boulder.* logger, from any module in the solve path.
+            logging.getLogger("boulder.staged_solver").info(
+                "Staged solve: stage '%s' finished (%d/%d)", "pfr_stage", 3, 3
+            )
+            assert (
+                app.state.sweep_job["last_line"]
+                == "Staged solve: stage 'pfr_stage' finished (3/3)"
+            )
+
+            workers[0].progress = SimulationProgress(is_complete=True)
+            _wait_until(lambda: len(workers) >= 2)
+            workers[1].progress = SimulationProgress(is_complete=True)
+            _wait_until(lambda: app.state.sweep_job.get("status") == "done")
+            assert app.state.sweep_job["last_line"] is None
+
+            # Detached once the sweep is over -- a later log must not resurrect
+            # a detail line for a job that finished.
+            logging.getLogger("boulder.staged_solver").info("late straggler")
+            assert app.state.sweep_job["last_line"] is None
+    finally:
+        client.__exit__(None, None, None)
+
+
 def test_scenario_progress_clears_if_a_scenario_errors_mid_solve(
     tmp_path: Path,
 ) -> None:
