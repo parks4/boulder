@@ -64,6 +64,14 @@ class BoulderPlugins:
     gui_actions: List[Any] = field(default_factory=list)
     cache_contributors: List[Any] = field(default_factory=list)
     sankey_generator: Optional[Callable] = None  # Custom Sankey generation function
+    #: Species (or species groups) to break out as their own Sankey bands,
+    #: replacing Boulder's minimal ``["H2", "CH4"]`` fallback. Which species
+    #: deserve a band is a property of the process being modelled, not of the
+    #: engine, so a host registers its own list here via the ``boulder.plugins``
+    #: entry point. Entries are passed to the generator untouched: they may be
+    #: plain names, groups to merge, or sentinels a custom ``sankey_generator``
+    #: expands against each node's own mechanism.
+    sankey_species: Optional[List[Any]] = None
     #: Hex color mapping for species bands in the Sankey diagram.
     #: Keys: ``"H2"``, ``"CH4"``, ``"Cs"`` (and any others the plugin wants to add).
     #: Registered by an external plugin via the ``boulder.plugins`` entry
@@ -2687,7 +2695,9 @@ class DualCanteraConverter:
                 logger.info("Using custom Sankey generator from plugin")
                 links, nodes = plugins.sankey_generator(
                     self.last_network,
-                    show_species=available_species,  # TODO : let it be set by plugin
+                    # Plugin-settable via plugins.sankey_species (falls back to
+                    # Boulder's own minimal list when unset).
+                    show_species=available_species,
                     verbose=False,
                 )
             else:
@@ -2769,61 +2779,20 @@ class DualCanteraConverter:
 
         return results
 
-    def _get_available_species_for_sankey(self) -> List[str]:
-        """Dynamically determine which species to use for Sankey diagram generation.
+    def _get_available_species_for_sankey(self) -> List[Any]:
+        """Determine which species to break out as bands in the Sankey diagram.
 
-        Returns a list of species that are available in the mechanism and commonly
-        used for energy flow analysis. Handles networks with multiple mechanisms.
+        Thin wrapper over :func:`boulder.sankey._get_available_species_for_sankey_from_sim`
+        -- this used to carry a byte-identical second copy of that logic, so a
+        plugin hook added to one had no effect on the other.
         """
         if not self.network or not self.network.reactors:
             return []
+        from .sankey import _get_available_species_for_sankey_from_sim
 
-        try:
-            # Define priority species for energy flow analysis (in order of preference)
-            # Only include species that are implemented in the Sankey generation code
-            priority_species = [
-                # Currently implemented species in Sankey generation
-                "H2",  # Hydrogen - implemented
-                "CH4",  # Methane - implemented
-                # Note: Other species like H2O, CO2, etc. are not yet implemented in Sankey
-                # and will cause "not implemented yet" errors, so we exclude them for now
-            ]
-
-            # Check all reactors in the network to find available species
-            # Different reactors might use different mechanisms
-            all_available_species = set()
-            for reactor in self.network.reactors:
-                try:
-                    reactor_species = set(reactor.phase.species_names)
-                    all_available_species.update(reactor_species)
-                except Exception as e:
-                    logger.debug(
-                        f"Could not get species from reactor {reactor.name}: {e}"
-                    )
-                    continue
-
-            # Find implemented species that are available in at least one reactor
-            available_species = []
-            for species in priority_species:
-                if species in all_available_species:
-                    available_species.append(species)
-
-            # If no implemented species found, disable species-based Sankey generation
-            # This prevents "not implemented yet" errors
-            if not available_species:
-                logger.info(
-                    f"No implemented species found for Sankey diagram in network with "
-                    f"{len(all_available_species)} total species, disabling species-based analysis"
-                )
-                return []  # Empty list disables species-based Sankey generation
-
-            logger.info(f"Found implemented species for Sankey: {available_species}")
-            return available_species
-
-        except Exception as e:
-            logger.warning(f"Could not determine species for Sankey diagram: {e}")
-            # Return empty list to disable species-based Sankey generation
-            return []
+        return _get_available_species_for_sankey_from_sim(
+            self.network, plugins=self.plugins
+        )
 
     def build_network_and_code(
         self, config: Dict[str, Any]
