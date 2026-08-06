@@ -22,6 +22,7 @@ Endpoints (prefix ``/api/sweep``):
 
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -137,6 +138,32 @@ def _run_host_sweep(
     runner(store_dir, **kwargs)
 
 
+class _LastLineHandler(logging.Handler):
+    """Mirror each ``boulder.*`` log record into a sweep job's ``last_line``.
+
+    The status payload's detail line was otherwise written only when a scenario
+    *started*, so a multi-minute solve showed ``scenario 3/4 (…)`` the whole way
+    through while the console narrated stage after stage. Boulder's own INFO
+    logs already say what the solve is doing ("stage 'pfr_stage' finished
+    (3/3)", "Network built successfully, …"), so the newest one is exactly the
+    detail line to show. Only the latest is kept — the frontend polls once a
+    second and the full stream stays on the server console.
+
+    INFO-level by design: ``BOULDER_VERBOSE=1`` puts the package logger at
+    DEBUG, and per-timestep chatter is not what this line is for.
+    """
+
+    def __init__(self, state: Dict[str, Any]) -> None:
+        super().__init__(level=logging.INFO)
+        self._state = state
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._state["last_line"] = record.getMessage()
+        except Exception:  # noqa: BLE001 — a status line must never break a solve
+            pass
+
+
 def _has_run_set(request: Request) -> bool:
     return has_run_set(
         _raw(request), getattr(request.app.state, "preloaded_config_path", None)
@@ -235,6 +262,8 @@ async def sweep_run(
         "scenario_progress": {},
         # Most recent progress line, verbatim — the frontend shows it under
         # the "Calculating…" spinner so a long solve says *what* it is doing.
+        # Written on each scenario transition below, and refreshed in between by
+        # the solver's own INFO logs (see `_LastLineHandler`).
         "last_line": None,
     }
     request.app.state.sweep_job = state
@@ -404,7 +433,23 @@ async def sweep_run(
             state["message"] = str(exc)
             print(f"[sweep] FAILED: {exc}", flush=True)
 
-    threading.Thread(target=_worker, daemon=True).start()
+    def _worker_logging_to_status() -> None:
+        # Live detail line for the "Calculating…" spinner: while this sweep
+        # runs, every boulder INFO log becomes `last_line`. Attached here rather
+        # than inside `_worker` so the detach is one `finally`, whichever way the
+        # sweep ends.
+        # The handler is process-wide, so a *concurrent* single "Run Simulation"
+        # would write this line too — harmless while only one solve runs at a
+        # time; filter on the thread id if that ever stops being true.
+        pkg_logger = logging.getLogger("boulder")
+        handler = _LastLineHandler(state)
+        pkg_logger.addHandler(handler)
+        try:
+            _worker()
+        finally:
+            pkg_logger.removeHandler(handler)
+
+    threading.Thread(target=_worker_logging_to_status, daemon=True).start()
     return {"status": "running", "total": total}
 
 
