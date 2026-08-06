@@ -17,6 +17,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { SimulateCard } from "./SimulateCard";
 import { useSolverStore } from "@/stores/solverStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 
 // ---------------------------------------------------------------------------
 // Mock dependencies that reach out to the network or zustand stores
@@ -34,8 +35,14 @@ vi.mock("@/api/guiActions", () => ({
 }));
 
 vi.mock("@/api/resultCache", () => ({
+  // Not cached by default, so the Run-button tests exercise the real
+  // startSimulation path rather than the early-return cache hit. Previously
+  // this resolved `cached: true` unconditionally, and the tests only passed
+  // because the old useSimulationStore mock omitted `setResults` -- calling
+  // it in the cache-hit branch threw, was swallowed by handleRun's own
+  // try/catch, and fell through to startSimulation by accident.
   checkSimulationCache: vi.fn().mockResolvedValue({
-    cached: true,
+    cached: false,
     result: { time: [0], reactors: {} },
     meta: { created_at: Date.now() / 1000 },
   }),
@@ -82,16 +89,28 @@ vi.mock("@/stores/configStore", () => {
   return { useConfigStore };
 });
 
-vi.mock("@/stores/simulationStore", () => ({
-  useSimulationStore: () => ({
+vi.mock("@/stores/simulationStore", () => {
+  // Mirrors zustand's real call shape: `useSimulationStore()` (no selector,
+  // used by SimulateCard's own destructuring) and `useSimulationStore(sel)`
+  // (used by RunControl's useRunStatus hook, via useSimulationRunPhase) must
+  // both work — a mock that ignored the selector previously returned this
+  // whole (truthy) object for `progress?.is_stopping`, always reading as
+  // "stopping".
+  const state = {
     isRunning: false,
     simulationId: null,
+    progress: null,
     pythonCode: "",
     beginSimulationRun: vi.fn(),
     startSimulation: vi.fn(),
     setError: vi.fn(),
-  }),
-}));
+    setResults: vi.fn(),
+    stopped: vi.fn(),
+  };
+  const useSimulationStore = (selector?: (s: typeof state) => unknown) =>
+    selector ? selector(state) : state;
+  return { useSimulationStore };
+});
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -107,6 +126,7 @@ describe("SimulateCard", () => {
       simTime: "10",
       timeStep: "1",
     });
+    useSweepRunStore.setState({ sweeping: false });
   });
 
   it("Run button calls startSimulation without time/step in steady mode", async () => {
@@ -221,5 +241,17 @@ describe("SimulateCard", () => {
     });
 
     expect(toast.loading).not.toHaveBeenCalled();
+  });
+
+  it("regression: disables the Run button while a sweep is running", () => {
+    // A plain run and a sweep share the same backend solve path and must
+    // not overlap -- runDisabled previously only checked isRunning, so a
+    // sweep in progress didn't stop a second, conflicting solve from being
+    // launched on top of it.
+    mockConfig = { nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }], connections: [] };
+    useSweepRunStore.setState({ sweeping: true });
+    render(<SimulateCard />);
+
+    expect(screen.getByRole("button", { name: /run simulation/i })).toBeDisabled();
   });
 });

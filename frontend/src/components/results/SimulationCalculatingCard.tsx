@@ -14,8 +14,14 @@ export function SimulationCalculatingCard() {
   if (!isRunning) return null;
 
   const { pct, label } = computeSimulationProgress(progress);
+  const stopping = progress?.is_stopping ?? false;
 
   return (
-    <CalculatingCardShell headline="Simulation running…" detailLine={label} pct={pct} />
+    <CalculatingCardShell
+      headline={stopping ? "Stopping simulation…" : "Simulation running…"}
+      detailLine={label}
+      pct={pct}
+      stopping={stopping}
+    />
   );
 }

@@ -41,6 +41,7 @@ export function ResultsTabs() {
   const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
   const sweepLastLine = useSweepRunStore((s) => s.lastLine);
   const sweepPinnedId = useSweepRunStore((s) => s.pinnedId);
+  const sweepStopping = useSweepRunStore((s) => s.stopping);
   const defaultResultsTab = results && hasSankeyData(results) ? "Sankey" : "Plots";
   /** Resolved tab for UI: explicit choice, else Sankey/Plots per available data. */
   const displayTab = activeTab ?? defaultResultsTab;
@@ -211,6 +212,7 @@ export function ResultsTabs() {
         scenarioId={followedId}
         stage={scenarioProgress[followedId]}
         lastLine={sweepLastLine}
+        stopping={sweepStopping}
       />
     );
   }

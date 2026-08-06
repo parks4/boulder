@@ -9,9 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockStartSweep = vi.fn();
 const mockGetSweepStatus = vi.fn();
+const mockStopSweep = vi.fn();
 vi.mock("@/api/sweep", () => ({
   startSweep: (...args: unknown[]) => mockStartSweep(...args),
   getSweepStatus: (...args: unknown[]) => mockGetSweepStatus(...args),
+  stopSweep: (...args: unknown[]) => mockStopSweep(...args),
 }));
 
 const mockRefresh = vi.fn();
@@ -37,10 +39,12 @@ vi.mock("./scenarioStore", () => ({
 
 const mockToastSuccess = vi.fn();
 const mockToastError = vi.fn();
+const mockToastInfo = vi.fn();
 vi.mock("sonner", () => ({
   toast: {
     success: (...args: unknown[]) => mockToastSuccess(...args),
     error: (...args: unknown[]) => mockToastError(...args),
+    info: (...args: unknown[]) => mockToastInfo(...args),
   },
 }));
 
@@ -54,6 +58,7 @@ describe("sweepStore", () => {
     mockOverlays = {};
     useSweepRunStore.setState({
       sweeping: false,
+      stopping: false,
       progress: { current: 0, total: 0 },
       scenarioProgress: {},
       lastLine: null,
@@ -277,5 +282,70 @@ describe("sweepStore", () => {
     await vi.advanceTimersByTimeAsync(1000);
 
     expect(mockSetActive).not.toHaveBeenCalled();
+  });
+
+  describe("stop()", () => {
+    it("is a no-op when nothing is sweeping", () => {
+      useSweepRunStore.getState().stop();
+
+      expect(mockStopSweep).not.toHaveBeenCalled();
+      expect(useSweepRunStore.getState().stopping).toBe(false);
+    });
+
+    it("optimistically sets stopping, then the next poll tick confirms it", async () => {
+      vi.useFakeTimers();
+      mockStartSweep.mockResolvedValue({ status: "running", total: 2 });
+      mockStopSweep.mockResolvedValue({ stopping: true });
+      mockGetSweepStatus
+        .mockResolvedValueOnce({ status: "stopping", current: 1, total: 2 })
+        .mockResolvedValueOnce({ status: "cancelled" });
+
+      useSweepRunStore.getState().run({ total: 2 });
+      await vi.advanceTimersByTimeAsync(0);
+
+      useSweepRunStore.getState().stop();
+      expect(mockStopSweep).toHaveBeenCalledOnce();
+      expect(useSweepRunStore.getState().stopping).toBe(true);
+      expect(useSweepRunStore.getState().sweeping).toBe(true); // still "in progress" for the UI
+
+      await vi.advanceTimersByTimeAsync(1000); // poll tick -> status "stopping"
+      expect(useSweepRunStore.getState().sweeping).toBe(true);
+      expect(useSweepRunStore.getState().stopping).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1000); // poll tick -> status "cancelled"
+      expect(useSweepRunStore.getState().sweeping).toBe(false);
+      expect(useSweepRunStore.getState().stopping).toBe(false);
+    });
+
+    it("a cancelled sweep toasts info, not error, and still refreshes the Scenario Pane", async () => {
+      vi.useFakeTimers();
+      mockStartSweep.mockResolvedValue({ status: "running", total: 2 });
+      mockGetSweepStatus.mockResolvedValueOnce({ status: "cancelled" });
+
+      useSweepRunStore.getState().run({ total: 2 });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(useSweepRunStore.getState().sweeping).toBe(false);
+      expect(mockToastInfo).toHaveBeenCalledOnce();
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(mockRefresh).toHaveBeenCalledOnce();
+    });
+
+    it("reverts the optimistic stopping flag if the stop request itself fails", async () => {
+      vi.useFakeTimers();
+      mockStartSweep.mockResolvedValue({ status: "running", total: 1 });
+      mockStopSweep.mockRejectedValue(new Error("network error"));
+
+      useSweepRunStore.getState().run({ total: 1 });
+      await vi.advanceTimersByTimeAsync(0);
+
+      useSweepRunStore.getState().stop();
+      expect(useSweepRunStore.getState().stopping).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(0); // flush the rejected stopSweep() promise
+      expect(useSweepRunStore.getState().stopping).toBe(false);
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("network error"));
+    });
   });
 });

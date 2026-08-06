@@ -14,7 +14,7 @@ export interface SweepInfo {
 }
 
 export interface SweepStatus {
-  status: "idle" | "running" | "done" | "error";
+  status: "idle" | "running" | "stopping" | "cancelled" | "done" | "error";
   current?: number;
   total?: number;
   message?: string;
@@ -65,4 +65,13 @@ export function startSweep(options?: {
 /** Poll the running/last sweep job's status. */
 export function getSweepStatus() {
   return apiFetch<SweepStatus>("/sweep/status");
+}
+
+/**
+ * Request that the running sweep stop. Cooperative, not immediate: returns
+ * right away; the job's status becomes "cancelled" once the in-flight
+ * scenario actually stops — observed via the existing status poll.
+ */
+export function stopSweep() {
+  return apiFetch<{ stopping: boolean }>("/sweep/stop", { method: "POST" });
 }

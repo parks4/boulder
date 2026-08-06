@@ -17,7 +17,9 @@ store — are written to disk here, same as before.
 Endpoints (prefix ``/api/sweep``):
   GET  ""        -> availability / scenario count / can_run / running
   POST "/run"    -> start the sweep (409 if one is already running)
-  GET  "/status" -> current job status (idle | running | done | error)
+  POST "/stop"   -> request the running sweep stop (cooperative, non-blocking)
+  GET  "/status" -> current job status (idle | running | stopping | done |
+                    error | cancelled)
 """
 
 from __future__ import annotations
@@ -82,13 +84,18 @@ def _run_host_sweep(
     state: Dict[str, Any],
     store_dir: Path,
     config_path: Optional[str] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> None:
     """Resolve and call a ``sweep.runner`` callable, updating *state* around it.
 
     The callable owns the run-set: it decides the points, solves them and writes
     them into the result store. It may accept an optional ``progress`` callable
     — ``(done, total, message)`` — so a host that knows its point count can
-    drive the same status UI a declarative sweep does.
+    drive the same status UI a declarative sweep does. It may also accept
+    ``stop_event`` (a ``threading.Event``) to cooperate with Stop; a runner
+    that doesn't declare it simply can't be interrupted early -- "Stopping…"
+    then waits out the whole host sweep, same honesty as a single-stage
+    single run with no checkpoint of its own.
 
     .. versionchanged:: (store unification)
        The first argument is now the store **directory**, not a single HDF5
@@ -133,6 +140,8 @@ def _run_host_sweep(
         kwargs["progress"] = _progress
     if "config_path" in declared:
         kwargs["config_path"] = config_path
+    if "stop_event" in declared:
+        kwargs["stop_event"] = stop_event
 
     print(f"[sweep] delegating to host runner {dotted}", flush=True)
     runner(store_dir, **kwargs)
@@ -236,7 +245,7 @@ async def sweep_run(
         )
 
     job = getattr(request.app.state, "sweep_job", None)
-    if job and job.get("status") == "running":
+    if job and job.get("status") in ("running", "stopping"):
         raise HTTPException(status_code=409, detail="A sweep is already running")
 
     # The one place results live: the same directory `/api/scenarios` reads, so
@@ -267,6 +276,13 @@ async def sweep_run(
         "last_line": None,
     }
     request.app.state.sweep_job = state
+    # A fresh Event per launch, reachable from POST /stop (below) without
+    # living inside `state` -- GET /status returns `dict(job)` and must stay
+    # JSON-serialisable. Cooperative, not a subprocess handle: setting it is
+    # exactly the same primitive SimulationWorker.stop_simulation() uses, via
+    # `solve_scenario`'s `stop_event` param (see boulder.sweep_runner).
+    stop_event = threading.Event()
+    request.app.state.sweep_stop_event = stop_event
     print(f"[sweep] starting {total} run(s)", flush=True)
 
     def _worker() -> None:
@@ -290,7 +306,9 @@ async def sweep_run(
                 # writes the collection store itself; Boulder only resolves the
                 # callable and reports status. Runs in-process like every other
                 # sweep -- declaring the runner replaced *spawning* it.
-                _run_host_sweep(host_runner, state, store_dir, cfg_path)
+                _run_host_sweep(
+                    host_runner, state, store_dir, cfg_path, stop_event=stop_event
+                )
                 # The host owns the store's contents, including its root
                 # attrs, so skip Boulder's own finalisation -- but *not* the
                 # terminal bookkeeping, or the UI would poll "running" forever
@@ -330,6 +348,14 @@ async def sweep_run(
             # reference -- same trick `_default_resolve_mechanism` uses.
             resolve_mechanism = converter_cls.__new__(converter_cls).resolve_mechanism
             for i, (sid, cfg) in enumerate(runs):
+                if stop_event.is_set():
+                    # A stop was requested while the previous scenario was
+                    # in flight (or between scenarios) -- don't start
+                    # another one. The scenario that *was* solving raises
+                    # out of `solve_scenario` below and is handled there;
+                    # this only guards the ones that haven't started yet.
+                    break
+
                 config, mech_name, fingerprint = prepare_scenario(
                     cfg, resolve_mechanism
                 )
@@ -383,6 +409,7 @@ async def sweep_run(
                     mech_name,
                     converter_cls=converter_cls,
                     progress_cb=_publish,
+                    stop_event=stop_event,
                 )
                 # `conv.mechanism` is whatever bare name/spec the converter was
                 # constructed with -- resolving it (again) to a real, absolute
@@ -412,6 +439,8 @@ async def sweep_run(
                     warn=lambda msg: print(f"[sweep]{msg}", flush=True),
                 )
 
+            # run_ids is the full intended set regardless of how far the loop
+            # got, so pruning stays correct even for a stopped sweep.
             stale = scenario_store.prune_entries(store_dir, run_ids)
             if stale:
                 print(
@@ -423,15 +452,32 @@ async def sweep_run(
 
             state["scenario_progress"] = {}
             state["last_line"] = None
-            state["status"] = "done"
-            state["message"] = "Sweep complete"
-            print(f"[sweep] complete — {total} run(s)", flush=True)
+            if stop_event.is_set():
+                # The loop above broke on the stop check before starting the
+                # next scenario -- the in-flight one (if any) is handled by
+                # the except branch below, which raises out of solve_scenario.
+                state["status"] = "cancelled"
+                state["message"] = "Sweep stopped"
+                print("[sweep] cancelled", flush=True)
+            else:
+                state["status"] = "done"
+                state["message"] = "Sweep complete"
+                print(f"[sweep] complete — {total} run(s)", flush=True)
         except Exception as exc:  # noqa: BLE001
             state["scenario_progress"] = {}
             state["last_line"] = None
-            state["status"] = "error"
-            state["message"] = str(exc)
-            print(f"[sweep] FAILED: {exc}", flush=True)
+            if stop_event.is_set():
+                # solve_scenario raises RuntimeError when its own poll loop
+                # sees the stop flag (see boulder.sweep_runner) -- same
+                # exception shape as a genuine failure, distinguished here by
+                # whether *this* route asked for the stop.
+                state["status"] = "cancelled"
+                state["message"] = "Sweep stopped"
+                print("[sweep] cancelled", flush=True)
+            else:
+                state["status"] = "error"
+                state["message"] = str(exc)
+                print(f"[sweep] FAILED: {exc}", flush=True)
 
     def _worker_logging_to_status() -> None:
         # Live detail line for the "Calculating…" spinner: while this sweep
@@ -451,6 +497,28 @@ async def sweep_run(
 
     threading.Thread(target=_worker_logging_to_status, daemon=True).start()
     return {"status": "running", "total": total}
+
+
+@router.post("/stop")
+async def sweep_stop(request: Request) -> Dict[str, Any]:
+    """Request that the running sweep stop, without blocking.
+
+    Cooperative, same mechanism a single "Run Simulation" uses: setting
+    ``sweep_stop_event`` is instant, so this returns right away rather than
+    waiting for the in-flight scenario (or, for a host ``sweep.runner`` that
+    doesn't declare a ``stop_event`` parameter, the whole sweep) to actually
+    stop. The job's ``status`` becomes ``"cancelled"`` once it does -- poll
+    ``GET /status``, the same way completion is already observed.
+    """
+    job = getattr(request.app.state, "sweep_job", None)
+    if not job or job.get("status") != "running":
+        raise HTTPException(status_code=404, detail="No sweep is currently running")
+
+    job["status"] = "stopping"
+    stop_event = getattr(request.app.state, "sweep_stop_event", None)
+    if stop_event is not None:
+        stop_event.set()
+    return {"stopping": True}
 
 
 @router.get("/status")

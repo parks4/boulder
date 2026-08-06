@@ -53,4 +53,23 @@ describe("SimulationCalculatingCard", () => {
 
     expect(screen.getByText("Building")).toBeInTheDocument();
   });
+
+  it("shows a 'Stopping…' headline once is_stopping is set", () => {
+    mockIsRunning = true;
+    mockProgress = {
+      is_running: true,
+      is_complete: false,
+      is_stopping: true,
+      stages_done: 0,
+      n_stages: 1,
+      times: [],
+      total_time: 10,
+      reactors_series: {},
+    };
+
+    render(<SimulationCalculatingCard />);
+
+    expect(screen.getByText("Stopping simulation…")).toBeInTheDocument();
+    expect(screen.queryByText("Simulation running…")).not.toBeInTheDocument();
+  });
 });

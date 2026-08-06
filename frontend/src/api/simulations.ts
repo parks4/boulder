@@ -24,8 +24,14 @@ export function fetchSimulationResults(simId: string) {
   return apiFetch<SimulationResults>(`/simulations/${simId}/results`);
 }
 
+/**
+ * Request that a running simulation stop. Cooperative, not immediate: the
+ * request returns right away; the actual wind-down is observed via the SSE
+ * stream's "stopped" event (see useSimulationSSE.ts).
+ */
 export function stopSimulation(simId: string) {
-  return apiFetch<{ stopped: boolean }>(`/simulations/${simId}`, {
-    method: "DELETE",
-  });
+  return apiFetch<{ stopping: boolean; simulation_id: string }>(
+    `/simulations/${simId}`,
+    { method: "DELETE" },
+  );
 }

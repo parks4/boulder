@@ -1,10 +1,16 @@
 import { create } from "zustand";
 import { toast } from "sonner";
-import { getSweepStatus, startSweep, type SweepStatus } from "@/api/sweep";
+import { getSweepStatus, startSweep, stopSweep, type SweepStatus } from "@/api/sweep";
 import { useScenarioStore } from "./scenarioStore";
 
 interface SweepRunState {
   sweeping: boolean;
+  /**
+   * A stop was requested and the server has acknowledged it (status
+   * "stopping"), but the in-flight scenario hasn't wound down yet — still
+   * `sweeping`, just no longer making progress toward a "done" result.
+   */
+  stopping: boolean;
   progress: { current: number; total: number };
   /**
    * Scenarios currently being solved, keyed by id (mirrors
@@ -45,6 +51,12 @@ interface SweepRunState {
    * is already polling one via `run()`.
    */
   hydrate: () => void;
+  /**
+   * Request that the running sweep stop — cooperative, so this doesn't wait
+   * for the in-flight scenario to actually wind down; the next poll tick
+   * observes that via `stopping`/the eventual "cancelled" status.
+   */
+  stop: () => void;
 }
 
 // Module-level (not store state) — a plain interval handle, not observed by
@@ -81,6 +93,7 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
       }
       set({
         sweeping: true,
+        stopping: false,
         progress: { current: st.current ?? 0, total: st.total ?? 0 },
         scenarioProgress,
         lastLine: st.last_line ?? null,
@@ -97,9 +110,26 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
       lastSeenCurrent = cur;
       return;
     }
+    if (st.status === "stopping") {
+      // Keep polling — the in-flight scenario (or a host sweep.runner with
+      // no stop_event of its own) hasn't wound down yet. Leave
+      // scenarioProgress/lastLine as they were so the card doesn't blank
+      // out before there's anything new to show.
+      set({ sweeping: true, stopping: true });
+      return;
+    }
     stopPolling();
-    set({ sweeping: false, scenarioProgress: {}, lastLine: null, pinnedId: null });
-    if (st.status === "done") {
+    set({
+      sweeping: false,
+      stopping: false,
+      scenarioProgress: {},
+      lastLine: null,
+      pinnedId: null,
+    });
+    if (st.status === "cancelled") {
+      toast.info("Sweep stopped");
+      void useScenarioStore.getState().refresh();
+    } else if (st.status === "done") {
       toast.success("Sweep complete — scenarios updated");
       void (async () => {
         await useScenarioStore.getState().refresh();
@@ -130,13 +160,14 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
         .then(applyStatus)
         .catch(() => {
           stopPolling();
-          set({ sweeping: false });
+          set({ sweeping: false, stopping: false });
         });
     }, 1000);
   }
 
   return {
     sweeping: false,
+    stopping: false,
     progress: { current: 0, total: 0 },
     scenarioProgress: {},
     lastLine: null,
@@ -152,6 +183,7 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
       // had pinned during the last one.
       set({
         sweeping: true,
+        stopping: false,
         pinnedId: null,
         progress: { current: 0, total: options?.total ?? 0 },
       });
@@ -162,6 +194,17 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
           set({ sweeping: false });
           toast.error(e instanceof Error ? e.message : String(e));
         });
+    },
+
+    stop: () => {
+      if (!get().sweeping) return;
+      // Optimistic: the next poll tick (up to 1s away) will confirm this
+      // once the server acknowledges, same pattern run() already uses.
+      set({ stopping: true });
+      stopSweep().catch((e) => {
+        set({ stopping: false });
+        toast.error(e instanceof Error ? e.message : String(e));
+      });
     },
 
     hydrate: () => {
