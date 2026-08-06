@@ -29,7 +29,7 @@ from .reactor_energy import (
 )
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
-from .staged_solver import _order_stage_nodes_for_flow
+from .staged_solver import SolveCancelled, _order_stage_nodes_for_flow
 from .verbose_utils import get_verbose_logger, is_verbose_mode
 
 logger = get_verbose_logger(__name__)
@@ -1980,7 +1980,10 @@ class DualCanteraConverter:
                 times = [float(t) for t in np.arange(start + dt, stop + dt / 2, dt)]
             else:
                 times = [float(t) for t in grid_spec]
+            cancel_token = getattr(self, "cancel_token", None)
             for t in times:
+                if cancel_token is not None and cancel_token.is_set():
+                    raise SolveCancelled(f"cancelled during stage '{stage_id}'")
                 network.advance(float(t))
                 if _scope_recorder is not None:
                     _scope_recorder.record(float(t), axis=axis)
@@ -1990,7 +1993,10 @@ class DualCanteraConverter:
             max_dt = float(solver.get("max_dt", chunk_dt / 10))
             reinit = bool(solver.get("reinitialize_between_chunks", False))
             t = float(solver.get("start", 0.0))
+            cancel_token = getattr(self, "cancel_token", None)
             while t < t_total:
+                if cancel_token is not None and cancel_token.is_set():
+                    raise SolveCancelled(f"cancelled during stage '{stage_id}'")
                 t_end = min(t + chunk_dt, t_total)
                 # Fire any schedule callbacks before each chunk, then
                 # reinitialize *immediately* -- CVODES caches the RHS's

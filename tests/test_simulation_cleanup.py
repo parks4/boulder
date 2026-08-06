@@ -48,13 +48,18 @@ class TestSimulationCleanup:
     """Test suite for simulation memory cleanup."""
 
     @pytest.mark.asyncio
-    async def test_simulation_deleted_after_stop(self, minimal_config):
-        """Verify that stopping a simulation removes it from memory."""
-        # Clear any existing simulations
+    async def test_cleanup_endpoint_removes_a_stopped_simulation(self, minimal_config):
+        """A stopped-and-exited simulation is cleanable, same as complete/errored.
+
+        DELETE /{sim_id} itself no longer removes the registry entry (see
+        tests/test_simulation_stop.py for that behavior change) -- it has to
+        stay reachable until :func:`cleanup_completed_simulations` reaps it.
+        """
+        import asyncio
+
         _simulations.clear()
 
         async with _make_client() as client:
-            # Start a simulation
             resp = await client.post(
                 "/api/simulations",
                 json={
@@ -65,20 +70,25 @@ class TestSimulationCleanup:
             )
             assert resp.status_code == 200
             sim_id = resp.json()["simulation_id"]
-
-            # Verify the simulation is in memory
             assert sim_id in _simulations
-            initial_count = len(_simulations)
-            assert initial_count == 1
 
-            # Stop the simulation
             resp = await client.delete(f"/api/simulations/{sim_id}")
             assert resp.status_code == 200
-            assert resp.json()["stopped"] is True
+            assert resp.json()["stopping"] is True
+            # Still present immediately after the (non-blocking) stop request.
+            assert sim_id in _simulations
 
-            # Verify the simulation was removed from memory
+            worker, _ = _simulations[sim_id]
+            for _ in range(20):
+                if not worker.get_progress().is_running:
+                    break
+                await asyncio.sleep(0.1)
+            assert not worker.get_progress().is_running
+
+            resp = await client.post("/api/simulations/cleanup")
+            assert resp.status_code == 200
+            assert resp.json()["removed"] == 1
             assert sim_id not in _simulations
-            assert len(_simulations) == initial_count - 1
 
     @pytest.mark.asyncio
     async def test_simulation_cleanup_with_query_param(self, minimal_config):

@@ -9,6 +9,7 @@ export function SweepCalculatingCard({
   scenarioId,
   stage,
   lastLine,
+  stopping,
 }: {
   scenarioId: string;
   stage: { stage: number | null; stageTotal: number | null } | undefined;
@@ -18,6 +19,8 @@ export function SweepCalculatingCard({
    * line — the full stream is on the server console.
    */
   lastLine?: string | null;
+  /** A stop was requested and the sweep hasn't wound down yet (see sweepStore.ts). */
+  stopping?: boolean;
 }) {
   const stageLabel =
     stage?.stage != null && stage.stageTotal != null && stage.stageTotal > 1
@@ -26,8 +29,13 @@ export function SweepCalculatingCard({
 
   return (
     <CalculatingCardShell
-      headline={`Calculating "${scenarioId}"…${stageLabel}`}
+      headline={
+        stopping
+          ? `Stopping — "${scenarioId}"…${stageLabel}`
+          : `Calculating "${scenarioId}"…${stageLabel}`
+      }
       detailLine={lastLine}
+      stopping={stopping}
     />
   );
 }

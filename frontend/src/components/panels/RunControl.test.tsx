@@ -3,10 +3,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { RunControl } from "./RunControl";
 import { useSweepRunStore } from "@/stores/sweepStore";
+import { useSimulationStore } from "@/stores/simulationStore";
 
 const mockGetSweepInfo = vi
   .fn()
@@ -44,13 +45,19 @@ vi.mock("@/stores/scenarioStore", () => {
 
 describe("RunControl", () => {
   const onRunSimulation = vi.fn();
+  const onStopSimulation = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetSweepInfo.mockResolvedValue({ can_run: false, reason: "No sweep" });
     mockScenarioRevision = 0;
     mockAuthoredIdsLength = 0;
-    useSweepRunStore.setState({ sweeping: false, progress: { current: 0, total: 0 } });
+    useSweepRunStore.setState({
+      sweeping: false,
+      stopping: false,
+      progress: { current: 0, total: 0 },
+    });
+    useSimulationStore.setState({ isRunning: false, progress: null });
   });
 
   afterEach(() => {
@@ -61,6 +68,7 @@ describe("RunControl", () => {
     render(
       <RunControl
         onRunSimulation={onRunSimulation}
+        onStopSimulation={onStopSimulation}
         isRunning={false}
         runDisabled={false}
       />,
@@ -79,6 +87,7 @@ describe("RunControl", () => {
     render(
       <RunControl
         onRunSimulation={onRunSimulation}
+        onStopSimulation={onStopSimulation}
         isRunning={false}
         runDisabled={false}
       />,
@@ -96,6 +105,7 @@ describe("RunControl", () => {
     render(
       <RunControl
         onRunSimulation={onRunSimulation}
+        onStopSimulation={onStopSimulation}
         isRunning={false}
         runDisabled={false}
       />,
@@ -109,6 +119,7 @@ describe("RunControl", () => {
     render(
       <RunControl
         onRunSimulation={onRunSimulation}
+        onStopSimulation={onStopSimulation}
         isRunning={false}
         runDisabled={false}
       />,
@@ -128,6 +139,7 @@ describe("RunControl", () => {
     render(
       <RunControl
         onRunSimulation={onRunSimulation}
+        onStopSimulation={onStopSimulation}
         isRunning={false}
         runDisabled={false}
       />,
@@ -150,7 +162,7 @@ describe("RunControl", () => {
       reason: "Run 2 scenarios",
     });
     render(
-      <RunControl onRunSimulation={onRunSimulation} isRunning={false} runDisabled={false} />,
+      <RunControl onRunSimulation={onRunSimulation} onStopSimulation={onStopSimulation} isRunning={false} runDisabled={false} />,
     );
     await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalled());
 
@@ -180,7 +192,7 @@ describe("RunControl", () => {
     mockGetSweepInfo.mockResolvedValue({ can_run: false, reason: "No sweep" });
     mockAuthoredIdsLength = 2; // BASELINE + one session-created scenario
     render(
-      <RunControl onRunSimulation={onRunSimulation} isRunning={false} runDisabled={false} />,
+      <RunControl onRunSimulation={onRunSimulation} onStopSimulation={onStopSimulation} isRunning={false} runDisabled={false} />,
     );
     await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalled());
 
@@ -190,16 +202,168 @@ describe("RunControl", () => {
 
   it("re-fetches sweep info when a scenario is added/edited/renamed/deleted elsewhere", async () => {
     const { rerender } = render(
-      <RunControl onRunSimulation={onRunSimulation} isRunning={false} runDisabled={false} />,
+      <RunControl onRunSimulation={onRunSimulation} onStopSimulation={onStopSimulation} isRunning={false} runDisabled={false} />,
     );
     await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalledOnce());
 
     mockGetSweepInfo.mockResolvedValue({ can_run: true, n_scenarios: 3, reason: "Run 3 scenarios" });
     mockScenarioRevision += 1;
     rerender(
-      <RunControl onRunSimulation={onRunSimulation} isRunning={false} runDisabled={false} />,
+      <RunControl onRunSimulation={onRunSimulation} onStopSimulation={onStopSimulation} isRunning={false} runDisabled={false} />,
     );
 
     await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalledTimes(2));
+  });
+
+  describe("Stop / Stopping", () => {
+    it("shows Stop Simulation (destructive) while a single run is active", () => {
+      useSimulationStore.setState({ isRunning: true, progress: null });
+      render(
+        <RunControl
+          onRunSimulation={onRunSimulation}
+          onStopSimulation={onStopSimulation}
+          isRunning={true}
+          runDisabled={true}
+        />,
+      );
+
+      const button = screen.getByRole("button", { name: "Stop Simulation" });
+      expect(button).not.toBeDisabled();
+    });
+
+    it("clicking Stop Simulation while running calls onStopSimulation, not onRunSimulation", () => {
+      useSimulationStore.setState({ isRunning: true, progress: null });
+      render(
+        <RunControl
+          onRunSimulation={onRunSimulation}
+          onStopSimulation={onStopSimulation}
+          isRunning={true}
+          runDisabled={true}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Stop Simulation" }));
+
+      expect(onStopSimulation).toHaveBeenCalledOnce();
+      expect(onRunSimulation).not.toHaveBeenCalled();
+    });
+
+    it("shows a disabled Stopping Simulation… once is_stopping is set, with a checkpoint tooltip", () => {
+      useSimulationStore.setState({
+        isRunning: true,
+        // @ts-expect-error -- partial SimulationProgress is fine for this test
+        progress: { is_stopping: true },
+      });
+      render(
+        <RunControl
+          onRunSimulation={onRunSimulation}
+          onStopSimulation={onStopSimulation}
+          isRunning={true}
+          runDisabled={true}
+        />,
+      );
+
+      const button = screen.getByRole("button", { name: "Stopping Simulation…" });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "Will stop at the next checkpoint");
+    });
+
+    it("regression: disables the primary button while stopping even if the caller's runDisabled prop is false", () => {
+      // RunControl must not rely on the caller to compute this correctly --
+      // is_stopping alone must be enough to keep the button inert.
+      useSimulationStore.setState({
+        isRunning: true,
+        // @ts-expect-error -- partial SimulationProgress is fine for this test
+        progress: { is_stopping: true },
+      });
+      render(
+        <RunControl
+          onRunSimulation={onRunSimulation}
+          onStopSimulation={onStopSimulation}
+          isRunning={true}
+          runDisabled={false}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Stopping Simulation…" })).toBeDisabled();
+    });
+
+    // The caret (used to switch to "Run Sweep" mode) is disabled once
+    // `sweeping` is true, so each test below selects sweep mode first --
+    // while idle -- and only then mutates the store to simulate the sweep
+    // having started; RunControl's own `runMode` state stays "sweep" across
+    // that later store update, no further menu interaction needed.
+    async function renderInSweepMode() {
+      mockGetSweepInfo.mockResolvedValue({
+        can_run: true,
+        n_scenarios: 3,
+        reason: "Run 3 scenarios",
+      });
+      render(
+        <RunControl
+          onRunSimulation={onRunSimulation}
+          onStopSimulation={onStopSimulation}
+          isRunning={false}
+          runDisabled={false}
+        />,
+      );
+      await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalled());
+      fireEvent.click(screen.getByLabelText("Choose run action"));
+      // getSweepInfo resolves asynchronously -- `canSweep` (and so the menu
+      // item's disabled state) may not have caught up yet even though the
+      // call itself already happened; a click on a still-disabled item is a
+      // silent no-op, so wait for it to actually be enabled first.
+      await waitFor(() =>
+        expect(screen.getByRole("menuitemradio", { name: /run sweep/i })).not.toBeDisabled(),
+      );
+      fireEvent.click(screen.getByRole("menuitemradio", { name: /run sweep/i }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Run Sweep (3 scenarios)" })).toBeInTheDocument(),
+      );
+    }
+
+    it("shows Stop Sweep (n/total) while a sweep is running", async () => {
+      await renderInSweepMode();
+      act(() => {
+        useSweepRunStore.setState({
+          sweeping: true,
+          stopping: false,
+          progress: { current: 1, total: 3 },
+        });
+      });
+
+      expect(screen.getByRole("button", { name: "Stop Sweep (1/3)" })).not.toBeDisabled();
+    });
+
+    it("clicking Stop Sweep calls the sweep store's stop(), not onRunSimulation", async () => {
+      await renderInSweepMode();
+      const mockStop = vi.fn();
+      act(() => {
+        useSweepRunStore.setState({
+          sweeping: true,
+          stopping: false,
+          progress: { current: 1, total: 3 },
+          stop: mockStop,
+        });
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Stop Sweep (1/3)" }));
+
+      expect(mockStop).toHaveBeenCalledOnce();
+      expect(onRunSimulation).not.toHaveBeenCalled();
+    });
+
+    it("shows a disabled Stopping Sweep… once the sweep store reports stopping", async () => {
+      await renderInSweepMode();
+      act(() => {
+        useSweepRunStore.setState({
+          sweeping: true,
+          stopping: true,
+          progress: { current: 1, total: 3 },
+        });
+      });
+
+      expect(screen.getByRole("button", { name: "Stopping Sweep…" })).toBeDisabled();
+    });
   });
 });

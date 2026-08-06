@@ -533,6 +533,16 @@ def alias_inter_connection_mfcs(
 # ---------------------------------------------------------------------------
 
 
+class SolveCancelled(Exception):
+    """Raised to unwind a staged solve when a stop was requested mid-run.
+
+    Checked cooperatively — Cantera's own solver calls cannot be interrupted,
+    so this can only take effect at a stage boundary (or, for transient runs,
+    inside the per-step loops in :mod:`boulder.cantera_converter`) rather than
+    immediately.
+    """
+
+
 def solve_staged(
     converter: "DualCanteraConverter",
     plan: StageExecutionPlan,
@@ -609,7 +619,12 @@ def solve_staged(
 
     n_stages = len(plan.ordered_stages)
 
+    cancel_token = getattr(converter, "cancel_token", None)
+
     for stage_idx, stage in enumerate(plan.ordered_stages):
+        if cancel_token is not None and cancel_token.is_set():
+            raise SolveCancelled(f"cancelled before stage '{stage.id}'")
+
         logger.info(
             "Staged solve: stage '%s' (%d/%d, %d reactors)",
             stage.id,

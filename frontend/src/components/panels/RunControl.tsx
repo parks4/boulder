@@ -7,12 +7,15 @@ import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useShortcutNudge } from "@/hooks/useShortcutNudge";
+import { useSimulationRunPhase, useSweepRunPhase } from "@/hooks/useRunStatus";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 
 type RunMode = "sim" | "force_sim" | "sweep";
 
 interface RunControlProps {
   onRunSimulation: (force?: boolean) => void;
+  /** Request that the in-flight single run stop (see api/simulations.ts's stopSimulation). */
+  onStopSimulation: () => void;
   isRunning: boolean;
   runDisabled: boolean;
 }
@@ -24,7 +27,12 @@ interface RunControlProps {
  * is shown in the menu and on the button). Running a sweep streams progress and
  * refreshes the Scenario Pane on completion.
  */
-export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunControlProps) {
+export function RunControl({
+  onRunSimulation,
+  onStopSimulation,
+  isRunning,
+  runDisabled,
+}: RunControlProps) {
   const [runMode, setRunMode] = useState<RunMode>("sim");
   const [menuOpen, setMenuOpen] = useState(false);
   // The menu portals to `document.body` (see below) so the sidebar's
@@ -36,6 +44,9 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
   const sweeping = useSweepRunStore((s) => s.sweeping);
   const progress = useSweepRunStore((s) => s.progress);
   const runSweepJob = useSweepRunStore((s) => s.run);
+  const stopSweepJob = useSweepRunStore((s) => s.stop);
+  const simPhase = useSimulationRunPhase();
+  const sweepPhase = useSweepRunPhase();
   const appliedDefault = useRef(false);
   const appliedAutorun = useRef(false);
   const scenarioRevision = useScenarioStore((s) => s.revision);
@@ -139,24 +150,52 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
     onRunSimulation,
   ]);
 
+  // Which phase governs the primary button depends on which action it
+  // currently performs -- "sweep" mode tracks the sweep job, "sim"/
+  // "force_sim" track the plain single-run store, regardless of which one
+  // is actually in flight (the two are mutually exclusive by the disabled
+  // guards below).
+  const phase = effectiveMode === "sweep" ? sweepPhase : simPhase;
+
   const primaryLabel =
     effectiveMode === "sweep"
-      ? sweeping
-        ? `Sweeping… ${progress.current}/${progress.total}`
-        : `Run Sweep (${nScenarios} scenarios)`
-      : effectiveMode === "force_sim"
-        ? isRunning
-          ? "Running…"
-          : "Force Run"
-        : isRunning
-          ? "Running…"
-          : "Run Simulation (Ctrl+Enter)";
+      ? phase === "idle"
+        ? `Run Sweep (${nScenarios} scenarios)`
+        : phase === "stopping"
+          ? "Stopping Sweep…"
+          : `Stop Sweep (${progress.current}/${progress.total})`
+      : phase === "idle"
+        ? effectiveMode === "force_sim"
+          ? "Force Run"
+          : "Run Simulation (Ctrl+Enter)"
+        : phase === "stopping"
+          ? "Stopping Simulation…"
+          : "Stop Simulation";
+
+  // Stopping is cooperative and can only take effect at the next checkpoint
+  // (a stage boundary for a single run, a scenario boundary for a sweep) --
+  // this doesn't change the disabled state (the button already shows
+  // "Stopping…" and is inert), it just explains the wait instead of letting
+  // it read as a hang.
+  const primaryTitle = phase === "stopping" ? "Will stop at the next checkpoint" : undefined;
 
   const primaryDisabled =
-    effectiveMode === "sweep" ? sweeping || isRunning || !canSweep : runDisabled;
-  const variant = primaryDisabled ? "muted" : "success";
+    phase === "stopping"
+      ? true
+      : phase === "running"
+        ? false
+        : effectiveMode === "sweep"
+          ? sweeping || isRunning || !canSweep
+          : runDisabled;
+  const variant =
+    phase === "stopping" ? "warning" : phase === "running" ? "destructive" : primaryDisabled ? "muted" : "success";
 
   const onPrimary = () => {
+    if (phase === "running") {
+      if (effectiveMode === "sweep") stopSweepJob();
+      else onStopSimulation();
+      return;
+    }
     if (effectiveMode === "sweep") handleRunSweep();
     else {
       // Ctrl+Enter (see AppShell's keydown handler) always runs the plain
@@ -174,6 +213,7 @@ export function RunControl({ onRunSimulation, isRunning, runDisabled }: RunContr
           id="run-primary"
           onClick={onPrimary}
           disabled={primaryDisabled}
+          title={primaryTitle}
           variant={variant}
           className="flex-1 rounded-r-none"
         >

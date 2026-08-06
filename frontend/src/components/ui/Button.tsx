@@ -7,6 +7,7 @@ type ButtonVariant =
   | "secondary"
   | "destructive"
   | "success"
+  | "warning"
   | "muted"
   | "ghost"
   | "link"
@@ -27,6 +28,10 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary: "bg-secondary text-secondary-foreground hover:opacity-80",
   destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
   success: "bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700",
+  // "In progress and winding down" (e.g. Stopping…) — distinct from `muted`,
+  // which means "nothing to do right now"; collapsing the two would make an
+  // in-flight stop look identical to an inert button.
+  warning: "bg-amber-600 text-white hover:bg-amber-700 dark:bg-amber-600 dark:hover:bg-amber-700",
   muted:
     "border border-border bg-muted text-foreground hover:bg-accent hover:shadow-sm dark:hover:bg-white/10 dark:hover:border-white/20 dark:hover:shadow-md",
   ghost: "bg-transparent text-foreground hover:bg-accent",

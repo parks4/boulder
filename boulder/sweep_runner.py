@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import copy
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Type
@@ -169,6 +170,7 @@ def solve_scenario(
     converter_cls: Optional[Type[Any]] = None,
     progress_cb: Optional[Callable[[Any], None]] = None,
     poll_interval: float = 0.05,
+    stop_event: Optional[threading.Event] = None,
 ) -> Tuple[Dict[str, Any], str, DualCanteraConverter]:
     """Solve one normalized scenario config → (gui_payload, mechanism, converter).
 
@@ -198,6 +200,13 @@ def solve_scenario(
     passes nothing. The solved ``converter`` is returned (not discarded) so
     callers can build a :class:`~boulder.simulation_result.SimulationResult`
     from it or hand it to cache contributors — see :func:`run`'s ``on_solved``.
+
+    ``stop_event``, when set mid-poll, requests that this scenario's solve
+    stop -- the same :class:`~boulder.simulation_worker.SimulationWorker`
+    cooperative-cancellation mechanism a plain "Run Simulation" uses (see
+    ``SimulationWorker.stop_simulation``), not a second cancellation design.
+    Raises, same as a genuine solve failure: the caller (the GUI sweep route)
+    distinguishes the two by checking whether it itself requested the stop.
     """
     from .simulation_worker import SimulationWorker  # noqa: PLC0415 — cycle
 
@@ -213,6 +222,9 @@ def solve_scenario(
         progress = worker.get_progress()
         if progress_cb is not None:
             progress_cb(progress)
+        if stop_event is not None and stop_event.is_set():
+            worker.stop_simulation()
+            break
         if progress.is_complete or progress.error_message:
             break
         time.sleep(poll_interval)

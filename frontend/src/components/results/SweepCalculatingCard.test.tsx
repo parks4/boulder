@@ -69,4 +69,17 @@ describe("SweepCalculatingCard", () => {
     // Only the headline paragraph — no empty second line taking up space.
     expect(container.querySelectorAll("p")).toHaveLength(1);
   });
+
+  it("shows a 'Stopping —' headline once stopping is set", () => {
+    render(
+      <SweepCalculatingCard
+        scenarioId="cold_feed"
+        stage={{ stage: 1, stageTotal: 3 }}
+        stopping
+      />,
+    );
+
+    expect(screen.getByText(/Stopping — "cold_feed"…/)).toBeInTheDocument();
+    expect(screen.queryByText(/Calculating "cold_feed"…/)).not.toBeInTheDocument();
+  });
 });

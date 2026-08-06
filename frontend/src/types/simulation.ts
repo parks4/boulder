@@ -63,6 +63,13 @@ export interface ConnectionReport {
 export interface SimulationProgress {
   is_running: boolean;
   is_complete: boolean;
+  /**
+   * A stop was requested (DELETE /api/simulations/{id}) but the solve
+   * thread hasn't exited yet — cooperative, so it can lag the request by up
+   * to one stage. "Stopped" is derived, not a separate flag:
+   * `is_stopping && !is_running`.
+   */
+  is_stopping?: boolean;
   error_message?: string | null;
   /** Staged-solver build counters — updated after each stage completes. */
   stages_done?: number;

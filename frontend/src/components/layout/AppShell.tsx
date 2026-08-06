@@ -160,7 +160,12 @@ export function AppShell() {
 
   // Keyboard shortcut: Ctrl+Enter
   const handleRunSimulation = useCallback(async () => {
-    if (isRunning || config.nodes.length === 0) return;
+    // `sweeping`: a plain run and a sweep share the same solve path and must
+    // not overlap (see SimulateCard.tsx's runDisabled for the click-path
+    // equivalent of this guard).
+    if (isRunning || useSweepRunStore.getState().sweeping || config.nodes.length === 0) {
+      return;
+    }
     beginSimulationRun();
     try {
       const resp = await startSimulation(config);
@@ -172,7 +177,9 @@ export function AppShell() {
     }
   }, [isRunning, config, beginSimulationRun, setStarted, setError]);
 
-  // Ctrl+Enter runs the simulation from anywhere in the app.
+  // Ctrl+Enter runs the simulation from anywhere in the app. Deliberately
+  // stays a no-op while busy rather than becoming a stop shortcut — too easy
+  // to fire by reflex; Stop is a click-only action (see RunControl.tsx).
   useEffect(() => {
     function handler(e: KeyboardEvent) {
       if (e.ctrlKey && e.key === "Enter") {

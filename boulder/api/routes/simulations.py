@@ -347,16 +347,22 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
 
 @router.delete("/{sim_id}")
 async def stop_simulation(sim_id: str) -> Dict[str, Any]:
-    """Stop a running simulation and remove it from memory."""
+    """Request that a running simulation stop.
+
+    Cooperative, not immediate: ``worker.stop_simulation()`` returns right
+    away without waiting for the solve thread to actually exit (it used to
+    block the request for up to 5 s). The registry entry is deliberately
+    *not* removed here -- the open SSE stream (or a late ``/results`` poll)
+    still needs to reach it to report the wind-down; it's reaped once the
+    thread has actually exited, by :func:`cleanup_completed_simulations`.
+    """
     entry = _simulations.get(sim_id)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Simulation {sim_id} not found")
 
     worker, _ = entry
     worker.stop_simulation()
-    # Remove the worker from the dictionary to free memory
-    del _simulations[sim_id]
-    return {"stopped": True, "simulation_id": sim_id}
+    return {"stopping": True, "simulation_id": sim_id}
 
 
 @router.post("/check-cache")
@@ -511,8 +517,12 @@ async def cleanup_completed_simulations(
 
     for sim_id, (worker, created_at) in _simulations.items():
         progress = worker.get_progress()
-        # Only clean up if completed or errored
-        if progress.is_complete or progress.error_message:
+        # Only clean up a simulation that has actually reached a terminal
+        # state: completed, errored, or stopped (is_stopping and no longer
+        # running -- not just "not running", which a worker whose thread
+        # hasn't started yet would also match).
+        stopped = progress.is_stopping and not progress.is_running
+        if progress.is_complete or progress.error_message or stopped:
             # Check age if specified
             if max_age_seconds is None or (current_time - created_at) > max_age_seconds:
                 to_remove.append(sim_id)

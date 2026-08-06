@@ -16,6 +16,9 @@ interface SimulationState {
   updateProgress: (progress: SimulationProgress) => void;
   setResults: (results: SimulationResults) => void;
   setError: (error: string) => void;
+  /** The SSE stream's terminal "stopped" event: the solve thread has exited
+   * after a stop request, with no completion and no error. */
+  stopped: () => void;
   clearResults: () => void;
   setPythonCode: (code: string) => void;
 }
@@ -58,6 +61,8 @@ export const useSimulationStore = create<SimulationState>((set) => ({
     }),
 
   setError: (error) => set({ isRunning: false, error }),
+
+  stopped: () => set({ isRunning: false }),
 
   clearResults: () =>
     set({

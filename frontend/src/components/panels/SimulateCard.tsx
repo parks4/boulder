@@ -4,8 +4,9 @@ import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSolverStore } from "@/stores/solverStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { useSweepRunStore } from "@/stores/sweepStore";
 import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
-import { startSimulation } from "@/api/simulations";
+import { startSimulation, stopSimulation } from "@/api/simulations";
 import { checkSimulationCache } from "@/api/resultCache";
 import { getSweepInfo } from "@/api/sweep";
 import { Button } from "@/components/ui/Button";
@@ -49,6 +50,7 @@ export function SimulateCard() {
     setError,
     setResults,
   } = useSimulationStore();
+  const sweeping = useSweepRunStore((s) => s.sweeping);
 
   // Steady/Transient mode and its tolerances are edited from the Stage panel
   // (StageCard) — this card only needs to read them to run a simulation.
@@ -168,6 +170,14 @@ export function SimulateCard() {
     }
   }, [config, simTime, timeStep, sendTimeOverride, beginSimulationRun, setStarted, setError, setResults]);
 
+  const handleStop = useCallback(() => {
+    if (!simulationId) return;
+    stopSimulation(simulationId).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Failed to stop: ${msg}`);
+    });
+  }, [simulationId]);
+
   const handleDownloadPy = useCallback(() => {
     if (!pythonCode) return;
     const blob = new Blob([pythonCode], { type: "text/x-python" });
@@ -235,7 +245,9 @@ export function SimulateCard() {
     [config, fileName, simulationId, syncYaml],
   );
 
-  const runDisabled = isRunning || config.nodes.length === 0;
+  // `sweeping` guards against launching a plain run on top of a running
+  // sweep — the two share the same backend solve path and must not overlap.
+  const runDisabled = isRunning || sweeping || config.nodes.length === 0;
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-3">
@@ -243,6 +255,7 @@ export function SimulateCard() {
 
       <RunControl
         onRunSimulation={handleRun}
+        onStopSimulation={handleStop}
         isRunning={isRunning}
         runDisabled={runDisabled}
       />

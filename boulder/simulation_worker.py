@@ -205,6 +205,11 @@ class SimulationProgress:
     is_running: bool = False
     is_complete: bool = False
     error_message: Optional[str] = None
+    #: A stop has been requested (``stop_simulation()`` was called) but the
+    #: worker thread hasn't exited yet -- cooperative, so it can lag behind
+    #: the request by up to one stage. "Stopped" (as opposed to "stopping")
+    #: is derived, not tracked separately: ``is_stopping and not is_running``.
+    is_stopping: bool = False
 
     # Timing information
     start_time: Optional[float] = None
@@ -294,16 +299,23 @@ class SimulationWorker:
         logger.info("Background simulation started")
 
     def stop_simulation(self) -> None:
-        """Stop the current simulation."""
-        self._stop_event.set()
-        if self._worker_thread:
-            self._worker_thread.join(timeout=5.0)
-            if self._worker_thread.is_alive():
-                logger.warning("Worker thread did not stop gracefully")
+        """Request that the current simulation stop, without blocking.
 
+        Cooperative, not immediate: it sets the flag ``_run_simulation``'s
+        cancellation checkpoints (via ``cancel_token``) and its own finalize
+        guard check, then returns right away. The caller learns the worker
+        thread actually exited from ``is_running`` turning ``False`` in a
+        later :meth:`get_progress` poll -- never by blocking here, which used
+        to stall the FastAPI event loop for up to 5 s per stop request.
+        """
+        self._stop_event.set()
         with self._lock:
-            self.progress.is_running = False
-        logger.info("Simulation stopped")
+            # Only meaningful for a run that's actually in flight -- guards
+            # against a late/duplicate stop request marking an already
+            # finished (or already-stopped) run as "stopping" again.
+            if self.progress.is_running:
+                self.progress.is_stopping = True
+        logger.info("Simulation stop requested")
 
     def get_progress(self) -> SimulationProgress:
         """Get current simulation progress (thread-safe copy)."""
@@ -337,6 +349,7 @@ class SimulationWorker:
                 is_running=self.progress.is_running,
                 is_complete=self.progress.is_complete,
                 error_message=self.progress.error_message,
+                is_stopping=self.progress.is_stopping,
                 start_time=self.progress.start_time,
                 end_time=self.progress.end_time,
                 total_time=self.progress.total_time,
@@ -386,6 +399,13 @@ class SimulationWorker:
                     self.progress.stages_done = n_done
                     self.progress.n_stages = n_total
                     self.progress.completed_stage_ids.append(stage_id)
+
+            # Cooperative-cancellation token: staged_solver/cantera_converter
+            # check this at each stage/transient-step boundary and raise
+            # SolveCancelled if it's set. An attribute, not a build_network
+            # kwarg, so a host converter subclass that overrides build_network
+            # doesn't need to know about it to keep working.
+            converter.cancel_token = self._stop_event
 
             # Build the network first
             network = converter.build_network(
@@ -480,6 +500,26 @@ class SimulationWorker:
                 config=config,
             )
 
+            # Finalize results -- skipped entirely if a stop was requested,
+            # checked once here regardless of whether a SolveCancelled
+            # checkpoint actually fired. A single-stage steady solve has no
+            # checkpoint before this point (see staged_solver.py), so without
+            # this explicit check a stop would silently do nothing for that
+            # common case: the solve would run to completion and this whole
+            # block -- the cache write and is_complete=True -- would fire
+            # anyway. Also covers a SolveCancelled that *did* fire mid-stage
+            # and unwound straight past this point into the except block below.
+            if self._stop_event.is_set():
+                with self._lock:
+                    self.progress.is_running = False
+                    # Set unconditionally here too (not just by
+                    # stop_simulation()): that call and the background thread
+                    # reaching this point race, so is_stopping could otherwise
+                    # still read False for a run that very much did stop.
+                    self.progress.is_stopping = True
+                logger.info("Simulation stopped before finalizing results")
+                return
+
             # Finalize results
             logger.info(f"Simulation completed: {len(results['time'])} time points")
             reactor_reports = generate_reactor_reports(converter, results)
@@ -520,6 +560,17 @@ class SimulationWorker:
                     self.progress.error_message = results.get("error_message")
 
         except Exception as e:
+            if self._stop_event.is_set():
+                # A cancellation checkpoint raised SolveCancelled (or some
+                # other exception surfaced while a stop was in flight) --
+                # either way this is an intentional stop, not a failure: no
+                # error_message, no is_complete.
+                logger.info("Simulation stopped: %s", e)
+                with self._lock:
+                    self.progress.is_running = False
+                    self.progress.is_stopping = True
+                    self.progress.end_time = time.time()
+                return
             logger.error(f"Simulation failed: {e}", exc_info=True)
             with self._lock:
                 self.progress.error_message = str(e)

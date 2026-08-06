@@ -38,6 +38,7 @@ async def simulation_event_stream(
         snapshot: Dict[str, Any] = {
             "is_running": progress.is_running,
             "is_complete": progress.is_complete,
+            "is_stopping": progress.is_stopping,
             "error_message": progress.error_message,
             "stages_done": progress.stages_done,
             "n_stages": progress.n_stages,
@@ -48,6 +49,15 @@ async def simulation_event_stream(
             "connection_reports": progress.connection_reports.copy(),
             "total_time": progress.total_time,
         }
+
+        # A stopped run: is_stopping was set by stop_simulation() and the
+        # solve thread has since exited without completing or erroring.
+        # Checked before the error/complete branches below since without a
+        # terminal event of its own here, this state matches neither of
+        # them and the loop would otherwise poll "progress" forever.
+        if progress.is_stopping and not progress.is_running:
+            yield _sse_event("stopped", snapshot)
+            return
 
         if progress.error_message and not progress.is_running:
             yield _sse_event("error", {"message": progress.error_message})

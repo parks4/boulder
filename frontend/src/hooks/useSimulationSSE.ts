@@ -21,7 +21,7 @@ function conservationFailingNodes(data: SimulationResults): string[] {
  */
 export function useSimulationSSE() {
   const sourceRef = useRef<EventSource | null>(null);
-  const { simulationId, isRunning, updateProgress, setResults, setError } =
+  const { simulationId, isRunning, updateProgress, setResults, setError, stopped } =
     useSimulationStore();
 
   useEffect(() => {
@@ -136,8 +136,23 @@ export function useSimulationSSE() {
       source.close();
     });
 
+    // Terminal event for a cooperatively stopped run (see boulder/api/sse.py):
+    // is_running is now false with no is_complete and no error_message, so
+    // without this branch the run would just sit there with isRunning still
+    // true in the store — no overlay to visually hide that the way there
+    // almost accidentally used to be, so a genuinely stuck Stop button.
+    source.addEventListener("stopped", () => {
+      stopped();
+      toast.info("Simulation stopped");
+      source.close();
+    });
+
     source.onerror = () => {
-      // EventSource connection error – simulation may have ended
+      // EventSource connection error (dropped network, server restart, ...).
+      // Previously just closed the stream, leaving isRunning stuck true
+      // forever with no feedback -- now a permanently stuck Stop button
+      // rather than a permanently stuck spinner.
+      setError("Connection to simulation lost");
       source.close();
     };
 
@@ -145,5 +160,5 @@ export function useSimulationSSE() {
       source.close();
       sourceRef.current = null;
     };
-  }, [simulationId, isRunning, updateProgress, setResults, setError]);
+  }, [simulationId, isRunning, updateProgress, setResults, setError, stopped]);
 }
