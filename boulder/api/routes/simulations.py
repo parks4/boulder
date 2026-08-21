@@ -280,9 +280,16 @@ async def start_simulation(
         # worker left with no raw config wrote `BASE` into the default location
         # while a sweep of the same config wrote `BASELINE` into the declared
         # one -- the two paths disagreeing about a store they now share.
+        #
+        # `body.scenarios` (the caller's overlays) must be folded in the same
+        # way (`_merged_raw`) so a GUI-only-authored scenario resolves the
+        # base to BASELINE here too -- `preloaded_raw` alone never carries
+        # one, only a hand-edited YAML `scenarios:` block does.
         # A selected scenario names its own entry, so its result lands under
         # that scenario id instead of overwriting the base entry -- the same
         # naming a sweep gives it.
+        from .sweep import _merged_raw  # noqa: PLC0415 — avoid import cycle
+
         meta = config.get("metadata") or {}
         worker.set_run_identity(
             body.scenario_id if scenario_config is not None else None,
@@ -291,7 +298,7 @@ async def start_simulation(
                 if scenario_config is not None
                 else None
             ),
-            raw_config=getattr(request.app.state, "preloaded_raw", None),
+            raw_config=_merged_raw(request, body.scenarios),
         )
         worker.start_simulation(
             converter,
