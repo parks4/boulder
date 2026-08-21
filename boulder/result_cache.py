@@ -42,6 +42,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -518,16 +519,30 @@ def run_contributors(
     fingerprint: str,
     artifacts_dir: Path,
 ) -> None:
-    """Call each contributor, logging but not re-raising on failure."""
+    """Call each contributor, logging but not re-raising on failure.
+
+    Logged at INFO on both sides of each ``contribute()`` call, with the
+    elapsed time: a contributor runs *after* the solve is already reported
+    complete, and post-processing artifacts (figures, exports) can take longer
+    than the solve itself. Without these two lines that time is a silent gap
+    between one solve's last log record and the next solve's first.
+    """
     for contributor in contributors:
+        logger.info(
+            "Cache contributor %s: writing artifacts for %s ...",
+            contributor.contributor_id,
+            fingerprint[:12],
+        )
+        started = time.perf_counter()
         try:
             contributor.contribute(
                 config, converter, simulation_result, fingerprint, artifacts_dir
             )
-            logger.debug(
-                "Cache contributor %s completed for %s",
+            logger.info(
+                "Cache contributor %s completed for %s in %.1f s",
                 contributor.contributor_id,
                 fingerprint[:12],
+                time.perf_counter() - started,
             )
         except OSError as exc:
             logger.warning(
