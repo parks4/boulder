@@ -4,6 +4,7 @@ import { useConfigStore } from "@/stores/configStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSolverStore } from "@/stores/solverStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
+import { BASELINE_SCENARIO_ID } from "@/api/scenarios";
 import { useSweepRunStore } from "@/stores/sweepStore";
 import { fetchGuiActions, runGuiAction } from "@/api/guiActions";
 import { startSimulation, stopSimulation } from "@/api/simulations";
@@ -124,6 +125,16 @@ export function SimulateCard() {
       return;
     }
 
+    // Run what the Scenario pane has selected, not the baseline. The server
+    // resolves the id against these overlays exactly as Run Sweep does; a
+    // null/BASELINE selection keeps solving the config held here (the only
+    // one carrying this session's base-network edits).
+    const { activeId, overlays } = useScenarioStore.getState();
+    const scenario =
+      activeId && activeId !== BASELINE_SCENARIO_ID
+        ? { id: activeId, overlays: overlays as Record<string, unknown> }
+        : undefined;
+
     // Check whether a cached result already exists for the current config.
     // This avoids re-running the full simulation when nothing has changed.
     // Transient runs pass their time/step overrides so the server-side
@@ -141,6 +152,7 @@ export function SimulateCard() {
           mechStr,
           sendTimeOverride ? parseFloat(simTime) : undefined,
           sendTimeOverride ? parseFloat(timeStep) : undefined,
+          scenario,
         );
         if (cacheResp.cached) {
           setResults(cacheResp.result);
@@ -161,6 +173,7 @@ export function SimulateCard() {
         config,
         sendTimeOverride ? parseFloat(simTime) : undefined,
         sendTimeOverride ? parseFloat(timeStep) : undefined,
+        scenario,
       );
       setStarted(resp.simulation_id);
     } catch (err) {

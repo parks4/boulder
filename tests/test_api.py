@@ -830,3 +830,142 @@ class TestStaticFrontend:
             resp = await client.get("/assets/SankeyTab-stalehash.js")
         assert resp.status_code == 404
         assert "text/html" not in resp.headers.get("content-type", "")
+
+
+# ---------------------------------------------------------------------------
+# Run Simulation on the selected scenario
+# ---------------------------------------------------------------------------
+
+
+class TestRunSelectedScenario:
+    """``POST /api/simulations`` solves ``scenario_id``, not the baseline."""
+
+    _RAW = {
+        "metadata": {},
+        "phases": {"gas": {"mechanism": "gri30.yaml"}},
+        "settings": {"end_time": 1.0, "dt": 0.1},
+        "nodes": [
+            {
+                "id": "r",
+                "type": "IdealGasReactor",
+                "properties": {"temperature": 300.0},
+            }
+        ],
+        "connections": [],
+    }
+
+    @staticmethod
+    def _stub(monkeypatch, captured):
+        class DummyConverter:
+            def __init__(self, mechanism: str):
+                self.mechanism = mechanism
+
+        class DummyWorker:
+            def set_run_identity(self, scenario_id, **kwargs):
+                captured["scenario_id"] = scenario_id
+                captured["label"] = kwargs.get("label")
+
+            def start_simulation(self, converter, config, *_args, **_kwargs):
+                captured["config"] = config
+
+        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
+        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
+
+    @staticmethod
+    def _temperature(config):
+        return config["nodes"][0]["properties"]["temperature"]
+
+    @pytest.mark.asyncio
+    async def test_selected_scenario_overrides_the_base_config(self, monkeypatch):
+        simulation_routes._simulations.clear()
+        captured: dict = {}
+        self._stub(monkeypatch, captured)
+
+        app = create_app()
+        app.state.preloaded_raw = dict(self._RAW)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/simulations",
+                json={
+                    # The config the GUI holds is the *baseline* one -- if the
+                    # route used it, the override below would be ignored.
+                    "config": {"nodes": [], "connections": []},
+                    "scenario_id": "hot",
+                    "scenarios": {
+                        "hot": {
+                            "metadata": {"scenario_name": "Hot feed"},
+                            "nodes": [
+                                {"id": "r", "properties": {"temperature": 900.0}}
+                            ],
+                        }
+                    },
+                },
+            )
+
+        assert resp.status_code == 200
+        assert self._temperature(captured["config"]) == 900.0
+        # Named after the scenario, so the result lands in that entry rather
+        # than overwriting the baseline's.
+        assert captured["scenario_id"] == "hot"
+        assert captured["label"] == "Hot feed"
+        simulation_routes._simulations.clear()
+
+    @pytest.mark.asyncio
+    async def test_baseline_and_no_selection_keep_the_submitted_config(
+        self, monkeypatch
+    ):
+        """Only the submitted config carries this session's base-network edits."""
+        simulation_routes._simulations.clear()
+        captured: dict = {}
+        self._stub(monkeypatch, captured)
+
+        edited = {
+            "nodes": [
+                {
+                    "id": "r",
+                    "type": "IdealGasReactor",
+                    "properties": {"temperature": 500.0},
+                }
+            ],
+            "connections": [],
+            "settings": {"end_time": 1.0, "dt": 0.1},
+        }
+        app = create_app()
+        app.state.preloaded_raw = dict(self._RAW)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            for scenario_id in ("BASELINE", None):
+                resp = await client.post(
+                    "/api/simulations",
+                    json={"config": edited, "scenario_id": scenario_id},
+                )
+                assert resp.status_code == 200
+                assert self._temperature(captured["config"]) == 500.0
+                assert captured["scenario_id"] is None
+
+        simulation_routes._simulations.clear()
+
+    @pytest.mark.asyncio
+    async def test_unknown_scenario_is_a_404(self, monkeypatch):
+        simulation_routes._simulations.clear()
+        self._stub(monkeypatch, {})
+
+        app = create_app()
+        app.state.preloaded_raw = dict(self._RAW)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/simulations",
+                json={
+                    "config": {"nodes": [], "connections": []},
+                    "scenario_id": "nope",
+                    "scenarios": {"hot": {}},
+                },
+            )
+
+        assert resp.status_code == 404
+        simulation_routes._simulations.clear()

@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...cantera_converter import DualCanteraConverter
 from ...config import TRANSIENT_SOLVER_KINDS, synthesize_default_group
@@ -67,6 +67,41 @@ class StartSimulationRequest(BaseModel):
     mechanism: Optional[str] = None
     simulation_time: Optional[float] = None
     time_step: Optional[float] = None
+    #: Run-set entry to solve *instead of* ``config``: the scenario selected in
+    #: the GUI. ``None`` (or ``BASELINE``) keeps solving the submitted config,
+    #: which is the only config carrying this session's base-network edits.
+    scenario_id: Optional[str] = None
+    #: The caller's in-memory scenario overlays map, as ``POST /api/sweep/run``
+    #: takes it -- ``scenario_id`` is resolved against these.
+    scenarios: Dict[str, Any] = Field(default_factory=dict)
+
+
+def _scenario_config(
+    request: Request, body: StartSimulationRequest
+) -> Optional[Dict[str, Any]]:
+    """Return the normalized config for ``body.scenario_id`` (``None`` if unset).
+
+    Resolved through the same expansion Run Sweep uses (base snapshot ⊕ the
+    caller's overlays → :func:`boulder.runset.expand_scenarios`), so running
+    one selected scenario on its own and running it inside a sweep solve the
+    same config. BASELINE is deliberately *not* diverted: it is the submitted
+    config, the only one carrying this session's base-network edits.
+    """
+    from ...runset import BASELINE_SCENARIO_ID, expand_scenarios
+
+    if not body.scenario_id or body.scenario_id == BASELINE_SCENARIO_ID:
+        return None
+
+    from ...cantera_converter import get_plugins
+    from ...config import normalize_config
+    from .sweep import _merged_raw
+
+    for sid, cfg in expand_scenarios(_merged_raw(request, body.scenarios)):
+        if sid == body.scenario_id:
+            return normalize_config(copy.deepcopy(cfg), plugins=get_plugins())
+    raise HTTPException(
+        status_code=404, detail=f"Unknown scenario {body.scenario_id!r}"
+    )
 
 
 def _require_positive(value: float, name: str) -> None:
@@ -198,7 +233,8 @@ async def start_simulation(
     #
     # synthesize_default_group IS idempotent: it only adds a "default" group
     # when none exists, which build_network requires.
-    config: Dict[str, Any] = dict(body.config)
+    scenario_config = _scenario_config(request, body)
+    config: Dict[str, Any] = scenario_config or dict(body.config)
     synthesize_default_group(config)
 
     # Determine mechanism
@@ -244,8 +280,18 @@ async def start_simulation(
         # worker left with no raw config wrote `BASE` into the default location
         # while a sweep of the same config wrote `BASELINE` into the declared
         # one -- the two paths disagreeing about a store they now share.
+        # A selected scenario names its own entry, so its result lands under
+        # that scenario id instead of overwriting the base entry -- the same
+        # naming a sweep gives it.
+        meta = config.get("metadata") or {}
         worker.set_run_identity(
-            None, raw_config=getattr(request.app.state, "preloaded_raw", None)
+            body.scenario_id if scenario_config is not None else None,
+            label=(
+                str(meta.get("scenario_name") or body.scenario_id)
+                if scenario_config is not None
+                else None
+            ),
+            raw_config=getattr(request.app.state, "preloaded_raw", None),
         )
         worker.start_simulation(
             converter,
@@ -387,7 +433,9 @@ async def check_simulation_cache(
 
     # Normalize exactly like a run would (transient re-runs included).
     config = normalize_config_for_fingerprint(
-        body.config, body.simulation_time, body.time_step
+        _scenario_config(request, body) or body.config,
+        body.simulation_time,
+        body.time_step,
     )
     converter_cls = getattr(request.app.state, "converter_class", None)
     mechanism = resolve_mechanism_for_fingerprint(
