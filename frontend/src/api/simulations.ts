@@ -6,14 +6,25 @@ interface StartResponse {
   simulation_id: string;
 }
 
+/**
+ * Start a run. When *scenario* is given, the server solves that run-set entry
+ * (base config ⊕ *scenario.overlays*) instead of *config* — the same
+ * expansion Run Sweep uses — and stores the result under that scenario id.
+ * BASELINE is passed as-is and keeps solving *config*.
+ */
 export function startSimulation(
   config: NormalizedConfig,
   simulationTime?: number,
   timeStep?: number,
+  scenario?: { id: string; overlays: Record<string, unknown> },
 ) {
   const body: Record<string, unknown> = { config };
   if (simulationTime !== undefined) body.simulation_time = simulationTime;
   if (timeStep !== undefined) body.time_step = timeStep;
+  if (scenario) {
+    body.scenario_id = scenario.id;
+    body.scenarios = scenario.overlays;
+  }
   return apiFetch<StartResponse>("/simulations", {
     method: "POST",
     body: JSON.stringify(body),

@@ -40,6 +40,7 @@ export function checkSimulationCache(
   mechanism?: string | null,
   simulationTime?: number,
   timeStep?: number,
+  scenario?: { id: string; overlays: Record<string, unknown> },
 ): Promise<CacheCheckResponse> {
   return apiFetch<CacheCheckResponse>("/simulations/check-cache", {
     method: "POST",
@@ -52,6 +53,11 @@ export function checkSimulationCache(
       // matches what the worker saved.
       simulation_time: simulationTime ?? null,
       time_step: timeStep ?? null,
+      // Same scenario selection the run itself sends (see startSimulation) —
+      // otherwise this looks up the base config's fingerprint and hands back
+      // the baseline result for a selected scenario.
+      scenario_id: scenario?.id ?? null,
+      scenarios: scenario?.overlays ?? {},
     }),
   });
 }
