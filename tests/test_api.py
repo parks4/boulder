@@ -379,6 +379,57 @@ class TestSimulationRoutes:
         simulation_routes._simulations.clear()
 
     @pytest.mark.asyncio
+    async def test_start_simulation_names_the_base_BASELINE_for_gui_authored_scenarios(
+        self, monkeypatch
+    ):
+        """Assert a plain run resolves the base entry to BASELINE for GUI scenarios.
+
+        A scenario authored only in the GUI (never written into the YAML's
+        `scenarios:` block) must still make the plain run's base entry resolve
+        to BASELINE, matching what Run Sweep of the same overlays would name it.
+
+        Regression for the phantom-`BASE`-row bug re-appearing via
+        `body.scenarios` (the in-memory overlay map) instead of a hand-edited
+        YAML `scenarios:` block — see boulder.runset.base_entry_id.
+        """
+        from boulder.runset import BASELINE_SCENARIO_ID, base_entry_id
+
+        simulation_routes._simulations.clear()
+        captured: dict = {}
+
+        class DummyConverter:
+            def __init__(self, mechanism: str):
+                self.mechanism = mechanism
+
+        class DummyWorker:
+            def set_run_identity(self, scenario_id, **kwargs):
+                captured["scenario_id"] = scenario_id
+                captured["raw_config"] = kwargs.get("raw_config")
+
+            def start_simulation(self, *args, **kwargs):
+                pass
+
+        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
+        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
+
+        config = {"nodes": [], "connections": [], "settings": {}}
+        payload = {
+            "config": config,
+            # No scenario_id: this is the base ("Run Simulation" / BASELINE
+            # row), the same request shape the frontend sends when the pane's
+            # active selection is BASELINE.
+            "scenarios": {"hot": {}},
+        }
+        async with _make_client() as client:
+            resp = await client.post("/api/simulations", json=payload)
+
+        assert resp.status_code == 200
+        assert captured["scenario_id"] is None
+        assert base_entry_id(captured["raw_config"]) == BASELINE_SCENARIO_ID
+
+        simulation_routes._simulations.clear()
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("invalid_time_step", [0.0, -1.0])
     async def test_start_simulation_rejects_non_positive_time_step(
         self, monkeypatch, invalid_time_step: float

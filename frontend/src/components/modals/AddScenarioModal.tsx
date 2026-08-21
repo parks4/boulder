@@ -76,7 +76,7 @@ export function AddScenarioModal({ open, onClose, onCreated }: Props) {
             id="scenario-id"
             value={id}
             onChange={(e) => setId(e.target.value)}
-            placeholder="e.g. C1T"
+            placeholder="e.g. High_P"
             className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input border border-border text-foreground"
             autoFocus
             onKeyDown={(e) => {
@@ -91,7 +91,7 @@ export function AddScenarioModal({ open, onClose, onCreated }: Props) {
             id="scenario-description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="e.g. Case 1 max: H2-NG (25 %vol H2)"
+            placeholder="e.g. High Pressure Version"
             className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input border border-border text-foreground"
             onKeyDown={(e) => {
               if (e.key === "Enter") void handleSubmit();
