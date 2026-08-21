@@ -419,12 +419,19 @@ class SimulationWorker:
 
             # Capture the full nodes + connections lists after post-build hooks
             # and the staged solver have run.  Both may grow during the build
-            # (e.g. interface-reservoir nodes, programmatic edges) so the client
+            # (e.g. stream-point reservoirs, programmatic edges) so the client
             # receives a single source of truth for the visual graph.
+            #
+            # Read them off the converter, not off the local ``config``:
+            # ``build_network`` deep-copies the config it is handed so a
+            # caller's dict is never corrupted, and it is that copy the staged
+            # solver enriches with stream-point nodes and their converged
+            # thermo (T, P, mdot, h_mass). This local dict never sees them.
+            post_config = getattr(converter, "_last_config", None) or config
             with self._lock:
-                self.progress.updated_nodes = list(config.get("nodes") or [])
+                self.progress.updated_nodes = list(post_config.get("nodes") or [])
                 self.progress.updated_connections = list(
-                    config.get("connections") or []
+                    post_config.get("connections") or []
                 )
 
             # Track last logged % for verbose throttle (log at 0, 25, 50, 75, 100)
