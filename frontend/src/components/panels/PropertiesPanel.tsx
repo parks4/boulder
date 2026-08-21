@@ -419,19 +419,14 @@ export function PropertiesPanel() {
             {kindDoc?.doc_url && (
               <Tooltip
                 content={
-                  <span className="block space-y-1">
-                    {kindDoc.description && (
-                      <span className="block">{kindDoc.description}</span>
-                    )}
-                    <a
-                      href={kindDoc.doc_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline text-primary"
-                    >
-                      Docs
-                    </a>
-                  </span>
+                  <a
+                    href={kindDoc.doc_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline text-primary"
+                  >
+                    Docs
+                  </a>
                 }
               >
                 <span
