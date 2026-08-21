@@ -46,11 +46,44 @@ network:
 """
 
 
-def _client_with_config(tmp_path: Path):
+# Two stages, so `scenario_progress` has something to count: `groups` comes out
+# of validation in topological (== solve) order, which is what tells the route
+# which stage is running -- the first one not yet completed.
+_TWO_STAGE_YAML = """
+metadata:
+  description: "two-stage test config"
+phases:
+  gas:
+    mechanism: gri30.yaml
+stages:
+  first:
+    mechanism: gri30.yaml
+    solver: advance_to_steady_state
+  second:
+    mechanism: gri30.yaml
+    solver: advance_to_steady_state
+
+first:
+  - id: feed
+    Reservoir:
+      temperature: 298.15
+      pressure: 101325
+      composition: "CH4:1"
+
+second:
+  - id: feed2
+    Reservoir:
+      temperature: 298.15
+      pressure: 101325
+      composition: "CH4:1"
+"""
+
+
+def _client_with_config(tmp_path: Path, yaml_text: str = _CONFIG_YAML):
     from boulder.runner import BoulderRunner
 
     cfg = tmp_path / "config.yaml"
-    cfg.write_text(_CONFIG_YAML, encoding="utf-8")
+    cfg.write_text(yaml_text, encoding="utf-8")
 
     app = create_app()
     client = TestClient(app)
@@ -97,7 +130,7 @@ def test_scenario_progress_tracks_stage_then_moves_to_the_next_scenario(
     A fresh scenario starts with no stage info of its own -- BASELINE (the
     unmodified base config) always solves first, then each named scenario.
     """
-    client, app = _client_with_config(tmp_path)
+    client, app = _client_with_config(tmp_path, _TWO_STAGE_YAML)
     workers: List[_FakeWorker] = []
 
     def _factory() -> _FakeWorker:
@@ -111,26 +144,32 @@ def test_scenario_progress_tracks_stage_then_moves_to_the_next_scenario(
             assert resp.status_code == 200, resp.text
 
             _wait_until(lambda: len(workers) >= 1)
+            # Stage "first" is done, so stage 2 of 2 ("second") is the one now
+            # solving -- what both the spinner headline and the tinted stage box
+            # mean by "stage". Reporting the *finished* stage here made the
+            # headline read "Stage 1/2" while the solver log line right
+            # underneath already announced stage 2/2.
             workers[0].progress = SimulationProgress(
-                stages_done=1, n_stages=2, completed_stage_ids=["default"]
+                stages_done=1, n_stages=2, completed_stage_ids=["first"]
             )
             _wait_until(
                 lambda: app.state.sweep_job.get("scenario_progress", {})
                 .get("BASELINE", {})
                 .get("stage")
-                == 1
+                == 2
             )
             assert app.state.sweep_job["scenario_progress"] == {
-                "BASELINE": {"stage": 1, "stage_total": 2, "stage_id": "default"}
+                "BASELINE": {"stage": 2, "stage_total": 2, "stage_id": "second"}
             }
 
             # BASELINE finishes -- the sweep moves on to "a".
             workers[0].progress = SimulationProgress(is_complete=True)
             _wait_until(lambda: len(workers) >= 2)
             _wait_until(lambda: app.state.sweep_job.get("current") == 2)
-            # "a"'s freshly constructed worker hasn't reported a stage yet.
+            # "a"'s freshly constructed worker hasn't reported stage counts
+            # yet -- but its first stage is already the one solving.
             assert app.state.sweep_job["scenario_progress"] == {
-                "a": {"stage": None, "stage_total": None, "stage_id": None}
+                "a": {"stage": None, "stage_total": None, "stage_id": "first"}
             }
 
             workers[1].progress = SimulationProgress(is_complete=True)
@@ -219,8 +258,10 @@ def test_scenario_progress_clears_if_a_scenario_errors_mid_solve(
                 .get("stage")
                 == 1
             )
+            # The only stage has finished, so no stage id is reported -- there
+            # is nothing left solving for the graph to tint.
             assert app.state.sweep_job["scenario_progress"] == {
-                "BASELINE": {"stage": 1, "stage_total": 1, "stage_id": "default"}
+                "BASELINE": {"stage": 1, "stage_total": 1, "stage_id": None}
             }
 
             workers[0].progress = SimulationProgress(error_message="boom")
