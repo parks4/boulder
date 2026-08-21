@@ -377,8 +377,15 @@ async def sweep_run(
                     continue
 
                 line = f"scenario {i + 1}/{total} ({sid})"
+                # Stage counts are unknown until the solver reports them (see
+                # `_publish` below), but the stage now running is already known:
+                # nothing has completed, so it is the first one.
                 state["scenario_progress"] = {
-                    sid: {"stage": None, "stage_total": None, "stage_id": None}
+                    sid: {
+                        "stage": None,
+                        "stage_total": None,
+                        "stage_id": next(iter(config.get("groups") or {}), None),
+                    }
                 }
                 state["message"] = line
                 state["last_line"] = line
@@ -390,16 +397,31 @@ async def sweep_run(
                 # depend on which button produced it. `progress_cb` is how this
                 # route stays able to publish per-stage progress while the
                 # solve runs.
-                def _publish(progress: Any, _sid: str = sid) -> None:
+                # Both fields describe the stage *currently solving*, not the
+                # last one that finished: `SimulationProgress` counts completed
+                # stages, so the running stage is `stages_done + 1` -- matching
+                # the solver's own "stage 'x' (3/3)" log line shown underneath,
+                # which is 1-based over stages *started*. Its id is the first
+                # stage not yet completed; `config["groups"]` is already in
+                # topological (== solve) order, see `config.py`.
+                def _publish(
+                    progress: Any, _sid: str = sid, _cfg: Any = config
+                ) -> None:
                     if progress.n_stages:
+                        done = set(progress.completed_stage_ids)
                         state["scenario_progress"] = {
                             _sid: {
-                                "stage": progress.stages_done,
+                                "stage": min(
+                                    progress.stages_done + 1, progress.n_stages
+                                ),
                                 "stage_total": progress.n_stages,
-                                "stage_id": (
-                                    progress.completed_stage_ids[-1]
-                                    if progress.completed_stage_ids
-                                    else None
+                                "stage_id": next(
+                                    (
+                                        g
+                                        for g in (_cfg.get("groups") or {})
+                                        if g not in done
+                                    ),
+                                    None,
                                 ),
                             }
                         }
