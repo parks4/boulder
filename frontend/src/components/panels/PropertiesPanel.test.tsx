@@ -466,7 +466,6 @@ describe("PropertiesPanel Cantera doc-link tooltip", () => {
       "href",
       "https://cantera.org/stable/python/zerodim.html#cantera.IdealGasReactor",
     );
-    expect(screen.getByText("Ideal-gas, constant-volume reactor.")).toBeInTheDocument();
   });
 
   it("shows a Cantera doc link for a selected connection kind on hover", () => {

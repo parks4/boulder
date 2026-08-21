@@ -55,7 +55,7 @@ export function Tooltip({ content, children, className }: TooltipProps) {
         <span
           id={id}
           role="tooltip"
-          className="absolute bottom-full left-1/2 z-30 mb-1.5 w-max max-w-xs -translate-x-1/2 rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-lg"
+          className="absolute bottom-full left-1/2 z-30 mb-1.5 w-max max-w-xs -translate-x-1/2 rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-lg after:absolute after:left-0 after:top-full after:h-1.5 after:w-full after:content-['']"
         >
           {content}
         </span>

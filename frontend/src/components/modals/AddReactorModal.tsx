@@ -124,17 +124,14 @@ export function AddReactorModal({ open, onClose, defaultGroup }: Props) {
             {selectedDoc?.doc_url && (
               <Tooltip
                 content={
-                  <span className="block space-y-1">
-                    <span className="block">{selectedDoc.description}</span>
-                    <a
-                      href={selectedDoc.doc_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline text-primary"
-                    >
-                      Docs
-                    </a>
-                  </span>
+                  <a
+                    href={selectedDoc.doc_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline text-primary"
+                  >
+                    Docs
+                  </a>
                 }
               >
                 <span
