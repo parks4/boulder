@@ -1,6 +1,9 @@
 """Boulder - A Cantera ReactorNet Visualization Tool."""
 
-__version__ = "0.5.0"
+try:
+    from .version import __version__
+except ImportError:
+    __version__ = "0.0.0+unknown"
 
 from .lagrangian import LagrangianTrajectory
 from .runner import BoulderRunner
