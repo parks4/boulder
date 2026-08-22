@@ -43,10 +43,10 @@ export function NetworkCard({ onEditYaml }: Props) {
       try {
         const resp = await uploadConfigFile(file);
         setConfig(resp.config, resp.filename, resp.yaml);
-        // The backend may have just adopted this upload as its preloaded
-        // config (if none was set yet) — bump scenarioRevision so RunControl
-        // re-checks Run Sweep availability instead of showing stale info.
-        void useScenarioStore.getState().refresh();
+        // A whole new network was just adopted server-side — drop this
+        // session's scenario overlays (they belonged to the previous file)
+        // and re-seed from the new config's own `scenarios:` block.
+        void useScenarioStore.getState().resetForNewConfig();
         toast.success(`Config uploaded: ${resp.filename}`);
       } catch (err) {
         toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);

@@ -81,6 +81,13 @@ interface ScenarioState {
 
   /** Fetch the scenario list for the active store (no-op-safe if none). */
   refresh: () => Promise<void>;
+  /**
+   * Drop this session's authored overlays and re-seed from the server's
+   * `authored_overlays` on the next `refresh()` -- for when the base config
+   * itself was just replaced wholesale (upload / preloaded-config swap), so
+   * the previous config's scenarios stop lingering in the pane.
+   */
+  resetForNewConfig: () => Promise<void>;
   /** Load a scenario's trajectory and push it into the simulation results. */
   setActive: (id: string) => Promise<void>;
   /**
@@ -166,6 +173,20 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
         revision: s.revision + 1,
       }));
     }
+  },
+
+  resetForNewConfig: async () => {
+    set({
+      overlays: {},
+      overlaysSeeded: false,
+      authoredIds: [],
+      activeId: null,
+      previewId: null,
+      previewNodes: null,
+      previewConnections: null,
+      previewError: null,
+    });
+    await get().refresh();
   },
 
   applyOverlays: (overlays) => {
