@@ -21,12 +21,12 @@ vi.mock("@/stores/configStore", () => ({
     selector({ setConfig: mockSetConfig, fileName: mockFileName }),
 }));
 
-const mockScenarioRefresh = vi.fn();
+const mockResetForNewConfig = vi.fn();
 vi.mock("@/stores/scenarioStore", () => {
   const useScenarioStore = (selector: (s: { activeId: string | null }) => unknown) =>
     selector({ activeId: mockActiveId });
   (useScenarioStore as unknown as { getState: () => unknown }).getState = () => ({
-    refresh: mockScenarioRefresh,
+    resetForNewConfig: mockResetForNewConfig,
   });
   return { useScenarioStore };
 });
@@ -92,7 +92,7 @@ describe("NetworkCard", () => {
     expect(onEditYaml).not.toHaveBeenCalled();
   });
 
-  it("nudges RunControl to re-check Run Sweep availability after an upload", async () => {
+  it("resets the scenario store to the new config's own scenarios after an upload", async () => {
     mockUploadConfigFile.mockResolvedValue({
       config: { nodes: [], connections: [] },
       filename: "uploaded.yaml",
@@ -105,6 +105,6 @@ describe("NetworkCard", () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(mockSetConfig).toHaveBeenCalledOnce());
-    expect(mockScenarioRefresh).toHaveBeenCalledOnce();
+    expect(mockResetForNewConfig).toHaveBeenCalledOnce();
   });
 });

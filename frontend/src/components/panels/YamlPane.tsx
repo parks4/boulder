@@ -106,10 +106,10 @@ export function YamlPane() {
       setConfig(resp.config, undefined, value);
       justSavedRef.current = true;
       setBaseline(value);
-      // The backend may have just adopted this Save as its preloaded config
-      // (if none was set yet) — bump scenarioRevision so RunControl re-checks
-      // Run Sweep availability instead of showing stale info.
-      void useScenarioStore.getState().refresh();
+      // The full base config was just replaced — drop this session's
+      // scenario overlays (they belonged to the previous YAML) and re-seed
+      // from the new config's own `scenarios:` block.
+      void useScenarioStore.getState().resetForNewConfig();
       toast.success("YAML config updated");
     } catch (err) {
       toast.error(`Invalid YAML: ${err instanceof Error ? err.message : String(err)}`);

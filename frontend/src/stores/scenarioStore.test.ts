@@ -119,6 +119,32 @@ describe("scenarioStore", () => {
     expect(state.available).toBe(true); // unrelated fields still refresh normally
   });
 
+  it("resetForNewConfig() drops the old overlays and re-seeds from the new config", async () => {
+    mockListScenarios.mockResolvedValue({
+      available: false,
+      scenarios: [],
+      authored_ids: ["BASELINE", "A"],
+      authored_overlays: { A: {} },
+    });
+    await useScenarioStore.getState().refresh();
+    useScenarioStore.getState().applyOverlays({ A: {}, B: { metadata: {} } });
+    useScenarioStore.setState({ activeId: "A" });
+
+    // A brand new config was just uploaded -- it only defines "C".
+    mockListScenarios.mockResolvedValue({
+      available: true,
+      scenarios: [],
+      authored_ids: ["BASELINE", "C"],
+      authored_overlays: { C: {} },
+    });
+    await useScenarioStore.getState().resetForNewConfig();
+
+    const state = useScenarioStore.getState();
+    expect(state.overlays).toEqual({ C: {} });
+    expect(state.authoredIds).toEqual(["BASELINE", "C"]);
+    expect(state.activeId).toBeNull();
+  });
+
   it("createScenario sends the current overlays and applies the response locally", async () => {
     useScenarioStore.getState().applyOverlays({ A: {} });
     mockCreateScenario.mockResolvedValue({

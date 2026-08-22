@@ -53,9 +53,9 @@ vi.mock("@/stores/layoutStore", () => ({
     selector({ closeYamlPane: mockCloseYamlPane }),
 }));
 
-const mockScenarioRefresh = vi.fn();
+const mockResetForNewConfig = vi.fn();
 vi.mock("@/stores/scenarioStore", () => ({
-  useScenarioStore: { getState: () => ({ refresh: mockScenarioRefresh }) },
+  useScenarioStore: { getState: () => ({ resetForNewConfig: mockResetForNewConfig }) },
 }));
 
 vi.mock("@/stores/themeStore", () => ({
@@ -149,9 +149,9 @@ describe("YamlPane", () => {
     expect(mockParseYaml).toHaveBeenCalledWith("merged: yaml\nextra: 1\n");
     // A save that round-trips exactly what's on screen needs no re-sync.
     expect(saveButton()).toBeDisabled();
-    // Nudges RunControl to re-check Run Sweep availability: the backend may
-    // have just adopted this Save as its preloaded config.
-    expect(mockScenarioRefresh).toHaveBeenCalledOnce();
+    // The base config was just replaced -- drops stale scenario overlays and
+    // re-seeds from the new config's own `scenarios:` block.
+    expect(mockResetForNewConfig).toHaveBeenCalledOnce();
   });
 
   it("Cancel reverts unsaved edits back to the last synced value", async () => {
