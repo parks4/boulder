@@ -113,7 +113,6 @@ METADATA_MANDATORY_KEYS: frozenset = frozenset({"description"})
 
 METADATA_OPTIONAL_KEYS: frozenset = frozenset(
     {
-        "scenario_id",
         "title",
         "gui_app_title",
         "gui_app_version",
@@ -177,7 +176,6 @@ class MetadataModel(BaseModel):
 
     description: Optional[str] = None
 
-    scenario_id: Optional[str] = None
     title: Optional[str] = None
     #: Short label for the web UI header (e.g. ``MyApp``); omitted defaults to "Boulder".
     gui_app_title: Optional[str] = None

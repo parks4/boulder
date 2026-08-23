@@ -6,7 +6,11 @@ import { useSweepRunStore } from "@/stores/sweepStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 import { SweepResultsPlot } from "./SweepResultsPlot";
-import { BASELINE_SCENARIO_ID, type ScenarioMeta } from "@/api/scenarios";
+import {
+  BASELINE_SCENARIO_ID,
+  type ScenarioMeta,
+  type ScenarioOverlay,
+} from "@/api/scenarios";
 
 /** One row in the pane: every authored id, paired with its computed data if any. */
 interface ScenarioRow {
@@ -27,6 +31,23 @@ function buildRows(authoredIds: string[], scenarios: ScenarioMeta[]): ScenarioRo
     if (!seen.has(s.id)) rows.push({ id: s.id, computed: s });
   }
   return rows;
+}
+
+/** `scenario_name`/`description`, read straight off the live overlay -- unlike
+ * the computed store's `label`, these are available before a scenario has
+ * ever been solved. Falls back to the id when a scenario has no name of its
+ * own (a blank or freshly cloned overlay). */
+function overlayMeta(
+  overlay: ScenarioOverlay | undefined,
+  id: string,
+): { name: string; description?: string } {
+  const metadata = (overlay?.metadata ?? {}) as Record<string, unknown>;
+  const name = metadata.scenario_name;
+  const description = metadata.description;
+  return {
+    name: typeof name === "string" && name ? name : id,
+    description: typeof description === "string" && description ? description : undefined,
+  };
 }
 
 /** Compact relative-time label, e.g. "just now", "2 min ago", "3 h ago". */
@@ -51,6 +72,7 @@ export function ScenarioPane() {
   const {
     scenarios,
     authoredIds,
+    overlays,
     createdAt,
     units,
     nonKpiKeys,
@@ -267,6 +289,7 @@ export function ScenarioPane() {
             const isCalculating = row.id in scenarioProgress;
             const s = row.computed;
             const ago = s ? timeAgo(s.computed_at ?? createdAt, now) : "";
+            const { name, description } = overlayMeta(overlays[row.id], row.id);
             return (
               // The action icons are an overlay (below), not siblings in a
               // flex row: as siblings they permanently reserved an icon column
@@ -296,7 +319,7 @@ export function ScenarioPane() {
                   ].join(" ")}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate">{row.id}</span>
+                    <span className="font-medium truncate">{name}</span>
                     {/* Hidden on hover -- the action icons take this spot. */}
                     {isCalculating ? (
                       <span className="shrink-0 text-[10px] text-primary animate-pulse group-hover:opacity-0">
@@ -314,13 +337,15 @@ export function ScenarioPane() {
                       </span>
                     )}
                   </div>
-                  {/* Descriptive scenario_name, when it adds anything beyond
-                      the id -- often identical/inherited across scenarios,
-                      which made every row look the same (the id, always
-                      unique, is the primary label above). */}
-                  {s?.label && s.label !== row.id && (
-                    <div className="text-[10px] text-muted-foreground truncate">
-                      {s.label}
+                  {/* From the live overlay, not the computed store -- shows
+                      up before a scenario has ever been solved. Single line,
+                      no wrap; hover (native `title`) surfaces the full text. */}
+                  {description && (
+                    <div
+                      title={description}
+                      className="text-[10px] text-muted-foreground truncate"
+                    >
+                      {description}
                     </div>
                   )}
                   {s?.reactor_mode && (

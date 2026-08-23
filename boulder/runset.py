@@ -50,7 +50,6 @@ BASELINE_SCENARIO_ID = "BASELINE"
 #: *with* a ``scenarios:`` block instead names its unmodified base run
 #: :data:`BASELINE_SCENARIO_ID`, so adding the first scenario renames the base
 #: entry (and orphans its stored result, which is regenerable).
-#: Overridden by ``metadata.scenario_id`` when the config sets one.
 BASE_SCENARIO_ID = "BASE"
 
 # ---------------------------------------------------------------------------
@@ -417,9 +416,9 @@ def base_entry_id(raw: Dict[str, Any]) -> str:
     """Return the store id the *unmodified base* run is written under.
 
     :data:`BASELINE_SCENARIO_ID` when the config declares ``scenarios:``, else
-    :data:`BASE_SCENARIO_ID` (or an explicit ``metadata.scenario_id``). Mirrors
-    the naming :func:`expand_scenarios` gives the base entry, which is the whole
-    point: both paths that can solve the base must land on the same name.
+    :data:`BASE_SCENARIO_ID`. Mirrors the naming :func:`expand_scenarios` gives
+    the base entry, which is the whole point: both paths that can solve the
+    base must land on the same name.
 
     They did not. A sweep took the name from :func:`expand_scenarios`
     (``BASELINE``) while a plain Run Simulation defaulted to ``BASE``, so the
@@ -432,10 +431,7 @@ def base_entry_id(raw: Dict[str, Any]) -> str:
     and no unmodified-base entry is emitted at all, so the base keeps its plain
     name.
     """
-    if raw.get("scenarios"):
-        return BASELINE_SCENARIO_ID
-    declared = (raw.get("metadata") or {}).get("scenario_id")
-    return str(declared) if declared else BASE_SCENARIO_ID
+    return BASELINE_SCENARIO_ID if raw.get("scenarios") else BASE_SCENARIO_ID
 
 
 def expand_scenarios(
@@ -452,7 +448,7 @@ def expand_scenarios(
     the scenarios do not cross-multiply.
 
     When neither block is present, returns a single ``(scenario_id, base)``
-    tuple using ``metadata.scenario_id`` or :data:`BASE_SCENARIO_ID`.
+    tuple using :data:`BASE_SCENARIO_ID`.
 
     Parameters
     ----------
@@ -489,8 +485,7 @@ def expand_scenarios(
             "boulder.runset.expand_scenarios."
         )
 
-    base_meta = base_raw.get("metadata") or {}
-    base_id = base_meta.get("scenario_id", BASE_SCENARIO_ID)
+    base_id = BASE_SCENARIO_ID
     scenario_block = raw_scenarios or {}
     global_sweeps = sweeps_of(base_raw)
 

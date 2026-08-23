@@ -25,15 +25,12 @@ from boulder.runset import (
 
 
 def test_expand_scenarios_no_block_returns_single_base():
-    """A YAML without scenarios:/sweep: yields a single scenario.
-
-    whose id matches ``metadata.scenario_id``.
-    """
-    base = {"metadata": {"scenario_id": "MY_BASE"}, "nodes": []}
+    """A YAML without scenarios:/sweep: yields a single scenario, id BASE."""
+    base = {"metadata": {"title": "plain"}, "nodes": []}
     out = expand_scenarios(base)
     assert len(out) == 1
     sid, cfg = out[0]
-    assert sid == "MY_BASE"
+    assert sid == "BASE"
     assert "scenarios" not in cfg
     assert "sweeps" not in cfg
 
