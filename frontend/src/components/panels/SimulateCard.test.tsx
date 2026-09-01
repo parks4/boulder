@@ -18,6 +18,7 @@ import "@testing-library/jest-dom";
 import { SimulateCard } from "./SimulateCard";
 import { useSolverStore } from "@/stores/solverStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
+import { useScenarioStore } from "@/stores/scenarioStore";
 
 // ---------------------------------------------------------------------------
 // Mock dependencies that reach out to the network or zustand stores
@@ -127,6 +128,25 @@ describe("SimulateCard", () => {
       timeStep: "1",
     });
     useSweepRunStore.setState({ sweeping: false });
+    useScenarioStore.setState({ activeId: null, overlays: {} });
+  });
+
+  it("sends the authored overlays even when running BASELINE (no scenario selected)", async () => {
+    // Regression: the server's `_merged_raw` uses the overlays map's presence
+    // to tell whether the base config declares `scenarios:` at all, naming
+    // the stored base entry BASELINE vs BASE accordingly (see
+    // `runset.base_entry_id`). Omitting overlays for a plain BASELINE run
+    // used to make that result land under the wrong name -- a phantom row
+    // next to the real (still "Not computed yet") BASELINE one.
+    mockConfig = { nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }], connections: [] };
+    useScenarioStore.setState({ activeId: null, overlays: { hot: { metadata: {} } } });
+    render(<SimulateCard />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
+    });
+    expect(mockStartSimulation).toHaveBeenCalledOnce();
+    const [, , , scenario] = mockStartSimulation.mock.calls[0];
+    expect(scenario).toEqual({ id: "BASELINE", overlays: { hot: { metadata: {} } } });
   });
 
   it("Run button calls startSimulation without time/step in steady mode", async () => {
