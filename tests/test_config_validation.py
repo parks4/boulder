@@ -299,3 +299,25 @@ def test_warn_simulation_quality_with_output_configured() -> None:
     normalized = normalize_config(data)
     notes = warn_simulation_quality(normalized)
     assert notes == []
+
+
+@pytest.mark.unit
+def test_metadata_accepts_sweep_point_but_stays_strict() -> None:
+    """``metadata.sweep_point`` (stamped on every expanded sweep point) validates.
+
+    ``runset.expand_scenarios`` records each point's axis values under
+    ``metadata.sweep_point``; a runner that validates the merged config must
+    not reject it.  Any other unknown metadata key is still forbidden.
+    """
+    data = {
+        "metadata": {"scenario_id": "base__T=300", "sweep_point": {"T": 300.0}},
+        "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
+        "connections": [],
+    }
+    model = validate_normalized_config(normalize_config(data))
+    assert model.metadata is not None
+    assert model.metadata.sweep_point == {"T": 300.0}
+
+    data["metadata"] = {"scenario_id": "base", "not_a_metadata_key": 1}
+    with pytest.raises(Exception, match="not_a_metadata_key"):
+        validate_normalized_config(normalize_config(data))
