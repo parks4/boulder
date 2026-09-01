@@ -334,6 +334,7 @@ class BoulderRunner:
                     target_stage.mechanism,
                     ic.mechanism_switch,
                     converter,
+                    source_mechanism=stage.mechanism,
                 )
                 stream_mech = target_stage.mechanism
 
@@ -350,6 +351,7 @@ class BoulderRunner:
                     (_stream_conns_by_stage or {}).get(ic.target_stage, []),
                     stage_intra_connections=list(stage.intra_connections),
                     display_gas=outlet_gas_preswitched,
+                    display_mechanism=stage.mechanism,
                 )
                 # Back-fill the node dict with converged state for PropertiesPanel
                 stream_id = ic.stream_point_id

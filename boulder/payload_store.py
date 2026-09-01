@@ -80,10 +80,6 @@ _X_SUM_TOL = 1e-6
 #: Series keys handled structurally (not as generic per-state extra columns).
 _STRUCTURAL_KEYS = frozenset({"T", "P", "X", "Y"})
 
-# Cache one empty Solution per mechanism — loading a 453-species mechanism is
-# the dominant cost of a restore; pay it once per process per mechanism.
-_SOLUTION_CACHE: Dict[str, ct.Solution] = {}
-
 
 # --------------------------------------------------------------------------- #
 # Mechanism handling
@@ -106,13 +102,18 @@ def _resolve_mechanism(mechanism: str) -> Tuple[str, str]:
 
 
 def _solution_for(mechanism: str) -> Optional[ct.Solution]:
+    """Return a state-independent template phase for *mechanism* (or None).
+
+    Loading a large mechanism is the dominant cost of a restore, so the parse
+    is shared process-wide (:func:`~boulder.ctutils.load_solution`); the
+    template itself is a cheap kinetics-free derivation that this module may
+    freely set the state of.
+    """
     if not mechanism:
         return None
-    sol = _SOLUTION_CACHE.get(mechanism)
-    if sol is None:
-        sol = ct.Solution(mechanism)
-        _SOLUTION_CACHE[mechanism] = sol
-    return sol
+    from .ctutils import derive_solution, load_solution
+
+    return derive_solution(load_solution(mechanism), kinetics=False)
 
 
 # --------------------------------------------------------------------------- #

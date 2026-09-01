@@ -735,7 +735,7 @@ class DualCanteraConverter:
         self.mechanism = mechanism or CANTERA_MECHANISM
         self.plugins = plugins or get_plugins()
         try:
-            from .ctutils import create_solution_from_spec, parse_mechanism_spec
+            from .ctutils import parse_mechanism_spec
 
             mech_path, mech_phase = parse_mechanism_spec(self.mechanism)
             resolved_mechanism = self.resolve_mechanism(mech_path)
@@ -749,7 +749,7 @@ class DualCanteraConverter:
                 if mech_phase
                 else resolved_mechanism
             )
-            self.gas = create_solution_from_spec(spec, resolver=lambda path: path)
+            self.gas = self.create_solution(spec, transport=True)
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         # Cache of mechanisms -> Solution to support per-node overrides
@@ -1032,6 +1032,66 @@ class DualCanteraConverter:
         """
         return self.SCRIPT_EMITTER_CLASS(converter=self).emit(config)
 
+    def create_solution(
+        self, mech_name: str, *, kinetics: bool = True, transport: bool = False
+    ) -> ct.Solution:
+        """Return a fresh, independent :class:`~cantera.Solution` for *mech_name*.
+
+        Every Solution the converter and the staged solver build goes through
+        this hook: the shared per-mechanism gas (``transport=True``), reactor
+        and reservoir contents (replacing ``clone=True``), state carriers and
+        SolutionArray templates (``kinetics=False``). Subclasses may override
+        it -- for example to serve objects from a host-wide mechanism cache.
+
+        The default parses each mechanism file once per process
+        (:func:`~boulder.ctutils.load_solution`) and derives independent
+        objects from the parsed parts (:func:`~boulder.ctutils.derive_solution`),
+        which on a large mechanism is an order of magnitude cheaper than
+        re-reading the file or cloning a reactor's contents. *mech_name* may
+        carry a ``#phase`` suffix and is resolved with :meth:`resolve_mechanism`.
+        """
+        from .ctutils import (
+            create_solution_from_spec,
+            derive_solution,
+            load_solution,
+            parse_mechanism_spec,
+        )
+
+        path, phase = parse_mechanism_spec(mech_name)
+        resolved = self.resolve_mechanism(path)
+        spec = f"{resolved}#{phase}" if phase else resolved
+        base = load_solution(spec)
+        if base.thermo_model != "ideal-gas":
+            # Deriving from parts is exact for an ideal gas, whose phase entry
+            # carries nothing beyond species, reactions and transport. Other
+            # models keep phase-level configuration (a plasma's electron energy
+            # distribution, say) that only a file load reproduces.
+            return create_solution_from_spec(spec)
+        return derive_solution(
+            base, kinetics=kinetics, transport=transport, mechanism_path=spec
+        )
+
+    def _independent_phase(
+        self, rid: str, gas_for_node: ct.Solution, *, kinetics: bool
+    ) -> Optional[ct.Solution]:
+        """Return a fresh phase holding *gas_for_node*'s state, or None.
+
+        Stands in for ``Reactor(gas, clone=True)``: the reactor gets contents
+        independent of the shared per-mechanism gas without Cantera's C++ clone
+        (seconds on a large mechanism). None when the node's mechanism cannot
+        be resolved or does not match *gas_for_node* (a surface-adjacent bulk
+        phase, say), in which case the caller keeps the clone.
+        """
+        mech = (self.reactor_meta.get(rid) or {}).get("mechanism") or self.mechanism
+        try:
+            phase = self.create_solution(str(mech), kinetics=kinetics)
+        except Exception:  # noqa: BLE001 - fall back to the clone
+            return None
+        if phase.species_names != gas_for_node.species_names:
+            return None
+        phase.state = gas_for_node.state
+        return phase
+
     def _get_gas_for_mech(self, mech_name: str) -> ct.Solution:
         """Return (creating and caching if needed) a :class:`~cantera.Solution`.
 
@@ -1041,7 +1101,7 @@ class DualCanteraConverter:
         Mechanism names may include an optional phase suffix after ``#``, e.g.
         ``nDodecane_Reitz.yaml#nDodecane_IG``.
         """
-        from .ctutils import create_solution_from_spec, parse_mechanism_spec
+        from .ctutils import parse_mechanism_spec
 
         resolved = self.resolve_mechanism(mech_name)
         if resolved in self._gases_by_mech:
@@ -1051,9 +1111,8 @@ class DualCanteraConverter:
         cache_key = f"{mech_path}#{phase}" if phase else mech_path
         if cache_key in self._gases_by_mech:
             return self._gases_by_mech[cache_key]
-        gas_obj = create_solution_from_spec(
-            f"{mech_path}#{phase}" if phase else mech_path,
-            resolver=lambda path: path,
+        gas_obj = self.create_solution(
+            f"{mech_path}#{phase}" if phase else mech_path, transport=True
         )
         self._gases_by_mech[cache_key] = gas_obj
         return gas_obj
@@ -1129,9 +1188,20 @@ class DualCanteraConverter:
         props = node.get("properties") or {}
 
         # STONE v2: clone: and energy: may be specified per-node.
-        # Default clone=True preserves existing behaviour; set clone=False only
+        # Default clone=True means "independent contents"; set clone=False only
         # when a shared Solution instance is needed (e.g. micro_step plasma runs).
         clone = bool(props.get("clone", True))
+        # An independent phase built from the parsed mechanism gives the same
+        # isolation as clone=True for a fraction of the cost; a Reservoir never
+        # integrates chemistry, so its contents need no reactions at all.
+        # Plugin builders receive the converter, not gas_for_node, and take
+        # their own copy -- deriving one here would be wasted.
+        if clone and typ not in self.plugins.reactor_builders:
+            phase = self._independent_phase(
+                rid, gas_for_node, kinetics=typ not in ("Reservoir", "OutletSink")
+            )
+            if phase is not None:
+                gas_for_node, clone = phase, False
 
         if typ in self.plugins.reactor_builders:
             reactor = self.plugins.reactor_builders[typ](self, node)

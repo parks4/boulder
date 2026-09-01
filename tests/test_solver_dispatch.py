@@ -518,10 +518,18 @@ class TestClonePerNode:
         plugins = MagicMock()
         plugins.reactor_builders = {}
         conv.plugins = plugins
+        # What create_reactor_from_node reads to build a node's own phase.
+        conv.mechanism = _GRI_MECH
+        conv.reactor_meta = {}
         return conv
 
     def test_default_clone_true(self):
-        """Reactor node without clone: key builds with clone=True (Cantera default)."""
+        """Reactor node without clone: contents independent of the shared gas.
+
+        The default used to be Cantera's ``clone=True``. The converter now
+        derives an independent phase from the parsed mechanism instead (same
+        isolation, a fraction of the cost) and passes ``clone=False``.
+        """
         import boulder.cantera_converter as cc_mod
 
         node = {
@@ -541,6 +549,7 @@ class TestClonePerNode:
 
         def fake_reactor(solution, clone=True):
             captured["clone"] = clone
+            captured["solution"] = solution
             r = MagicMock()
             r.name = "r1"
             r.group_name = ""
@@ -550,7 +559,10 @@ class TestClonePerNode:
         with patch.object(cc_mod.ct, "IdealGasReactor", side_effect=fake_reactor):
             conv.create_reactor_from_node(node, gas)
 
-        assert captured.get("clone", True) is True
+        assert captured["clone"] is False
+        assert captured["solution"] is not gas
+        assert captured["solution"].T == gas.T
+        assert captured["solution"].n_reactions == gas.n_reactions
 
     def test_clone_false_passed_through(self):
         """Reactor node with clone: false builds with clone=False."""

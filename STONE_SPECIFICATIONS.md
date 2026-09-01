@@ -421,9 +421,12 @@ a residence-time substitute (see Physics Rules).
 
 ### `clone:` — phase sharing between reactors
 
-By default Boulder creates an independent copy of the Cantera `Solution` object for each reactor
-(`clone: true`). Set `clone: false` only when two reactors must share the same `Solution` instance
-(e.g. a `ConstPressureReactor` feeding directly from a mutated `PlasmaPhase`):
+By default each reactor gets its own independent Cantera `Solution` (`clone: true`). Boulder
+builds that phase from the mechanism parsed once per process rather than through Cantera's
+`clone=True` (which re-installs every reaction and forgets the mechanism file): same isolation,
+a fraction of the cost on a large mechanism. Reservoirs get a reaction-free phase, since they never
+integrate chemistry. Set `clone: false` only when two reactors must share the same `Solution`
+instance (e.g. a `ConstPressureReactor` feeding directly from a mutated `PlasmaPhase`):
 
 ```yaml
 - id: plasma_reactor
