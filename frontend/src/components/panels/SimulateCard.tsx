@@ -129,11 +129,19 @@ export function SimulateCard() {
     // resolves the id against these overlays exactly as Run Sweep does; a
     // null/BASELINE selection keeps solving the config held here (the only
     // one carrying this session's base-network edits).
+    //
+    // Overlays are sent even for a BASELINE run: the server's `_merged_raw`
+    // uses their presence to tell whether the base config declares
+    // `scenarios:` at all, which decides whether the base entry is named
+    // BASELINE or BASE/`metadata.scenario_id` (see `runset.base_entry_id`).
+    // Omitting them here (as this used to do whenever no named scenario was
+    // selected) made a plain "Run Simulation" on BASELINE store its result
+    // under the wrong name, leaving a phantom row next to the real one.
     const { activeId, overlays } = useScenarioStore.getState();
-    const scenario =
-      activeId && activeId !== BASELINE_SCENARIO_ID
-        ? { id: activeId, overlays: overlays as Record<string, unknown> }
-        : undefined;
+    const scenario = {
+      id: activeId && activeId !== BASELINE_SCENARIO_ID ? activeId : BASELINE_SCENARIO_ID,
+      overlays: overlays as Record<string, unknown>,
+    };
 
     // Check whether a cached result already exists for the current config.
     // This avoids re-running the full simulation when nothing has changed.
