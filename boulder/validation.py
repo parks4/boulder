@@ -206,6 +206,11 @@ class MetadataModel(BaseModel):
     part1_stone_yaml: Optional[str] = None
     source_file: Optional[str] = None
 
+    #: Axis label -> value of one expanded sweep point, stamped by
+    #: :func:`boulder.runset.expand_scenarios`. Declared so a merged sweep
+    #: point still passes strict validation when a runner validates it.
+    sweep_point: Optional[Dict[str, Any]] = None
+
     extra: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:
