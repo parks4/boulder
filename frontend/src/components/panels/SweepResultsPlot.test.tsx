@@ -3,13 +3,14 @@
  *
  * Asserts:
  * - Default render bundles the mole-fraction family as separate traces (legacy behavior).
- * - The "Add series" dropdown lists individual species plus a "quick add" family shortcut,
+ * - The "Add series" picker lists individual species plus a "quick add" family shortcut,
  *   and only offers series that aren't already active.
- * - Picking an individual species from the dropdown adds it as its own active chip/trace.
+ * - Picking an individual species from the picker adds it as its own active chip/trace.
  * - Clicking a chip's remove ("x") button drops that series without touching the others.
  * - A user can build an arbitrary combination (e.g. nC7H16 + CO + O2) one at a time,
  *   matching Cantera's continuous_reactor.py-style plot.
  * - Removing every active series still renders the picker (doesn't unmount the panel).
+ * - Typing into either picker fuzzy-filters its option list.
  */
 
 import { render, screen, fireEvent } from "@testing-library/react";
@@ -59,8 +60,12 @@ const scenarios: ScenarioMeta[] = [
   makeScenario(1000, { nC7H16: 0.0, CO: 0.02, O2: 0.05 }),
 ];
 
+/** Opens the "Add series" picker (a type-to-filter combobox, not a native
+ * `<select>`) and clicks the option for `value`, e.g. "k:final_X_CO" or
+ * "f:mole_fractions". */
 function addSeries(value: string) {
-  fireEvent.change(screen.getByTestId("y-axis-add-select"), { target: { value } });
+  fireEvent.focus(screen.getByTestId("y-axis-add-select"));
+  fireEvent.click(screen.getByTestId(`y-axis-add-select-option-${value}`));
 }
 
 describe("SweepResultsPlot", () => {
@@ -83,16 +88,19 @@ describe("SweepResultsPlot", () => {
   it("offers a quick-add family option and individual species not yet active", () => {
     render(<SweepResultsPlot scenarios={scenarios} />);
 
-    const select = screen.getByTestId("y-axis-add-select") as HTMLSelectElement;
-    const optionValues = Array.from(select.options).map((o) => o.value);
+    fireEvent.focus(screen.getByTestId("y-axis-add-select"));
     // The family (mole fractions) is already fully active by default, so it
     // should not be offered again, and none of its species should be listed
     // as addable individually either.
-    expect(optionValues).not.toContain("f:mole_fractions");
-    expect(optionValues).not.toContain("k:final_X_CO");
+    expect(
+      screen.queryByTestId("y-axis-add-select-option-f:mole_fractions"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("y-axis-add-select-option-k:final_X_CO"),
+    ).not.toBeInTheDocument();
   });
 
-  it("removing a chip re-offers that species in the add dropdown", () => {
+  it("removing a chip re-offers that species in the add picker", () => {
     render(<SweepResultsPlot scenarios={scenarios} />);
 
     fireEvent.click(screen.getByTestId("remove-series-final_X_CO"));
@@ -101,9 +109,10 @@ describe("SweepResultsPlot", () => {
     expect(screen.getByTestId("active-series-chip-final_X_nC7H16")).toBeInTheDocument();
     expect(screen.getByTestId("active-series-chip-final_X_O2")).toBeInTheDocument();
 
-    const select = screen.getByTestId("y-axis-add-select") as HTMLSelectElement;
-    const optionValues = Array.from(select.options).map((o) => o.value);
-    expect(optionValues).toContain("k:final_X_CO");
+    fireEvent.focus(screen.getByTestId("y-axis-add-select"));
+    expect(
+      screen.getByTestId("y-axis-add-select-option-k:final_X_CO"),
+    ).toBeInTheDocument();
 
     const names = plotCalls.at(-1)?.data.map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining(["nC7H16", "O2"]));
@@ -171,15 +180,13 @@ describe("SweepResultsPlot", () => {
     it("labels an auto-walked node.property key as input with its unit", () => {
       render(<SweepResultsPlot scenarios={kpiScenarios} />);
 
-      const select = screen.getByTestId("y-axis-add-select") as HTMLSelectElement;
-      const optionValues = Array.from(select.options).map((o) => o.value);
       // efficiency is active by default (first available series); pressure
-      // is still offered in the "add series" dropdown.
-      expect(optionValues).toContain("k:in.downstream.pressure");
-      const pressureOption = Array.from(select.options).find(
-        (o) => o.value === "k:in.downstream.pressure",
+      // is still offered in the "add series" picker.
+      fireEvent.focus(screen.getByTestId("y-axis-add-select"));
+      const pressureOption = screen.getByTestId(
+        "y-axis-add-select-option-k:in.downstream.pressure",
       );
-      expect(pressureOption?.textContent).toBe("downstream.pressure (Pa, input)");
+      expect(pressureOption).toHaveTextContent("downstream.pressure (Pa, input)");
     });
 
     it("labels a host KPI attr as output, with its unit when supplied", () => {
@@ -196,6 +203,43 @@ describe("SweepResultsPlot", () => {
       expect(
         screen.getByTestId("active-series-chip-efficiency"),
       ).toHaveTextContent("Efficiency (output)");
+    });
+  });
+
+  describe("fuzzy filters", () => {
+    it("narrows the X axis picker to keys whose label matches the typed text", () => {
+      render(<SweepResultsPlot scenarios={scenarios} />);
+
+      const input = screen.getByTestId("x-axis-select");
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "temp" } });
+
+      expect(screen.getByTestId("x-axis-select-option-t0_K")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("x-axis-select-option-final_X_CO"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("narrows the Y axis add-series picker to labels matching the typed text", () => {
+      render(<SweepResultsPlot scenarios={scenarios} />);
+      // Drop the default mole-fraction family so its species are addable again.
+      fireEvent.click(screen.getByTestId("remove-series-final_X_nC7H16"));
+      fireEvent.click(screen.getByTestId("remove-series-final_X_CO"));
+      fireEvent.click(screen.getByTestId("remove-series-final_X_O2"));
+
+      const input = screen.getByTestId("y-axis-add-select");
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "c7" } });
+
+      expect(
+        screen.getByTestId("y-axis-add-select-option-k:final_X_nC7H16"),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("y-axis-add-select-option-k:final_X_CO"),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("y-axis-add-select-option-f:mole_fractions"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -221,8 +265,8 @@ describe("SweepResultsPlot", () => {
     it("puts the swept input on X and the KPI on Y, not the reverse", () => {
       render(<SweepResultsPlot scenarios={kpiVsInput} />);
 
-      const xSelect = screen.getByTestId("x-axis-select") as HTMLSelectElement;
-      expect(xSelect.value).toBe("in.downstream.pressure");
+      const xSelect = screen.getByTestId("x-axis-select") as HTMLInputElement;
+      expect(xSelect.value).toBe("downstream.pressure (Pa, input)");
       expect(
         screen.getByTestId("active-series-chip-carbon_yield"),
       ).toBeInTheDocument();
@@ -239,8 +283,8 @@ describe("SweepResultsPlot", () => {
       }));
       render(<SweepResultsPlot scenarios={withT0} />);
 
-      const xSelect = screen.getByTestId("x-axis-select") as HTMLSelectElement;
-      expect(xSelect.value).toBe("t0_K");
+      const xSelect = screen.getByTestId("x-axis-select") as HTMLInputElement;
+      expect(xSelect.value).toBe("Temperature (K) (output)");
     });
 
     it("keeps a KPI on Y even when another input sorts ahead of it", () => {
@@ -262,8 +306,8 @@ describe("SweepResultsPlot", () => {
       ];
       render(<SweepResultsPlot scenarios={twoInputs} />);
 
-      const xSelect = screen.getByTestId("x-axis-select") as HTMLSelectElement;
-      expect(xSelect.value).toBe("in.a.pressure");
+      const xSelect = screen.getByTestId("x-axis-select") as HTMLInputElement;
+      expect(xSelect.value).toBe("a.pressure (Pa, input)");
       // "in.b.temperature" sorts before "yield_pct", but it is an input:
       // the KPI must still be what gets plotted.
       expect(

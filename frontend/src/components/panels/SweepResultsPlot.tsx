@@ -3,6 +3,7 @@ import Plot from "react-plotly.js";
 import { useThemeStore } from "@/stores/themeStore";
 import type { ScenarioMeta } from "@/api/scenarios";
 import { propertyDisplayUnit } from "@/lib/units";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 // TODO: overlay experimental/reference data points on this chart (planned future enhancement).
 
@@ -254,6 +255,12 @@ export function SweepResultsPlot({ scenarios, units, nonKpiKeys }: Props) {
   );
   const availableOptions = options.filter((o) => !effectiveActiveKeys.includes(o.key));
 
+  const xAxisOptions = keys.map((k) => ({ value: k, label: displayLabel(k, units) }));
+  const yAxisAddOptions = [
+    ...availableFamilies.map((f) => ({ value: `f:${f.id}`, label: f.label, group: "Quick add" })),
+    ...availableOptions.map((o) => ({ value: `k:${o.key}`, label: o.label, group: "Individual series" })),
+  ];
+
   const yAxisTitle = (() => {
     const labels = new Set(effectiveActiveKeys.map((k) => groupLabelByKey.get(k) ?? k));
     return labels.size === 1 ? [...labels][0] : "Value";
@@ -277,63 +284,36 @@ export function SweepResultsPlot({ scenarios, units, nonKpiKeys }: Props) {
     return null;
   }
 
-  const selectClass =
-    "rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground";
-
   return (
     <div className="rounded-lg border border-border bg-card p-4 space-y-2">
       <h3 className="font-semibold text-sm text-foreground">Sweep results</h3>
       <div className="flex flex-col gap-1.5">
         <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
           X axis
-          <select
-            className={`${selectClass} flex-1`}
+          <SearchableSelect
+            className="flex-1"
+            options={xAxisOptions}
             value={effectiveXKey}
+            onSelect={setXKey}
+            placeholder="Select X axis…"
             data-testid="x-axis-select"
-            onChange={(e) => setXKey(e.target.value)}
-          >
-            {keys.map((k) => (
-              <option key={k} value={k}>
-                {displayLabel(k, units)}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <div className="flex flex-col gap-1 text-[10px] text-muted-foreground">
           <div className="flex items-center gap-1.5">
             <span className="shrink-0">Y axis</span>
-            <select
-              className={`${selectClass} flex-1`}
-              value=""
-              disabled={availableFamilies.length === 0 && availableOptions.length === 0}
-              data-testid="y-axis-add-select"
-              onChange={(e) => {
-                const value = e.target.value;
-                if (!value) return;
+            <SearchableSelect
+              className="flex-1"
+              options={yAxisAddOptions}
+              value={null}
+              onSelect={(value) => {
                 if (value.startsWith("f:")) addFamily(value.slice(2));
                 else if (value.startsWith("k:")) addKey(value.slice(2));
               }}
-            >
-              <option value="">+ Add series…</option>
-              {availableFamilies.length > 0 && (
-                <optgroup label="Quick add">
-                  {availableFamilies.map((f) => (
-                    <option key={f.id} value={`f:${f.id}`}>
-                      {f.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {availableOptions.length > 0 && (
-                <optgroup label="Individual series">
-                  {availableOptions.map((o) => (
-                    <option key={o.key} value={`k:${o.key}`}>
-                      {o.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
+              placeholder="+ Add series…"
+              disabled={availableFamilies.length === 0 && availableOptions.length === 0}
+              data-testid="y-axis-add-select"
+            />
           </div>
           {effectiveActiveKeys.length > 0 && (
             <div className="flex flex-wrap gap-1">
