@@ -729,6 +729,7 @@ def solve_staged(
                     target_stage.mechanism,
                     ic.mechanism_switch,
                     converter,
+                    source_mechanism=stage.mechanism,
                 )
                 mapping_losses = losses
                 # After a mechanism switch the outlet_gas is in the target mechanism;
@@ -873,6 +874,7 @@ def _update_stream_point(
     stream_inlet_mfc_dicts: List[Dict[str, Any]],
     stage_intra_connections: Optional[List[Dict[str, Any]]] = None,
     display_gas: Optional[Any] = None,
+    display_mechanism: Optional[str] = None,
 ) -> None:
     """Refresh the stream-point reservoir for *ic* with the converged upstream state.
 
@@ -899,6 +901,10 @@ def _update_stream_point(
         has been applied and the pre-switch composition is more meaningful for
         the operator (more species, richer composition).  When ``None``,
         *outlet_gas* is used for both the Cantera object and display.
+    display_mechanism :
+        Mechanism string *display_gas* was built on (the source mechanism).
+        Defaults to *mechanism*; a derived or cloned phase does not report
+        its file through ``source``, so the caller names it.
     stage_intra_connections :
         Intra-stage connection dicts for the source stage.  Passed to
         :func:`_measure_outlet_mdot` as a fallback for plugin-built reactors
@@ -936,7 +942,9 @@ def _update_stream_point(
         h_mass = float(props_gas.enthalpy_mass)
         h_molar = float(props_gas.enthalpy_mole)
         # Normal volumetric flow [Nm³/s]: mdot / (ρ at normal conditions)
-        props_mech = props_gas.source if hasattr(props_gas, "source") else mechanism
+        props_mech = (
+            (display_mechanism or mechanism) if display_gas is not None else mechanism
+        )
         norm_gas = converter._get_gas_for_mech(props_mech)
         norm_gas.TPY = T_norm, P_norm, props_gas.Y
         rho_norm = float(norm_gas.density)
@@ -1330,14 +1338,10 @@ def _collect_stage_states(
     ``volume * density / mass_flow_rate`` using the first available outgoing
     mass flow rate; if unknown, the field is ``NaN``.
     """
-    # Resolve mechanism and create template
+    # Resolve mechanism and create template (a state holder: no kinetics)
     mech = stage.mechanism
     try:
-        from .ctutils import create_solution_from_spec
-
-        gas_template = create_solution_from_spec(
-            mech, resolver=converter.resolve_mechanism
-        )
+        gas_template = converter.create_solution(mech, kinetics=False)
     except Exception as exc:
         raise RuntimeError(
             f"Cannot create Solution for stage '{stage.id}' mechanism '{mech}': {exc}"
@@ -1434,10 +1438,12 @@ def _extract_gas_state(
     mechanism: str,
     converter: "DualCanteraConverter",
 ) -> ct.Solution:
-    """Return a new ``ct.Solution`` carrying the reactor's current thermo state."""
-    from .ctutils import create_solution_from_spec
+    """Return a new ``ct.Solution`` carrying the reactor's current thermo state.
 
-    gas = create_solution_from_spec(mechanism, resolver=converter.resolve_mechanism)
+    A state carrier only (no kinetics): it feeds the mechanism switch and the
+    stream-point reservoir, which read T, P and composition.
+    """
+    gas = converter.create_solution(mechanism, kinetics=False)
     gas.TPY = reactor.phase.T, reactor.phase.P, reactor.phase.Y
     return gas
 
@@ -1447,6 +1453,7 @@ def _apply_mechanism_switch(
     new_mechanism: str,
     switch_cfg: Dict[str, Any],
     converter: "DualCanteraConverter",
+    source_mechanism: Optional[str] = None,
 ) -> Tuple[ct.Solution, Optional[Dict[str, float]]]:
     """Apply ``mechanism_switch_fn`` plugin to *gas*, returning the mapped gas.
 
@@ -1454,6 +1461,9 @@ def _apply_mechanism_switch(
     ----------
     gas :
         Outlet gas in the upstream stage's mechanism.
+    source_mechanism :
+        Mechanism string *gas* was built on (the upstream stage's). Preferred
+        over ``gas.source``, which a derived or cloned phase does not carry.
     new_mechanism :
         Target mechanism for the downstream stage.
     switch_cfg :
@@ -1475,7 +1485,8 @@ def _apply_mechanism_switch(
         registered.
     """
     # Resolve paths for comparison
-    resolved_src = converter.resolve_mechanism(gas.source)
+    src_mechanism = source_mechanism or gas.source
+    resolved_src = converter.resolve_mechanism(src_mechanism)
     resolved_tgt = converter.resolve_mechanism(new_mechanism)
 
     if resolved_src == resolved_tgt:
@@ -1484,7 +1495,7 @@ def _apply_mechanism_switch(
     switch_fn = getattr(converter.plugins, "mechanism_switch_fn", None)
     if switch_fn is None:
         raise ValueError(
-            f"A mechanism_switch is required ('{gas.source}' -> '{new_mechanism}') "
+            f"A mechanism_switch is required ('{src_mechanism}' -> '{new_mechanism}') "
             "but no 'mechanism_switch_fn' plugin is registered. "
             "Register a plugin that provides 'mechanism_switch_fn' via the "
             "Boulder plugin system (entry point 'boulder.plugins' or "

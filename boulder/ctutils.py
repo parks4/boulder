@@ -2,7 +2,7 @@
 
 import inspect
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 import cantera as ct
 import numpy as np
@@ -28,6 +28,85 @@ def create_solution_from_spec(
     if phase:
         return ct.Solution(path, phase)
     return ct.Solution(path)
+
+
+# Parsed once per process, keyed by resolved ``path`` or ``path#phase``. On a
+# large mechanism (hundreds of species, tens of thousands of reactions) a
+# ``ct.Solution(file)`` costs seconds -- the YAML parse and the transport fit
+# dominate -- while every other object the engine needs can be derived from
+# the parsed species/reaction objects in a fraction of that (see
+# :func:`derive_solution`). The cached object is a read-only template: never
+# hand it to a caller that will set its state.
+_PARSED_SOLUTIONS: Dict[str, ct.Solution] = {}
+
+
+class DerivedSolution(ct.Solution):
+    """A :class:`~cantera.Solution` built from parsed parts, remembering its file.
+
+    A Solution assembled from species/reaction objects reports
+    ``source == "custom parts"``; a reactor-cloned one ``"<unknown>"``. Hosts
+    that key behaviour on the mechanism file read :attr:`mechanism_path`
+    instead, which :func:`derive_solution` stamps with the spec it was derived
+    from (``path`` or ``path#phase``, as resolved).
+    """
+
+    __slots__ = ("mechanism_path",)
+    mechanism_path: str
+
+
+def load_solution(
+    name: str,
+    *,
+    resolver: Optional[Callable[[str], str]] = None,
+) -> ct.Solution:
+    """Return the process-wide parsed :class:`~cantera.Solution` for *name*.
+
+    Parsed at most once per resolved spec per process. The returned object is
+    shared: read its species, reactions and models, but do not set its state
+    -- use :func:`derive_solution` for anything that needs a state of its own.
+    """
+    path, phase = parse_mechanism_spec(name)
+    if resolver is not None:
+        path = resolver(path)
+    key = f"{path}#{phase}" if phase else path
+    sol = _PARSED_SOLUTIONS.get(key)
+    if sol is None:
+        sol = ct.Solution(path, phase) if phase else ct.Solution(path)
+        _PARSED_SOLUTIONS[key] = sol
+    return sol
+
+
+def derive_solution(
+    base: ct.Solution,
+    *,
+    kinetics: bool = True,
+    transport: bool = False,
+    mechanism_path: Optional[str] = None,
+) -> DerivedSolution:
+    """Return a fresh, independent Solution sharing *base*'s species definitions.
+
+    Thermo (and, with ``kinetics=True``, reactions) are identical to *base*:
+    the same parsed objects are installed into a new phase, so rates and
+    reactor trajectories match to the last digit while the state is
+    independent. With ``kinetics=False`` the result holds no reactions (a
+    state carrier, ~1 ms on any mechanism); with ``transport=False`` (default)
+    no transport model is fitted -- the fit is the dominant per-object cost on
+    a large mechanism and only matters to callers reading viscosity or thermal
+    conductivity.
+
+    The phase ``name`` is copied so :class:`cantera.Quantity` mixing accepts
+    the result alongside phases loaded from the file.
+    """
+    sol = DerivedSolution(
+        thermo=base.thermo_model,
+        kinetics=base.kinetics_model,
+        species=base.species(),
+        reactions=base.reactions() if kinetics else [],
+        transport_model=base.transport_model if transport else "none",
+        name=base.name,
+    )
+    sol.mechanism_path = mechanism_path if mechanism_path is not None else base.source
+    return sol
 
 
 def create_interface_from_spec(
