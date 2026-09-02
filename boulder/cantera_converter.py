@@ -749,7 +749,7 @@ class DualCanteraConverter:
                 if mech_phase
                 else resolved_mechanism
             )
-            self.gas = self.create_solution(spec, transport=True)
+            self.gas = self.create_solution(spec)
         except Exception as e:
             raise ValueError(f"Failed to load mechanism '{self.mechanism}': {e}")
         # Cache of mechanisms -> Solution to support per-node overrides
@@ -1038,10 +1038,17 @@ class DualCanteraConverter:
         """Return a fresh, independent :class:`~cantera.Solution` for *mech_name*.
 
         Every Solution the converter and the staged solver build goes through
-        this hook: the shared per-mechanism gas (``transport=True``), reactor
-        and reservoir contents (replacing ``clone=True``), state carriers and
-        SolutionArray templates (``kinetics=False``). Subclasses may override
-        it -- for example to serve objects from a host-wide mechanism cache.
+        this hook: the shared per-mechanism gas, reactor and reservoir contents
+        (replacing ``clone=True``), state carriers and SolutionArray templates
+        (``kinetics=False``). Subclasses may override it -- for example to
+        serve objects from a host-wide mechanism cache.
+
+        No phase built here carries a transport model unless asked
+        (``transport=True``): fitting one is the dominant per-object cost on a
+        large mechanism, and the engine only ever reads thermodynamic state.
+        A host reactor that needs viscosity or thermal conductivity builds its
+        own phase with ``transport=True`` instead of reading them off the
+        shared gas.
 
         The default parses each mechanism file once per process
         (:func:`~boulder.ctutils.load_solution`) and derives independent
@@ -1111,9 +1118,7 @@ class DualCanteraConverter:
         cache_key = f"{mech_path}#{phase}" if phase else mech_path
         if cache_key in self._gases_by_mech:
             return self._gases_by_mech[cache_key]
-        gas_obj = self.create_solution(
-            f"{mech_path}#{phase}" if phase else mech_path, transport=True
-        )
+        gas_obj = self.create_solution(f"{mech_path}#{phase}" if phase else mech_path)
         self._gases_by_mech[cache_key] = gas_obj
         return gas_obj
 
