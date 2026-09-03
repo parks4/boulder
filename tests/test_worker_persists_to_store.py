@@ -17,7 +17,7 @@ pytest.importorskip("h5py")
 
 from boulder import scenario_store as store  # noqa: E402
 from boulder.runset import (  # noqa: E402
-    BASE_SCENARIO_ID,
+    BASELINE_SCENARIO_ID,
     resolve_store_dir,
     store_artifacts_dir,
 )
@@ -84,7 +84,7 @@ def test_a_plain_solve_writes_the_base_entry(cfg: Path) -> None:
     store_dir = resolve_store_dir({}, cfg)
     identity = store.config_identity(cfg)
     entries = store.list_entries(store_dir, identity)
-    assert [e["id"] for e in entries] == [BASE_SCENARIO_ID]
+    assert [e["id"] for e in entries] == [BASELINE_SCENARIO_ID]
     assert entries[0]["fingerprint"]
 
 
@@ -129,12 +129,12 @@ def test_the_entry_answers_to_the_post_build_fingerprint_too(cfg: Path) -> None:
 
     assert (store.find_entry(store_dir, pre_fp, identity) or {}).get(
         "id"
-    ) == BASE_SCENARIO_ID
+    ) == BASELINE_SCENARIO_ID
     assert (store.find_entry(store_dir, post_fp, identity) or {}).get(
         "id"
-    ) == BASE_SCENARIO_ID
+    ) == BASELINE_SCENARIO_ID
     # The canonical fingerprint -- the one a sweep compares -- is the pre-build one.
-    assert store.fingerprints(store_dir, identity) == {BASE_SCENARIO_ID: pre_fp}
+    assert store.fingerprints(store_dir, identity) == {BASELINE_SCENARIO_ID: pre_fp}
 
 
 def test_contributors_write_under_the_entrys_own_artifacts_dir(cfg: Path) -> None:
@@ -251,18 +251,3 @@ def test_a_plain_solve_of_a_scenario_config_writes_BASELINE_not_BASE(
         )
     ]
     assert ids == [BASELINE_SCENARIO_ID], f"plain solve stored the base as {ids}"
-
-
-def test_a_sweep_only_config_keeps_the_plain_base_name(tmp_path: Path) -> None:
-    """A global `sweep:` emits no unmodified-base entry, so the base stays BASE.
-
-    Guards the over-broad version of the rule: treating `sweep:` like
-    `scenarios:` renamed every sweep point's `BASE__<axis>` prefix too.
-    """
-    from boulder.runset import BASE_SCENARIO_ID, base_entry_id
-
-    raw = {
-        **_CONFIG,
-        "sweep": {"T": {"path": "nodes[id=r].properties.T", "values": [1, 2]}},
-    }
-    assert base_entry_id(raw) == BASE_SCENARIO_ID

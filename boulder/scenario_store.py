@@ -7,7 +7,7 @@ content-addressed store: the **name** is the key, and the ``fingerprint`` attr
 recorded under that name is the staleness check.
 
     <store_dir>/
-        BASE.h5 | BASELINE.h5 | <scenario_id>.h5
+        BASELINE.h5 | <scenario_id>.h5
         artifacts/<scenario_id>/...
 
 Consequence worth stating plainly: an entry holds **one** result, the latest.

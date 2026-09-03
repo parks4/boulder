@@ -155,7 +155,7 @@ N=3. One HDF5 file per run-set entry:
 
 ```
 <config_dir>/.boulder-cache/<stem>/
-    BASE.h5 | BASELINE.h5 | <scenario_id>.h5
+    BASELINE.h5 | <scenario_id>.h5
     artifacts/<scenario_id>/...
 ```
 

@@ -37,21 +37,15 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-#: Scenario id for the unmodified base config's own run-set entry, added
-#: automatically whenever a ``scenarios:`` mapping is declared (see
-#: :func:`expand_scenarios`). Reserved: a host must reject this as a
-#: user-authored scenario id (see ``scenario_editor._validate_id``) since a
-#: config could otherwise define its own "BASELINE" overlay that collides
-#: with this synthesized entry.
+#: Scenario id for the unmodified base config's own run-set entry — whether
+#: that entry comes from a ``scenarios:`` mapping (see :func:`expand_scenarios`)
+#: or *is* the whole run-set (the N=1 case, no ``scenarios:`` block at all).
+#: One name for both so a plain Run Simulation and a Run Sweep of the same
+#: config always agree on where the result lives. Reserved: a host must
+#: reject this as a user-authored scenario id (see
+#: ``scenario_editor._validate_id``) since a config could otherwise define its
+#: own "BASELINE" overlay that collides with this synthesized entry.
 BASELINE_SCENARIO_ID = "BASELINE"
-
-#: Run-set id for the base config when it declares no ``scenarios:`` block —
-#: the N=1 case, where the whole run-set is just the config itself. A config
-#: *with* a ``scenarios:`` block instead names its unmodified base run
-#: :data:`BASELINE_SCENARIO_ID`, so adding the first scenario renames the base
-#: entry (and orphans its stored result, which is regenerable).
-#: Overridden by ``metadata.scenario_id`` when the config sets one.
-BASE_SCENARIO_ID = "BASE"
 
 # ---------------------------------------------------------------------------
 # Deep merge with id-keyed list support (the STONE overlay merge).
@@ -310,7 +304,7 @@ def run_set_size(raw: Dict[str, Any]) -> int:
 # leave room to solve entries in parallel later.
 #
 #     <store_dir>/
-#         BASE.h5 | BASELINE.h5 | <scenario_id>.h5
+#         BASELINE.h5 | <scenario_id>.h5
 #         artifacts/<scenario_id>/...        host cache-contributor files
 
 #: Characters that are unsafe in a filename on some supported platform, plus
@@ -333,10 +327,10 @@ def _sha8(text: str) -> str:
 def store_entry_name(scenario_id: str) -> str:
     """Return a filesystem- and HDF5-safe stem for *scenario_id*.
 
-    Scenario ids reach us straight from YAML keys and from
-    ``metadata.scenario_id``, neither of which passes through
-    ``scenario_editor._validate_id`` (that guards only GUI-authored ids). They
-    now become *filenames*, so they must be sanitised centrally here.
+    Scenario ids reach us straight from YAML ``scenarios:`` keys and sweep-point
+    labels, neither of which passes through ``scenario_editor._validate_id``
+    (that guards only GUI-authored ids). They now become *filenames*, so they
+    must be sanitised centrally here.
 
     Sanitising alone would let distinct ids collide (``a/b`` and ``a_b`` mapping
     to one file, silently sharing results), so whenever the safe form differs
@@ -416,26 +410,24 @@ def store_artifacts_dir(store_dir: Path, scenario_id: str) -> Path:
 def base_entry_id(raw: Dict[str, Any]) -> str:
     """Return the store id the *unmodified base* run is written under.
 
-    :data:`BASELINE_SCENARIO_ID` when the config declares ``scenarios:``, else
-    :data:`BASE_SCENARIO_ID` (or an explicit ``metadata.scenario_id``). Mirrors
-    the naming :func:`expand_scenarios` gives the base entry, which is the whole
-    point: both paths that can solve the base must land on the same name.
+    Always :data:`BASELINE_SCENARIO_ID`, whether the config declares
+    ``scenarios:`` or is itself the whole (N=1) run-set. Mirrors the naming
+    :func:`expand_scenarios` gives the base entry, which is the whole point:
+    both paths that can solve the base must land on the same name.
 
-    They did not. A sweep took the name from :func:`expand_scenarios`
-    (``BASELINE``) while a plain Run Simulation defaulted to ``BASE``, so the
-    same result was stored twice under two names -- the pane grew a phantom
-    ``BASE`` row while the authored ``BASELINE`` row still read "Not computed
-    yet".
+    They did not, historically. A sweep took the name from
+    :func:`expand_scenarios` (``BASELINE``) while a plain Run Simulation
+    defaulted to a different id, so the same result was stored twice under two
+    names -- the pane grew a phantom row while the authored ``BASELINE`` row
+    still read "Not computed yet".
 
     A global ``sweep:`` without ``scenarios:`` deliberately does **not** count:
-    there the run-set is the sweep points themselves (ids prefixed ``BASE__``)
-    and no unmodified-base entry is emitted at all, so the base keeps its plain
-    name.
+    there the run-set is the sweep points themselves (ids prefixed
+    ``BASELINE__``) and no unmodified-base entry is emitted at all, so *this*
+    function's return value is moot for that config -- nothing gets written
+    under the plain ``BASELINE`` name.
     """
-    if raw.get("scenarios"):
-        return BASELINE_SCENARIO_ID
-    declared = (raw.get("metadata") or {}).get("scenario_id")
-    return str(declared) if declared else BASE_SCENARIO_ID
+    return BASELINE_SCENARIO_ID
 
 
 def expand_scenarios(
@@ -452,7 +444,7 @@ def expand_scenarios(
     the scenarios do not cross-multiply.
 
     When neither block is present, returns a single ``(scenario_id, base)``
-    tuple using ``metadata.scenario_id`` or :data:`BASE_SCENARIO_ID`.
+    tuple using :data:`BASELINE_SCENARIO_ID`.
 
     Parameters
     ----------
@@ -460,7 +452,7 @@ def expand_scenarios(
         The raw (``from:``-resolved) config. Not mutated.
     symbols : Mapping[str, str], optional
         Axis-name/path-leaf → symbol mapping used to label sweep points in
-        scenario ids (e.g. ``diameter`` → ``TF_D`` gives ``BASE__TF_D=0.03``).
+        scenario ids (e.g. ``diameter`` → ``TF_D`` gives ``BASELINE__TF_D=0.03``).
         Defaults to the host-registered ``plugins.sweep_symbols`` (empty when
         no host registered one). An axis's explicit ``symbol:`` always wins.
     schema_entry : callable, optional
@@ -489,8 +481,7 @@ def expand_scenarios(
             "boulder.runset.expand_scenarios."
         )
 
-    base_meta = base_raw.get("metadata") or {}
-    base_id = base_meta.get("scenario_id", BASE_SCENARIO_ID)
+    base_id = BASELINE_SCENARIO_ID
     scenario_block = raw_scenarios or {}
     global_sweeps = sweeps_of(base_raw)
 

@@ -17,7 +17,7 @@ N=1 and N=3:
 
 ```
 <config_dir>/.boulder-cache/<stem>/
-    BASE.h5 | BASELINE.h5 | <scenario_id>.h5     # one file per entry
+    BASELINE.h5 | <scenario_id>.h5     # one file per entry
     artifacts/<scenario_id>/...
 ```
 

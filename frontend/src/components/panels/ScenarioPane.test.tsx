@@ -35,12 +35,18 @@ let mockScenarios: Array<{ id: string; label: string; t0_K: number }> = [
   { id: "A", label: "Scenario A", t0_K: 300 },
 ];
 let mockAuthoredIds: string[] = [];
+// `metadata.scenario_name`/`description` per overlay -- the live, pre-solve
+// source the pane's title/subtitle now read from (see `overlayMeta`).
+let mockOverlays: Record<string, { metadata?: Record<string, unknown> }> = {
+  A: { metadata: { scenario_name: "Scenario A" } },
+};
 
 vi.mock("@/stores/scenarioStore", () => ({
   useScenarioStore: () => ({
     available: mockAvailable,
     scenarios: mockScenarios,
     authoredIds: mockAuthoredIds,
+    overlays: mockOverlays,
     createdAt: undefined,
     activeId: null,
     loading: false,
@@ -89,6 +95,7 @@ describe("ScenarioPane", () => {
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
     mockAuthoredIds = [];
+    mockOverlays = { A: { metadata: { scenario_name: "Scenario A" } } };
     mockScenarioProgress = {};
   });
 
