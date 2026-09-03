@@ -18,6 +18,7 @@ from boulder.runset import (
     run_set_size,
     sweep_axis_values,
 )
+from boulder.validation import MetadataModel
 
 # ---------------------------------------------------------------------------
 # expand_scenarios
@@ -33,6 +34,31 @@ def test_expand_scenarios_no_block_returns_single_base():
     assert sid == "BASELINE"
     assert "scenarios" not in cfg
     assert "sweeps" not in cfg
+
+
+def test_expand_scenarios_never_stamps_scenario_id_into_the_config():
+    """Regression: the id lives only in the tuple, never in ``metadata``.
+
+    A host commonly writes one expanded scenario's merged config back out to
+    a temp YAML file and re-validates it before solving (e.g. to run each
+    scenario as its own isolated process). ``metadata.scenario_id`` is not a
+    valid field (:class:`boulder.validation.MetadataModel` forbids it), so a
+    config carrying it fails that re-validation with `extra_forbidden` --
+    which is exactly what happened here until this stamp was removed: every
+    scenario in a `scenarios:` block failed to solve via that path.
+    """
+    base = {
+        "metadata": {"title": "plain"},
+        "nodes": [{"id": "torch", "properties": {"T_out": 2500}}],
+        "scenarios": {
+            "hot": {"nodes": [{"id": "torch", "properties": {"T_out": 3000}}]}
+        },
+    }
+    out = expand_scenarios(base)
+    assert [sid for sid, _ in out] == ["BASELINE", "hot"]
+    for _sid, cfg in out:
+        assert "scenario_id" not in (cfg.get("metadata") or {})
+        MetadataModel(**(cfg.get("metadata") or {}))  # must validate cleanly
 
 
 def test_expand_scenarios_legacy_scenarios_list_raises_migration_error():
@@ -56,7 +82,6 @@ def test_expand_scenario_mapping_deep_merges_overlays():
     The key is the scenario id; id-keyed lists (``nodes``) merge by id.
     """
     base = {
-        "metadata": {"scenario_id": "BASE"},
         "nodes": [{"id": "torch", "properties": {"T_out": 2500}}],
         "scenarios": {
             "hot": {"nodes": [{"id": "torch", "properties": {"T_out": 3000}}]},
@@ -69,8 +94,6 @@ def test_expand_scenario_mapping_deep_merges_overlays():
     assert out[0][1]["nodes"][0]["properties"]["T_out"] == 2500
     assert out[1][1]["nodes"][0]["properties"]["T_out"] == 3000
     assert out[2][1]["nodes"][0]["properties"]["T_out"] == 2000
-    assert out[0][1]["metadata"]["scenario_id"] == "BASELINE"
-    assert out[1][1]["metadata"]["scenario_id"] == "hot"
     assert "scenarios" not in out[0][1]
 
 

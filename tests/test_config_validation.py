@@ -310,7 +310,7 @@ def test_metadata_accepts_sweep_point_but_stays_strict() -> None:
     not reject it.  Any other unknown metadata key is still forbidden.
     """
     data = {
-        "metadata": {"scenario_id": "base__T=300", "sweep_point": {"T": 300.0}},
+        "metadata": {"sweep_point": {"T": 300.0}},
         "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
         "connections": [],
     }
@@ -318,6 +318,6 @@ def test_metadata_accepts_sweep_point_but_stays_strict() -> None:
     assert model.metadata is not None
     assert model.metadata.sweep_point == {"T": 300.0}
 
-    data["metadata"] = {"scenario_id": "base", "not_a_metadata_key": 1}
+    data["metadata"] = {"not_a_metadata_key": 1}
     with pytest.raises(Exception, match="not_a_metadata_key"):
         validate_normalized_config(normalize_config(data))
