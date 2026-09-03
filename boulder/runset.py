@@ -465,12 +465,17 @@ def expand_scenarios(
     -------
     list of tuple
         ``[(scenario_id, merged_config_dict), ...]``. Each merged dict is a
-        deep copy with the ``scenarios``/``sweep`` directives stripped, and
-        ``metadata.scenario_id`` set to the scenario id. When a ``scenarios:``
-        mapping is declared, the unmodified base config is always the first
-        entry, id :data:`BASELINE_SCENARIO_ID` — otherwise it would never be
-        part of the run-set at all (the union below only covers the named
-        overlays), so ``Run Sweep`` would silently never solve it.
+        deep copy with the ``scenarios``/``sweep`` directives stripped — the
+        id lives only in the tuple, never stamped into the dict itself, since
+        ``metadata.scenario_id`` is not a valid config field (see
+        :class:`boulder.validation.MetadataModel`) and a merged dict often
+        gets written back out and re-validated (e.g. a host dumping one
+        scenario's merged config to a temp YAML file before solving it). When
+        a ``scenarios:`` mapping is declared, the unmodified base config is
+        always the first entry, id :data:`BASELINE_SCENARIO_ID` — otherwise it
+        would never be part of the run-set at all (the union below only
+        covers the named overlays), so ``Run Sweep`` would silently never
+        solve it.
     """
     raw_scenarios = base_raw.get("scenarios")
     if isinstance(raw_scenarios, list):
@@ -498,18 +503,10 @@ def expand_scenarios(
 
     expanded: List[Tuple[str, dict]] = []
 
-    def _with_id(cfg: dict, sid: str) -> dict:
-        return deep_merge(cfg, {"metadata": {"scenario_id": sid}})
-
     # 0) The unmodified base config, always first -- named scenarios: overlays
     # only add to the run-set, they never stand in for the base itself.
     if scenario_block:
-        expanded.append(
-            (
-                BASELINE_SCENARIO_ID,
-                _with_id(copy.deepcopy(base_clean), BASELINE_SCENARIO_ID),
-            )
-        )
+        expanded.append((BASELINE_SCENARIO_ID, copy.deepcopy(base_clean)))
 
     # 1) Global sweep points, expanded on the base.
     for sweep_id, patch in (
@@ -518,7 +515,7 @@ def expand_scenarios(
         else []
     ):
         sid = f"{base_id}__{sweep_id}" if sweep_id else base_id
-        expanded.append((sid, _with_id(deep_merge(base_clean, patch), sid)))
+        expanded.append((sid, deep_merge(base_clean, patch)))
 
     # 2) Each scenario overlay; a scenario-local sweep multiplies only itself.
     for key, overlay in scenario_block.items():
@@ -533,9 +530,9 @@ def expand_scenarios(
                 inner_sweeps, scen_base, symbols, schema_entry
             ):
                 sid = f"{key}__{sweep_id}" if sweep_id else key
-                expanded.append((sid, _with_id(deep_merge(scen_base, patch), sid)))
+                expanded.append((sid, deep_merge(scen_base, patch)))
         else:
-            expanded.append((key, _with_id(scen_base, key)))
+            expanded.append((key, scen_base))
 
     return expanded
 
