@@ -151,7 +151,8 @@ def test_converter_parses_the_mechanism_file_once_per_process():
     template = ctutils._PARSED_SOLUTIONS[MECH]
     # Converter gases are derived from the template, never the template itself.
     assert conv.gas is not template
-    assert conv.gas.transport_model == template.transport_model
+    # The engine never reads transport properties: no fit on the shared gas.
+    assert conv.gas.transport_model == "none"
     for reactor in conv.reactors.values():
         assert reactor.phase is not template
 
@@ -190,6 +191,7 @@ def test_a_subclass_can_serve_solutions_from_its_own_cache():
     cfg = normalize_config(copy.deepcopy(_TWO_STAGE))
     solve_staged(conv, build_stage_graph(cfg), cfg)
 
-    assert any(k and t for _, k, t in served)  # the converter's shared gas
+    assert any(k for _, k, _ in served)  # the converter's shared gas / reactors
     assert any(not k for _, k, _ in served)  # templates / carriers
+    assert not any(t for _, _, t in served)  # nothing asks for a transport fit
     assert all(m.endswith(MECH) for m, _, _ in served)  # resolved path or bare name
