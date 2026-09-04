@@ -39,7 +39,7 @@ network:
 scenarios:
   base_case:
     metadata:
-      scenario_name: "Base Case"
+      description: "Base Case"
     network:
       - id: feed
         Reservoir:
@@ -136,7 +136,7 @@ def test_create_scenario_clone(tmp_path: Path) -> None:
             },
         )
         assert resp.status_code == 200, resp.text
-        assert "scenario_name:" in resp.json()["yaml"]
+        assert "description:" in resp.json()["yaml"]
         assert "Base Case" in resp.json()["yaml"]
     finally:
         client.__exit__(None, None, None)
@@ -270,7 +270,7 @@ def test_get_scenario_source(tmp_path: Path) -> None:
             "/api/scenarios/base_case/source", json={"overlay": overlays["base_case"]}
         )
         assert resp.status_code == 200
-        assert "scenario_name" in resp.json()["yaml"]
+        assert "description" in resp.json()["yaml"]
     finally:
         client.__exit__(None, None, None)
 
@@ -293,7 +293,7 @@ def test_update_scenario(tmp_path: Path) -> None:
     try:
         overlays = _authored_overlays(client)
         new_yaml = (
-            "metadata:\n  scenario_name: Updated\n"
+            "metadata:\n  description: Updated\n"
             "network:\n  - id: feed\n    Reservoir:\n      temperature: 350.0\n"
         )
         resp = client.patch(
@@ -302,8 +302,7 @@ def test_update_scenario(tmp_path: Path) -> None:
         assert resp.status_code == 200, resp.text
         assert "Updated" in resp.json()["yaml"]
         assert (
-            resp.json()["overlays"]["base_case"]["metadata"]["scenario_name"]
-            == "Updated"
+            resp.json()["overlays"]["base_case"]["metadata"]["description"] == "Updated"
         )
         # Nothing here ever touches disk.
         assert "Updated" not in cfg.read_text(encoding="utf-8")

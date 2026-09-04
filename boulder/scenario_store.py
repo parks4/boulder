@@ -195,7 +195,7 @@ def update_display_attrs(
     """Refresh an entry's *display* attrs without touching its result.
 
     A sweep that skips an unchanged entry still wants the Scenario pane to track
-    the YAML — a reordered run-set, or a renamed ``scenario_name``. Deliberately
+    the YAML — a reordered run-set. Deliberately
     cannot touch the fingerprint or the payload: this is presentation only.
     Returns whether the entry existed.
     """

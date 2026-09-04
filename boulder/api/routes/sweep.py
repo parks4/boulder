@@ -359,7 +359,8 @@ async def sweep_run(
                 config, mech_name, fingerprint = prepare_scenario(
                     cfg, resolve_mechanism
                 )
-                label = str((cfg.get("metadata") or {}).get("scenario_name") or sid)
+                # The `scenarios:` key is a scenario's only name -- no label.
+                label = sid
                 state["current"] = i + 1
 
                 if cached_fps.get(sid) == fingerprint:
@@ -369,8 +370,8 @@ async def sweep_run(
                     state["message"] = line
                     state["last_line"] = line
                     print(f"[sweep] {line}", flush=True)
-                    # Display attrs still track the YAML (reordering, a renamed
-                    # scenario_name) even though the solve itself is skipped.
+                    # Display attrs still track the YAML (a reordered run-set)
+                    # even though the solve itself is skipped.
                     scenario_store.update_display_attrs(
                         store_dir, sid, label=label, order=i
                     )

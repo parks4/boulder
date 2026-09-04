@@ -33,21 +33,14 @@ function buildRows(authoredIds: string[], scenarios: ScenarioMeta[]): ScenarioRo
   return rows;
 }
 
-/** `scenario_name`/`description`, read straight off the live overlay -- unlike
- * the computed store's `label`, these are available before a scenario has
- * ever been solved. Falls back to the id when a scenario has no name of its
- * own (a blank or freshly cloned overlay). */
-function overlayMeta(
-  overlay: ScenarioOverlay | undefined,
-  id: string,
-): { name: string; description?: string } {
+/** `metadata.description`, read straight off the live overlay -- unlike the
+ * computed store's attrs, it is available before a scenario has ever been
+ * solved. A scenario's only name is its `scenarios:` key (the row's id); the
+ * description is a subtitle, not an alternative name. */
+function overlayDescription(overlay: ScenarioOverlay | undefined): string | undefined {
   const metadata = (overlay?.metadata ?? {}) as Record<string, unknown>;
-  const name = metadata.scenario_name;
   const description = metadata.description;
-  return {
-    name: typeof name === "string" && name ? name : id,
-    description: typeof description === "string" && description ? description : undefined,
-  };
+  return typeof description === "string" && description ? description : undefined;
 }
 
 /** Compact relative-time label, e.g. "just now", "2 min ago", "3 h ago". */
@@ -289,7 +282,7 @@ export function ScenarioPane() {
             const isCalculating = row.id in scenarioProgress;
             const s = row.computed;
             const ago = s ? timeAgo(s.computed_at ?? createdAt, now) : "";
-            const { name, description } = overlayMeta(overlays[row.id], row.id);
+            const description = overlayDescription(overlays[row.id]);
             return (
               // The action icons are an overlay (below), not siblings in a
               // flex row: as siblings they permanently reserved an icon column
@@ -319,7 +312,7 @@ export function ScenarioPane() {
                   ].join(" ")}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate">{name}</span>
+                    <span className="font-medium truncate">{row.id}</span>
                     {/* Hidden on hover -- the action icons take this spot. */}
                     {isCalculating ? (
                       <span className="shrink-0 text-[10px] text-primary animate-pulse group-hover:opacity-0">

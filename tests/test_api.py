@@ -946,7 +946,7 @@ class TestRunSelectedScenario:
                     "scenario_id": "hot",
                     "scenarios": {
                         "hot": {
-                            "metadata": {"scenario_name": "Hot feed"},
+                            "metadata": {"description": "Hot feed"},
                             "nodes": [
                                 {"id": "r", "properties": {"temperature": 900.0}}
                             ],
@@ -958,9 +958,10 @@ class TestRunSelectedScenario:
         assert resp.status_code == 200
         assert self._temperature(captured["config"]) == 900.0
         # Named after the scenario, so the result lands in that entry rather
-        # than overwriting the baseline's.
+        # than overwriting the baseline's. The id is the scenario's only name,
+        # so it is the label too -- `metadata.description` is a subtitle.
         assert captured["scenario_id"] == "hot"
-        assert captured["label"] == "Hot feed"
+        assert captured["label"] == "hot"
         simulation_routes._simulations.clear()
 
     @pytest.mark.asyncio
