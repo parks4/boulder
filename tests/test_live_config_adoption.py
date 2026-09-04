@@ -10,6 +10,8 @@ directly and its wiring into ``POST /api/configs/parse`` and
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -164,12 +166,19 @@ class TestAdoptLiveConfigUnit:
         with open(second_path, encoding="utf-8") as f:
             assert f.read() == _SCENARIO_YAML
 
-    def test_noop_when_real_config_path_already_set(self, tmp_path):
+    def test_real_config_path_takes_content_keeps_location(self, tmp_path):
+        """An in-place edit of a CLI-provided file updates content, not location.
+
+        The base config the sweep and the Scenario Pane work from must follow
+        the edit; the path (and so the result store, its identity and any
+        relative paths) must stay with the user's file, which is never written.
+        """
         app = create_app()
         real_cfg = tmp_path / "real.yaml"
         real_cfg.write_text(_PLAIN_YAML, encoding="utf-8")
         app.state.preloaded_config_path = str(real_cfg)
-        app.state.preloaded_raw = {"marker": "untouched"}
+        app.state.preloaded_filename = "real.yaml"
+        app.state.preloaded_raw = {"marker": "startup"}
 
         class _Req:
             pass
@@ -180,13 +189,18 @@ class TestAdoptLiveConfigUnit:
         adopt_live_config(
             req,
             raw={"scenarios": {"a": {}}},
-            validated={},
+            validated={"nodes": [], "connections": []},
             yaml_str=_SCENARIO_YAML,
             filename="pasted.yaml",
         )
 
+        assert app.state.preloaded_raw == {"scenarios": {"a": {}}}
+        assert app.state.preloaded_config == {"nodes": [], "connections": []}
+        assert app.state.preloaded_yaml == _SCENARIO_YAML
         assert app.state.preloaded_config_path == str(real_cfg)
-        assert app.state.preloaded_raw == {"marker": "untouched"}
+        assert app.state.preloaded_filename == "real.yaml"
+        assert real_cfg.read_text(encoding="utf-8") == _PLAIN_YAML
+        assert not list(tmp_path.glob("**/pasted.yaml"))
 
 
 class TestParseYamlAdoptsLiveConfig:
@@ -227,19 +241,22 @@ class TestParseYamlAdoptsLiveConfig:
         finally:
             client.__exit__(None, None, None)
 
-    def test_parse_is_noop_for_a_real_preloaded_config(self, tmp_path):
+    def test_parse_updates_content_for_a_real_preloaded_config(self, tmp_path):
         real_cfg = tmp_path / "real.yaml"
         real_cfg.write_text(_PLAIN_YAML, encoding="utf-8")
         client, app = _client()
         try:
             app.state.preloaded_config_path = str(real_cfg)
-            app.state.preloaded_raw = {"marker": "untouched"}
+            app.state.preloaded_raw = {"marker": "startup"}
 
             resp = client.post("/api/configs/parse", json={"yaml": _SCENARIO_YAML})
             assert resp.status_code == 200, resp.text
 
             assert app.state.preloaded_config_path == str(real_cfg)
-            assert app.state.preloaded_raw == {"marker": "untouched"}
+            assert app.state.preloaded_raw.get("scenarios") == {
+                "a": {"metadata": {"scenario_name": "A"}}
+            }
+            assert app.state.preloaded_yaml == _SCENARIO_YAML
         finally:
             client.__exit__(None, None, None)
 
@@ -326,5 +343,64 @@ class TestAdoptedRawIsUnNormalized:
             raw = app.state.preloaded_raw
             assert "pressure" not in _outlet_node(raw)["OutletSink"]
             assert raw == _to_plain_dict(load_yaml_string_with_comments(_OUTLET_YAML))
+        finally:
+            client.__exit__(None, None, None)
+
+
+_LOW_P_SCENARIO = """\
+  low_p:
+    network:
+      - id: outlet
+        OutletSink:
+          pressure: 50000 Pa
+"""
+
+
+def _client_started_with(cfg_path):
+    """Start the app the way the CLI does, so the lifespan preloads *cfg_path*."""
+    os.environ["BOULDER_CONFIG_PATH"] = str(cfg_path)
+    try:
+        app = create_app()
+        client = TestClient(app)
+        client.__enter__()
+    finally:
+        del os.environ["BOULDER_CONFIG_PATH"]
+    return client, app
+
+
+class TestEditedScenariosReachThePane:
+    """Saving a `scenarios:` edit on a server started with a real file.
+
+    The Scenario Pane re-seeds from ``GET /api/scenarios`` after a YAML-pane
+    Save and Run Sweep merges overlays onto the server's base config: both must
+    see the edited config, while the result store stays where the file is.
+    """
+
+    def test_parse_adds_a_scenario_without_moving_the_store(self, tmp_path):
+        cfg = tmp_path / "base.yaml"
+        cfg.write_text(_OUTLET_YAML, encoding="utf-8")
+        client, app = _client_started_with(cfg)
+        try:
+            before = client.get("/api/scenarios").json()
+            assert before["authored_ids"] == ["BASELINE", "high_p"]
+
+            resp = client.post(
+                "/api/configs/parse", json={"yaml": _OUTLET_YAML + _LOW_P_SCENARIO}
+            )
+            assert resp.status_code == 200, resp.text
+
+            after = client.get("/api/scenarios").json()
+            assert after["authored_ids"] == ["BASELINE", "high_p", "low_p"]
+            assert after["store"] == before["store"] == "base"
+            assert app.state.preloaded_config_path == str(cfg)
+
+            info = client.get("/api/sweep").json()
+            assert info["n_scenarios"] == 3
+            assert info["can_run"] is True
+
+            # The base network the sweep merges onto is the edited one, still
+            # un-normalized (no propagated pressure on the outlet).
+            assert "pressure" not in _outlet_node(app.state.preloaded_raw)["OutletSink"]
+            assert cfg.read_text(encoding="utf-8") == _OUTLET_YAML
         finally:
             client.__exit__(None, None, None)

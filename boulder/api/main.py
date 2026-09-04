@@ -88,23 +88,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         "BOULDER_CONFIG"
     )
     # ------------------------------------------------------------------
-    # Every ``preloaded_*`` attribute below is a **startup snapshot**: it is
-    # written once, here, from the file named by ``BOULDER_CONFIG_PATH``, and
-    # is then frozen for the process lifetime. Read them as if they were named
-    # ``initial_*``.
+    # Every ``preloaded_*`` attribute below is seeded here from the file named
+    # by ``BOULDER_CONFIG_PATH`` and then kept current by ``adopt_live_config``
+    # (see ``boulder/api/live_config.py``), in two halves:
     #
-    # They deliberately do NOT track live edits. Saving the YAML pane calls
-    # ``adopt_live_config``, which **no-ops when a real file was preloaded**
-    # (see ``boulder/api/live_config.py``) -- the browser's own store becomes
-    # the current config instead. That is why ``/api/simulations`` takes the
-    # config from the *request body* rather than from here. The one exception
-    # is a file *upload*: a whole new config, adopted (into a private temp
-    # file) even over a CLI-preloaded one, so these attrs then describe the
-    # uploaded file.
+    #   * **Content** -- ``preloaded_raw`` / ``preloaded_config`` /
+    #     ``preloaded_yaml`` -- follows every YAML-pane Save and every upload,
+    #     so Run Sweep's base and the Scenario Pane's ``scenarios:`` seed are
+    #     what the user last saved, not what the file held at startup.
+    #   * **Location** -- ``preloaded_config_path`` / ``preloaded_filename`` --
+    #     stays with the CLI-provided file (its directory anchors relative
+    #     paths, the result store and its identity stamp) and only changes on
+    #     a file *upload*, which is a new file and gets its own private
+    #     location.
+    #
+    # ``/api/simulations`` still takes the config from the *request body*: the
+    # browser store is the source of truth for a single run, these attrs are
+    # the server-side mirror the sweep and scenario routes work from.
     #
     # Consequences to keep in mind when adding a route:
-    #   * Anything served from these attrs reflects the file as it was at
-    #     startup, not what the user currently sees in the editor.
+    #   * Content attrs reflect the last *saved* YAML -- an unsaved edit in
+    #     the editor is not yet visible here.
     #   * ``preloaded_raw`` is additionally the base that every scenario
     #     overlay is merged onto (Run Sweep, scenario preview), so it must
     #     stay byte-identical to the file -- never hand it to a function that

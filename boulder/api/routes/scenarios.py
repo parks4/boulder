@@ -54,14 +54,14 @@ def _identity(request: Request) -> str:
 
 
 def _base_scenarios_snapshot(request: Request) -> Dict[str, Any]:
-    """Return the ``scenarios:`` block as loaded at startup — frozen from then on.
+    """Return the ``scenarios:`` block of the config as last saved from the browser.
 
-    This is the *one* place scenario overlays are ever read from disk: the
-    initial seed for the frontend's own overlay state (``scenarioStore``),
-    exactly like ``configStore.config`` is seeded once from ``GET
-    /configs/preloaded`` and never re-read after. Every scenario authoring
-    route past this point is a pure function over whatever overlays map the
-    caller sends — nothing here is written back to disk or to ``app.state``.
+    This is the *one* place scenario overlays are ever read from the server's
+    base config: the seed for the frontend's own overlay state
+    (``scenarioStore``), taken at startup and again whenever the base config is
+    replaced or saved (``resetForNewConfig``). Every scenario authoring route
+    past this point is a pure function over whatever overlays map the caller
+    sends — nothing here is written back to disk or to ``app.state``.
     """
     raw = _raw_base_config(request) or {}
     overlays = raw.get("scenarios") or {}
@@ -191,12 +191,12 @@ def _config_path(request: Request) -> Optional[Path]:
 def _raw_base_config(request: Request) -> Optional[Dict[str, Any]]:
     """Return the inheritance-resolved base config dict (keeps `scenarios:`/`sweep:`).
 
-    Prefers the in-memory startup snapshot (`app.state.preloaded_raw`); falls
-    back to a fresh disk load so this also works against a config path set
-    directly (e.g. in tests) without a preload having happened yet. This is a
-    read-only structural reference for `_entity_location`/preview/render — not
-    kept in sync with scenario edits, which live entirely in the caller's
-    overlays map.
+    Prefers the in-memory base config (`app.state.preloaded_raw`, the config as
+    last saved from the browser); falls back to a fresh disk load so this also
+    works against a config path set directly (e.g. in tests) without a preload
+    having happened yet. This is a read-only structural reference for
+    `_entity_location`/preview/render — not kept in sync with *scenario* edits,
+    which live entirely in the caller's overlays map.
     """
     raw = getattr(request.app.state, "preloaded_raw", None)
     if raw:
