@@ -7,8 +7,9 @@ pipeline. Progress is written into ``app.state.sweep_job`` as it goes; the
 frontend polls :func:`sweep_status` and refreshes the Scenario Pane on
 completion.
 
-The base config comes from the one-time startup snapshot
-(``app.state.preloaded_raw``, unchanged for the process lifetime); the
+The base config comes from ``app.state.preloaded_raw`` -- the config as last
+saved from the browser (YAML-pane Save or upload), seeded at startup from the
+CLI file (see ``boulder.api.live_config``); the
 scenario overlays come from the request body — the caller's (``scenarioStore``)
 current in-memory overlays map, since scenario authoring no longer writes to
 disk (see ``boulder.scenario_editor``). Only the *results* — the HDF5 scenario
@@ -184,11 +185,11 @@ def _raw(request: Request) -> Dict[str, Any]:
 
 
 def _merged_raw(request: Request, scenarios: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the base config snapshot with *scenarios* (the caller's overlays) merged in.
+    """Return the base config with *scenarios* (the caller's overlays) merged in.
 
-    The base structure itself is the frozen startup snapshot — not re-read or
-    kept in sync with base-network edits, same as every other scenario route
-    in this module (see ``boulder.api.routes.scenarios._raw_base_config``).
+    The base structure is the config as last saved from the browser (not
+    re-read from disk), same as every other scenario route (see
+    ``boulder.api.routes.scenarios._raw_base_config``).
     """
     base = {k: v for k, v in _raw(request).items() if k != "scenarios"}
     return {**base, "scenarios": scenarios}
@@ -198,8 +199,8 @@ def _merged_raw(request: Request, scenarios: Dict[str, Any]) -> Dict[str, Any]:
 async def sweep_info(request: Request) -> Dict[str, Any]:
     """Report whether a run-set (scenarios and/or sweep) can be run.
 
-    Reflects the config's startup snapshot — a scenario created in this
-    session but not yet included in a run request isn't counted here (purely
+    Reflects the config as last saved — a scenario created in the pane but not
+    yet saved into the YAML or included in a run request isn't counted here (purely
     informational; the actual run in :func:`sweep_run` always uses whatever
     overlays the caller sends).
     """

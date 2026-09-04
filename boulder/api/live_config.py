@@ -14,9 +14,26 @@ already declares ``scenarios:``.
 parsed or uploaded with no preloaded path set, it is written to a private
 temp file and adopted as the preloaded config, exactly as if Boulder had been
 started with that file. Subsequent edits overwrite the same temp file in
-place instead of leaving a trail of one-off files. A config that *was*
-already preloaded from a real file is left untouched -- this only ever fires
-for the "no file yet" case.
+place instead of leaving a trail of one-off files.
+
+When a config *was* preloaded from a real file, the two halves of "the
+preloaded config" are treated differently:
+
+* **Content** (``preloaded_raw`` / ``preloaded_config`` / ``preloaded_yaml``)
+  always follows the browser -- an in-place edit saved from the YAML pane
+  becomes the base that Run Sweep merges overlays onto and the ``scenarios:``
+  block the Scenario Pane re-seeds from. Otherwise a scenario the user just
+  typed vanishes from the pane and the sweep solves the startup network.
+* **Location** (``preloaded_config_path`` / ``preloaded_filename``) stays with
+  the user's file: its directory anchors relative paths (``from:``
+  inheritance, mechanism files, ``cache_store``), the result store and the
+  store's identity stamp. Adopting an edit into a temp copy would break all
+  of those, so no temp file is written for a CLI-provided config.
+
+A *file upload* is a different file, not an edit, so it adopts regardless
+(``replace=True``) and gets its own location -- otherwise a server started
+with a starter file would keep serving that file's result cache for whatever
+the user uploads afterwards. The user's own file is never written to.
 """
 
 from __future__ import annotations
@@ -41,13 +58,16 @@ def adopt_live_config(
     validated: Dict[str, Any],
     yaml_str: str,
     filename: Optional[str] = None,
+    *,
+    replace: bool = False,
 ) -> None:
-    """Persist *yaml_str* to disk and adopt it as the preloaded config.
+    """Adopt *yaml_str* (and its parsed forms) as the preloaded config.
 
-    No-op when a real preloaded config path is already set (a config Boulder
-    was started with from the CLI) -- this only ever materializes the
-    "started with no file" case, and never overwrites or shadows a
-    user-provided file.
+    With no real preloaded config path set, or with *replace* true, the YAML
+    is written to a private temp file that becomes the config's location.
+    When a real CLI-provided path is set and *replace* is false, only the
+    *content* attributes are updated and the location is left alone (see the
+    module docstring). The user's own file is never written to.
 
     Parameters
     ----------
@@ -66,17 +86,29 @@ def adopt_live_config(
     filename
         Display filename to adopt (e.g. an uploaded file's original name).
         Defaults to ``"config.yaml"``.
+    replace
+        The browser replaced the whole config (file upload): adopt even over
+        a CLI-preloaded file, location included, so the result cache follows
+        the new file instead of the file the server started with.
     """
     state = request.app.state
     live_dir = getattr(state, _LIVE_CONFIG_DIR_ATTR, None)
     if live_dir is None:
-        # First adoption this session: bail if a *real* CLI-provided config
-        # path is already set. Once we've adopted once, `_LIVE_CONFIG_DIR_ATTR`
-        # is set and every later call is known to be updating our own
-        # ephemeral file, so this check is skipped on subsequent calls --
-        # otherwise the very first adoption would set preloaded_config_path
-        # and permanently block all later edits from ever being adopted.
-        if getattr(state, "preloaded_config_path", None):
+        # First adoption this session with a *real* CLI-provided config path
+        # already set: an in-place edit. Take the content, keep the location
+        # (see the module docstring for why the two are split). Once we've
+        # adopted once, `_LIVE_CONFIG_DIR_ATTR` is set and every later call is
+        # known to be updating our own ephemeral file, so this branch is
+        # skipped on subsequent calls -- otherwise the very first adoption
+        # would set preloaded_config_path and route every later edit here.
+        if getattr(state, "preloaded_config_path", None) and not replace:
+            state.preloaded_config = validated
+            state.preloaded_raw = raw
+            state.preloaded_yaml = yaml_str
+            logger.info(
+                "Updated live config content; location stays %s",
+                state.preloaded_config_path,
+            )
             return
         live_dir = tempfile.mkdtemp(prefix="boulder-live-config-")
         setattr(state, _LIVE_CONFIG_DIR_ATTR, live_dir)
