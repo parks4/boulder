@@ -220,6 +220,8 @@ describe("ScenarioPane", () => {
     mockAuthoredIds = ["A", "pending_b"];
     render(<ScenarioPane />);
 
+    // The id is the primary label; `scenario_name` is the secondary line.
+    expect(screen.getByText("A")).toBeInTheDocument();
     expect(screen.getByText("Scenario A")).toBeInTheDocument();
     expect(screen.getByText("pending_b")).toBeInTheDocument();
     expect(screen.getByText("Not computed yet")).toBeInTheDocument();

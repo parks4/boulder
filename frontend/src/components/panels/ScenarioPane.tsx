@@ -35,17 +35,19 @@ function buildRows(authoredIds: string[], scenarios: ScenarioMeta[]): ScenarioRo
 
 /** `scenario_name`/`description`, read straight off the live overlay -- unlike
  * the computed store's `label`, these are available before a scenario has
- * ever been solved. Falls back to the id when a scenario has no name of its
- * own (a blank or freshly cloned overlay). */
+ * ever been solved. The scenario *id* is always the row's primary label (it is
+ * what the `scenarios:` key, the sweep log and the result store all use);
+ * `scenario_name` is a secondary line, omitted when unset or identical to the
+ * id (a blank or freshly cloned overlay). */
 function overlayMeta(
   overlay: ScenarioOverlay | undefined,
   id: string,
-): { name: string; description?: string } {
+): { name?: string; description?: string } {
   const metadata = (overlay?.metadata ?? {}) as Record<string, unknown>;
   const name = metadata.scenario_name;
   const description = metadata.description;
   return {
-    name: typeof name === "string" && name ? name : id,
+    name: typeof name === "string" && name && name !== id ? name : undefined,
     description: typeof description === "string" && description ? description : undefined,
   };
 }
@@ -319,7 +321,7 @@ export function ScenarioPane() {
                   ].join(" ")}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate">{name}</span>
+                    <span className="font-medium truncate">{row.id}</span>
                     {/* Hidden on hover -- the action icons take this spot. */}
                     {isCalculating ? (
                       <span className="shrink-0 text-[10px] text-primary animate-pulse group-hover:opacity-0">
@@ -340,6 +342,11 @@ export function ScenarioPane() {
                   {/* From the live overlay, not the computed store -- shows
                       up before a scenario has ever been solved. Single line,
                       no wrap; hover (native `title`) surfaces the full text. */}
+                  {name && (
+                    <div title={name} className="text-[10px] text-muted-foreground truncate">
+                      {name}
+                    </div>
+                  )}
                   {description && (
                     <div
                       title={description}
