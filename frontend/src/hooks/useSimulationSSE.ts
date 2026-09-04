@@ -2,8 +2,13 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useConfigStore } from "@/stores/configStore";
+import { fetchSimulationResults } from "@/api/simulations";
 import type { SimulationProgress, SimulationResults } from "@/types/simulation";
 // useConfigStore is accessed via .getState() inside callbacks to avoid stale closures.
+
+const CONNECTION_LOST = "Connection to simulation lost";
+/** Consecutive failed reconnects (no "open" in between) before giving up. */
+const MAX_RECONNECTS = 3;
 
 /** Node ids where the post-solve mass/energy conservation check failed. */
 function conservationFailingNodes(data: SimulationResults): string[] {
@@ -27,6 +32,7 @@ export function useSimulationSSE() {
   useEffect(() => {
     if (!simulationId || !isRunning) return;
 
+    let live = true;
     const url = `/api/simulations/${simulationId}/stream`;
     const source = new EventSource(url);
     sourceRef.current = source;
@@ -126,14 +132,47 @@ export function useSimulationSSE() {
       source.close();
     });
 
-    source.addEventListener("error", (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data);
-        setError(data.message ?? "Simulation failed");
-      } catch {
-        setError("Connection to simulation lost");
+    // EventSource dispatches BOTH the server's own terminal `event: error`
+    // (a MessageEvent carrying JSON, see boulder/api/sse.py) and its native
+    // connection-failure event (a plain Event, no data) under the one name
+    // "error", so a single listener has to tell them apart by `data`.
+    let reconnects = 0;
+    source.addEventListener("open", () => {
+      reconnects = 0;
+    });
+    source.addEventListener("error", (e: Event) => {
+      const data = (e as MessageEvent).data;
+      if (data !== undefined) {
+        let message = "Simulation failed";
+        try {
+          message = JSON.parse(data).message ?? message;
+        } catch {
+          // Malformed payload: keep the generic message.
+        }
+        setError(message);
+        source.close();
+        return;
+      }
+      // Native connection error. While readyState is CONNECTING the browser
+      // is retrying by itself: a proxy in front of the server (a forwarded
+      // dev-container port, say) does drop long-lived streams, and the
+      // reconnect re-enters the server generator, which replays the terminal
+      // event if the run finished meanwhile. Treating that first drop as
+      // fatal is how the UI used to show "Connection to simulation lost"
+      // while the server log held the run's real failure. Only a dead
+      // stream (CLOSED: 404, non-SSE response) or repeated failures are.
+      if (source.readyState === EventSource.CONNECTING && ++reconnects < MAX_RECONNECTS) {
+        return;
       }
       source.close();
+      // Ask the server what actually happened before blaming the network: a
+      // solve that failed as the stream dropped has its real message in
+      // error_message. Anything else (still running, gone, unreachable) is
+      // a genuinely lost connection -- and either way isRunning never stays
+      // stuck true with a permanently stuck Stop button.
+      fetchSimulationResults(simulationId)
+        .then((r) => live && setError(r.error_message ?? CONNECTION_LOST))
+        .catch(() => live && setError(CONNECTION_LOST));
     });
 
     // Terminal event for a cooperatively stopped run (see boulder/api/sse.py):
@@ -147,16 +186,8 @@ export function useSimulationSSE() {
       source.close();
     });
 
-    source.onerror = () => {
-      // EventSource connection error (dropped network, server restart, ...).
-      // Previously just closed the stream, leaving isRunning stuck true
-      // forever with no feedback -- now a permanently stuck Stop button
-      // rather than a permanently stuck spinner.
-      setError("Connection to simulation lost");
-      source.close();
-    };
-
     return () => {
+      live = false;
       source.close();
       sourceRef.current = null;
     };
