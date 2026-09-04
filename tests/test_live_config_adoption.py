@@ -254,7 +254,7 @@ class TestParseYamlAdoptsLiveConfig:
 
             assert app.state.preloaded_config_path == str(real_cfg)
             assert app.state.preloaded_raw.get("scenarios") == {
-                "a": {"metadata": {"scenario_name": "A"}}
+                "a": {"metadata": {"description": "A"}}
             }
             assert app.state.preloaded_yaml == _SCENARIO_YAML
         finally:
