@@ -1246,6 +1246,49 @@ def _rewrite_port_connections(
             del conn["port"]
 
 
+#: ``metadata:`` keys that were removed from the STONE vocabulary, mapped to the
+#: one-line reason shown when a file still carries them. Accepted on load for
+#: backward compatibility and **discarded with a warning** by
+#: :func:`normalize_config`, so the normalized config never carries them and a
+#: file authored against an older release keeps loading instead of failing
+#: validation on an ``extra_forbidden`` error.
+LEGACY_METADATA_KEYS: Dict[str, str] = {
+    "scenario_id": "a scenario is identified by its `scenarios:` key",
+    "scenario_name": (
+        "a scenario's only name is its `scenarios:` key; use `description` "
+        "for a subtitle"
+    ),
+}
+
+
+def drop_legacy_metadata_keys(config: Dict[str, Any]) -> List[str]:
+    """Remove :data:`LEGACY_METADATA_KEYS` from ``config["metadata"]`` in place.
+
+    Logs one warning per discarded key naming the key, its value and what
+    replaces it. Returns the keys that were dropped (empty when the file is
+    already clean). Only the top-level ``metadata:`` block is touched:
+    ``scenarios:`` overlays are merged onto the base and normalized one by one
+    by ``expand_scenarios``, so their own legacy keys go through here too.
+    """
+    meta = config.get("metadata")
+    if not isinstance(meta, dict):
+        return []
+    dropped: List[str] = []
+    for key, why in LEGACY_METADATA_KEYS.items():
+        if key in meta:
+            value = meta.pop(key)
+            dropped.append(key)
+            logger.warning(
+                "metadata.%s is no longer part of STONE metadata and was "
+                "discarded (%s). Remove it from the YAML: %s: %r",
+                key,
+                why,
+                key,
+                value,
+            )
+    return dropped
+
+
 def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, Any]:
     """Normalize configuration from YAML with 🪨 STONE standard to internal format.
 
@@ -1281,6 +1324,10 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
                 config = _result
         except Exception as _exc:  # noqa: BLE001 — a transform must not break load
             logger.debug("config_transform %r skipped: %s", _transform, _exc)
+
+    # Older files may still carry metadata keys the vocabulary has since
+    # dropped; discard them (with a warning) rather than failing validation.
+    drop_legacy_metadata_keys(config)
 
     # --- STONE v2 detection and normalization ---
     # Detect dialect first; this raises ValueError for v1 or unknown shapes.
