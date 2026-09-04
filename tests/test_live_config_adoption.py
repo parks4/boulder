@@ -18,6 +18,8 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from boulder.api.live_config import adopt_live_config  # noqa: E402
 from boulder.api.main import create_app  # noqa: E402
+from boulder.api.routes.configs import _to_plain_dict  # noqa: E402
+from boulder.config import load_yaml_string_with_comments  # noqa: E402
 
 _SCENARIO_YAML = """\
 metadata:
@@ -50,6 +52,52 @@ network:
       pressure: 101325
       composition: "CH4:1"
 """
+
+# A flow network whose outlet declares no pressure: `normalize()` propagates
+# the process pressure onto it (in place), which is exactly what the adopted
+# *raw* base must not contain -- a scenario overlay setting another outlet
+# pressure would otherwise conflict with the propagated one.
+_OUTLET_YAML = """\
+phases:
+  gas:
+    mechanism: gri30.yaml
+network:
+  - id: feed
+    Reservoir:
+      temperature: 300 K
+      pressure: 101325 Pa
+      composition: "CH4:0.5,O2:1.0,N2:3.76"
+  - id: reactor
+    IdealGasConstPressureMoleReactor:
+      volume: 1.0e-3 m**3
+      initial:
+        temperature: 1475 K
+        pressure: 101325 Pa
+        composition: "CO2:0.04476,H2O:0.08951,N2:0.86573"
+  - id: outlet
+    OutletSink: {}
+  - id: feed_to_reactor
+    MassFlowController:
+      mass_flow_rate: 1.0e-4 kg/s
+    source: feed
+    target: reactor
+  - id: reactor_to_outlet
+    PressureController:
+      pressure_coeff: 0.0
+      master: feed_to_reactor
+    source: reactor
+    target: outlet
+scenarios:
+  high_p:
+    network:
+      - id: outlet
+        OutletSink:
+          pressure: 200000 Pa
+"""
+
+
+def _outlet_node(raw):
+    return next(n for n in raw["network"] if n["id"] == "outlet")
 
 
 def _client():
@@ -211,5 +259,72 @@ class TestUploadConfigAdoptsLiveConfig:
             assert app.state.preloaded_config_path is not None
             assert app.state.preloaded_filename == "uploaded.yaml"
             assert app.state.preloaded_raw.get("scenarios")
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_upload_replaces_a_real_preloaded_config(self, tmp_path):
+        """An upload is adopted even when the server was started with a real file.
+
+        Otherwise the Scenario Pane, Run Sweep and the result cache keep
+        serving the startup file's scenarios for whatever the user uploads
+        afterwards. The startup file itself is left untouched.
+        """
+        real_cfg = tmp_path / "real.yaml"
+        real_cfg.write_text(_PLAIN_YAML, encoding="utf-8")
+        client, app = _client()
+        try:
+            app.state.preloaded_config_path = str(real_cfg)
+            app.state.preloaded_filename = "real.yaml"
+            app.state.preloaded_raw = {"marker": "startup file"}
+
+            resp = client.post(
+                "/api/configs/upload",
+                files={"file": ("uploaded.yaml", _SCENARIO_YAML, "application/x-yaml")},
+            )
+            assert resp.status_code == 200, resp.text
+
+            assert app.state.preloaded_config_path != str(real_cfg)
+            assert app.state.preloaded_filename == "uploaded.yaml"
+            assert list(app.state.preloaded_raw.get("scenarios", {})) == ["a"]
+            assert real_cfg.read_text(encoding="utf-8") == _PLAIN_YAML
+        finally:
+            client.__exit__(None, None, None)
+
+
+class TestAdoptedRawIsUnNormalized:
+    """The adopted `preloaded_raw` is the config as authored, not the normalized one.
+
+    `normalize()` mutates its argument in place; if that dict were adopted as
+    the Run Sweep base config, every node would carry a propagated process
+    pressure and a scenario overriding the outlet pressure would fail with a
+    pressure conflict.
+    """
+
+    def test_upload_adopts_the_authored_config(self):
+        client, app = _client()
+        try:
+            resp = client.post(
+                "/api/configs/upload",
+                files={"file": ("outlet.yaml", _OUTLET_YAML, "application/x-yaml")},
+            )
+            assert resp.status_code == 200, resp.text
+
+            raw = app.state.preloaded_raw
+            assert "pressure" not in _outlet_node(raw)["OutletSink"]
+            assert raw == _to_plain_dict(load_yaml_string_with_comments(_OUTLET_YAML))
+            # The response itself is still the normalized, validated config.
+            assert resp.json()["config"]["nodes"]
+        finally:
+            client.__exit__(None, None, None)
+
+    def test_parse_adopts_the_authored_config(self):
+        client, app = _client()
+        try:
+            resp = client.post("/api/configs/parse", json={"yaml": _OUTLET_YAML})
+            assert resp.status_code == 200, resp.text
+
+            raw = app.state.preloaded_raw
+            assert "pressure" not in _outlet_node(raw)["OutletSink"]
+            assert raw == _to_plain_dict(load_yaml_string_with_comments(_OUTLET_YAML))
         finally:
             client.__exit__(None, None, None)

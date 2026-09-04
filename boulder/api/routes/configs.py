@@ -6,6 +6,7 @@ reactor network configurations in the STONE YAML format.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import tempfile
@@ -111,12 +112,17 @@ async def parse_yaml(request: Request, body: YAMLParseRequest) -> Dict[str, Any]
         data = load_yaml_string_with_comments(body.yaml)
         # Convert ruamel CommentedMap to plain dict for normalisation
         plain = _to_plain_dict(data)
+        # `normalize()` mutates its argument in place (pressure propagation,
+        # unit coercion) -- deep-copy so `plain`, adopted below as the
+        # *un-normalized* base for Run Sweep, stays pristine. A normalized
+        # base carries a process pressure on every node, so any scenario
+        # overlay setting a different boundary pressure would conflict.
         runner_cls = getattr(request.app.state, "runner_class", None)
         if runner_cls is not None:
-            normalized = runner_cls.normalize(plain)
+            normalized = runner_cls.normalize(copy.deepcopy(plain))
             validated = runner_cls.validate(normalized)
         else:
-            normalized = normalize_config(plain)
+            normalized = normalize_config(copy.deepcopy(plain))
             validated = validate_config(normalized)
 
         # See the Run Sweep button / Scenario Pane -- both need a real
@@ -235,20 +241,26 @@ async def upload_config(
 
         data = load_yaml_string_with_comments(yaml_str)
         plain = _to_plain_dict(data)
+        # Deep-copy before normalizing -- see `parse_yaml`.
         runner_cls = getattr(request.app.state, "runner_class", None)
         if runner_cls is not None:
-            normalized = runner_cls.normalize(plain)
+            normalized = runner_cls.normalize(copy.deepcopy(plain))
             validated = runner_cls.validate(normalized)
         else:
-            normalized = normalize_config(plain)
+            normalized = normalize_config(copy.deepcopy(plain))
             validated = validate_config(normalized)
 
+        # An upload replaces the config wholesale, so adopt it even over a
+        # CLI-preloaded file: the Scenario Pane, Run Sweep and the result
+        # cache must follow the uploaded file, not the one the server was
+        # started with.
         adopt_live_config(
             request,
             raw=plain,
             validated=validated,
             yaml_str=yaml_str,
             filename=file.filename,
+            replace=True,
         )
 
         return {

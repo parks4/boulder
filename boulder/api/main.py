@@ -97,7 +97,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ``adopt_live_config``, which **no-ops when a real file was preloaded**
     # (see ``boulder/api/live_config.py``) -- the browser's own store becomes
     # the current config instead. That is why ``/api/simulations`` takes the
-    # config from the *request body* rather than from here.
+    # config from the *request body* rather than from here. The one exception
+    # is a file *upload*: a whole new config, adopted (into a private temp
+    # file) even over a CLI-preloaded one, so these attrs then describe the
+    # uploaded file.
     #
     # Consequences to keep in mind when adding a route:
     #   * Anything served from these attrs reflects the file as it was at
