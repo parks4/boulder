@@ -90,9 +90,9 @@ Scenario editing check:
    session (persisted in `localStorage['boulder-layout'].rightCollapsed`) —
    click the "Collapse/Expand right sidebar" header button, or clear that
    key and reload.
-1. Select a scenario (see the DOM-id trick below — do **not** rely on
-   visible label text, which is `metadata.scenario_name` and can be
-   identical across scenarios — see the Scenario Pane's id-first display).
+1. Select a scenario (see the DOM-id trick below — the row title is the
+   scenario id, i.e. its `scenarios:` key; `metadata.description` is only a
+   subtitle).
 1. Select a node or connection on the graph (canvas — see the Cytoscape trick
    below, it's far more reliable than pixel-coordinate clicks for this).
 1. Click **Edit**. The field shown is the scenario's *currently effective*

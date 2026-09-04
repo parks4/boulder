@@ -290,14 +290,11 @@ async def start_simulation(
         # naming a sweep gives it.
         from .sweep import _merged_raw  # noqa: PLC0415 — avoid import cycle
 
-        meta = config.get("metadata") or {}
+        # The scenario id is its only name -- the entry's label is the id.
+        run_id = body.scenario_id if scenario_config is not None else None
         worker.set_run_identity(
-            body.scenario_id if scenario_config is not None else None,
-            label=(
-                str(meta.get("scenario_name") or body.scenario_id)
-                if scenario_config is not None
-                else None
-            ),
+            run_id,
+            label=run_id,
             raw_config=_merged_raw(request, body.scenarios),
         )
         worker.start_simulation(

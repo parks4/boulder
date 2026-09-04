@@ -82,10 +82,11 @@ def create_scenario(
 
     *overlays* is not mutated. Returns ``(new_overlays, new_overlay_yaml_text)``.
 
-    *description*, if given, is written to ``metadata.scenario_name`` -- the
-    field the Scenario Pane shows as each row's label. Optional: a cloned
-    overlay's own inherited name is kept as-is when omitted, and a blank one
-    simply has no label of its own (the Pane falls back to the id).
+    *description*, if given, is written to ``metadata.description`` -- the
+    subtitle the Scenario Pane shows under the id. A scenario's only name is
+    its ``scenarios:`` key (*scenario_id*); there is no separate display
+    name. Optional: a cloned overlay's inherited description is kept as-is
+    when omitted, and a blank one simply has none.
     """
     _validate_id(scenario_id)
     if scenario_id in overlays:
@@ -105,7 +106,7 @@ def create_scenario(
         if metadata is None:
             metadata = {}
             overlay["metadata"] = metadata
-        metadata["scenario_name"] = description
+        metadata["description"] = description
 
     new_overlays = {**overlays, scenario_id: overlay}
     return new_overlays, _overlay_yaml_text(overlay)

@@ -117,7 +117,6 @@ METADATA_OPTIONAL_KEYS: frozenset = frozenset(
         "gui_app_title",
         "gui_app_version",
         "name",
-        "scenario_name",
         "architecture",
         "author",
         "date",
@@ -182,7 +181,7 @@ class MetadataModel(BaseModel):
     #: Optional app version shown next to the header title (e.g. ``1.2.3``).
     gui_app_version: Optional[str] = None
     name: Optional[str] = None
-    scenario_name: Optional[str] = None
+    # No ``scenario_name``: a scenario's only name is its ``scenarios:`` key.
     architecture: Optional[str] = None
     author: Optional[str] = None
     # Date is kept untyped so YAML can emit either strings or date objects

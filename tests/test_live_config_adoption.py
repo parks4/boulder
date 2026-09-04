@@ -34,7 +34,7 @@ network:
 scenarios:
   a:
     metadata:
-      scenario_name: "A"
+      description: "A"
 """
 
 _PLAIN_YAML = """\
@@ -152,7 +152,7 @@ class TestParseYamlAdoptsLiveConfig:
 
             assert app.state.preloaded_config_path is not None
             assert app.state.preloaded_raw.get("scenarios") == {
-                "a": {"metadata": {"scenario_name": "A"}}
+                "a": {"metadata": {"description": "A"}}
             }
         finally:
             client.__exit__(None, None, None)

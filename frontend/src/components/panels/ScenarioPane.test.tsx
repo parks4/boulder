@@ -14,10 +14,9 @@
  * available in a plain Boulder install, making the button look broken. "Clear
  * cache" only deletes the store, so it needs no sweep runner.
  *
- * No "Rename scenario" action here — a scenario's display name is
- * `metadata.scenario_name`, already editable via "Edit scenario YAML"; a
- * separate control that renames the underlying `scenario:` mapping key
- * would be a second, confusing way to change what looks like the same thing.
+ * A scenario's only name is its `scenarios:` mapping key, shown as the row
+ * title; `metadata.description` is a subtitle (editable via "Edit scenario
+ * YAML"), never an alternative name. No "Rename scenario" control here.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -35,10 +34,10 @@ let mockScenarios: Array<{ id: string; label: string; t0_K: number }> = [
   { id: "A", label: "Scenario A", t0_K: 300 },
 ];
 let mockAuthoredIds: string[] = [];
-// `metadata.scenario_name`/`description` per overlay -- the live, pre-solve
-// source the pane's title/subtitle now read from (see `overlayMeta`).
+// `metadata.description` per overlay -- the live, pre-solve source of the
+// pane's subtitle (see `overlayDescription`); the title is always the id.
 let mockOverlays: Record<string, { metadata?: Record<string, unknown> }> = {
-  A: { metadata: { scenario_name: "Scenario A" } },
+  A: { metadata: { description: "Scenario A" } },
 };
 
 vi.mock("@/stores/scenarioStore", () => ({
@@ -95,7 +94,7 @@ describe("ScenarioPane", () => {
     mockAvailable = true;
     mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
     mockAuthoredIds = [];
-    mockOverlays = { A: { metadata: { scenario_name: "Scenario A" } } };
+    mockOverlays = { A: { metadata: { description: "Scenario A" } } };
     mockScenarioProgress = {};
   });
 
@@ -220,6 +219,8 @@ describe("ScenarioPane", () => {
     mockAuthoredIds = ["A", "pending_b"];
     render(<ScenarioPane />);
 
+    // The id is the row title; the overlay's description is its subtitle.
+    expect(screen.getByText("A")).toBeInTheDocument();
     expect(screen.getByText("Scenario A")).toBeInTheDocument();
     expect(screen.getByText("pending_b")).toBeInTheDocument();
     expect(screen.getByText("Not computed yet")).toBeInTheDocument();

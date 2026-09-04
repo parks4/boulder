@@ -439,12 +439,13 @@ def run(
     n_cached = 0
     for i, (sid, cfg) in enumerate(runs):
         config, mech_name, fingerprint = prepare_scenario(cfg, resolve_mechanism)
-        label = str((cfg.get("metadata") or {}).get("scenario_name") or sid)
+        # The `scenarios:` key is a scenario's only name -- no separate label.
+        label = sid
         if cached_fps.get(sid) == fingerprint:
             n_cached += 1
             print(f"scenario {i + 1}/{total} ({sid}): cached, skipped", flush=True)
-            # Display attrs still track the YAML (reorderings / renamed labels)
-            # even when the solve itself is skipped.
+            # Display attrs still track the YAML (a reordered run-set) even
+            # when the solve itself is skipped.
             scenario_store.update_display_attrs(store_dir, sid, label=label, order=i)
             continue
         print(f"scenario {i + 1}/{total} ({sid})", flush=True)
