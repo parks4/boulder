@@ -2,7 +2,7 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Ban, Eraser, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/stores/scenarioStore";
-import { useSweepRunStore } from "@/stores/sweepStore";
+import { followedScenarioId, useSweepRunStore } from "@/stores/sweepStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { AddScenarioModal } from "@/components/modals/AddScenarioModal";
 import { SweepResultsPlot } from "./SweepResultsPlot";
@@ -79,6 +79,12 @@ export function ScenarioPane() {
     clearEntryCache,
   } = useScenarioStore();
   const scenarioProgress = useSweepRunStore((s) => s.scenarioProgress);
+  const pinnedId = useSweepRunStore((s) => s.pinnedId);
+  // The highlighted row is the scenario the screen is looking at: while a
+  // sweep runs that is the one being followed (the solver's, unless the user
+  // pinned another), which the graph and the results card already track --
+  // `activeId` alone lags behind, since auto-follow never selects.
+  const highlightedId = followedScenarioId(pinnedId, scenarioProgress) ?? activeId;
   const openYamlPane = useLayoutStore((s) => s.openYamlPane);
   const openScenarioYamlEditor = useLayoutStore((s) => s.openScenarioYamlEditor);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -216,7 +222,7 @@ export function ScenarioPane() {
   const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     e.preventDefault();
-    const idx = rows.findIndex((r) => r.id === activeId);
+    const idx = rows.findIndex((r) => r.id === highlightedId);
     let next =
       idx === -1
         ? e.key === "ArrowDown"
@@ -278,7 +284,7 @@ export function ScenarioPane() {
           }`}
         >
           {rows.map((row) => {
-            const isActive = row.id === activeId;
+            const isActive = row.id === highlightedId;
             const isCalculating = row.id in scenarioProgress;
             const s = row.computed;
             const ago = s ? timeAgo(s.computed_at ?? createdAt, now) : "";

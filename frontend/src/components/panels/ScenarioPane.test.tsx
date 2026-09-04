@@ -59,9 +59,12 @@ vi.mock("@/stores/scenarioStore", () => ({
 }));
 
 let mockScenarioProgress: Record<string, { stage: number | null; stageTotal: number | null }> = {};
-vi.mock("@/stores/sweepStore", () => ({
+let mockPinnedId: string | null = null;
+vi.mock("@/stores/sweepStore", async (importOriginal) => ({
+  // Real follow rule (`followedScenarioId`), mocked store state.
+  ...(await importOriginal<typeof import("@/stores/sweepStore")>()),
   useSweepRunStore: (selector: (s: unknown) => unknown) =>
-    selector({ scenarioProgress: mockScenarioProgress }),
+    selector({ scenarioProgress: mockScenarioProgress, pinnedId: mockPinnedId }),
 }));
 
 vi.mock("sonner", () => ({
@@ -235,6 +238,32 @@ describe("ScenarioPane", () => {
     expect(screen.getByText("Calculating…")).toBeInTheDocument();
     // The computed, not-currently-solving row keeps its own status.
     expect(screen.queryByText("Not computed yet")).not.toBeInTheDocument();
+  });
+
+  it("highlights the scenario being followed mid-sweep, not the stale selection", () => {
+    // The graph and the results card follow the solver during a sweep; the
+    // row highlight must move with them instead of staying on whatever was
+    // selected before the sweep started (auto-follow never calls setActive).
+    mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
+    mockAuthoredIds = ["A", "cold_feed"];
+    mockScenarioProgress = { cold_feed: { stage: 1, stageTotal: 3 } };
+    render(<ScenarioPane />);
+
+    expect(document.getElementById("scenario-cold_feed")).toHaveClass("border-blue-500");
+    expect(document.getElementById("scenario-A")).not.toHaveClass("border-blue-500");
+  });
+
+  it("keeps the highlight on a scenario the user pinned mid-sweep", () => {
+    mockScenarios = [{ id: "A", label: "Scenario A", t0_K: 300 }];
+    mockAuthoredIds = ["A", "cold_feed"];
+    mockScenarioProgress = { cold_feed: { stage: 1, stageTotal: 3 } };
+    mockPinnedId = "A";
+    render(<ScenarioPane />);
+
+    // Pinned but not solving: nothing is followed, so the highlight falls
+    // back to the store's own selection (null in this mock) -- never the solver.
+    expect(document.getElementById("scenario-cold_feed")).not.toHaveClass("border-blue-500");
+    mockPinnedId = null;
   });
 
   it("clicking a pending (not-yet-computed) row still calls setActive", () => {

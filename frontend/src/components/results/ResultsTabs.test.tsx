@@ -75,9 +75,11 @@ vi.mock("@/stores/scenarioStore", () => ({
     selector({ activeId: null }),
 }));
 
-vi.mock("@/stores/sweepStore", () => ({
+vi.mock("@/stores/sweepStore", async (importOriginal) => ({
+  // Real follow rule (`followedScenarioId`), mocked store state.
+  ...(await importOriginal<typeof import("@/stores/sweepStore")>()),
   useSweepRunStore: (selector: (s: unknown) => unknown) =>
-    selector({ scenarioProgress: {} }),
+    selector({ scenarioProgress: {}, pinnedId: null }),
 }));
 
 vi.mock("@/api/plugins", () => ({
