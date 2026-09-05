@@ -1125,13 +1125,14 @@ def sequential_of(
         )
 
     raw_paths = spec.get("parameter")
-    paths_list = (
+    candidates = (
         list(raw_paths) if isinstance(raw_paths, (list, tuple)) else [raw_paths]
     )
-    if not raw_paths or not all(isinstance(p, str) and p for p in paths_list):
+    if not raw_paths or not all(isinstance(p, str) and p for p in candidates):
         raise ValueError(
             f"{where}.parameter must be a dotted path or a list of them; got {raw_paths!r}"
         )
+    paths_list: List[str] = [str(p) for p in candidates]
     if symbols is None:
         symbols = _default_symbols()
     paths = tuple(_resolve_sweep_path(kind, p, raw, schema_entry) for p in paths_list)
