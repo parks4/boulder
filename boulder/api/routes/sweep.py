@@ -1,4 +1,4 @@
-"""Run-sweep API: execute a config's ``scenarios:``/``sweep:`` run-set.
+"""Run-sweep API: execute a config's ``scenarios:``/``scenarios_sweep:`` run-set.
 
 Runs in-process, in a background thread, reusing the exact same solve path
 ``/api/simulations`` uses for a single run (:class:`~boulder.simulation_worker.
@@ -36,15 +36,22 @@ from pydantic import BaseModel, Field
 from ... import scenario_store
 from ...cantera_converter import DualCanteraConverter, get_plugins
 from ...runset import (
+    SEQUENTIAL_KINDS,
+    RunSetCursor,
+    expand_scenarios,
+    iter_run_set,
     resolve_store_dir,
+    run_set_block,
     run_set_size,
     sweep_runner_of,
     sweeps_of,
 )
 from ...sweep_runner import (
+    final_states_of,
     prepare_scenario,
     solve_scenario,
     store_solved_scenario,
+    stored_final_states,
 )
 
 __all__ = ["has_run_set", "router"]
@@ -66,18 +73,20 @@ class SweepRunRequest(BaseModel):
 def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     """Return whether *raw* (the inheritance-resolved config) declares a run-set.
 
-    True when it declares one **in the config**: an inline
-    ``scenarios:``/``sweep:``/``sweeps:`` block, or a ``sweep.runner`` dotted
-    path naming a host function that produces the run-set itself.
+    True when it declares one **in the config**: a ``scenarios:`` mapping, a
+    ``scenarios_sweep:`` block with grid axes or a ``for:``/``while:`` chain, or
+    a ``scenarios_sweep.runner`` dotted path naming a host function that
+    produces the run-set itself.
 
     Pure function of ``raw`` so both the request-scoped sweep routes and the
     app-startup lifespan share one detection rule. ``config_path`` is accepted
     for signature compatibility; it is deliberately *not* consulted — Boulder
     used to treat any file named ``run_sweep.py`` next to the config as a
     run-set source, which coupled behaviour to a filename and was invisible in
-    the config itself. Declare ``sweep.runner`` instead.
+    the config itself. Declare the run-set in the config instead.
     """
-    return bool(raw.get("scenarios") or sweeps_of(raw) or sweep_runner_of(raw))
+    chain = any(kind in run_set_block(raw) for kind in SEQUENTIAL_KINDS)
+    return bool(raw.get("scenarios") or sweeps_of(raw) or sweep_runner_of(raw) or chain)
 
 
 def _run_host_sweep(
@@ -239,8 +248,11 @@ async def sweep_run(
     """
     raw = _merged_raw(request, body.scenarios)
     host_runner = sweep_runner_of(raw)
+    # A `while:` chain sizes as 0 -- its length is only known once its
+    # condition trips -- so it is detected by key, not by count.
+    chain = any(kind in run_set_block(raw) for kind in SEQUENTIAL_KINDS)
     total = run_set_size(raw)
-    if total == 0 and not host_runner:
+    if total == 0 and not host_runner and not chain:
         raise HTTPException(
             status_code=400, detail="No runnable run-set for this config"
         )
@@ -284,12 +296,10 @@ async def sweep_run(
     # `solve_scenario`'s `stop_event` param (see boulder.sweep_runner).
     stop_event = threading.Event()
     request.app.state.sweep_stop_event = stop_event
-    print(f"[sweep] starting {total} run(s)", flush=True)
+    print(f"[sweep] starting {total or '?'} run(s)", flush=True)
 
     def _worker() -> None:
         try:
-            from ...runset import expand_scenarios
-
             store_dir.mkdir(parents=True, exist_ok=True)
             if body.no_cache:
                 # Force a full recompute of *this run-set*. Scoped to the whole
@@ -331,8 +341,11 @@ async def sweep_run(
             # below, and the registry is fixed for the process lifetime.
             plugins = get_plugins()
 
-            runs = expand_scenarios(raw)
-            run_ids = {sid for sid, _ in runs}
+            # Points arrive lazily: a chain's next point is built from the
+            # previous step's converged state, which this loop records in
+            # `cursor` after each step (solved or read back from the cache).
+            cursor = RunSetCursor()
+            visited: "set[str]" = set()
             n_cached = 0
             # The active converter class -- e.g. a host's own subclass with
             # its own mechanism search convention -- lives on `app.state`
@@ -348,7 +361,8 @@ async def sweep_run(
             # eagerly load a Cantera Solution) just to obtain a method
             # reference -- same trick `_default_resolve_mechanism` uses.
             resolve_mechanism = converter_cls.__new__(converter_cls).resolve_mechanism
-            for i, (sid, cfg) in enumerate(runs):
+            for i, (sid, cfg) in enumerate(iter_run_set(raw, cursor)):
+                visited.add(sid)
                 if stop_event.is_set():
                     # A stop was requested while the previous scenario was
                     # in flight (or between scenarios) -- don't start
@@ -363,10 +377,14 @@ async def sweep_run(
                 # The `scenarios:` key is a scenario's only name -- no label.
                 label = sid
                 state["current"] = i + 1
+                if not total:
+                    # Open-ended chain: the total grows with the chain.
+                    state["total"] = i + 1
+                shown_total = total or "?"
 
                 if cached_fps.get(sid) == fingerprint:
                     n_cached += 1
-                    line = f"scenario {i + 1}/{total} ({sid}): cached, skipped"
+                    line = f"scenario {i + 1}/{shown_total} ({sid}): cached, skipped"
                     state["scenario_progress"] = {}
                     state["message"] = line
                     state["last_line"] = line
@@ -376,9 +394,13 @@ async def sweep_run(
                     scenario_store.update_display_attrs(
                         store_dir, sid, label=label, order=i
                     )
+                    # A skipped chain step still seeds the next one.
+                    cursor.previous_states = stored_final_states(
+                        store_dir, sid, identity
+                    )
                     continue
 
-                line = f"scenario {i + 1}/{total} ({sid})"
+                line = f"scenario {i + 1}/{shown_total} ({sid})"
                 # Stage counts are unknown until the solver reports them (see
                 # `_publish` below), but the stage now running is already known:
                 # nothing has completed, so it is the first one.
@@ -462,10 +484,20 @@ async def sweep_run(
                     on_solved=plugins.on_scenario_solved,
                     warn=lambda msg: print(f"[sweep]{msg}", flush=True),
                 )
+                cursor.previous_states = final_states_of(gui)
 
-            # run_ids is the full intended set regardless of how far the loop
-            # got, so pruning stays correct even for a stopped sweep.
-            stale = scenario_store.prune_entries(store_dir, run_ids)
+            if not chain:
+                # The full intended set is known up front regardless of how
+                # far the loop got, so pruning stays correct even for a
+                # stopped sweep.
+                intended = {sid for sid, _ in expand_scenarios(raw)}
+                stale = scenario_store.prune_entries(store_dir, intended)
+            elif not stop_event.is_set():
+                # A chain's intended set is only known once it has run to its
+                # end; a stopped chain keeps every entry.
+                stale = scenario_store.prune_entries(store_dir, visited)
+            else:
+                stale = []
             if stale:
                 print(
                     f"[sweep] pruned {len(stale)} stale entr(ies): {', '.join(stale)}",
@@ -486,7 +518,7 @@ async def sweep_run(
             else:
                 state["status"] = "done"
                 state["message"] = "Sweep complete"
-                print(f"[sweep] complete — {total} run(s)", flush=True)
+                print(f"[sweep] complete — {len(visited)} run(s)", flush=True)
         except Exception as exc:  # noqa: BLE001
             state["scenario_progress"] = {}
             state["last_line"] = None

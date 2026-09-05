@@ -46,8 +46,9 @@ STONE_TOP_LEVEL_KEYS: frozenset = frozenset(
         "groups",
         "output",
         "export",
-        "sweeps",
-        "sweep",
+        "scenarios_sweep",
+        "sweeps",  # legacy spelling of scenarios_sweep (renamed on load)
+        "sweep",  # legacy spelling of scenarios_sweep (renamed on load)
         "scenarios",
     }
 )
@@ -64,10 +65,11 @@ STONE_V2_BASE_KEYS: frozenset = frozenset(
         "network",
         "output",
         "export",
-        "sweeps",
-        "sweep",
+        "scenarios_sweep",
+        "sweeps",  # legacy spelling of scenarios_sweep (renamed on load)
+        "sweep",  # legacy spelling of scenarios_sweep (renamed on load)
         "scenarios",
-        "continuation",
+        "continuation",  # legacy: headless BoulderRunner.run_continuation only
         "signals",
         "bindings",
         "scopes",
@@ -568,6 +570,7 @@ def _normalize_v2_network(raw: Dict[str, Any]) -> Dict[str, Any]:
     for k in (
         "output",
         "export",
+        "scenarios_sweep",
         "sweeps",
         "sweep",
         "scenarios",
@@ -872,6 +875,7 @@ def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
     for k in (
         "output",
         "export",
+        "scenarios_sweep",
         "sweeps",
         "sweep",
         "scenarios",
@@ -1055,10 +1059,20 @@ def _assert_stone_yaml_extension(config_path: str) -> None:
 
 
 def load_config_file(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file with 🪨 STONE standard."""
+    """Load configuration from YAML file with 🪨 STONE standard.
+
+    The run-set block's legacy spellings (``sweep:``/``sweeps:``) are renamed to
+    ``scenarios_sweep:`` here, with a warning, so every raw config Boulder holds
+    (the Run Sweep base included) speaks one dialect -- see
+    :func:`boulder.runset.canonicalize_run_set_keys`.
+    """
     _assert_stone_yaml_extension(config_path)
     with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        raw = yaml.safe_load(f)
+    from .runset import canonicalize_run_set_keys  # noqa: PLC0415 — avoid import cycle
+
+    canonicalize_run_set_keys(raw)
+    return raw
 
 
 def load_config_file_with_comments(config_path: str):
@@ -1328,6 +1342,11 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
     # Older files may still carry metadata keys the vocabulary has since
     # dropped; discard them (with a warning) rather than failing validation.
     drop_legacy_metadata_keys(config)
+    # Likewise the run-set block's former spellings (``sweep:``/``sweeps:``):
+    # read as ``scenarios_sweep:`` with a warning -- see boulder.runset.
+    from .runset import canonicalize_run_set_keys  # noqa: PLC0415 — avoid import cycle
+
+    canonicalize_run_set_keys(config)
 
     # --- STONE v2 detection and normalization ---
     # Detect dialect first; this raises ValueError for v1 or unknown shapes.
@@ -2043,7 +2062,14 @@ def convert_to_stone_format(config: dict) -> dict:
     if "settings" in config:
         stone_config["settings"] = config["settings"]
 
-    for passthrough in ("output", "export", "sweeps", "sweep", "scenarios"):
+    for passthrough in (
+        "output",
+        "export",
+        "scenarios_sweep",
+        "sweeps",
+        "sweep",
+        "scenarios",
+    ):
         if passthrough in config:
             stone_config[passthrough] = config[passthrough]
 

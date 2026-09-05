@@ -328,10 +328,13 @@ def test_deep_merge_plain_lists_replace():
 
 
 def test_load_yaml_with_inheritance_sweeps_inherited_scenario_not(tmp_path: Path):
-    """``sweep:`` is inherited through ``from:``; ``scenarios:`` is not.
+    """``scenarios_sweep:`` is inherited through ``from:``; ``scenarios:`` is not.
 
     A parent's named run-set must not leak into a child overlay, but a child
-    legitimately re-runs the parent's parameter sweep with overrides.
+    legitimately re-runs the parent's parameter sweep with overrides. The
+    parent here still uses the legacy ``sweep:`` spelling, which the loader
+    renames to ``scenarios_sweep:`` (with a warning) -- so the child reads the
+    canonical key.
     """
     parent = tmp_path / "parent.yaml"
     parent.write_text(
@@ -349,7 +352,8 @@ def test_load_yaml_with_inheritance_sweeps_inherited_scenario_not(tmp_path: Path
     cfg = load_yaml_with_inheritance(child)
     assert cfg["metadata"]["scenario_id"] == "CHILD"
     assert "scenarios" not in cfg
-    assert cfg["sweep"]["T"]["values"] == [1, 2]
+    assert "sweep" not in cfg, "legacy spelling is renamed on load"
+    assert cfg["scenarios_sweep"]["T"]["values"] == [1, 2]
 
 
 # ---------------------------------------------------------------------------

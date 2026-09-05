@@ -74,9 +74,11 @@ def adopt_live_config(
     request
         The current request, used to reach and mutate ``app.state``.
     raw
-        The inheritance-resolved config dict (pre-normalize -- keeps
-        ``scenarios:``/``sweep:``/``sweeps:`` blocks intact), stored as
+        The inheritance-resolved config dict (pre-normalize -- keeps the
+        ``scenarios:``/``scenarios_sweep:`` blocks intact), stored as
         ``app.state.preloaded_raw`` for the Run Sweep / Scenario Pane checks.
+        Legacy run-set spellings are renamed in place here, with a warning,
+        so the stored base speaks the canonical dialect.
     validated
         The normalized + validated config dict, stored as
         ``app.state.preloaded_config``.
@@ -91,6 +93,9 @@ def adopt_live_config(
         a CLI-preloaded file, location included, so the result cache follows
         the new file instead of the file the server started with.
     """
+    from ..runset import canonicalize_run_set_keys  # noqa: PLC0415 — avoid import cycle
+
+    canonicalize_run_set_keys(raw)
     state = request.app.state
     live_dir = getattr(state, _LIVE_CONFIG_DIR_ATTR, None)
     if live_dir is None:

@@ -107,6 +107,9 @@ class DetectedContinuation:
     condition_attr: str
     condition_threshold: float
     derived_via: str = "ast_match"
+    #: Python variable the condition reads (``combustor`` in ``combustor.T``);
+    #: empty when the tested expression is not a plain name chain.
+    condition_var: str = ""
 
 
 @dataclass
@@ -726,6 +729,12 @@ def _detect_continuation(tree: ast.AST) -> Optional[DetectedContinuation]:
         if not isinstance(left, ast.Attribute):
             continue
         cond_attr = left.attr
+        # ``combustor.T`` / ``combustor.phase.T`` -> the reactor variable, so
+        # the emitter can name the node the STONE condition path must read.
+        cond_base: ast.expr = left.value
+        while isinstance(cond_base, ast.Attribute):
+            cond_base = cond_base.value
+        cond_var = cond_base.id if isinstance(cond_base, ast.Name) else ""
         thresh = _eval_const(test.comparators[0])
         if thresh is None or not isinstance(thresh, (int, float)):
             continue
@@ -766,6 +775,7 @@ def _detect_continuation(tree: ast.AST) -> Optional[DetectedContinuation]:
                 condition_attr=cond_attr,
                 condition_threshold=float(thresh),
                 derived_via="ast_match",
+                condition_var=cond_var,
             )
 
         return DetectedContinuation(
@@ -774,6 +784,7 @@ def _detect_continuation(tree: ast.AST) -> Optional[DetectedContinuation]:
             condition_attr=cond_attr,
             condition_threshold=float(thresh),
             derived_via="ast_match",
+            condition_var=cond_var,
         )
     return None
 

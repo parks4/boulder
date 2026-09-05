@@ -70,9 +70,12 @@ or in a per-stage ``groups.<id>.solver:`` block.
 STONE example for ``combustor.py`` round-trip:
 
 The ``combustor.py`` script uses a residence-time closure (``def mdot(t): return reactor.mass / tau``)
-and sweeps ``residence_time`` downward while the reactor stays lit.  Boulder's causal layer
-represents this with a ``closure: residence_time`` annotation on the MFC and a top-level
-``continuation:`` block — both auto-derived by ``sim2stone`` via ``derived_via: ast_match``.
+and sweeps ``residence_time`` downward while the reactor stays lit.  Boulder represents this with a
+``closure: residence_time`` annotation on the MFC and a ``scenarios_sweep.while`` chain (the run-set
+form of the loop, see STONE_SPECIFICATIONS.md Section 14) — both auto-derived by ``sim2stone`` via
+``derived_via: ast_match``. Run Sweep then solves the chain one point at a time through the ordinary
+solve path, each point warm-started from the previous one (``initial: from_previous``), exactly as
+upstream keeps solving the same live ``ReactorNet``.
 
 .. code-block:: yaml
 
@@ -81,26 +84,30 @@ represents this with a ``closure: residence_time`` annotation on the MFC and a t
      solver:
        kind: solve_steady
 
-   # derived_via: ast_match
-   continuation:
-     parameter: residence_time
-     factor: 0.9
-     stop_when:
-       attribute: T
-       less_than: 500.0
-
    network:
-     - id: IdealGasReactor_0
+     - id: combustor
        IdealGasReactor:
          volume: 1.0
          # ...
 
-     - id: MassFlowController_0
+     - id: air_inlet
        MassFlowController:
          closure: residence_time   # derived_via: ast_match
-         tau_s: "{{residence_time}}"
-       source: Reservoir_0
-       target: IdealGasReactor_0
+         tau_s: 0.1
+       source: inlet
+       target: combustor
+
+   scenarios_sweep:
+     while:
+       # derived_via: ast_match
+       parameter: network[id=air_inlet].MassFlowController.tau_s
+       condition:
+         path: network[id=combustor].T
+         gt: 500.0
+       update:
+         multiply: 0.9
+       max_iters: 200
+       initial: from_previous
 
 STONE example for ``reactor2.py`` round-trip:
 

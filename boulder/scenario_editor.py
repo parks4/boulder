@@ -264,8 +264,10 @@ def render_full_yaml(base_raw: dict, overlay: dict) -> str:
     nothing here writes to disk anymore, this is the one way a user gets a
     complete, ready-to-run config out of an edited scenario.
     """
+    from .runset import RUN_SET_KEYS  # noqa: PLC0415 — avoid import cycle
+
     base_clean = {
-        k: v for k, v in base_raw.items() if k not in ("scenarios", "sweep", "sweeps")
+        k: v for k, v in base_raw.items() if k not in ("scenarios", *RUN_SET_KEYS)
     }
     merged = deep_merge(base_clean, overlay or {})
     return yaml_to_string_with_comments(merged)
