@@ -472,3 +472,75 @@ def test_a_half_written_entry_reads_as_absent_not_as_an_error(tmp_path: Path) ->
     assert st.read_entry(store_dir, "crashed", identity) is None
     assert st.list_entries(store_dir, identity) == []
     assert st.find_entry(store_dir, "any-fingerprint", identity) is None
+
+
+def test_rewriting_an_entry_a_reader_holds_open_waits_instead_of_failing(
+    tmp_path: Path,
+) -> None:
+    """The Windows race behind ``WinError 32`` on a re-run sweep.
+
+    With the Scenario pane lighting up for runner sweeps (#181), the GUI fetches
+    the focused entry the moment the page loads -- and a re-run sweep rewrites
+    that very entry. Deleting-then-rewriting the file failed the whole sweep on
+    Windows while the reader's handle was open. Building the entry beside its
+    final name and swapping it in retries through the reader's brief hold
+    instead; on POSIX the swap simply succeeds.
+    """
+    import threading
+
+    cfg = tmp_path / "model.yaml"
+    cfg.write_text("metadata: {}\n", encoding="utf-8")
+    store_dir = tmp_path / "store"
+    identity = store.config_identity(cfg)
+    path = _write(store_dir, "tres_001", identity, fingerprint="fp-old")
+
+    errors: List[BaseException] = []
+
+    def _rewrite() -> None:
+        try:
+            _write(store_dir, "tres_001", identity, fingerprint="fp-new")
+        except BaseException as exc:  # noqa: BLE001 — surfaced below
+            errors.append(exc)
+
+    with open(path, "rb"):  # a reader mid-decode holds the previous entry open
+        writer = threading.Thread(target=_rewrite, daemon=True)
+        writer.start()
+        writer.join(timeout=0.3)  # the writer must wait (Windows) or finish (POSIX)
+    writer.join(timeout=10)
+
+    assert not errors, f"rewrite failed under a reader's open handle: {errors[0]!r}"
+    attrs = store.entry_attrs(store_dir, "tres_001", identity)
+    assert attrs is not None and attrs["fingerprint"] == "fp-new"
+    assert [p.name for p in store_dir.iterdir()] == [path.name], (
+        "no scratch file or directory may be left behind"
+    )
+
+
+def test_an_entry_is_never_visible_before_it_is_complete(tmp_path: Path) -> None:
+    """The scratch file is invisible to the store's readers until the swap."""
+    from unittest.mock import patch
+
+    from boulder import payload_store
+
+    cfg = tmp_path / "model.yaml"
+    cfg.write_text("metadata: {}\n", encoding="utf-8")
+    store_dir = tmp_path / "store"
+    identity = store.config_identity(cfg)
+
+    seen_before_swap: List[List[Dict[str, Any]]] = []
+    real_replace = payload_store.replace_file
+
+    def _spy(src: Path, dst: Path, **kw: Any) -> None:
+        # Everything is written, nothing is swapped in yet: the store must
+        # still list no entry at all, and the scratch file must be beside it.
+        seen_before_swap.append(store.list_entries(store_dir, identity))
+        # Same volume (a rename, not a copy), out of the `*.h5` listing, and
+        # still an `.h5` file so Cantera's SolutionArray.save writes HDF5.
+        assert src.parent == dst.parent / ".tmp" and src.suffix == ".h5"
+        real_replace(src, dst, **kw)
+
+    with patch.object(payload_store, "replace_file", _spy):
+        _write(store_dir, "fresh", identity, fingerprint="fp")
+
+    assert seen_before_swap == [[]]
+    assert [e["id"] for e in store.list_entries(store_dir, identity)] == ["fresh"]

@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
 from numbers import Real
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -300,15 +302,83 @@ def write_payload(
         scenario in a *collection* file). When ``None``, written at the top level
         (a single-result *cache* file).
     fresh:
-        When ``True`` (and no ``group``), any existing file is replaced. For a
-        collection (``group`` set) pass ``fresh=False`` to append without wiping
-        previously-written scenarios.
+        When ``True`` (and no ``group``), any existing file is replaced -- by
+        building the new one beside it and swapping it in with
+        :func:`replace_file`, never by deleting first. A reader that has the
+        old file open (the GUI fetching a scenario the very moment a sweep
+        re-solves it) keeps reading the old bytes and the swap simply retries;
+        unlinking instead raised ``WinError 32`` on Windows and lost the whole
+        sweep to one unlucky poll. For a collection (``group`` set) pass
+        ``fresh=False`` to append without wiping previously-written scenarios.
     """
     _require_h5py()
     h5_path = Path(h5_path)
-    if fresh and group is None and h5_path.exists():
-        h5_path.unlink()
+    if fresh and group is None:
+        tmp = scratch_path(h5_path)
+        try:
+            _write_payload_into(tmp, gui_payload, mechanism, None)
+            replace_file(tmp, h5_path)
+        finally:
+            discard_scratch(tmp)
+        return
+    _write_payload_into(h5_path, gui_payload, mechanism, group)
 
+
+def scratch_path(path: Path) -> Path:
+    """Return a unique scratch file for building *path* atomically.
+
+    It lives in a ``.tmp/`` directory next to *path* -- same filesystem, so
+    :func:`replace_file` is a rename, and out of the store's top-level ``*.h5``
+    listing, so a half-built entry is never listed -- and it keeps *path*'s
+    suffix, because Cantera's ``SolutionArray.save`` picks the HDF5 format from
+    the extension.
+    """
+    scratch_dir = path.parent / ".tmp"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    return scratch_dir / f"{path.stem}-{os.getpid()}-{time.monotonic_ns()}{path.suffix}"
+
+
+def discard_scratch(tmp: Path) -> None:
+    """Remove a leftover scratch file (if the swap never happened) and its dir if empty."""
+    tmp.unlink(missing_ok=True)
+    try:
+        tmp.parent.rmdir()
+    except OSError:
+        pass  # another writer's scratch file is still in there
+
+
+def replace_file(
+    src: Path, dst: Path, *, attempts: int = 40, delay: float = 0.05
+) -> None:
+    """Move *src* over *dst* atomically, retrying while a reader holds *dst*.
+
+    ``os.replace`` is atomic on every platform Boulder runs on, but on Windows
+    it fails with a sharing violation (``PermissionError``) while another
+    handle has *dst* open -- and readers *do* have it open, briefly: h5py and
+    Cantera's ``SolutionArray.restore`` hold a store entry for the milliseconds
+    it takes to decode it, while the GUI polls the store the whole time a sweep
+    writes it. Those windows are short, so retry for a couple of seconds
+    (``attempts`` x ``delay``) before giving up; *src* is removed on failure so
+    no scratch file is left behind.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                src.unlink(missing_ok=True)
+                raise
+            time.sleep(delay)
+
+
+def _write_payload_into(
+    h5_path: Path,
+    gui_payload: Dict[str, Any],
+    mechanism: str,
+    group: Optional[str],
+) -> None:
+    """Write *gui_payload* into *h5_path* (created if absent, else appended to)."""
     prefix = f"{group}/" if group else ""
 
     # Shallow-copy the top level and pop the heavy series — never deepcopy the

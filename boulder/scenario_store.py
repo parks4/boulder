@@ -24,11 +24,15 @@ config it belongs to, and :func:`read_entry` / :func:`list_entries` refuse a
 file whose stamp does not match, so a collision degrades to a rebuild instead of
 a wrong answer.
 
-**Never serve a half-written result.** ``fingerprint`` is the validity signal,
-so it is written *last*, after the payload. A solve that dies midway leaves a
-file with no fingerprint — read as "not computed", which is what it is. Writing
-it earlier would let every later run cache-hit onto a broken payload: strictly
-worse than a miss.
+**Never serve a half-written result.** An entry is built in a scratch file and
+swapped into its final name atomically (:func:`write_entry`), so a reader sees
+the previous complete entry or the new one, never a torn file -- and a reader
+that still has the previous file open cannot make the write fail, which
+deleting-then-rewriting did on Windows (``WinError 32``) the moment the GUI
+polled a scenario a sweep was re-solving. Inside the scratch file
+``fingerprint`` is still the validity signal and still written *last*: a solve
+that dies midway leaves nothing readable as a result. Writing it earlier would
+let every later run cache-hit onto a broken payload: strictly worse than a miss.
 """
 
 from __future__ import annotations
@@ -148,40 +152,57 @@ def write_entry(
     units: Optional[Dict[str, str]] = None,
     extra_attrs: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """Write one solved entry, recording ``fingerprint`` last.
+    """Write one solved entry, atomically, recording ``fingerprint`` last.
 
     Returns the file written. The payload goes through the same
     :func:`boulder.payload_store.write_payload` every result uses, so there is
     one serialisation format regardless of which action produced the result.
+
+    The entry is built in full -- payload and attrs -- in a scratch file beside
+    its final name, then swapped in with :func:`~boulder.payload_store.replace_file`.
+    Readers therefore see either the previous complete entry or the new one,
+    never a torn file; and a reader holding the previous entry open (the GUI
+    fetching the scenario a sweep is just re-solving) no longer makes the
+    write fail on Windows, where deleting an open file is a sharing violation.
     """
-    from .payload_store import write_payload  # noqa: PLC0415 — heavy import
+    from .payload_store import (  # noqa: PLC0415 — heavy import
+        discard_scratch,
+        replace_file,
+        scratch_path,
+        write_payload,
+    )
 
     store_dir.mkdir(parents=True, exist_ok=True)
     path = store_entry_path(store_dir, scenario_id)
-
-    # Payload first: until `fingerprint` lands this file reads as "not
-    # computed", so an interruption here cannot be mistaken for a valid result.
-    write_payload(path, gui_payload, mechanism)
-
-    with h5py.File(str(path), "a") as handle:
-        attrs = handle.attrs
-        attrs[_ATTR_VERSION] = STORE_VERSION
-        attrs[_ATTR_CONFIG_IDENTITY] = identity
-        attrs["computed_at"] = float(time.time())
-        if label is not None:
-            attrs["label"] = label
-        if order is not None:
-            attrs["order"] = int(order)
-        alts = tuple(fp for fp in (alt_fingerprints or ()) if fp and fp != fingerprint)
-        if alts:
-            attrs[_ATTR_ALT_FINGERPRINTS] = list(alts)
-        if units:
-            attrs["units"] = json.dumps(units)
-        for key, value in (extra_attrs or {}).items():
-            attrs[key] = value
-        handle.flush()
-        # Last, and only now: this entry is complete and valid.
-        attrs[_ATTR_FINGERPRINT] = fingerprint
+    tmp = scratch_path(path)
+    try:
+        write_payload(tmp, gui_payload, mechanism, fresh=False)
+        with h5py.File(str(tmp), "a") as handle:
+            attrs = handle.attrs
+            attrs[_ATTR_VERSION] = STORE_VERSION
+            attrs[_ATTR_CONFIG_IDENTITY] = identity
+            attrs["computed_at"] = float(time.time())
+            if label is not None:
+                attrs["label"] = label
+            if order is not None:
+                attrs["order"] = int(order)
+            alts = tuple(
+                fp for fp in (alt_fingerprints or ()) if fp and fp != fingerprint
+            )
+            if alts:
+                attrs[_ATTR_ALT_FINGERPRINTS] = list(alts)
+            if units:
+                attrs["units"] = json.dumps(units)
+            for key, value in (extra_attrs or {}).items():
+                attrs[key] = value
+            handle.flush()
+            # Last, even inside the scratch file: `fingerprint` is the validity
+            # signal, so a crash between here and the swap still leaves nothing
+            # a reader would mistake for a result.
+            attrs[_ATTR_FINGERPRINT] = fingerprint
+        replace_file(tmp, path)
+    finally:
+        discard_scratch(tmp)
     return path
 
 
