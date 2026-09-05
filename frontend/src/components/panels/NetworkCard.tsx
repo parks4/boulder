@@ -47,7 +47,15 @@ export function NetworkCard({ onEditYaml }: Props) {
         // session's scenario overlays (they belonged to the previous file)
         // and re-seed from the new config's own `scenarios:` block.
         void useScenarioStore.getState().resetForNewConfig();
-        toast.success(`Config uploaded: ${resp.filename}`);
+        const n = resp.warnings?.length ?? 0;
+        if (n > 0) {
+          toast.warning(
+            `Config uploaded: ${resp.filename} — ${n} STONE migration notice${n > 1 ? "s" : ""}. ` +
+              "Open the YAML pane for details and Download to save the converted file.",
+          );
+        } else {
+          toast.success(`Config uploaded: ${resp.filename}`);
+        }
       } catch (err) {
         toast.error(`Upload failed: ${err instanceof Error ? err.message : String(err)}`);
       }

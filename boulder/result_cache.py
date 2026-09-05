@@ -105,16 +105,16 @@ def _coerce(obj: Any) -> Any:
 # Fingerprinting
 # ---------------------------------------------------------------------------
 
-#: ``metadata`` keys Boulder *injects* to label a run, excluded from the hash.
-#: :func:`boulder.runset.expand_scenarios` stamps ``scenario_id`` onto every
-#: run-set entry (``BASELINE`` for the unmodified base). That is bookkeeping —
-#: it names the run without changing the physics — so hashing it gave the same
-#: solve two different fingerprints depending on whether it was reached through
-#: the run-set expansion or straight from the preloaded config, and neither
-#: path could recognise the other's cached result. Only keys Boulder writes
-#: itself belong here: user-authored metadata (``title``, ``description``, …)
-#: still participates. See ``tests/test_fingerprint_identity.py``.
-_RUN_LABEL_METADATA_KEYS = ("scenario_id",)
+#: ``metadata`` keys Boulder *injects* itself, excluded from the hash. They are
+#: bookkeeping — they label the run or the file format without changing the
+#: physics — so hashing them gave the same solve two different fingerprints
+#: depending on the path that produced the config (``scenario_id``, once
+#: stamped by the run-set expansion and still accepted as a legacy key) or on
+#: the Boulder release that stamped ``metadata.stone_version``
+#: (:func:`boulder.config.migrate_stone_config`, on every load). Only keys
+#: Boulder writes itself belong here: user-authored metadata (``title``,
+#: ``description``, …) still participates. See ``tests/test_fingerprint_identity.py``.
+_RUN_LABEL_METADATA_KEYS = ("scenario_id", "stone_version")
 
 
 def _canonical_config(config: Dict[str, Any]) -> Any:

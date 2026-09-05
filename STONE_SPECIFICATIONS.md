@@ -1,26 +1,65 @@
-# STONE v2 Specification
+# STONE 2.x Specification
 
 **STONE** — Structured Type-Oriented Network Expressions — is the YAML dialect Boulder uses to
-describe Cantera reactor networks. This document is the normative contract for **STONE v2**, the
-current authored format.
+describe Cantera reactor networks. This document is the normative contract for **STONE 2.x**
+(informally "STONE v2": the `network:` / `stages:` shape), the current authored format. The exact
+format version is `metadata.stone_version` (Section 1).
 
 For a quick introduction and worked examples, see `docs/stone.rst` (online) or `configs/README.md`.
 
 ______________________________________________________________________
 
-## 1. Dialect Detection
+## 1. Format Version and Dialect Detection
 
-STONE v2 files carry no explicit version header. Boulder infers the dialect from the top-level
-shape:
+### Dialect (shape)
+
+Boulder infers the dialect from the top-level shape:
 
 | Shape | Dialect |
 |---|---|
-| Top-level `network:` list | STONE v2 — single stage |
-| Top-level `stages:` mapping | STONE v2 — staged |
-| Top-level `nodes:`, `connections:`, or `groups:` | STONE v1 — **rejected** |
+| Top-level `network:` list | STONE 2.x ("v2") — single stage |
+| Top-level `stages:` mapping | STONE 2.x ("v2") — staged |
+| Top-level `nodes:`, `connections:`, or `groups:` | STONE 1.x ("v1", historical) — **rejected** |
 | None of the above | Invalid — error |
 
 Files that mix `stages:` and `network:` at the same level are rejected.
+
+### Format version — `metadata.stone_version`
+
+```yaml
+metadata:
+  stone_version: "2.0"   # quoted string, MAJOR.MINOR
+```
+
+- **MAJOR** equals the Boulder MAJOR that reads and writes the file. **MINOR** is the Boulder minor
+  release that last changed the STONE vocabulary or semantics. Boulder releases that do not touch
+  the format keep writing the previous value, so a file written by Boulder 2.3 still loads in
+  Boulder 2.1 when the format did not change in between.
+- Always a **quoted string**: unquoted `2.10` is the YAML float `2.1`.
+- The field is optional on input. A file without it is a pre-versioned STONE 2.x file.
+- Boulder rewrites it to its own `boulder.config.STONE_FORMAT_VERSION` on every load, so any YAML
+  Boulder writes (YAML pane sync and Download, `/api/configs/export`, `sim2stone`) carries the
+  current value. `metadata.version` is unrelated: it is the user's own document revision.
+
+Reader rules (Boulder at `STONE_FORMAT_VERSION = M.m`, file at `stone_version = X.y`):
+
+| File | Behaviour |
+|---|---|
+| absent | accepted silently, stamped `M.m` |
+| `X == M`, `y <= m` | accepted silently |
+| `X == M`, `y > m` | accepted with a warning (written by a newer Boulder; unknown keys fail validation) |
+| `X != M` | accepted with a warning; the 1.x shape is still a hard error |
+| not `MAJOR.MINOR` | accepted with a warning, treated as `M.m` |
+
+### Compatibility promise
+
+- Within a MAJOR, Boulder `M.y` reads every file written by Boulder `M.x`, `x <= y`.
+- Removing or renaming a key within a MAJOR requires a **load-time migration**: the old key is
+  accepted, converted or discarded, and reported as a warning — never a hard error. The current
+  migration table is `boulder.config.LEGACY_METADATA_KEYS`, applied by `migrate_stone_config`.
+- A change that makes old files stop loading bumps the STONE MAJOR, and therefore Boulder's.
+- To convert an old file: upload it in the Boulder GUI, open the YAML pane (the banner lists what was
+  migrated) and Download. Comments and unit strings are preserved.
 
 ______________________________________________________________________
 
@@ -51,10 +90,11 @@ ______________________________________________________________________
 
 ### `metadata:`
 
-A mapping for documentation and provenance fields. Key fields: `title`, `description`,
-`gui_app_title` (optional short label for the web UI header; defaults to `Boulder`),
-`scenario_id`, `author`, `date`, `project`. See `boulder/validation.py:MetadataModel` for the
-full vocabulary.
+A mapping for documentation and provenance fields. Key fields: `stone_version` (format version,
+written by Boulder — Section 1), `title`, `description`, `gui_app_title` (optional short label for
+the web UI header; defaults to `Boulder`), `author`, `date`, `project`, `version` (the user's own
+document revision). See `boulder/validation.py:MetadataModel` for the full vocabulary. Removed keys
+(`scenario_id`, `scenario_name`) are discarded with a warning on load.
 
 ### `phases:`
 
@@ -1250,7 +1290,7 @@ See the Continuation section in Section 3 and the worked examples in
 
 ______________________________________________________________________
 
-## 12. Historical STONE v1 (for reference only)
+## 12. Historical STONE 1.x ("v1", for reference only)
 
 STONE v1 used flat top-level `nodes:` and `connections:` lists, with each node carrying a
 `group:` field to assign it to a stage declared under `groups:`:
@@ -1324,7 +1364,8 @@ not restore numerics.
 
 `schema_version` (== `payload_store.PAYLOAD_SCHEMA`), `mechanism` (resolved abs path, or bundled
 name), `mechanism_sha256` (diagnostic; the cache fingerprint is the correctness guard), `mechanism_name`.
-`result_cache.CACHE_VERSION` gates cache entries (mismatch ⇒ silent miss + recompute).
+`result_cache.CACHE_VERSION` gates cache entries (mismatch ⇒ silent miss + recompute). These version
+the result store only; the YAML format version is `metadata.stone_version` (Section 1).
 
 ### One file per run-set entry
 

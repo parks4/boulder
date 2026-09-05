@@ -18,7 +18,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple, cast
 
 import cantera as ct  # type: ignore
 
-from .config import CANTERA_MECHANISM, yaml_to_string_with_comments
+from .config import (
+    CANTERA_MECHANISM,
+    STONE_FORMAT_VERSION,
+    yaml_to_string_with_comments,
+)
 from .ctutils import collect_all_reactors_and_reservoirs
 
 
@@ -1050,17 +1054,17 @@ def sim_to_stone_yaml(
 
     stone_cm = CommentedMap()
 
-    # metadata (if available)
-    if "metadata" in internal:
-        metadata_cm = CommentedMap()
-        for key, value in internal["metadata"].items():
-            if key == "description" and isinstance(value, str) and "\n" in value:
-                from ruamel.yaml.scalarstring import LiteralScalarString
+    # metadata -- always present so the file carries its STONE format version
+    metadata_cm = CommentedMap()
+    metadata_cm["stone_version"] = STONE_FORMAT_VERSION
+    for key, value in (internal.get("metadata") or {}).items():
+        if key == "description" and isinstance(value, str) and "\n" in value:
+            from ruamel.yaml.scalarstring import LiteralScalarString
 
-                metadata_cm[key] = LiteralScalarString(value)
-            else:
-                metadata_cm[key] = value
-        stone_cm["metadata"] = metadata_cm
+            metadata_cm[key] = LiteralScalarString(value)
+        else:
+            metadata_cm[key] = value
+    stone_cm["metadata"] = metadata_cm
 
     # phases
     phases_cm = CommentedMap()

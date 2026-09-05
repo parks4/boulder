@@ -7,13 +7,16 @@ specifications index for Boulder. See individual linked documents for normative 
 
 **STONE** (Structured Type-Oriented Network Expressions) is the YAML dialect Boulder uses to
 describe reactor networks. **[STONE_SPECIFICATIONS.md](STONE_SPECIFICATIONS.md)** is the normative
-contract for STONE v2, the current authored format.
+contract for STONE 2.x, the current authored format.
 
 Key points:
 
-- STONE v2 uses `network:` (single stage) or `stages:` + dynamic stage blocks (multi-stage).
-- No version header is required; Boulder detects the dialect automatically.
-- STONE v1 files (top-level `nodes:` / `connections:` / `groups:`) are rejected.
+- STONE 2.x ("v2") uses `network:` (single stage) or `stages:` + dynamic stage blocks (multi-stage).
+- Files carry `metadata.stone_version: "MAJOR.MINOR"`. MAJOR equals Boulder's MAJOR; MINOR is the
+  Boulder minor that last changed the format. Files without it are older 2.x files: Boulder loads
+  them and stamps the current version on save (STONE_SPECIFICATIONS.md §1).
+- Within a MAJOR, newer Boulder reads every older file; removed keys are migrated with a warning.
+- STONE 1.x ("v1") files (top-level `nodes:` / `connections:` / `groups:`) are rejected.
 - See `configs/README.md` for worked examples.
 
 ## Architecture

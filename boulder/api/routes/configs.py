@@ -20,6 +20,7 @@ from ...config import (
     get_initial_config_with_comments,
     load_yaml_string_with_comments,
     merge_config_into_yaml,
+    migrate_stone_config,
     normalize_config,
     validate_config,
     yaml_to_string_with_comments,
@@ -114,15 +115,19 @@ async def parse_yaml(request: Request, body: YAMLParseRequest) -> Dict[str, Any]
         plain = _to_plain_dict(data)
         # `normalize()` mutates its argument in place (pressure propagation,
         # unit coercion) -- deep-copy so `plain`, adopted below as the
-        # *un-normalized* base for Run Sweep, stays pristine. A normalized
-        # base carries a process pressure on every node, so any scenario
-        # overlay setting a different boundary pressure would conflict.
+        # *un-normalized* base for Run Sweep, stays exactly the authored file.
+        # A normalized base carries a process pressure on every node, so any
+        # scenario overlay setting a different boundary pressure would conflict.
+        # The STONE migration runs on the copy first, so its notices can be
+        # returned to the browser (the call inside normalize() is then a no-op).
+        to_normalize = copy.deepcopy(plain)
+        notices = migrate_stone_config(to_normalize)
         runner_cls = getattr(request.app.state, "runner_class", None)
         if runner_cls is not None:
-            normalized = runner_cls.normalize(copy.deepcopy(plain))
+            normalized = runner_cls.normalize(to_normalize)
             validated = runner_cls.validate(normalized)
         else:
-            normalized = normalize_config(copy.deepcopy(plain))
+            normalized = normalize_config(to_normalize)
             validated = validate_config(normalized)
 
         # See the Run Sweep button / Scenario Pane -- both need a real
@@ -130,7 +135,7 @@ async def parse_yaml(request: Request, body: YAMLParseRequest) -> Dict[str, Any]
         # (no CLI-preloaded file) never has otherwise.
         adopt_live_config(request, raw=plain, validated=validated, yaml_str=body.yaml)
 
-        return {"config": validated, "yaml": body.yaml}
+        return {"config": validated, "yaml": body.yaml, "warnings": notices}
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
@@ -241,13 +246,15 @@ async def upload_config(
 
         data = load_yaml_string_with_comments(yaml_str)
         plain = _to_plain_dict(data)
-        # Deep-copy before normalizing -- see `parse_yaml`.
+        # Deep-copy, migrate, normalize -- see `parse_yaml`.
+        to_normalize = copy.deepcopy(plain)
+        notices = migrate_stone_config(to_normalize)
         runner_cls = getattr(request.app.state, "runner_class", None)
         if runner_cls is not None:
-            normalized = runner_cls.normalize(copy.deepcopy(plain))
+            normalized = runner_cls.normalize(to_normalize)
             validated = runner_cls.validate(normalized)
         else:
-            normalized = normalize_config(copy.deepcopy(plain))
+            normalized = normalize_config(to_normalize)
             validated = validate_config(normalized)
 
         # An upload replaces the config wholesale, so adopt it even over a
@@ -267,6 +274,7 @@ async def upload_config(
             "config": validated,
             "yaml": yaml_str,
             "filename": file.filename,
+            "warnings": notices,
         }
     except HTTPException:
         raise

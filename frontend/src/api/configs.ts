@@ -16,6 +16,8 @@ interface PreloadedConfigResponse {
 interface ParseResponse {
   config: NormalizedConfig;
   yaml: string;
+  /** STONE migration notices (legacy keys dropped, version mismatch). */
+  warnings?: string[];
 }
 
 interface ValidateResponse {
@@ -30,6 +32,8 @@ interface UploadResponse {
   config: NormalizedConfig;
   yaml: string;
   filename: string;
+  /** STONE migration notices (legacy keys dropped, version mismatch). */
+  warnings?: string[];
 }
 
 interface SyncResponse {

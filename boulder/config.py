@@ -274,7 +274,8 @@ def _detect_stone_dialect(raw: Dict[str, Any]) -> str:
         # Has non-empty nodes but first node doesn't have `type` → v1 YAML shape.
         raise ValueError(
             "STONE v1 format detected (top-level 'nodes:', 'connections:', or 'groups:'). "
-            "Migrate to STONE v2. See STONE_SPECIFICATIONS.md."
+            "STONE v1 is the historical STONE 1.x format; migrate to STONE 2.x "
+            "('network:' or 'stages:'). See STONE_SPECIFICATIONS.md."
         )
 
     if has_groups and not has_nodes and not has_stages and not has_network:
@@ -284,7 +285,8 @@ def _detect_stone_dialect(raw: Dict[str, Any]) -> str:
     if has_connections and not has_nodes and not has_stages and not has_network:
         raise ValueError(
             "STONE v1 format detected (top-level 'connections:' without 'network:' or 'stages:'). "
-            "Migrate to STONE v2. See STONE_SPECIFICATIONS.md."
+            "STONE v1 is the historical STONE 1.x format; migrate to STONE 2.x "
+            "('network:' or 'stages:'). See STONE_SPECIFICATIONS.md."
         )
 
     if has_stages and has_network:
@@ -1289,6 +1291,80 @@ def drop_legacy_metadata_keys(config: Dict[str, Any]) -> List[str]:
     return dropped
 
 
+#: STONE format version, ``"MAJOR.MINOR"``. MAJOR tracks Boulder's MAJOR; MINOR is
+#: the Boulder minor release that last changed the STONE vocabulary or semantics.
+#: Bump it in the same PR as the format change and release that PR under the
+#: matching Boulder version (see AGENTS.md, "Git and releases"). Written into
+#: ``metadata.stone_version`` by :func:`migrate_stone_config` on every load.
+STONE_FORMAT_VERSION = "2.0"
+
+
+def _parse_stone_version(value: Any) -> Optional[Tuple[int, int]]:
+    """``"2.10"`` -> ``(2, 10)``; ``None`` when *value* is not ``MAJOR.MINOR``."""
+    try:
+        major, minor = str(value).split(".")[:2]
+        return int(major), int(minor)
+    except (ValueError, TypeError):
+        return None
+
+
+def migrate_stone_config(config: Dict[str, Any]) -> List[str]:
+    """Bring a raw STONE config up to :data:`STONE_FORMAT_VERSION`, in place.
+
+    Drops :data:`LEGACY_METADATA_KEYS` from the top-level ``metadata:`` and from
+    every ``scenarios:`` overlay, warns when the file was written for a newer or
+    a different-major STONE, and stamps ``metadata.stone_version`` (creating the
+    block when absent). A file without ``stone_version`` is a pre-versioned
+    STONE 2.x file and is stamped silently.
+
+    Works on plain dicts (``normalize_config``) and on ruamel trees
+    (``merge_config_into_yaml``). Returns human-readable notices, empty for an
+    up-to-date file; each notice is also logged as a warning.
+    """
+    notices: List[str] = []
+    meta = config.get("metadata")
+    if not isinstance(meta, dict):
+        meta = config["metadata"] = {}
+
+    found = meta.get("stone_version")
+    current = _parse_stone_version(STONE_FORMAT_VERSION)
+    if found is not None:
+        parsed = _parse_stone_version(found)
+        if parsed is None:
+            notices.append(
+                f"metadata.stone_version {found!r} is not MAJOR.MINOR; "
+                f"treated as STONE {STONE_FORMAT_VERSION}."
+            )
+        elif current is not None and parsed[0] != current[0]:
+            notices.append(
+                f"File is STONE {found}; this Boulder reads STONE {current[0]}.x. "
+                "Loading anyway -- expect validation errors."
+            )
+        elif current is not None and parsed > current:
+            notices.append(
+                f"File is STONE {found}, newer than this Boulder's "
+                f"{STONE_FORMAT_VERSION}; keys unknown here will fail validation."
+            )
+    for line in notices:
+        logger.warning("STONE migration: %s", line)
+
+    for key in drop_legacy_metadata_keys(config):  # logs its own warning
+        notices.append(f"metadata.{key} was removed ({LEGACY_METADATA_KEYS[key]}).")
+    scenarios = config.get("scenarios")
+    if isinstance(scenarios, dict):
+        for sid, overlay in scenarios.items():
+            if isinstance(overlay, dict):
+                for key in drop_legacy_metadata_keys(overlay):
+                    notices.append(
+                        f"scenarios.{sid}.metadata.{key} was removed "
+                        f"({LEGACY_METADATA_KEYS[key]})."
+                    )
+
+    if found != STONE_FORMAT_VERSION:
+        meta["stone_version"] = STONE_FORMAT_VERSION
+    return notices
+
+
 def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, Any]:
     """Normalize configuration from YAML with 🪨 STONE standard to internal format.
 
@@ -1325,9 +1401,10 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
         except Exception as _exc:  # noqa: BLE001 — a transform must not break load
             logger.debug("config_transform %r skipped: %s", _transform, _exc)
 
-    # Older files may still carry metadata keys the vocabulary has since
-    # dropped; discard them (with a warning) rather than failing validation.
-    drop_legacy_metadata_keys(config)
+    # Bring older files up to the current STONE format: drop metadata keys the
+    # vocabulary has since removed (with a warning) rather than failing
+    # validation, and stamp metadata.stone_version.
+    migrate_stone_config(config)
 
     # --- STONE v2 detection and normalization ---
     # Detect dialect first; this raises ValueError for v1 or unknown shapes.
@@ -2311,7 +2388,8 @@ def merge_config_into_yaml(
     -------
     tuple
         ``(yaml_string, warnings)`` — the merged YAML text plus any non-fatal
-        warning messages (e.g. Pint back-conversion failures).
+        warning messages (e.g. Pint back-conversion failures, STONE migration
+        notices from :func:`migrate_stone_config`).
 
     Raises
     ------
@@ -2531,6 +2609,16 @@ def merge_config_into_yaml(
     # 9. Apply unit map: replace SI floats with original unit strings.
     unit_warnings = apply_unit_map_inplace(original_data, unit_map, config)
     warnings.extend(unit_warnings)
+
+    # 9b. Migrate the authored tree itself. The merge above never removes keys
+    #     (legacy metadata would survive) and step 7 drops top-level keys the
+    #     original lacked (a missing metadata: block would never be created),
+    #     so the saved YAML would not be a current STONE file otherwise.
+    if "metadata" not in original_data:
+        from ruamel.yaml.comments import CommentedMap  # noqa: PLC0415
+
+        original_data.insert(0, "metadata", CommentedMap())
+    warnings.extend(migrate_stone_config(original_data))
 
     # 10. Dump to string using the same sequence indentation as the original.
     yaml_str = _yaml_to_string_matching_indent(original_data, original_yaml_str)
