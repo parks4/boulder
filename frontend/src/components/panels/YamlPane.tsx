@@ -106,6 +106,7 @@ export function YamlPane() {
       setConfig(resp.config, undefined, value);
       justSavedRef.current = true;
       setBaseline(value);
+      setSyncWarnings(resp.warnings ?? []);
       // The full base config was just replaced — drop this session's
       // scenario overlays (they belonged to the previous YAML) and re-seed
       // from the new config's own `scenarios:` block.
@@ -178,7 +179,7 @@ export function YamlPane() {
           id="sync-warnings-banner"
           className="px-3 py-2 text-xs bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 space-y-0.5 shrink-0"
         >
-          <p className="font-semibold">Sync warnings (non-blocking):</p>
+          <p className="font-semibold">Warnings (non-blocking):</p>
           {syncWarnings.map((w, i) => (
             <p key={i}>{w}</p>
           ))}

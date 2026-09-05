@@ -88,6 +88,28 @@ def test_scenario_id_alone_never_changes_the_fingerprint() -> None:
     assert _fingerprint(a) == _fingerprint(_BASE)
 
 
+def test_stone_version_alone_never_changes_the_fingerprint() -> None:
+    """A result cached before the format stamp existed must still be found.
+
+    ``normalize_config`` stamps ``metadata.stone_version`` on every load, so
+    the stamp is varied *after* normalization here, the way a cache entry
+    written by an older Boulder (no stamp, or an older value) would differ.
+    """
+    import copy
+
+    normalized = normalize_config(copy.deepcopy(_BASE))
+    assert "stone_version" in normalized["metadata"]
+
+    unstamped = copy.deepcopy(normalized)
+    del unstamped["metadata"]["stone_version"]
+    older = copy.deepcopy(normalized)
+    older["metadata"]["stone_version"] = "1.9"
+
+    fp = compute_fingerprint(normalized, mechanism="gri30.yaml")
+    assert compute_fingerprint(unstamped, mechanism="gri30.yaml") == fp
+    assert compute_fingerprint(older, mechanism="gri30.yaml") == fp
+
+
 def test_a_real_parameter_change_still_changes_the_fingerprint() -> None:
     """Guard against over-stripping: physics must still invalidate."""
     import copy

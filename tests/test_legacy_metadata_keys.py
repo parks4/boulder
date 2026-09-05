@@ -17,7 +17,10 @@ import pytest
 
 from boulder.config import (
     LEGACY_METADATA_KEYS,
+    STONE_FORMAT_VERSION,
     drop_legacy_metadata_keys,
+    merge_config_into_yaml,
+    migrate_stone_config,
     normalize_config,
     validate_config,
 )
@@ -43,8 +46,9 @@ _LEGACY_CONFIG = {
 }
 
 _LEGACY_YAML = """\
+# keep me: a file-level comment that must survive the GUI round-trip
 metadata:
-  description: "test config"
+  description: "test config"  # keep me too
   scenario_id: old_id
   scenario_name: "Old display name"
 phases:
@@ -135,6 +139,64 @@ def test_upload_of_legacy_yaml_is_accepted():
         meta = resp.json()["config"]["metadata"]
         for key in LEGACY_METADATA_KEYS:
             assert key not in meta
-        # The authored `scenarios:` block survives untouched in the adopted raw
-        # base -- the overlay's own legacy key is dropped when it is expanded.
-        assert list(app.state.preloaded_raw["scenarios"]) == ["a"]
+        # The adopted raw base is the file exactly as authored (legacy keys
+        # included -- they are dropped when a scenario is expanded); the
+        # validated config is stamped and the notices travel to the browser.
+        raw = app.state.preloaded_raw
+        assert list(raw["scenarios"]) == ["a"]
+        assert "stone_version" not in raw["metadata"]
+        assert meta["stone_version"] == STONE_FORMAT_VERSION
+        warnings = resp.json()["warnings"]
+        assert any("metadata.scenario_id" in w for w in warnings)
+        assert any("scenarios.a.metadata.scenario_name" in w for w in warnings)
+
+
+def test_migrate_reports_legacy_keys_in_base_and_overlays():
+    import yaml
+
+    raw = yaml.safe_load(_LEGACY_YAML)
+    notices = migrate_stone_config(raw)
+    assert raw["metadata"]["stone_version"] == STONE_FORMAT_VERSION
+    for key in LEGACY_METADATA_KEYS:
+        assert key not in raw["metadata"]
+    assert raw["scenarios"]["a"]["metadata"] == {}
+    assert len(notices) == 3
+    # Second pass: nothing left to do.
+    assert migrate_stone_config(raw) == []
+
+
+def test_gui_round_trip_yields_a_current_stone_file():
+    """Upload old -> YAML pane (sync) -> Download produces a migrated file.
+
+    The YAML pane text is ``merge_config_into_yaml(live_config, original)``;
+    it must lose the legacy keys, gain ``stone_version`` and keep comments.
+    """
+    import yaml
+
+    raw = yaml.safe_load(_LEGACY_YAML)
+    validated = validate_config(normalize_config(copy.deepcopy(raw)))
+    out, warnings = merge_config_into_yaml(validated, _LEGACY_YAML)
+
+    assert "scenario_id" not in out
+    assert "scenario_name" not in out
+    assert "# keep me: a file-level comment" in out
+    assert "# keep me too" in out
+    assert any("scenario_id" in w for w in warnings)
+    reloaded = yaml.safe_load(out)
+    assert reloaded["metadata"]["stone_version"] == STONE_FORMAT_VERSION  # a str
+    assert reloaded["scenarios"]["a"]["metadata"] == {}
+    # Re-syncing the migrated file is quiet.
+    _, warnings2 = merge_config_into_yaml(validated, out)
+    assert warnings2 == []
+
+
+def test_sync_creates_metadata_block_when_missing():
+    original = _LEGACY_YAML.split("phases:", 1)[1]
+    original = "phases:" + original.split("scenarios:")[0]
+    assert "metadata" not in original
+    import yaml
+
+    validated = validate_config(normalize_config(yaml.safe_load(original)))
+    out, _ = merge_config_into_yaml(validated, original)
+    assert out.lstrip().startswith("metadata:")
+    assert yaml.safe_load(out)["metadata"] == {"stone_version": STONE_FORMAT_VERSION}

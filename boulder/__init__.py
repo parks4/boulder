@@ -5,6 +5,7 @@ try:
 except ImportError:
     __version__ = "0.0.0+unknown"
 
+from .config import STONE_FORMAT_VERSION, migrate_stone_config
 from .lagrangian import LagrangianTrajectory
 from .runner import BoulderRunner
 from .schema_registry import (
@@ -35,6 +36,8 @@ __all__ = [
     "METADATA_MANDATORY_KEYS",
     "METADATA_OPTIONAL_KEYS",
     "MetadataModel",
+    "STONE_FORMAT_VERSION",
+    "migrate_stone_config",
     "ReactorSchemaEntry",
     "SimulationResult",
     "StagedReactorNet",

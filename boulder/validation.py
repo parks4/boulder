@@ -113,6 +113,8 @@ METADATA_MANDATORY_KEYS: frozenset = frozenset({"description"})
 
 METADATA_OPTIONAL_KEYS: frozenset = frozenset(
     {
+        # STONE format version written by Boulder on every load/save
+        "stone_version",
         "title",
         "gui_app_title",
         "gui_app_version",
@@ -136,6 +138,8 @@ METADATA_OPTIONAL_KEYS: frozenset = frozenset(
         "original_yaml",
         "part1_stone_yaml",
         "source_file",
+        # Stamped by the run-set expansion on each sweep point
+        "sweep_point",
         # Escape hatch for truly freeform user metadata
         "extra",
     }
@@ -175,6 +179,10 @@ class MetadataModel(BaseModel):
 
     description: Optional[str] = None
 
+    #: STONE format version, ``"MAJOR.MINOR"`` — see ``boulder.config.STONE_FORMAT_VERSION``.
+    #: ``Any`` because an unquoted ``stone_version: 2.0`` loads as a float; the
+    #: value is normalised to the current string on load by ``migrate_stone_config``.
+    stone_version: Optional[Any] = None
     title: Optional[str] = None
     #: Short label for the web UI header (e.g. ``MyApp``); omitted defaults to "Boulder".
     gui_app_title: Optional[str] = None
