@@ -91,10 +91,12 @@ async def list_scenarios(request: Request) -> Dict[str, Any]:
 
     # `available` says whether the Scenario pane has anything to show. Every
     # config now has at least one entry (the base run), so store presence alone
-    # would light the pane up for every plain single-reactor config -- it is the
-    # *authored* scenarios that make the pane meaningful.
+    # would light the pane up for every plain single-reactor config -- it is
+    # *authored* scenarios, or a real sweep having computed more than that one
+    # base entry (a `sweep.runner`/axis sweep authors no `scenarios:` overlay
+    # at all, but still fills the store), that make the pane meaningful.
     return {
-        "available": bool(authored_ids),
+        "available": bool(authored_ids) or len(entries) > 1,
         "store": store_dir.name if store_dir else None,
         "mechanism": next(
             (e.get("mechanism_name") for e in entries if e.get("mechanism_name")), None
@@ -249,14 +251,12 @@ async def get_scenario_preview(
     raw = _require_base_raw(request)
 
     from ...runner import BoulderRunner
-    from ...runset import deep_merge
+    from ...runset import RUN_SET_KEYS, deep_merge
 
-    base_clean = {
-        k: v for k, v in raw.items() if k not in ("scenarios", "sweep", "sweeps")
-    }
+    base_clean = {k: v for k, v in raw.items() if k not in ("scenarios", *RUN_SET_KEYS)}
     overlay = dict(body.overlay)
-    overlay.pop("sweep", None)
-    overlay.pop("sweeps", None)
+    for key in RUN_SET_KEYS:
+        overlay.pop(key, None)
     merged = deep_merge(base_clean, overlay)
 
     runner_cls = getattr(request.app.state, "runner_class", None) or BoulderRunner

@@ -5,7 +5,7 @@ import { useConfigStore } from "@/stores/configStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useResultsTabStore } from "@/stores/resultsTabStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
-import { useSweepRunStore } from "@/stores/sweepStore";
+import { followedScenarioId, useSweepRunStore } from "@/stores/sweepStore";
 import { fetchPlugins, renderPlugin } from "@/api/plugins";
 import { hasSankeyData } from "@/lib/sankeyData";
 import { Button } from "@/components/ui/Button";
@@ -203,10 +203,10 @@ export function ResultsTabs() {
   // Previously this read `activeScenarioId` alone. Nothing is selected when a
   // sweep starts, so the condition was false and no card ever appeared -- it
   // only showed if you happened to click the scenario being solved right then.
-  const solvingId = Object.keys(scenarioProgress).at(-1) ?? null;
-  const followedId = sweepPinnedId ?? solvingId;
+  // Same rule the Scenario Pane highlights by (`followedScenarioId`).
+  const followedId = followedScenarioId(sweepPinnedId, scenarioProgress);
 
-  if (followedId != null && followedId in scenarioProgress) {
+  if (followedId != null) {
     return (
       <SweepCalculatingCard
         scenarioId={followedId}

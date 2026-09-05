@@ -81,6 +81,25 @@ function stopPolling(): void {
   lastSeenCurrent = null;
 }
 
+/**
+ * Which scenario the UI follows while a sweep runs: the one the user pinned by
+ * clicking mid-sweep, else the one currently solving — and only while that
+ * scenario is actually in progress. `null` when nothing is being followed
+ * (no sweep, or the pinned scenario is not the one solving).
+ *
+ * One rule, read by both the results area (which "Calculating …" card to show)
+ * and the Scenario Pane (which row to highlight), so the two can't disagree
+ * about what the screen is looking at.
+ */
+export function followedScenarioId(
+  pinnedId: string | null,
+  scenarioProgress: Record<string, unknown>,
+): string | null {
+  const solvingId = Object.keys(scenarioProgress).at(-1) ?? null;
+  const followed = pinnedId ?? solvingId;
+  return followed != null && followed in scenarioProgress ? followed : null;
+}
+
 export const useSweepRunStore = create<SweepRunState>((set, get) => {
   // Single place that interprets a status payload — `run()`'s poll tick and
   // `hydrate()`'s first snapshot both funnel through this, so there is only

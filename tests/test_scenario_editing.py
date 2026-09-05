@@ -53,6 +53,28 @@ def _write_config(tmp_path: Path) -> Path:
     return cfg
 
 
+_NO_SCENARIOS_YAML = """\
+network:
+  - id: feed
+    Reservoir:
+      temperature: 298.15
+      pressure: 101325
+      composition: "CH4:1"
+"""
+
+
+def _write_config_without_scenarios(tmp_path: Path) -> Path:
+    """Write a config that authors no `scenarios:` block at all.
+
+    Mirrors a `sweep.runner`/axis-based sweep (e.g. boulder_examples'
+    combustor.yaml, continuous_reactor.yaml): the store still fills up with
+    many computed entries, but none of them come from an authored overlay.
+    """
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_NO_SCENARIOS_YAML, encoding="utf-8")
+    return cfg
+
+
 def _client_with_config(cfg_path: Path):
     app = create_app()
     client = TestClient(app)
@@ -682,6 +704,41 @@ def test_list_scenarios_includes_authored_ids_without_a_store(tmp_path: Path) ->
         assert body["scenarios"] == [], "nothing has been solved yet"
         assert body["authored_ids"] == ["BASELINE", "base_case"]
         assert "base_case" in body["authored_overlays"]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_list_scenarios_available_after_sweep_with_no_authored_scenarios(
+    tmp_path: Path,
+) -> None:
+    """A runner/axis sweep must light up the pane even with no `scenarios:` block.
+
+    Regression test: `available` used to be `bool(authored_ids)` alone, so a
+    `sweep.runner`/axis sweep -- which fills the store with many computed
+    entries but authors no `scenarios:` overlay -- could never show its Sweep
+    Results plot. A single base entry (no sweep at all) must still report
+    `available: False`, per `test_list_scenarios_includes_authored_ids_without_a_store`'s
+    "don't light up for every plain single-reactor config" contract.
+    """
+    pytest.importorskip("h5py")
+    cfg = _write_config_without_scenarios(tmp_path)
+    client, _app = _client_with_config(cfg)
+    try:
+        resp = client.get("/api/scenarios")
+        body = resp.json()
+        assert body["authored_ids"] == []
+        assert body["available"] is False, "no store yet"
+
+        _seed_entry(cfg, "tres_001")
+        resp = client.get("/api/scenarios")
+        body = resp.json()
+        assert body["available"] is False, "one entry alone is just the base run"
+
+        _seed_entry(cfg, "tres_002")
+        resp = client.get("/api/scenarios")
+        body = resp.json()
+        assert body["authored_ids"] == [], "still no authored scenarios:"
+        assert body["available"] is True, "a real sweep computed multiple entries"
     finally:
         client.__exit__(None, None, None)
 

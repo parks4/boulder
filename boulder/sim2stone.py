@@ -922,26 +922,72 @@ def _build_signals_bindings_blocks(
     return signals, bindings
 
 
-def _build_continuation_block(
+def _build_scenarios_sweep_block(
     ast_result: Any,
+    node_ids: List[str],
+    closure_by_mfc_id: Dict[str, Any],
+    mfc_targets: Dict[str, str],
 ) -> Optional[Dict[str, Any]]:
-    """Build a ``continuation:`` block from an ``ASTExtractionResult``."""
+    """Build ``scenarios_sweep: {while: ...}`` from a detected extinction loop.
+
+    ``while reactor.T > N: sim.solve_steady(); tau *= k`` is the run-set chain
+    STONE_SPECIFICATIONS.md Section 14 describes: the swept ``parameter`` is
+    the ``tau_s`` of the MFC whose residence-time closure reads ``tau``
+    (*closure_by_mfc_id* maps emitted MFC id -> its ``DetectedClosure``), the
+    ``condition`` reads the tested reactor's attribute from the previous step,
+    ``update`` is the loop's ``*= k``, and ``initial: from_previous`` carries
+    each step's converged state into the next -- upstream keeps solving the
+    same live ``ReactorNet``, so that is what its STONE form must do too.
+
+    ``None`` when the loop cannot be tied to an emitted MFC (no closure reads
+    its ``tau`` variable) or to a reactor node: a chain missing either would be
+    a guess, so it is left out. The reactor is the condition's own variable
+    when it names a node (exact id, else case-insensitive containment -- the
+    same heuristic the closure annotation uses), else the closure's reactor
+    variable, else the MFC's target.
+    """
     if ast_result is None or not ast_result.continuations:
         return None
-
     cont = ast_result.continuations[0]
-    block: Dict[str, Any] = {}
+    if not cont.tau_var or not cont.tau_factor:
+        return None
+    mfc_id = next(
+        (cid for cid, cl in closure_by_mfc_id.items() if cl.tau_var == cont.tau_var),
+        None,
+    )
+    if mfc_id is None:
+        return None
 
-    if cont.tau_var:
-        block["parameter"] = cont.tau_var
-        if cont.tau_factor:
-            block["factor"] = cont.tau_factor
-    block["stop_when"] = {
-        "attribute": cont.condition_attr,
-        "less_than": cont.condition_threshold,
+    def _node_for(var: str) -> Optional[str]:
+        if not var:
+            return None
+        if var in node_ids:
+            return var
+        low = var.lower()
+        return next(
+            (nid for nid in node_ids if low in nid.lower() or nid.lower() in low), None
+        )
+
+    reactor_id = (
+        _node_for(getattr(cont, "condition_var", ""))
+        or _node_for(closure_by_mfc_id[mfc_id].reactor_var)
+        or mfc_targets.get(mfc_id)
+    )
+    if not reactor_id:
+        return None
+    return {
+        "while": {
+            "parameter": f"network[id={mfc_id}].MassFlowController.tau_s",
+            "condition": {
+                "path": f"network[id={reactor_id}].{cont.condition_attr}",
+                "gt": cont.condition_threshold,
+            },
+            "update": {"multiply": cont.tau_factor},
+            "max_iters": 200,
+            "initial": "from_previous",
+        },
+        "_derived_via": cont.derived_via,
     }
-    block["_derived_via"] = cont.derived_via
-    return block
 
 
 def _solver_kind_from_ast(
@@ -1194,32 +1240,6 @@ def sim_to_stone_yaml(
         except Exception:
             pass
 
-    # --- causal layer: continuation ---
-    cont_block = _build_continuation_block(ast_result)
-    if cont_block is not None:
-        cont_cm = CommentedMap()
-        cont_derived = cont_block.pop("_derived_via", "ast_match")
-        for k, v in cont_block.items():
-            if isinstance(v, dict):
-                sub_cm = CommentedMap()
-                for sk, sv in v.items():
-                    sub_cm[sk] = sv
-                cont_cm[k] = sub_cm
-            else:
-                cont_cm[k] = v
-        try:
-            cont_cm.yaml_set_comment_before_after_key(
-                list(cont_cm.keys())[0],
-                before=f"derived_via: {cont_derived}",
-            )
-        except Exception:
-            pass
-        stone_cm["continuation"] = cont_cm
-        try:
-            stone_cm.yaml_set_comment_before_after_key("continuation", before="\n")
-        except Exception:
-            pass
-
     # network: list of node and connection items in STONE v2 format
     network_seq = CommentedSeq()
 
@@ -1228,6 +1248,10 @@ def sim_to_stone_yaml(
     if ast_result is not None:
         for cl in ast_result.closures:
             closure_map[cl.mfc_var] = cl
+    # Emitted MFC id -> the closure annotated onto it (and its target node),
+    # for tying a detected extinction loop's ``tau`` to a real STONE path.
+    applied_closures: Dict[str, Any] = {}
+    mfc_targets: Dict[str, str] = {}
 
     # AST-detected Gaussian Func1 signals not already consumed by another
     # binding (e.g. a plasma reduced_electric_field pulse). A live Func1
@@ -1331,6 +1355,8 @@ def sim_to_stone_yaml(
                 conn_props["tau_s"] = f"{{{{{apply_closure.tau_var}}}}}"
                 conn_props.pop("mass_flow_rate", None)
                 conn_props.pop("_comment", None)
+                applied_closures[str(conn["id"])] = apply_closure
+                mfc_targets[str(conn["id"])] = str(conn.get("target") or "")
 
         # Substitute a real Gaussian schedule for an MFC whose mass_flow_rate
         # was snapshotted from a live Func1 (see gaussian_signals comment
@@ -1400,6 +1426,37 @@ def sim_to_stone_yaml(
         stone_cm.yaml_set_comment_before_after_key("network", before="\n")
     except Exception:
         pass
+
+    # --- run-set: a detected extinction loop becomes a scenarios_sweep.while chain ---
+    chain_block = _build_scenarios_sweep_block(
+        ast_result,
+        [str(n["id"]) for n in internal.get("nodes", [])],
+        applied_closures,
+        mfc_targets,
+    )
+    if chain_block is not None:
+        chain_derived = chain_block.pop("_derived_via", "ast_match")
+        while_cm = CommentedMap()
+        for k, v in chain_block["while"].items():
+            if isinstance(v, dict):
+                sub_cm = CommentedMap()
+                sub_cm.update(v)
+                while_cm[k] = sub_cm
+            else:
+                while_cm[k] = v
+        try:
+            while_cm.yaml_set_comment_before_after_key(
+                "parameter", before=f"derived_via: {chain_derived}"
+            )
+        except Exception:
+            pass
+        run_set_cm = CommentedMap()
+        run_set_cm["while"] = while_cm
+        stone_cm["scenarios_sweep"] = run_set_cm
+        try:
+            stone_cm.yaml_set_comment_before_after_key("scenarios_sweep", before="\n")
+        except Exception:
+            pass
 
     return yaml_to_string_with_comments(stone_cm)
 

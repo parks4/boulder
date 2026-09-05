@@ -46,8 +46,9 @@ STONE_TOP_LEVEL_KEYS: frozenset = frozenset(
         "groups",
         "output",
         "export",
-        "sweeps",
-        "sweep",
+        "scenarios_sweep",
+        "sweeps",  # legacy spelling of scenarios_sweep (renamed on load)
+        "sweep",  # legacy spelling of scenarios_sweep (renamed on load)
         "scenarios",
     }
 )
@@ -64,10 +65,11 @@ STONE_V2_BASE_KEYS: frozenset = frozenset(
         "network",
         "output",
         "export",
-        "sweeps",
-        "sweep",
+        "scenarios_sweep",
+        "sweeps",  # legacy spelling of scenarios_sweep (renamed on load)
+        "sweep",  # legacy spelling of scenarios_sweep (renamed on load)
         "scenarios",
-        "continuation",
+        "continuation",  # legacy: headless BoulderRunner.run_continuation only
         "signals",
         "bindings",
         "scopes",
@@ -570,6 +572,7 @@ def _normalize_v2_network(raw: Dict[str, Any]) -> Dict[str, Any]:
     for k in (
         "output",
         "export",
+        "scenarios_sweep",
         "sweeps",
         "sweep",
         "scenarios",
@@ -874,6 +877,7 @@ def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
     for k in (
         "output",
         "export",
+        "scenarios_sweep",
         "sweeps",
         "sweep",
         "scenarios",
@@ -1057,10 +1061,20 @@ def _assert_stone_yaml_extension(config_path: str) -> None:
 
 
 def load_config_file(config_path: str) -> Dict[str, Any]:
-    """Load configuration from YAML file with 🪨 STONE standard."""
+    """Load configuration from YAML file with 🪨 STONE standard.
+
+    The run-set block's legacy spellings (``sweep:``/``sweeps:``) are renamed to
+    ``scenarios_sweep:`` here, with a warning, so every raw config Boulder holds
+    (the Run Sweep base included) speaks one dialect -- see
+    :func:`boulder.runset.canonicalize_run_set_keys`.
+    """
     _assert_stone_yaml_extension(config_path)
     with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        raw = yaml.safe_load(f)
+    from .runset import canonicalize_run_set_keys  # noqa: PLC0415 — avoid import cycle
+
+    canonicalize_run_set_keys(raw)
+    return raw
 
 
 def load_config_file_with_comments(config_path: str):
@@ -1312,10 +1326,12 @@ def migrate_stone_config(config: Dict[str, Any]) -> List[str]:
     """Bring a raw STONE config up to :data:`STONE_FORMAT_VERSION`, in place.
 
     Drops :data:`LEGACY_METADATA_KEYS` from the top-level ``metadata:`` and from
-    every ``scenarios:`` overlay, warns when the file was written for a newer or
-    a different-major STONE, and stamps ``metadata.stone_version`` (creating the
-    block when absent). A file without ``stone_version`` is a pre-versioned
-    STONE 2.x file and is stamped silently.
+    every ``scenarios:`` overlay, renames legacy run-set keys (``sweep:`` /
+    ``sweeps:`` / ``continuation:``, see :func:`boulder.runset.canonicalize_run_set_keys`),
+    warns when the file was written for a newer or a different-major STONE, and
+    stamps ``metadata.stone_version`` (creating the block when absent). A file
+    without ``stone_version`` is a pre-versioned STONE 2.x file and is stamped
+    silently.
 
     Works on plain dicts (``normalize_config``) and on ruamel trees
     (``merge_config_into_yaml``). Returns human-readable notices, empty for an
@@ -1360,6 +1376,11 @@ def migrate_stone_config(config: Dict[str, Any]) -> List[str]:
                         f"({LEGACY_METADATA_KEYS[key]})."
                     )
 
+    from .runset import canonicalize_run_set_keys  # noqa: PLC0415 — avoid import cycle
+
+    for key in canonicalize_run_set_keys(config):  # logs its own warning(s)
+        notices.append(f"'{key}:' is a legacy run-set spelling; see the warning log.")
+
     if found != STONE_FORMAT_VERSION:
         meta["stone_version"] = STONE_FORMAT_VERSION
     return notices
@@ -1401,9 +1422,9 @@ def normalize_config(config: Dict[str, Any], plugins: Any = None) -> Dict[str, A
         except Exception as _exc:  # noqa: BLE001 — a transform must not break load
             logger.debug("config_transform %r skipped: %s", _transform, _exc)
 
-    # Bring older files up to the current STONE format: drop metadata keys the
-    # vocabulary has since removed (with a warning) rather than failing
-    # validation, and stamp metadata.stone_version.
+    # Bring older files up to the current STONE format: drop metadata keys and
+    # rename run-set keys the vocabulary has since removed/renamed (with a
+    # warning) rather than failing validation, and stamp metadata.stone_version.
     migrate_stone_config(config)
 
     # --- STONE v2 detection and normalization ---
@@ -2120,7 +2141,14 @@ def convert_to_stone_format(config: dict) -> dict:
     if "settings" in config:
         stone_config["settings"] = config["settings"]
 
-    for passthrough in ("output", "export", "sweeps", "sweep", "scenarios"):
+    for passthrough in (
+        "output",
+        "export",
+        "scenarios_sweep",
+        "sweeps",
+        "sweep",
+        "scenarios",
+    ):
         if passthrough in config:
             stone_config[passthrough] = config[passthrough]
 

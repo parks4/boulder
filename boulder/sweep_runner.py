@@ -1,10 +1,12 @@
 """Generic scenario/sweep runner → composite collection store (for the GUI Run Sweep).
 
 Invoked out-of-process by the ``/api/sweep`` routes for any config that declares
-``scenarios:`` and/or ``sweep:``. It:
+``scenarios:`` and/or ``scenarios_sweep:``. It:
 
 1. loads the raw config (``from:`` inheritance resolved),
-2. expands the union run-set with :func:`boulder.runset.expand_scenarios`,
+2. pulls the union run-set from :func:`boulder.runset.iter_run_set` -- grid
+   points and overlays up front, a ``for:``/``while:`` chain one point at a
+   time, each built from the previous step's converged state,
 3. solves each run through the Boulder converter, and
 4. writes each result into the run-set store
    (``metadata.extra.cache_store``, default ``.boulder-cache/<stem>/``), one
@@ -39,16 +41,18 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type
 
 from . import scenario_store
 from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
 from .config import normalize_config
 from .runset import (
-    expand_scenarios,
+    RunSetCursor,
+    iter_run_set,
     load_yaml_with_inheritance,
     node_property_attrs,
     resolve_store_dir,
+    run_set_size,
     sweep_point_of,
 )
 
@@ -267,6 +271,49 @@ def gui_payload_from_progress(progress: Any, started: float) -> Dict[str, Any]:
     }
 
 
+def final_states_of(gui: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Return each reactor's final ``{"T", "P", "X", "Y"}`` from a solved GUI payload.
+
+    Read from ``reactors_series`` -- the same trajectory the Plots tab draws --
+    so a chain's warm start (``initial: from_previous``) and its ``while:``
+    condition see exactly the state the previous step ended in. Series without
+    samples are skipped; a payload with no series yields ``{}``.
+    """
+    states: Dict[str, Dict[str, Any]] = {}
+    for rid, series in (gui.get("reactors_series") or {}).items():
+        if not isinstance(series, dict):
+            continue
+        temperatures = series.get("T") or []
+        if not temperatures:
+            continue
+        state: Dict[str, Any] = {"T": float(temperatures[-1])}
+        pressures = series.get("P") or []
+        if pressures:
+            state["P"] = float(pressures[-1])
+        for fraction_key in ("X", "Y"):
+            fractions = series.get(fraction_key)
+            if isinstance(fractions, dict):
+                state[fraction_key] = {
+                    str(sp): float(vals[-1])
+                    for sp, vals in fractions.items()
+                    if isinstance(vals, (list, tuple)) and vals
+                }
+        states[str(rid)] = state
+    return states
+
+
+def stored_final_states(
+    store_dir: Path, sid: str, identity: str
+) -> Optional[Dict[str, Dict[str, Any]]]:
+    """Return :func:`final_states_of` a cached store entry, or ``None`` if unreadable.
+
+    A cached (skipped) chain step still has to feed the next one, so its
+    converged state is read back from the store instead of re-solved.
+    """
+    payload = scenario_store.read_entry(store_dir, sid, identity)
+    return final_states_of(payload) if payload else None
+
+
 def store_solved_scenario(
     store_dir: Path,
     sid: str,
@@ -433,22 +480,32 @@ def run(
         store_dir.mkdir(parents=True, exist_ok=True)
     cached_fps = {} if no_cache else scenario_store.fingerprints(store_dir, identity)
 
-    runs = expand_scenarios(raw)
-    total = len(runs)
-    run_ids = {sid for sid, _ in runs}
+    # Exact for grids, overlays and a `for:` chain; 0 for a `while:` chain,
+    # whose length is only known once its condition trips.
+    total_hint = run_set_size(raw)
+    total_label = str(total_hint) if total_hint else "?"
+    cursor = RunSetCursor()
+    run_ids: "set[str]" = set()
     n_cached = 0
-    for i, (sid, cfg) in enumerate(runs):
+    total = 0
+    for i, (sid, cfg) in enumerate(iter_run_set(raw, cursor)):
+        total += 1
+        run_ids.add(sid)
         config, mech_name, fingerprint = prepare_scenario(cfg, resolve_mechanism)
         # The `scenarios:` key is a scenario's only name -- no separate label.
         label = sid
         if cached_fps.get(sid) == fingerprint:
             n_cached += 1
-            print(f"scenario {i + 1}/{total} ({sid}): cached, skipped", flush=True)
+            print(
+                f"scenario {i + 1}/{total_label} ({sid}): cached, skipped", flush=True
+            )
             # Display attrs still track the YAML (a reordered run-set) even
             # when the solve itself is skipped.
             scenario_store.update_display_attrs(store_dir, sid, label=label, order=i)
+            # A skipped chain step still seeds the next one.
+            cursor.previous_states = stored_final_states(store_dir, sid, identity)
             continue
-        print(f"scenario {i + 1}/{total} ({sid})", flush=True)
+        print(f"scenario {i + 1}/{total_label} ({sid})", flush=True)
         gui, resolved_mech, conv = solve_scenario(config, mech_name)
         stored_mech = _resolve(resolved_mech)
         store_solved_scenario(
@@ -466,6 +523,7 @@ def run(
             scenario_attrs=scenario_attrs,
             on_solved=on_solved,
         )
+        cursor.previous_states = final_states_of(gui)
 
     stale = scenario_store.prune_entries(store_dir, run_ids)
     if stale:
@@ -483,7 +541,7 @@ def run(
 
 def main(argv: "list[str] | None" = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("config", help="STONE config with scenarios:/sweep:")
+    parser.add_argument("config", help="STONE config with scenarios:/scenarios_sweep:")
     parser.add_argument("--no-plot", action="store_true", help="(accepted, ignored)")
     args = parser.parse_args(argv)
     run(Path(args.config).resolve())

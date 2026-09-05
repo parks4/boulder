@@ -215,6 +215,20 @@ describe("RunControl", () => {
     await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalledTimes(2));
   });
 
+  it("omits the count for a run-set whose length is only known at runtime (while: chain)", async () => {
+    mockGetSweepInfo.mockResolvedValue({ can_run: true, n_scenarios: 0, reason: "Run the scenario sweep" });
+    render(
+      <RunControl onRunSimulation={onRunSimulation} onStopSimulation={onStopSimulation} isRunning={false} runDisabled={false} />,
+    );
+    await waitFor(() => expect(mockGetSweepInfo).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText("Choose run action"));
+    await waitFor(() =>
+      expect(screen.getByRole("menuitemradio", { name: /run sweep/i })).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /run sweep/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run Sweep" })).toBeInTheDocument());
+  });
+
   describe("Stop / Stopping", () => {
     it("shows Stop Simulation (destructive) while a single run is active", () => {
       useSimulationStore.setState({ isRunning: true, progress: null });

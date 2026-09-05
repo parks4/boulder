@@ -160,7 +160,11 @@ export function RunControl({
   const primaryLabel =
     effectiveMode === "sweep"
       ? phase === "idle"
-        ? `Run Sweep (${nScenarios} scenarios)`
+        ? // A `while:` chain's length is only known once its condition
+          // trips, so the server reports 0 -- no count to show.
+          nScenarios > 0
+          ? `Run Sweep (${nScenarios} scenarios)`
+          : "Run Sweep"
         : phase === "stopping"
           ? "Stopping Sweep…"
           : `Stop Sweep (${progress.current}/${progress.total})`

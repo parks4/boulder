@@ -13,17 +13,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { useScenarioStore } from "./scenarioStore";
-import { useSweepRunStore } from "./sweepStore";
-
-/** The gate `ResultsTabs` applies, kept in step with it. */
-function followedId(
-  pinnedId: string | null,
-  scenarioProgress: Record<string, unknown>,
-): string | null {
-  const solvingId = Object.keys(scenarioProgress).at(-1) ?? null;
-  const followed = pinnedId ?? solvingId;
-  return followed != null && followed in scenarioProgress ? followed : null;
-}
+import { followedScenarioId as followedId, useSweepRunStore } from "./sweepStore";
 
 describe("sweep follow", () => {
   beforeEach(() => {
