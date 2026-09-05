@@ -544,3 +544,91 @@ def test_an_entry_is_never_visible_before_it_is_complete(tmp_path: Path) -> None
 
     assert seen_before_swap == [[]]
     assert [e["id"] for e in store.list_entries(store_dir, identity)] == ["fresh"]
+
+
+def test_replace_file_retries_only_a_readers_hold_and_never_hides_the_rest(
+    tmp_path: Path,
+) -> None:
+    """Raise rather than hide: one expected transient is waited out (and said so).
+
+    A reader's brief hold (``PermissionError`` on Windows) is retried and the
+    wait is logged; any other error propagates at once; an exhausted budget
+    re-raises the original error and leaves no scratch file behind.
+    """
+    import os
+    from unittest.mock import patch
+
+    from boulder import payload_store
+
+    src = tmp_path / "scratch.h5"
+    dst = tmp_path / "entry.h5"
+    src.write_bytes(b"new")
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def _held_once(s: Any, d: Any) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PermissionError(13, "sharing violation")
+        real_replace(s, d)
+
+    with (
+        patch("boulder.payload_store.os.replace", _held_once),
+        patch.object(payload_store.logger, "warning") as warn,
+    ):
+        payload_store.replace_file(src, dst, attempts=3, delay=0.0)
+    assert dst.read_bytes() == b"new" and not src.exists()
+    assert warn.call_count == 1, "a wait that happened must be reported, not hidden"
+
+    src.write_bytes(b"new")
+    with (
+        patch(
+            "boulder.payload_store.os.replace",
+            side_effect=IsADirectoryError(21, "boom"),
+        ),
+        pytest.raises(IsADirectoryError),
+    ):
+        payload_store.replace_file(src, dst, attempts=3, delay=0.0)
+    assert src.exists(), (
+        "an unexpected error is not retried and not cleaned up as if handled"
+    )
+
+    with (
+        patch(
+            "boulder.payload_store.os.replace", side_effect=PermissionError(13, "held")
+        ),
+        pytest.raises(PermissionError),
+    ):
+        payload_store.replace_file(src, dst, attempts=2, delay=0.0)
+    assert not src.exists(), (
+        "an exhausted budget re-raises and removes the scratch file"
+    )
+
+
+def test_discard_scratch_tolerates_only_another_writers_file(tmp_path: Path) -> None:
+    """Cleanup swallows exactly one thing: the scratch dir still holding a peer's file."""
+    from unittest.mock import patch
+
+    from boulder import payload_store
+
+    scratch_dir = tmp_path / ".tmp"
+    scratch_dir.mkdir()
+    mine = scratch_dir / "mine.h5"
+    other = scratch_dir / "other.h5"
+    mine.write_bytes(b"x")
+    other.write_bytes(b"x")
+
+    payload_store.discard_scratch(mine)  # a peer is still writing: keep the dir
+    assert not mine.exists() and scratch_dir.is_dir()
+
+    other.unlink()
+    with (
+        patch.object(
+            payload_store.Path, "rmdir", side_effect=PermissionError(13, "locked")
+        ),
+        pytest.raises(PermissionError),
+    ):
+        payload_store.discard_scratch(mine)
+
+    payload_store.discard_scratch(mine)  # empty and removable: gone
+    assert not scratch_dir.exists()

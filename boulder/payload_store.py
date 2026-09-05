@@ -40,8 +40,10 @@ Depends only on ``cantera`` + ``h5py`` + numpy + stdlib.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import logging
 import os
 import time
 from numbers import Real
@@ -62,6 +64,8 @@ except ImportError as _h5py_exc:  # pragma: no cover - environment-dependent
 else:
     _H5PY_IMPORT_ERROR = None
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def _require_h5py() -> None:
@@ -339,12 +343,19 @@ def scratch_path(path: Path) -> Path:
 
 
 def discard_scratch(tmp: Path) -> None:
-    """Remove a leftover scratch file (if the swap never happened) and its dir if empty."""
+    """Remove a leftover scratch file (if the swap never happened) and its dir if empty.
+
+    The one thing tolerated is the directory not being empty -- another
+    writer's scratch file is in there, and that writer will remove the
+    directory when it finishes. Anything else (a permission problem, a locked
+    directory) is a real failure and is raised, not hidden.
+    """
     tmp.unlink(missing_ok=True)
     try:
         tmp.parent.rmdir()
-    except OSError:
-        pass  # another writer's scratch file is still in there
+    except OSError as exc:
+        if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+            raise
 
 
 def replace_file(
@@ -358,18 +369,31 @@ def replace_file(
     Cantera's ``SolutionArray.restore`` hold a store entry for the milliseconds
     it takes to decode it, while the GUI polls the store the whole time a sweep
     writes it. Those windows are short, so retry for a couple of seconds
-    (``attempts`` x ``delay``) before giving up; *src* is removed on failure so
-    no scratch file is left behind.
+    (``attempts`` x ``delay``) before giving up. Only that one, expected
+    condition is retried; any other error propagates at once, and once the
+    budget is spent the original error is re-raised (after removing *src*, so
+    no scratch file is left behind). A wait that did happen is logged: the
+    swap succeeded, but contention on the store is worth seeing.
     """
+    started = time.perf_counter()
     for attempt in range(attempts):
         try:
             os.replace(src, dst)
-            return
         except PermissionError:
             if attempt == attempts - 1:
                 src.unlink(missing_ok=True)
                 raise
             time.sleep(delay)
+            continue
+        if attempt:
+            logger.warning(
+                "Waited %.2f s for a reader to release %s before replacing it "
+                "(%d retries) -- the store is being read while it is written.",
+                time.perf_counter() - started,
+                dst,
+                attempt,
+            )
+        return
 
 
 def _write_payload_into(
