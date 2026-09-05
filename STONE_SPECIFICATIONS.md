@@ -27,14 +27,18 @@ ______________________________________________________________________
 ## 2. Allowed Top-Level Keys
 
 ```
-metadata   phases   settings   stages   network   export   sweep   sweeps   scenarios
-continuation   signals   bindings   scopes
+metadata   phases   settings   stages   network   export   scenarios   scenarios_sweep
+signals   bindings   scopes
 ```
 
-`scenarios:` and `sweep:` declare inline run-set variations (Section 14). Boulder validates and
-passes them through; a host's reporting/expansion layer consumes them. (The legacy list-valued
+`scenarios:` and `scenarios_sweep:` declare inline run-set variations (Section 14). Boulder validates
+and passes them through; a host's reporting/expansion layer consumes them. (The legacy list-valued
 top-level `scenarios:` — `[{id, set, metadata}, ...]` — is removed; only the mapping form
 `scenarios: {<id>: <overlay>}` is accepted.)
+
+**Legacy keys, still loaded but warned about:** `sweep:` / `sweeps:` (former spellings of
+`scenarios_sweep:`, renamed on load) and `continuation:` (Section 10 — only the headless
+`BoulderRunner.run_continuation` executes it; Run Sweep runs its `scenarios_sweep.while` form).
 
 Dynamic stage block names (declared under `stages:`) are also allowed at the top level.
 
@@ -702,7 +706,12 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 10. Continuation Sweeps — `continuation:` block
+## 10. Continuation Sweeps — `continuation:` block (legacy)
+
+> **Legacy.** `continuation:` is still accepted (with a warning on load) but only the headless
+> `BoulderRunner.run_continuation` executes it — its results never reach the run-set store or the
+> Scenario pane. The run-set form of the same loop is `scenarios_sweep.while` (Section 14), which Run
+> Sweep executes point by point with `initial: from_previous`; `sim2stone` emits that form.
 
 The optional top-level `continuation:` block drives an outer loop that mutates one
 parameter across sequential steady-state (or transient) solves, collecting a trajectory of results.
@@ -1344,15 +1353,18 @@ once the config declares `scenarios:`.
 
 ______________________________________________________________________
 
-## 14. Inline run-set variations — `scenarios:` and `sweep:`
+## 14. Inline run-set variations — `scenarios:` and `scenarios_sweep:`
 
 A STONE file may declare multiple runs inline, instead of a glob of separate overlay files. Boulder
-validates and passes these blocks through single-run normalization; `boulder.runset.expand_scenarios`
-is the **reference implementation** that turns them into the run set (one config per run), and
-`python -m boulder.sweep_runner` is the generic runner that solves it into the collection store.
-Hosts customize naming/validation through hooks (`plugins.sweep_symbols`, `schema_entry`) rather
-than re-implementing the semantics. The directives never alter the topology a single run sees —
-each expanded run is the base with its overlay/patch deep-merged, and the directives stripped.
+validates and passes these blocks through single-run normalization; `boulder.runset.iter_run_set` is
+the **reference implementation** that turns them into the run set (one config per run) — eagerly for
+`scenarios:` overlays and grid axes (`expand_scenarios`), one point at a time for a `for:`/`while:`
+chain — and `python -m boulder.sweep_runner` is the generic runner that solves it into the
+collection store. The GUI's Run Sweep uses the same iterator and the same single-run solve path, so
+every point — grid, chain or overlay — is built from the YAML and solved identically. Hosts customize
+naming/validation through hooks (`plugins.sweep_symbols`, `schema_entry`) rather than
+re-implementing the semantics. The directives never alter the topology a single run sees — each
+expanded run is the base with its overlay/patch deep-merged, and the directives stripped.
 
 ### `scenarios:` — a mapping of `id → overlay`
 
@@ -1376,23 +1388,31 @@ The unmodified base config is always part of the run-set too, as its own entry (
 listed first) — `scenarios:` only *adds* named variations, it never stands in for the base itself.
 `BASELINE` is a reserved id: a `scenarios:` entry cannot use it.
 
-### `sweep:` — a Cartesian parameter grid
+### `scenarios_sweep:` — the run-set block
+
+`scenarios_sweep:` holds **either** a Cartesian grid of axes **or** one sequential chain (`for:` /
+`while:`), plus the optional host `runner:` (below). It may appear at the top level (expanded on the
+base) **or inside a `scenarios:` entry** (expanded on that scenario only). Ids are suffixed
+`__<label>=<value>`, the label being the axis name / the parameter's path leaf (or an explicit
+`symbol:`).
+
+#### Grid axes — independent points
 
 ```yaml
-sweep:
+scenarios_sweep:
   T:  {path: "nodes[id=torch].properties.T_out", values: [2600, 2700]}
   mdot: {path: "...", min: 1.0e-4, max: 2.0e-4, num: 3}   # or min/max/num (+ spacing: log)
 ```
 
-`sweep:` may appear at the top level (expanded on the base) **or inside a `scenarios:` entry**
-(expanded on that scenario only). Ids are suffixed `__<axis>=<value>`.
+All axes are crossed as a Cartesian product, and every point is solved **independently** from the
+network as written.
 
-#### One axis, several targets
+##### One axis, several targets
 
 `path:` also accepts a **list**, so one swept value is written to every listed target:
 
 ```yaml
-sweep:
+scenarios_sweep:
   inlet_temperature:
     path:
       - "network[id=fuel_air_mixture_tank].Reservoir.temperature"
@@ -1406,38 +1426,106 @@ They must move together: sweeping one alone is physically inconsistent, and givi
 axes would cross-multiply into mostly nonsense combinations. It stays **one** axis — three values
 give three runs, not nine — and the scenario id is unchanged, labelled from the first path.
 
-### `sweep.runner:` — a host-produced run-set
+#### `for:` — a chain over a list of values
 
-When no declarative axis can express the run-set, name a callable that produces it:
+The Python `for T in [650, 700, ...]:` loop: the points are solved **in order**, and each may start
+from the previous one.
 
 ```yaml
-sweep:
-  runner: "my_package.sweeps.combustor:run"
+scenarios_sweep:
+  for:
+    parameter:                         # one path, or a list one value drives together
+      - network[id=fuel_air_mixture_tank].Reservoir.temperature
+      - network[id=stirred_reactor].IdealGasMoleReactor.initial.temperature
+    values: [650, 700, 750, 775, 825, 850, 875, 925, 950, 1075, 1100]   # or min/max/num
+    initial: from_previous             # each step starts from the previous step's converged state
 ```
 
-Reach for this only when the points cannot be enumerated up front:
+#### `while:` — a chain that runs until a condition fails
 
-- they must be solved **sequentially**, each warm-started from the previous (continuing along a
-  branch, e.g. down to a combustor's extinction limit), or
-- the run-set's **length is only known at runtime** (stop when a condition is met).
+The Python `while combustor.T > 500: sim.solve_steady(); tau *= 0.9` loop:
 
-The callable receives the resolved collection-store path and writes the scenarios itself with
-`boulder.payload_store.write_payload`. It may declare an optional `progress` parameter —
-`(done, total, message)` — to drive the same status UI a declarative sweep does:
+```yaml
+scenarios_sweep:
+  while:
+    parameter: network[id=air_inlet].MassFlowController.tau_s
+    condition: {path: "network[id=combustor].T", gt: 500}   # evaluated on the previous step's result
+    update: {multiply: 0.9}                                # tau *= 0.9 after each step (or add: / set:)
+    max_iters: 200                                         # safety cap
+    initial: from_previous
+```
+
+(Quote a `network[id=…]` path inside a `{…}` flow mapping — `[` is a YAML flow indicator there; in
+block style no quotes are needed.)
+
+- The **first point is the config as written** and is always solved.
+- Before every *later* point, `condition` is evaluated on the **previous step's result**: `path`
+  names a reactor's `T`, `P`, `X.<species>` or `Y.<species>` (`network[id=<reactor>].T`), compared
+  with exactly one of `gt` / `ge` / `lt` / `le`. Like a Python `while` re-testing after each
+  iteration, the point that trips the condition has already been recorded (the extinguished
+  combustor is in the store); the chain then ends.
+- `update` — `multiply`, `add` or `set` — produces the next parameter value; `max_iters` caps the
+  chain. Ids are `BASELINE__<label>=<value>` (`BASELINE__tau_s=0.09`), and the value is recorded
+  under `metadata.sweep_point`, so the Sweep results plot gets its X axis like for a grid axis.
+- A `while:` chain sizes as 0 in the availability report (`Run Sweep` shows no count): its length is
+  only known once its condition trips.
+
+#### `initial:` — where each chain step starts (`for:` and `while:`)
+
+- `from_config` (the default): every step starts from the network as written — ordered, but
+  otherwise the same as independent points.
+- `from_previous`: a **warm start**. Every non-boundary reactor's converged temperature, pressure
+  and composition become its `initial:` block for the next step — exactly what continuing an
+  already-solved `ReactorNet` does. `Reservoir`s and `OutletSink`s are boundary conditions and are
+  never touched; pressure is only seeded where the node has no top-level `pressure:` (a
+  const-pressure reactor's operating constraint). The swept `parameter` is applied **after** the
+  carry, so it always wins: an `energy: "off"` reactor swept in temperature keeps the prescribed
+  temperature and carries only its composition. Step 0 has no previous step and starts from the
+  config. Because the carried state lives *in* the merged config, it is part of the entry's
+  fingerprint — incremental caching stays correct, and a cached (skipped) step still seeds the next
+  one from the store.
+
+A chain cannot share its block with grid axes, and a block holds at most one chain.
+
+### `scenarios_sweep.runner:` — a host-produced run-set
+
+When not even a chain can express the run-set, name a callable that produces it:
+
+```yaml
+scenarios_sweep:
+  runner: "my_package.sweeps.custom:run"
+```
+
+The callable receives the resolved collection-store directory and writes the scenarios itself with
+`boulder.scenario_store.write_entry` (which stamps the fingerprint, config identity and display attrs
+the Scenario pane checks). It may declare optional `progress` — `(done, total, message)` —,
+`config_path` and `stop_event` parameters:
 
 ```python
-def run(store_path, progress=None): ...
+def run(store_dir, config_path=None, progress=None, stop_event=None): ...
 ```
 
 `runner` is a reserved key inside the block: it is never interpreted as an axis, and may sit
-alongside real axes. Boulder resolves and calls it **in-process**, like every other sweep.
+alongside real axes. Boulder resolves and calls it **in-process**, like every other sweep. Prefer a
+`for:`/`while:` chain whenever the points can be described in YAML: a runner bypasses the converter,
+so the network it solves is not the one the file declares.
 
 > **Note** — Boulder previously executed any file literally named `run_sweep.py` next to the config.
 > That is gone: it tied behaviour to a filename, was invisible in the config, and broke silently.
-> Declare `sweep.runner` instead.
+> Declare the run-set in the config instead.
 
 ### Run-set semantics (union)
 
-The run set is the **union**: the top-level `sweep:` points **⊎** each `scenarios:` entry (each
-expanded across its *own* inner `sweep:` if present). A top-level sweep and the scenarios do **not**
-cross-multiply. (`sweep:` and `sweeps:` are accepted spellings.)
+The run set is the **union**: the unmodified base (`BASELINE`, when `scenarios:` declares overlays)
+**⊎** the top-level grid points *or* chain points **⊎** each `scenarios:` entry (each expanded across
+its *own* inner block if present). A top-level grid and the scenarios do **not** cross-multiply. A
+chain declared without `scenarios:` yields only its own points — its first point *is* the base
+config, so no separate `BASELINE` entry is written.
+
+### Legacy spellings
+
+`sweep:` / `sweeps:` are accepted and renamed to `scenarios_sweep:` on load, with a warning naming
+the replacement. `continuation:` (Section 10) is accepted and warned about; only the headless
+`BoulderRunner.run_continuation` executes it — Run Sweep executes its `scenarios_sweep.while` form,
+which is also what `sim2stone` emits for a detected `while reactor.T > N: solve_steady(); tau *= k`
+loop.

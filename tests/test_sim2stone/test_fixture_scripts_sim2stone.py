@@ -126,8 +126,22 @@ def test_sim2stone_cantera_examples_yaml_valid(
         assert "derived_via" in yaml_text, "nanosecond: missing derived_via annotations"
 
     elif script_name == "combustor.py":
-        # Phase D: continuation + closure
-        assert "continuation:" in yaml_text, "combustor: missing continuation: block"
+        # The extinction loop becomes a scenarios_sweep.while chain (the
+        # run-set form Run Sweep executes), tied to the MFC's residence-time
+        # closure and warm-started like upstream's live ReactorNet.
+        assert "scenarios_sweep:" in yaml_text, (
+            "combustor: missing scenarios_sweep: block"
+        )
+        assert "while:" in yaml_text, "combustor: missing while: chain"
+        assert "MassFlowController.tau_s" in yaml_text, (
+            "combustor: chain parameter should be the MFC's tau_s path"
+        )
+        assert "initial: from_previous" in yaml_text, (
+            "combustor: chain should warm-start"
+        )
+        assert "continuation:" not in yaml_text, (
+            "combustor: legacy continuation: emitted"
+        )
         assert "closure: residence_time" in yaml_text, (
             "combustor: missing closure: residence_time"
         )

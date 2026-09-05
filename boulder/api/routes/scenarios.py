@@ -249,14 +249,12 @@ async def get_scenario_preview(
     raw = _require_base_raw(request)
 
     from ...runner import BoulderRunner
-    from ...runset import deep_merge
+    from ...runset import RUN_SET_KEYS, deep_merge
 
-    base_clean = {
-        k: v for k, v in raw.items() if k not in ("scenarios", "sweep", "sweeps")
-    }
+    base_clean = {k: v for k, v in raw.items() if k not in ("scenarios", *RUN_SET_KEYS)}
     overlay = dict(body.overlay)
-    overlay.pop("sweep", None)
-    overlay.pop("sweeps", None)
+    for key in RUN_SET_KEYS:
+        overlay.pop(key, None)
     merged = deep_merge(base_clean, overlay)
 
     runner_cls = getattr(request.app.state, "runner_class", None) or BoulderRunner

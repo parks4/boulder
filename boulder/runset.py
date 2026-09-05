@@ -1,4 +1,4 @@
-"""STONE run-set primitives: inline ``scenarios:`` / ``sweep:`` expansion.
+"""STONE run-set primitives: inline ``scenarios:`` / ``scenarios_sweep:`` expansion.
 
 A STONE YAML may declare parameter variations inline (STONE_SPECIFICATIONS.md,
 Section 14), avoiding a glob of overlay files:
@@ -12,15 +12,22 @@ Section 14), avoiding a glob of overlay files:
     ``scenarios:`` is the legacy pre-mapping dialect and is rejected —
     see :func:`expand_scenarios`.)
 
-``sweep:`` (or ``sweeps:``)
-    Mapping axis name → ``{path, values | min/max/num}``, crossed as a
-    Cartesian product. May appear at the top level (expanded on the base) or
-    *inside* a ``scenarios:`` entry (expanded on that scenario only).
+``scenarios_sweep:``
+    The run-set block. Either grid axes -- ``{axis_name: {path, values |
+    min/max/num}}``, crossed as a Cartesian product, at the top level
+    (expanded on the base) or *inside* a ``scenarios:`` entry (expanded on
+    that scenario only) -- or one sequential chain: ``for:`` (walk a list of
+    values in order) / ``while:`` (repeat an ``update`` while a ``condition``
+    read from the previous result holds), optionally warm-started with
+    ``initial: from_previous``. The legacy spellings ``sweep:``/``sweeps:``
+    are renamed on load with a warning (:func:`canonicalize_run_set_keys`).
 
 This module is the reference implementation of those semantics: the Run Sweep
-API sizes run-sets with :func:`run_set_size`, and the generic
-:mod:`boulder.sweep_runner` expands them with :func:`expand_scenarios`. Host
-packages should call these functions rather than re-implementing the rules.
+API sizes run-sets with :func:`run_set_size`, and both sweep loops (the GUI
+route and :mod:`boulder.sweep_runner`) pull their points from
+:func:`iter_run_set` -- eager for grids and overlays (:func:`expand_scenarios`),
+lazy for a chain, whose next point depends on the previous solve. Host packages
+should call these functions rather than re-implementing the rules.
 
 Everything here is pure config manipulation — no solving, no I/O beyond
 :func:`load_yaml_with_inheritance` — and host-agnostic: host-specific naming
@@ -32,10 +39,14 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import logging
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 #: Scenario id for the unmodified base config's own run-set entry — whether
 #: that entry comes from a ``scenarios:`` mapping (see :func:`expand_scenarios`)
@@ -124,8 +135,8 @@ def deep_merge(base: dict, overlay: dict) -> dict:
     return result
 
 
-def load_yaml_with_inheritance(path: "str | Path") -> dict:
-    """Load a STONE YAML with optional ``from:`` inheritance.
+def _load_yaml_with_inheritance(path: "str | Path") -> dict:
+    """Load a STONE YAML with optional ``from:`` inheritance (keys as written).
 
     If a top-level ``from`` key is present, that file is loaded first
     (recursively) and deep-merged with the current file content (excluding
@@ -134,9 +145,10 @@ def load_yaml_with_inheritance(path: "str | Path") -> dict:
 
     The ``scenarios:`` directive is **not inherited**: a named scenario mapping
     declares *this* file's run-set, so a parent's scenarios must not leak into
-    a child (which would re-run them against the child's base). ``sweep:`` /
-    ``sweeps:`` **are** inherited — a child overlay legitimately re-runs the
-    parent's parameter sweep with overrides (e.g. a different mechanism).
+    a child (which would re-run them against the child's base). The
+    ``scenarios_sweep:`` block **is** inherited — a child overlay legitimately
+    re-runs the parent's parameter sweep with overrides (e.g. a different
+    mechanism).
     """
     from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
 
@@ -159,9 +171,21 @@ def load_yaml_with_inheritance(path: "str | Path") -> dict:
     overlay.pop("from", None)
 
     parent_path = (path.parent / str(from_path)).resolve()
-    base = load_yaml_with_inheritance(parent_path)
+    base = _load_yaml_with_inheritance(parent_path)
     base.pop("scenarios", None)  # the named run-set is not inherited (sweeps are)
     return deep_merge(base, overlay)
+
+
+def load_yaml_with_inheritance(path: "str | Path") -> dict:
+    """Load a STONE YAML (``from:`` resolved) with its run-set block canonicalized.
+
+    See :func:`_load_yaml_with_inheritance` for the inheritance rules and
+    :func:`canonicalize_run_set_keys` for the legacy ``sweep:``/``sweeps:``
+    rename (one warning per legacy key, on the merged result only).
+    """
+    data = _load_yaml_with_inheritance(path)
+    canonicalize_run_set_keys(data)
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -169,32 +193,121 @@ def load_yaml_with_inheritance(path: "str | Path") -> dict:
 # ---------------------------------------------------------------------------
 
 
-#: Keys inside a ``sweep:``/``sweeps:`` block that configure the run-set rather
-#: than declare an axis. Filtered out of every axis-iterating code path.
-SWEEP_RESERVED_KEYS = frozenset({"runner"})
+#: The canonical top-level key of a config's inline run-set block.
+RUN_SET_KEY = "scenarios_sweep"
+
+#: Former spellings of :data:`RUN_SET_KEY`. Still loaded -- renamed in place
+#: with a warning by :func:`canonicalize_run_set_keys` -- so a file authored
+#: against an older release keeps working while the name to migrate to is one.
+LEGACY_RUN_SET_KEYS: Tuple[str, ...] = ("sweep", "sweeps")
+
+#: Every key a run-set block may sit under, canonical first.
+RUN_SET_KEYS: Tuple[str, ...] = (RUN_SET_KEY, *LEGACY_RUN_SET_KEYS)
+
+#: Keys inside a ``scenarios_sweep:`` block that configure the run-set rather
+#: than declare a grid axis. Filtered out of every axis-iterating code path.
+SWEEP_RESERVED_KEYS = frozenset({"runner", "for", "while"})
+
+#: The two sequential (chain) run-set forms -- see :func:`sequential_of`.
+SEQUENTIAL_KINDS: Tuple[str, ...] = ("for", "while")
+
+
+def canonicalize_run_set_keys(raw: Any) -> List[str]:
+    """Rename legacy run-set keys in *raw* to :data:`RUN_SET_KEY`, in place.
+
+    ``sweep:``/``sweeps:`` become ``scenarios_sweep:`` (one warning per key,
+    naming the replacement). A top-level ``continuation:`` block is left as it
+    is -- it still drives the headless
+    :meth:`boulder.runner.BoulderRunner.run_continuation` -- but is warned
+    about too: Run Sweep does not execute it; ``scenarios_sweep.while`` is its
+    run-set form (STONE_SPECIFICATIONS.md, Section 14). Each ``scenarios:``
+    overlay is walked as well, since its inner block follows the same rules.
+
+    Returns the legacy keys found (empty for an already-canonical file). Safe
+    on non-dict input (returns ``[]``).
+    """
+    if not isinstance(raw, dict):
+        return []
+    found: List[str] = []
+    for legacy in LEGACY_RUN_SET_KEYS:
+        if legacy not in raw:
+            continue
+        found.append(legacy)
+        block = raw.pop(legacy)
+        if RUN_SET_KEY in raw:
+            logger.warning(
+                "'%s:' is a legacy spelling of '%s:' and was ignored because the "
+                "file already declares '%s:'. Remove the legacy block.",
+                legacy,
+                RUN_SET_KEY,
+                RUN_SET_KEY,
+            )
+            continue
+        raw[RUN_SET_KEY] = block
+        logger.warning(
+            "'%s:' is a legacy spelling of the run-set block and was read as "
+            "'%s:'. Rename it in the YAML (STONE_SPECIFICATIONS.md, Section 14).",
+            legacy,
+            RUN_SET_KEY,
+        )
+    if "continuation" in raw:
+        found.append("continuation")
+        logger.warning(
+            "'continuation:' is legacy: Run Sweep does not execute it (only the "
+            "headless BoulderRunner.run_continuation does). Declare the chain as "
+            "'%s: {while: ...}' instead (STONE_SPECIFICATIONS.md, Section 14).",
+            RUN_SET_KEY,
+        )
+    scenarios = raw.get("scenarios")
+    if isinstance(scenarios, dict):
+        for overlay in scenarios.values():
+            if isinstance(overlay, dict):
+                found.extend(
+                    f"scenarios.{k}" for k in canonicalize_run_set_keys(overlay)
+                )
+    return found
+
+
+def run_set_block(block: dict) -> dict:
+    """Return a config/overlay's run-set block (``{}`` when absent or malformed).
+
+    Reads :data:`RUN_SET_KEY` first, then the legacy spellings -- silently: the
+    warning belongs to load time (:func:`canonicalize_run_set_keys`), not to
+    an accessor the availability endpoint polls every second.
+    """
+    for key in RUN_SET_KEYS:
+        raw = block.get(key)
+        if raw is not None:
+            return raw if isinstance(raw, dict) else {}
+    return {}
+
+
+def _strip_run_set_keys(config: dict) -> None:
+    """Drop the run-set block (every spelling) from *config*, in place."""
+    for key in RUN_SET_KEYS:
+        config.pop(key, None)
 
 
 def sweeps_of(block: dict) -> dict:
-    """Return a config/overlay's sweep **axes**, accepting ``sweep:`` or ``sweeps:``.
+    """Return a config/overlay's grid **axes** (``{axis_name: axis_spec}``).
 
-    Reserved keys (:data:`SWEEP_RESERVED_KEYS`) are stripped, so every caller
-    that treats the result as ``{axis_name: axis_spec}`` stays correct as
-    non-axis configuration is added to the block.
+    Reserved keys (:data:`SWEEP_RESERVED_KEYS` -- the host ``runner`` and the
+    ``for:``/``while:`` chain) are stripped, so every caller that treats the
+    result as axes stays correct as non-axis configuration is added.
     """
-    raw = block.get("sweeps") or block.get("sweep") or {}
-    if not isinstance(raw, dict):
-        return {}
-    return {k: v for k, v in raw.items() if k not in SWEEP_RESERVED_KEYS}
+    return {
+        k: v for k, v in run_set_block(block).items() if k not in SWEEP_RESERVED_KEYS
+    }
 
 
 def sweep_runner_of(block: dict) -> Optional[str]:
     """Return a config's declared host sweep runner, or ``None``.
 
-    ``sweep.runner`` is a dotted ``"package.module:callable"`` reference to a
-    host function that produces the run-set itself, for run-sets that no
-    declarative axis can express — a sweep whose points must be solved
-    *sequentially* (each warm-started from the last, e.g. tracing a combustor's
-    extinction branch), or whose length is not known in advance.
+    ``scenarios_sweep.runner`` is a dotted ``"package.module:callable"``
+    reference to a host function that produces the run-set itself. It predates
+    the ``for:``/``while:`` chains (:func:`sequential_of`), which now cover the
+    sequential, warm-started case declaratively; a runner remains for run-sets
+    that not even a chain can express.
 
     Declaring it in the config is deliberate: Boulder used to *guess*, running
     any file literally named ``run_sweep.py`` sitting next to the config. That
@@ -202,10 +315,7 @@ def sweep_runner_of(block: dict) -> Optional[str]:
     stopped working when Run Sweep moved in-process. An explicit dotted path is
     resolvable, greppable, and testable.
     """
-    raw = block.get("sweeps") or block.get("sweep") or {}
-    if not isinstance(raw, dict):
-        return None
-    runner = raw.get("runner")
+    runner = run_set_block(block).get("runner")
     return str(runner) if runner else None
 
 
@@ -274,13 +384,14 @@ def _sweep_size(sweeps_block: dict) -> int:
 
 
 def run_set_size(raw: Dict[str, Any]) -> int:
-    """Return the union run-set size of a config's ``scenarios:``/``sweep:`` blocks.
+    """Return the union run-set size of a config's ``scenarios:``/``scenarios_sweep:``.
 
     The unmodified base config (:data:`BASELINE_SCENARIO_ID`) ⊎ global sweep
-    points ⊎ each ``scenarios:`` entry (its inner sweep, else 1) — the same
-    union semantics :func:`expand_scenarios` implements, computed without
-    deep-merging or resolving sweep paths (cheap enough for an availability
-    endpoint).
+    points ⊎ each ``scenarios:`` entry (its inner sweep, else 1) ⊎ a ``for:``
+    chain's values — the same union semantics :func:`iter_run_set` implements,
+    computed without deep-merging or resolving sweep paths (cheap enough for an
+    availability endpoint). A ``while:`` chain contributes 0: its length is only
+    known once its condition trips.
     """
     scenarios = raw.get("scenarios") or {}
     scenarios = scenarios if isinstance(scenarios, dict) else {}
@@ -289,6 +400,12 @@ def run_set_size(raw: Dict[str, Any]) -> int:
     for overlay in scenarios.values():
         inner = sweeps_of(overlay or {})
         total += _sweep_size(inner) if inner else 1
+    try:
+        chain = sequential_block_of(raw)
+        if chain is not None and chain[0] == "for":
+            total += len(sweep_axis_values(chain[1]))
+    except ValueError:
+        pass  # malformed: counts 0 here, fails loudly in sequential_of
     return total
 
 
@@ -444,7 +561,10 @@ def expand_scenarios(
     the scenarios do not cross-multiply.
 
     When neither block is present, returns a single ``(scenario_id, base)``
-    tuple using :data:`BASELINE_SCENARIO_ID`.
+    tuple using :data:`BASELINE_SCENARIO_ID`. A ``for:``/``while:`` chain is
+    deliberately *not* expanded here -- its points depend on the previous solve
+    -- so a config declaring only a chain also yields that single base tuple;
+    :func:`iter_run_set` is the entry point that knows about chains.
 
     Parameters
     ----------
@@ -498,8 +618,8 @@ def expand_scenarios(
 
     # Strip the directives from the base so downstream consumers never see them.
     base_clean = copy.deepcopy(base_raw)
-    for key in ("scenarios", "sweep", "sweeps"):
-        base_clean.pop(key, None)
+    base_clean.pop("scenarios", None)
+    _strip_run_set_keys(base_clean)
 
     expanded: List[Tuple[str, dict]] = []
 
@@ -522,8 +642,7 @@ def expand_scenarios(
         overlay = dict(overlay or {})
         inner_sweeps = sweeps_of(overlay)
         overlay_clean = copy.deepcopy(overlay)
-        overlay_clean.pop("sweep", None)
-        overlay_clean.pop("sweeps", None)
+        _strip_run_set_keys(overlay_clean)
         scen_base = deep_merge(base_clean, overlay_clean)
         if inner_sweeps:
             for sweep_id, patch in _expand_sweep_block(
@@ -547,6 +666,24 @@ def _default_symbols() -> Mapping[str, str]:
         return {}
 
 
+def _axis_label(
+    axis_name: str, axis_spec: Mapping[str, Any], symbols: Mapping[str, str]
+) -> str:
+    """Return an axis's (or chain's) id label: its ``symbol:``, else its first path's leaf."""
+    explicit_symbol = axis_spec.get("symbol")
+    if explicit_symbol:
+        return str(explicit_symbol)
+    # A multi-target axis labels itself from its *first* path, so the
+    # scenario id stays short and stable no matter how many nodes it drives.
+    raw_path = axis_spec.get("path")
+    first = (
+        raw_path[0] if isinstance(raw_path, (list, tuple)) and raw_path else raw_path
+    )
+    path = str(first or "")
+    leaf = path.rsplit(".", 1)[-1] if path else axis_name
+    return symbols.get(leaf) or symbols.get(axis_name) or axis_name
+
+
 def _expand_sweep_block(
     sweeps_block: dict,
     base_for_paths: dict,
@@ -560,22 +697,6 @@ def _expand_sweep_block(
     short-form / id-selector paths. Raises ``ValueError`` on a malformed axis.
     """
     from itertools import product  # noqa: PLC0415
-
-    def _axis_label(axis_name: str, axis_spec: Dict[str, Any]) -> str:
-        explicit_symbol = axis_spec.get("symbol")
-        if explicit_symbol:
-            return str(explicit_symbol)
-        # A multi-target axis labels itself from its *first* path, so the
-        # scenario id stays short and stable no matter how many nodes it drives.
-        raw_path = axis_spec.get("path")
-        first = (
-            raw_path[0]
-            if isinstance(raw_path, (list, tuple)) and raw_path
-            else raw_path
-        )
-        path = str(first or "")
-        leaf = path.rsplit(".", 1)[-1] if path else axis_name
-        return symbols.get(leaf) or symbols.get(axis_name) or axis_name
 
     axes = []
     for axis_name, axis_spec in sweeps_block.items():
@@ -607,7 +728,9 @@ def _expand_sweep_block(
             _resolve_sweep_path(axis_name, p, base_for_paths, schema_entry)
             for p in raw_paths
         )
-        axes.append((_axis_label(axis_name, axis_spec), axis_paths, list(axis_values)))
+        axes.append(
+            (_axis_label(axis_name, axis_spec, symbols), axis_paths, list(axis_values))
+        )
 
     points: List[Tuple[str, dict]] = []
     for combo in product(*[a[2] for a in axes]):
@@ -849,3 +972,432 @@ def _set_dotted(target: dict, dotted_path: str, value: Any) -> None:
                 nxt = {}
                 cur[seg] = nxt
             cur = nxt
+
+
+def _get_dotted(source: Any, dotted_path: str) -> Any:
+    """Read the value at *dotted_path* (the :func:`_set_dotted` grammar); ``None`` if absent."""
+    bracket_re = re.compile(r"^([^\[]+)\[([^=\]]+)=([^\]]+)\]$")
+    cur: Any = source
+    for seg in dotted_path.split("."):
+        m = bracket_re.match(seg)
+        if m:
+            list_key, match_key, match_val = m.group(1), m.group(2), m.group(3)
+            lst = cur.get(list_key) if isinstance(cur, dict) else None
+            cur = next(
+                (
+                    item
+                    for item in (lst or [])
+                    if isinstance(item, dict) and str(item.get(match_key)) == match_val
+                ),
+                None,
+            )
+        else:
+            cur = cur.get(seg) if isinstance(cur, dict) else None
+        if cur is None:
+            return None
+    return cur
+
+
+# ---------------------------------------------------------------------------
+# Sequential run-sets: ``scenarios_sweep.for`` / ``scenarios_sweep.while``.
+# ---------------------------------------------------------------------------
+#
+# A grid axis enumerates independent points up front. A chain cannot: each of
+# its points may depend on the previous solve -- its converged state seeds the
+# next point (``initial: from_previous``, the warm start upstream's loops rely
+# on when they keep solving the same live ReactorNet), and a ``while:``
+# condition is read from it. So a chain is *iterated*, not expanded: the solve
+# loop records each step's final reactor states in a :class:`RunSetCursor` and
+# :func:`iter_run_set` builds the next point from them.
+
+#: ``initial:`` values a chain accepts -- where each step's starting state comes from.
+INITIAL_FROM_CONFIG = "from_config"
+INITIAL_FROM_PREVIOUS = "from_previous"
+
+_CONDITION_OPS: Dict[str, Callable[[float, float], bool]] = {
+    "gt": lambda a, b: a > b,
+    "ge": lambda a, b: a >= b,
+    "lt": lambda a, b: a < b,
+    "le": lambda a, b: a <= b,
+}
+_UPDATE_MODES: Tuple[str, ...] = ("multiply", "add", "set")
+#: Node kinds that are boundary conditions, never seeded by a warm start.
+_BOUNDARY_KINDS = frozenset({"Reservoir", "OutletSink"})
+#: Keys on a node item that are not its kind key.
+_NODE_META_KEYS = frozenset({"id", "description", "mechanism", "source", "target"})
+_RESULT_PATH_RE = re.compile(r"^[A-Za-z_]\w*\[id=(?P<id>[^\]]+)\]\.(?P<attr>.+)$")
+
+
+@dataclass(frozen=True)
+class SequentialSpec:
+    """A validated ``for:``/``while:`` chain -- see :func:`sequential_of`."""
+
+    kind: str
+    label: str
+    paths: Tuple[str, ...]
+    values: Tuple[Any, ...] = ()
+    condition: Optional[Tuple[str, str, float]] = None
+    update: Optional[Tuple[str, float]] = None
+    max_iters: int = 200
+    from_previous: bool = False
+
+
+class RunSetCursor:
+    """Hand-off from the solve loop back into :func:`iter_run_set`.
+
+    ``previous_states`` is ``{reactor_id: {"T": K, "P": Pa, "X": {species:
+    mole_fraction}, "Y": {...}}}`` for the last point the loop finished -- solved
+    fresh (``boulder.sweep_runner.final_states_of``) or read back from a cached
+    store entry. The loop must set it before pulling the next point; the
+    iterator never reads results itself.
+    """
+
+    def __init__(self) -> None:
+        self.previous_states: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _as_float(value: Any) -> float:
+    """Read a number from a YAML scalar, unit-bearing strings (``"0.1 s"``) included."""
+    if _is_number(value):
+        return float(value)
+    if isinstance(value, str):
+        from .utils import coerce_unit_string  # noqa: PLC0415
+
+        coerced = coerce_unit_string(value)
+        if _is_number(coerced):
+            return float(coerced)
+        return float(value.strip().split()[0])
+    raise ValueError(f"cannot read a number from {value!r}")
+
+
+def sequential_block_of(block: dict) -> Optional[Tuple[str, dict]]:
+    """Return ``(kind, spec_dict)`` for a block's ``for:``/``while:``, else ``None``.
+
+    Cheap and non-validating (for availability endpoints); raises only when
+    both are declared, which has no meaning. :func:`sequential_of` validates.
+    """
+    rs = run_set_block(block)
+    present = [k for k in SEQUENTIAL_KINDS if k in rs]
+    if len(present) > 1:
+        raise ValueError(f"{RUN_SET_KEY}: declare either 'for:' or 'while:', not both")
+    if not present:
+        return None
+    spec = rs[present[0]]
+    if not isinstance(spec, dict):
+        raise ValueError(f"{RUN_SET_KEY}.{present[0]} must be a mapping; got {spec!r}")
+    return present[0], spec
+
+
+def sequential_of(
+    raw: dict,
+    *,
+    symbols: Optional[Mapping[str, str]] = None,
+    schema_entry: Optional[Callable[[str], Any]] = None,
+) -> Optional[SequentialSpec]:
+    """Validate a config's ``scenarios_sweep.for`` / ``.while`` chain.
+
+    ``for:`` -- ``parameter`` (a path, or a list of paths one value drives
+    together, same syntax as a grid axis) and the values to walk in order
+    (``values:`` or ``min``/``max``/``num``). ``while:`` -- ``parameter``, a
+    ``condition: {path, gt|ge|lt|le: number}`` read from the previous step's
+    result, an ``update: {multiply|add|set: number}`` applied after each step,
+    and a ``max_iters`` safety cap. Both take ``initial: from_config`` (the
+    default -- every step starts from the network as written) or ``initial:
+    from_previous`` (each step is seeded with the previous step's converged
+    reactor states -- a warm start; the swept ``parameter`` still wins). A chain
+    cannot share its block with grid axes: the run-set is one or the other.
+
+    Returns ``None`` when the config declares no chain; raises ``ValueError``
+    on a malformed one.
+    """
+    found = sequential_block_of(raw)
+    if found is None:
+        return None
+    kind, spec = found
+    where = f"{RUN_SET_KEY}.{kind}"
+    if sweeps_of(raw):
+        raise ValueError(
+            f"{where}: a chain cannot sit alongside grid axes in one block"
+        )
+
+    raw_paths = spec.get("parameter")
+    paths_list = (
+        list(raw_paths) if isinstance(raw_paths, (list, tuple)) else [raw_paths]
+    )
+    if not raw_paths or not all(isinstance(p, str) and p for p in paths_list):
+        raise ValueError(
+            f"{where}.parameter must be a dotted path or a list of them; got {raw_paths!r}"
+        )
+    if symbols is None:
+        symbols = _default_symbols()
+    paths = tuple(_resolve_sweep_path(kind, p, raw, schema_entry) for p in paths_list)
+    # A chain has no axis name to label its points with, so the label is the
+    # parameter's path leaf (``tau_s``, ``temperature``) -- through the host
+    # symbol map like an axis leaf -- unless an explicit ``symbol:`` is given.
+    leaf = str(paths_list[0]).rsplit(".", 1)[-1]
+    label = str(spec.get("symbol") or symbols.get(leaf) or leaf)
+
+    initial = spec.get("initial", INITIAL_FROM_CONFIG)
+    if initial not in (INITIAL_FROM_CONFIG, INITIAL_FROM_PREVIOUS):
+        raise ValueError(
+            f"{where}.initial must be '{INITIAL_FROM_CONFIG}' or "
+            f"'{INITIAL_FROM_PREVIOUS}'; got {initial!r}"
+        )
+    from_previous = initial == INITIAL_FROM_PREVIOUS
+
+    if kind == "for":
+        values = sweep_axis_values(spec)
+        if not values:
+            raise ValueError(f"{where} needs 'values: [...]' or 'min'/'max'/'num'")
+        return SequentialSpec(
+            kind,
+            label,
+            paths,
+            values=tuple(values),
+            max_iters=len(values),
+            from_previous=from_previous,
+        )
+
+    max_iters = spec.get("max_iters", 200)
+    if not isinstance(max_iters, int) or isinstance(max_iters, bool) or max_iters < 1:
+        raise ValueError(
+            f"{where}.max_iters must be a positive integer; got {max_iters!r}"
+        )
+    condition = spec.get("condition")
+    if not isinstance(condition, dict) or not isinstance(condition.get("path"), str):
+        raise ValueError(
+            f"{where}.condition must be {{path: <result path>, gt|ge|lt|le: <number>}}; "
+            f"got {condition!r}"
+        )
+    ops = [op for op in _CONDITION_OPS if op in condition]
+    if len(ops) != 1 or not _is_number(condition[ops[0]]):
+        raise ValueError(
+            f"{where}.condition needs exactly one of gt/ge/lt/le with a numeric bound; "
+            f"got {condition!r}"
+        )
+    update = spec.get("update")
+    if not isinstance(update, dict):
+        raise ValueError(
+            f"{where}.update must be {{multiply|add|set: <number>}}; got {update!r}"
+        )
+    modes = [m for m in _UPDATE_MODES if m in update]
+    if len(modes) != 1 or not _is_number(update[modes[0]]):
+        raise ValueError(
+            f"{where}.update needs exactly one of multiply/add/set with a numeric operand; "
+            f"got {update!r}"
+        )
+    return SequentialSpec(
+        kind,
+        label,
+        paths,
+        condition=(str(condition["path"]), ops[0], float(condition[ops[0]])),
+        update=(modes[0], float(update[modes[0]])),
+        max_iters=max_iters,
+        from_previous=from_previous,
+    )
+
+
+def sequential_start_value(spec: SequentialSpec, base_raw: dict) -> float:
+    """Return a ``while:`` chain's first value: the parameter as written in the config."""
+    current = _get_dotted(base_raw, spec.paths[0])
+    if current is None:
+        raise ValueError(
+            f"{RUN_SET_KEY}.while: parameter {spec.paths[0]!r} is not set in the "
+            "config, so the chain has no starting value"
+        )
+    return _as_float(current)
+
+
+def next_sequential_value(spec: SequentialSpec, current: float) -> float:
+    """Apply a ``while:`` chain's ``update`` to *current* (rounded for clean ids)."""
+    if spec.update is None:
+        raise ValueError(f"{RUN_SET_KEY}.{spec.kind} has no update rule")
+    mode, operand = spec.update
+    if mode == "multiply":
+        nxt = current * operand
+    elif mode == "add":
+        nxt = current + operand
+    else:
+        nxt = operand
+    return round(nxt, 10)
+
+
+def result_value_at(states: Mapping[str, Mapping[str, Any]], path: str) -> float:
+    """Read ``network[id=<reactor>].T`` / ``.P`` / ``.X.<species>`` from *states*."""
+    m = _RESULT_PATH_RE.match(path)
+    if m is None:
+        raise ValueError(
+            f"result path {path!r} must look like network[id=<reactor>].T "
+            "(or .P, .X.<species>, .Y.<species>)"
+        )
+    rid, attr = m.group("id"), m.group("attr")
+    state = states.get(rid)
+    if state is None:
+        raise ValueError(
+            f"result path {path!r}: no reactor {rid!r} in the previous step's "
+            f"results (have {sorted(states)})"
+        )
+    if attr in ("T", "P"):
+        return float(state[attr])
+    if attr[:2] in ("X.", "Y."):
+        fractions = state.get(attr[0]) or {}
+        species = attr[2:]
+        if species not in fractions:
+            raise ValueError(
+                f"result path {path!r}: species {species!r} not in reactor {rid!r}'s composition"
+            )
+        return float(fractions[species])
+    raise ValueError(
+        f"result path {path!r}: unknown attribute {attr!r}; use T, P, X.<species> or Y.<species>"
+    )
+
+
+def condition_holds(
+    spec: SequentialSpec, previous_states: Optional[Mapping[str, Mapping[str, Any]]]
+) -> bool:
+    """Evaluate a ``while:`` condition against the previous step's reactor states."""
+    if spec.condition is None:
+        raise ValueError(f"{RUN_SET_KEY}.{spec.kind} has no condition")
+    path, op, bound = spec.condition
+    if not previous_states:
+        raise ValueError(
+            f"{RUN_SET_KEY}.while: the previous step produced no reactor state to "
+            f"evaluate {path!r} against"
+        )
+    return _CONDITION_OPS[op](result_value_at(previous_states, path), bound)
+
+
+def _iter_node_items(config: dict) -> Iterator[dict]:
+    """Yield every node item of a STONE v2 config (``network:`` or stage blocks)."""
+    blocks: List[Any] = [config.get("network")]
+    stages = config.get("stages")
+    if isinstance(stages, dict):
+        blocks.extend(config.get(sid) for sid in stages)
+    for block in blocks:
+        if not isinstance(block, list):
+            continue
+        for item in block:
+            if isinstance(item, dict) and "source" not in item and "target" not in item:
+                yield item
+
+
+def _composition_string(fractions: Mapping[str, Any]) -> str:
+    return ",".join(
+        f"{sp}:{float(x):.6g}" for sp, x in fractions.items() if float(x) > 0.0
+    )
+
+
+def apply_previous_state(
+    config: dict, previous_states: Mapping[str, Mapping[str, Any]]
+) -> List[str]:
+    """Seed every non-boundary reactor's ``initial:`` from *previous_states*, in place.
+
+    The warm start behind ``initial: from_previous``: each reactor whose id has
+    a converged state gets that state's temperature, pressure and composition
+    as its ``initial:`` block -- what continuing an already-solved
+    ``ReactorNet`` does. Reservoirs and outlet sinks are boundary conditions and
+    are never touched. Pressure is only seeded where the node has no top-level
+    ``pressure:`` (a const-pressure reactor's operating constraint). Returns the
+    ids seeded. Callers apply the chain's own ``parameter`` *after* this, so
+    the swept value always wins over the carried one.
+    """
+    seeded: List[str] = []
+    for node in _iter_node_items(config):
+        nid = node.get("id")
+        state = previous_states.get(str(nid)) if nid else None
+        if not state:
+            continue
+        kind = next((k for k in node if k not in _NODE_META_KEYS), None)
+        if kind is None or kind in _BOUNDARY_KINDS:
+            continue
+        props = node.get(kind)
+        if not isinstance(props, dict):
+            props = {}
+            node[kind] = props
+        initial = props.get("initial")
+        if not isinstance(initial, dict):
+            initial = {}
+            props["initial"] = initial
+        if state.get("T") is not None:
+            initial["temperature"] = float(state["T"])
+        if state.get("P") is not None and "pressure" not in props:
+            initial["pressure"] = float(state["P"])
+        composition = _composition_string(state.get("X") or {})
+        if composition:
+            initial["composition"] = composition
+            initial.pop("mass_composition", None)
+        seeded.append(str(nid))
+    return seeded
+
+
+def sequential_point(
+    spec: SequentialSpec,
+    base_clean: dict,
+    value: Any,
+    previous_states: Optional[Mapping[str, Mapping[str, Any]]],
+) -> Tuple[str, dict]:
+    """Build one chain point: carry the previous state (if any), then set the parameter.
+
+    Ids follow the grid convention (``BASELINE__<label>=<value>``) and the value
+    is recorded under ``metadata.sweep_point`` like an axis value, so the Sweep
+    Results plot gets its X axis the same way.
+    """
+    cfg = copy.deepcopy(base_clean)
+    if spec.from_previous and previous_states:
+        apply_previous_state(cfg, previous_states)
+    patch: dict = {}
+    for path in spec.paths:
+        _set_dotted(patch, path, value)
+    patch.setdefault("metadata", {})["sweep_point"] = {spec.label: value}
+    return f"{BASELINE_SCENARIO_ID}__{spec.label}={value}", deep_merge(cfg, patch)
+
+
+def iter_run_set(
+    raw: dict,
+    cursor: RunSetCursor,
+    *,
+    symbols: Optional[Mapping[str, str]] = None,
+    schema_entry: Optional[Callable[[str], Any]] = None,
+) -> Iterator[Tuple[str, dict]]:
+    """Yield the run-set's ``(scenario_id, merged_config)`` points, lazily.
+
+    The eager part (``scenarios:`` overlays and grid axes) comes straight from
+    :func:`expand_scenarios`; a ``for:``/``while:`` chain follows, one point at a
+    time, because each may depend on the previous solve -- the loop consuming
+    this iterator must record every step's final reactor states in *cursor*
+    before asking for the next point.
+
+    The first ``while:`` point is the config as written, so it is always
+    solved; the condition is checked before every *later* point, on the
+    previous result -- like a Python ``while`` re-testing after each iteration,
+    so the point that trips it (the extinguished combustor) is recorded too.
+    A chain declared without ``scenarios:`` yields only its own points (no
+    separate ``BASELINE`` entry: its first point *is* the base config).
+    """
+    spec = sequential_of(raw, symbols=symbols, schema_entry=schema_entry)
+    if spec is None or raw.get("scenarios"):
+        yield from expand_scenarios(raw, symbols=symbols, schema_entry=schema_entry)
+    if spec is None:
+        return
+    base_clean = copy.deepcopy(raw)
+    base_clean.pop("scenarios", None)
+    _strip_run_set_keys(base_clean)
+
+    if spec.kind == "for":
+        for value in spec.values:
+            previous = cursor.previous_states if spec.from_previous else None
+            yield sequential_point(spec, base_clean, value, previous)
+        return
+
+    value = sequential_start_value(spec, base_clean)
+    for step in range(spec.max_iters):
+        if step:
+            if not condition_holds(spec, cursor.previous_states):
+                return
+            value = next_sequential_value(spec, value)
+        previous = cursor.previous_states if spec.from_previous else None
+        yield sequential_point(spec, base_clean, value, previous)
