@@ -109,10 +109,18 @@ export function ThermoReportTab({ results }: Props) {
   }
 
   if (!reports || Object.keys(reports).length === 0) {
+    // `results.is_complete` distinguishes "nothing has run yet" from "this
+    // result genuinely has no reactor_reports" -- a scenario built from a bare
+    // trajectory (gui_payload_from_solution_array, what a `sweep.runner` uses)
+    // is complete but never populates reports, so telling the user to "run a
+    // simulation" when one plainly already has (Plots/Sweep Results are full)
+    // is simply wrong, not just unhelpful.
     return (
       <p className="text-sm text-muted-foreground">
         {selectedElement
-          ? "No thermo reports. Run a simulation to see details."
+          ? results.is_complete
+            ? "This result has no thermo report data."
+            : "No thermo reports. Run a simulation to see details."
           : "Select a node or Mass Flow Controller to view thermo details."}
       </p>
     );
