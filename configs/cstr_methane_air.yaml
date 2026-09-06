@@ -1,5 +1,5 @@
 metadata:
-  stone_version: "2.0"
+  stone_version: "2.1"
   title: Lean methane/air CSTR — residence-time sweep template
   description: >-
     Well-stirred reactor (CSTR) for lean methane/air combustion at

@@ -1305,12 +1305,13 @@ def drop_legacy_metadata_keys(config: Dict[str, Any]) -> List[str]:
     return dropped
 
 
-#: STONE format version, ``"MAJOR.MINOR"``. MAJOR tracks Boulder's MAJOR; MINOR is
-#: the Boulder minor release that last changed the STONE vocabulary or semantics.
-#: Bump it in the same PR as the format change and release that PR under the
-#: matching Boulder version (see AGENTS.md, "Git and releases"). Written into
-#: ``metadata.stone_version`` by :func:`migrate_stone_config` on every load.
-STONE_FORMAT_VERSION = "2.0"
+#: STONE format version, ``"MAJOR.MINOR"``, versioned independently of the
+#: Boulder package version. MAJOR bumps when old files stop loading; MINOR
+#: bumps when the STONE vocabulary or semantics change but old files still
+#: load. Bump it in the same PR as the format change (see AGENTS.md, "Git and
+#: releases"). Written into ``metadata.stone_version`` by
+#: :func:`migrate_stone_config` on every load.
+STONE_FORMAT_VERSION = "2.1"
 
 
 def _parse_stone_version(value: Any) -> Optional[Tuple[int, int]]:

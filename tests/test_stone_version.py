@@ -1,9 +1,9 @@
 """STONE format version: ``STONE_FORMAT_VERSION`` and ``metadata.stone_version``.
 
 The migration behaviour itself (legacy keys, GUI round-trip) is covered in
-``tests/test_legacy_metadata_keys.py``; this module pins the two invariants
-that make the versioning scheme hold: Boulder MAJOR == STONE MAJOR, and the
-metadata vocabulary constants match the pydantic model.
+``tests/test_legacy_metadata_keys.py``; this module pins the invariant that
+the metadata vocabulary constants match the pydantic model. ``STONE_FORMAT_VERSION``
+is versioned independently of the Boulder package version.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from typing import Any, Dict
 
 import pytest
 
-import boulder
 from boulder.config import (
     STONE_FORMAT_VERSION,
     migrate_stone_config,
@@ -37,13 +36,6 @@ _CLEAN: Dict[str, Any] = {
         }
     ],
 }
-
-
-def test_stone_major_matches_boulder_major() -> None:
-    version = boulder.__version__
-    if version.startswith("0.0.0") or "dev" in version:
-        pytest.skip(f"not a release build: {version}")
-    assert int(version.split(".")[0]) == int(STONE_FORMAT_VERSION.split(".")[0])
 
 
 def test_metadata_vocabulary_matches_model() -> None:

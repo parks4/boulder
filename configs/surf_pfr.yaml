@@ -1,5 +1,5 @@
 metadata:
-  stone_version: "2.0"
+  stone_version: "2.1"
   title: Plug-flow reactor with surface chemistry (FlowReactor + FlowReactorSurface)
   description: >-
     Partial oxidation of methane over a platinum catalyst in a packed bed,

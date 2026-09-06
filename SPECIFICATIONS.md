@@ -12,9 +12,10 @@ contract for STONE 2.x, the current authored format.
 Key points:
 
 - STONE 2.x ("v2") uses `network:` (single stage) or `stages:` + dynamic stage blocks (multi-stage).
-- Files carry `metadata.stone_version: "MAJOR.MINOR"`. MAJOR equals Boulder's MAJOR; MINOR is the
-  Boulder minor that last changed the format. Files without it are older 2.x files: Boulder loads
-  them and stamps the current version on save (STONE_SPECIFICATIONS.md §1).
+- Files carry `metadata.stone_version: "MAJOR.MINOR"`, versioned independently of the Boulder
+  package version: MINOR bumps when the format last changed vocabulary or semantics. Files without
+  it are older 2.x files: Boulder loads them and stamps the current version on save
+  (STONE_SPECIFICATIONS.md §1).
 - Within a MAJOR, newer Boulder reads every older file; removed keys are migrated with a warning.
 - STONE 1.x ("v1") files (top-level `nodes:` / `connections:` / `groups:`) are rejected.
 - See `configs/README.md` for worked examples.

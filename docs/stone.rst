@@ -33,8 +33,8 @@ Boulder automatically infers the STONE dialect from the top-level keys:
    nodes: / connections: / groups: → STONE v1 (rejected with error)
 
 The precise format version is ``metadata.stone_version`` (a quoted ``"MAJOR.MINOR"``
-string, e.g. ``"2.0"``; MAJOR equals Boulder's MAJOR). Older files without it load
-unchanged and are stamped when Boulder writes them back. See
+string, e.g. ``"2.1"``), versioned independently of the Boulder package version. Older
+files without it load unchanged and are stamped when Boulder writes them back. See
 ``STONE_SPECIFICATIONS.md`` section 1 for the compatibility rules.
 
 Normalization

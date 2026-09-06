@@ -28,13 +28,13 @@ Files that mix `stages:` and `network:` at the same level are rejected.
 
 ```yaml
 metadata:
-  stone_version: "2.0"   # quoted string, MAJOR.MINOR
+  stone_version: "2.1"   # quoted string, MAJOR.MINOR
 ```
 
-- **MAJOR** equals the Boulder MAJOR that reads and writes the file. **MINOR** is the Boulder minor
-  release that last changed the STONE vocabulary or semantics. Boulder releases that do not touch
-  the format keep writing the previous value, so a file written by Boulder 2.3 still loads in
-  Boulder 2.1 when the format did not change in between.
+- Versioned independently of the Boulder package version. **MAJOR** bumps when old files stop
+  loading. **MINOR** bumps when the STONE vocabulary or semantics change but old files still load.
+  Boulder releases that do not touch the format keep writing the previous value, so a file written
+  by a later Boulder still loads in an earlier one when the format did not change in between.
 - Always a **quoted string**: unquoted `2.10` is the YAML float `2.1`.
 - The field is optional on input. A file without it is a pre-versioned STONE 2.x file.
 - Boulder rewrites it to its own `boulder.config.STONE_FORMAT_VERSION` on every load, so any YAML
@@ -53,11 +53,12 @@ Reader rules (Boulder at `STONE_FORMAT_VERSION = M.m`, file at `stone_version = 
 
 ### Compatibility promise
 
-- Within a MAJOR, Boulder `M.y` reads every file written by Boulder `M.x`, `x <= y`.
+- Within a MAJOR, a reader at `M.y` reads every file written at `M.x`, `x <= y`.
 - Removing or renaming a key within a MAJOR requires a **load-time migration**: the old key is
   accepted, converted or discarded, and reported as a warning — never a hard error. The current
   migration table is `boulder.config.LEGACY_METADATA_KEYS`, applied by `migrate_stone_config`.
-- A change that makes old files stop loading bumps the STONE MAJOR, and therefore Boulder's.
+- A change that makes old files stop loading bumps the STONE MAJOR. This is independent of the
+  Boulder package version, which follows its own semver history.
 - To convert an old file: upload it in the Boulder GUI, open the YAML pane (the banner lists what was
   migrated) and Download. Comments and unit strings are preserved.
 
