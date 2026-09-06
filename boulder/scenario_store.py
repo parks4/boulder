@@ -166,7 +166,6 @@ def write_entry(
     write fail on Windows, where deleting an open file is a sharing violation.
     """
     from .payload_store import (  # noqa: PLC0415 — heavy import
-        discard_scratch,
         replace_file,
         scratch_path,
         write_payload,
@@ -202,7 +201,7 @@ def write_entry(
             attrs[_ATTR_FINGERPRINT] = fingerprint
         replace_file(tmp, path)
     finally:
-        discard_scratch(tmp)
+        tmp.unlink(missing_ok=True)
     return path
 
 

@@ -40,7 +40,6 @@ Depends only on ``cantera`` + ``h5py`` + numpy + stdlib.
 
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import logging
@@ -306,103 +305,20 @@ def write_payload(
         scenario in a *collection* file). When ``None``, written at the top level
         (a single-result *cache* file).
     fresh:
-        When ``True`` (and no ``group``), any existing file is replaced -- by
-        building the new one beside it and swapping it in with
-        :func:`replace_file`, never by deleting first. A reader that has the
-        old file open (the GUI fetching a scenario the very moment a sweep
-        re-solves it) keeps reading the old bytes and the swap simply retries;
-        unlinking instead raised ``WinError 32`` on Windows and lost the whole
-        sweep to one unlucky poll. For a collection (``group`` set) pass
-        ``fresh=False`` to append without wiping previously-written scenarios.
+        When ``True`` (and no ``group``), any existing file is replaced. For a
+        collection (``group`` set) pass ``fresh=False`` to append without wiping
+        previously-written scenarios.
+
+    Not atomic by itself: a caller that must survive a reader holding the
+    destination open (Windows) builds into :func:`scratch_path` and swaps in
+    with :func:`replace_file` around this call -- see
+    :func:`boulder.scenario_store.write_entry`.
     """
     _require_h5py()
     h5_path = Path(h5_path)
-    if fresh and group is None:
-        tmp = scratch_path(h5_path)
-        try:
-            _write_payload_into(tmp, gui_payload, mechanism, None)
-            replace_file(tmp, h5_path)
-        finally:
-            discard_scratch(tmp)
-        return
-    _write_payload_into(h5_path, gui_payload, mechanism, group)
+    if fresh and group is None and h5_path.exists():
+        h5_path.unlink()
 
-
-def scratch_path(path: Path) -> Path:
-    """Return a unique scratch file for building *path* atomically.
-
-    It lives in a ``.tmp/`` directory next to *path* -- same filesystem, so
-    :func:`replace_file` is a rename, and out of the store's top-level ``*.h5``
-    listing, so a half-built entry is never listed -- and it keeps *path*'s
-    suffix, because Cantera's ``SolutionArray.save`` picks the HDF5 format from
-    the extension.
-    """
-    scratch_dir = path.parent / ".tmp"
-    scratch_dir.mkdir(parents=True, exist_ok=True)
-    return scratch_dir / f"{path.stem}-{os.getpid()}-{time.monotonic_ns()}{path.suffix}"
-
-
-def discard_scratch(tmp: Path) -> None:
-    """Remove a leftover scratch file (if the swap never happened) and its dir if empty.
-
-    The one thing tolerated is the directory not being empty -- another
-    writer's scratch file is in there, and that writer will remove the
-    directory when it finishes. Anything else (a permission problem, a locked
-    directory) is a real failure and is raised, not hidden.
-    """
-    tmp.unlink(missing_ok=True)
-    try:
-        tmp.parent.rmdir()
-    except OSError as exc:
-        if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST):
-            raise
-
-
-def replace_file(
-    src: Path, dst: Path, *, attempts: int = 40, delay: float = 0.05
-) -> None:
-    """Move *src* over *dst* atomically, retrying while a reader holds *dst*.
-
-    ``os.replace`` is atomic on every platform Boulder runs on, but on Windows
-    it fails with a sharing violation (``PermissionError``) while another
-    handle has *dst* open -- and readers *do* have it open, briefly: h5py and
-    Cantera's ``SolutionArray.restore`` hold a store entry for the milliseconds
-    it takes to decode it, while the GUI polls the store the whole time a sweep
-    writes it. Those windows are short, so retry for a couple of seconds
-    (``attempts`` x ``delay``) before giving up. Only that one, expected
-    condition is retried; any other error propagates at once, and once the
-    budget is spent the original error is re-raised (after removing *src*, so
-    no scratch file is left behind). A wait that did happen is logged: the
-    swap succeeded, but contention on the store is worth seeing.
-    """
-    started = time.perf_counter()
-    for attempt in range(attempts):
-        try:
-            os.replace(src, dst)
-        except PermissionError:
-            if attempt == attempts - 1:
-                src.unlink(missing_ok=True)
-                raise
-            time.sleep(delay)
-            continue
-        if attempt:
-            logger.warning(
-                "Waited %.2f s for a reader to release %s before replacing it "
-                "(%d retries) -- the store is being read while it is written.",
-                time.perf_counter() - started,
-                dst,
-                attempt,
-            )
-        return
-
-
-def _write_payload_into(
-    h5_path: Path,
-    gui_payload: Dict[str, Any],
-    mechanism: str,
-    group: Optional[str],
-) -> None:
-    """Write *gui_payload* into *h5_path* (created if absent, else appended to)."""
     prefix = f"{group}/" if group else ""
 
     # Shallow-copy the top level and pop the heavy series — never deepcopy the
@@ -464,6 +380,56 @@ def _write_payload_into(
         node.attrs["mechanism"] = stored_mech
         node.attrs["mechanism_sha256"] = sha
         node.attrs["mechanism_name"] = Path(mechanism).name if mechanism else ""
+
+
+def scratch_path(path: Path) -> Path:
+    """Return a unique scratch file for building *path* atomically.
+
+    It lives in a ``.tmp/`` directory next to *path* -- same filesystem, so
+    :func:`replace_file` is a rename, and out of the store's top-level ``*.h5``
+    listing, so a half-built entry is never listed -- and it keeps *path*'s
+    suffix, because Cantera's ``SolutionArray.save`` picks the HDF5 format from
+    the extension.
+    """
+    scratch_dir = path.parent / ".tmp"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    return scratch_dir / f"{path.stem}-{os.getpid()}-{time.monotonic_ns()}{path.suffix}"
+
+
+def replace_file(
+    src: Path, dst: Path, *, attempts: int = 40, delay: float = 0.05
+) -> None:
+    """Move *src* over *dst* atomically, retrying while a reader holds *dst*.
+
+    ``os.replace`` is atomic on every platform Boulder runs on, but on Windows
+    it fails with a sharing violation (``PermissionError``) while another
+    handle has *dst* open -- and readers *do* have it open, briefly: h5py and
+    Cantera's ``SolutionArray.restore`` hold a store entry for the milliseconds
+    it takes to decode it, while the GUI polls the store the whole time a sweep
+    writes it. Those windows are short, so retry for a couple of seconds
+    (``attempts`` x ``delay``) before giving up. Only that one, expected
+    condition is retried; any other error propagates at once. A wait that did
+    happen is logged: the swap succeeded, but contention on the store is worth
+    seeing.
+    """
+    started = time.perf_counter()
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            break
+        except PermissionError:
+            if attempt == attempts - 1:
+                src.unlink(missing_ok=True)
+                raise
+            time.sleep(delay)
+    if attempt:
+        logger.warning(
+            "Waited %.2f s for a reader to release %s before replacing it "
+            "(%d retries) -- the store is being read while it is written.",
+            time.perf_counter() - started,
+            dst,
+            attempt,
+        )
 
 
 def read_payload(

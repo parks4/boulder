@@ -511,9 +511,11 @@ def test_rewriting_an_entry_a_reader_holds_open_waits_instead_of_failing(
     assert not errors, f"rewrite failed under a reader's open handle: {errors[0]!r}"
     attrs = store.entry_attrs(store_dir, "tres_001", identity)
     assert attrs is not None and attrs["fingerprint"] == "fp-new"
-    assert [p.name for p in store_dir.iterdir()] == [path.name], (
-        "no scratch file or directory may be left behind"
-    )
+    # No scratch *file* survives the swap. The now-empty `.tmp/` scratch
+    # directory is left in place rather than swept up here -- `clear()`
+    # already removes the whole store directory, so a second cleanup path
+    # for one empty directory would be speculative.
+    assert list((store_dir / ".tmp").iterdir()) == []
 
 
 def test_an_entry_is_never_visible_before_it_is_complete(tmp_path: Path) -> None:
@@ -603,32 +605,3 @@ def test_replace_file_retries_only_a_readers_hold_and_never_hides_the_rest(
     assert not src.exists(), (
         "an exhausted budget re-raises and removes the scratch file"
     )
-
-
-def test_discard_scratch_tolerates_only_another_writers_file(tmp_path: Path) -> None:
-    """Cleanup swallows exactly one thing: the scratch dir still holding a peer's file."""
-    from unittest.mock import patch
-
-    from boulder import payload_store
-
-    scratch_dir = tmp_path / ".tmp"
-    scratch_dir.mkdir()
-    mine = scratch_dir / "mine.h5"
-    other = scratch_dir / "other.h5"
-    mine.write_bytes(b"x")
-    other.write_bytes(b"x")
-
-    payload_store.discard_scratch(mine)  # a peer is still writing: keep the dir
-    assert not mine.exists() and scratch_dir.is_dir()
-
-    other.unlink()
-    with (
-        patch.object(
-            payload_store.Path, "rmdir", side_effect=PermissionError(13, "locked")
-        ),
-        pytest.raises(PermissionError),
-    ):
-        payload_store.discard_scratch(mine)
-
-    payload_store.discard_scratch(mine)  # empty and removable: gone
-    assert not scratch_dir.exists()
