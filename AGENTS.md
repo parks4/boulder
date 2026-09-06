@@ -169,15 +169,15 @@ Recipe for verifying a YAML against a running Boulder API without using the brow
 - **Do not commit** unless the user or maintainer explicitly asks (team rule for agents).
 - GitHub Releases: workflow [.github/workflows/release.yml](.github/workflows/release.yml) builds wheel and sdist with full git history (`setuptools_scm`).
 - Tags are plain `MAJOR.MINOR.PATCH` (no `v` prefix).
-- **Boulder MAJOR == STONE MAJOR.** `boulder/config.py:STONE_FORMAT_VERSION` (`"MAJOR.MINOR"`) is
-  the Boulder minor that last changed the STONE vocabulary or semantics. A PR that changes what
-  STONE accepts or means bumps it to the *next* Boulder `MAJOR.MINOR` and that PR ships in a
-  release with that version. Boulder releases that leave the format alone do not bump it.
+- **STONE format version is versioned independently of the Boulder package version.**
+  `boulder/config.py:STONE_FORMAT_VERSION` (`"MAJOR.MINOR"`) tracks only the STONE file format. A PR
+  that changes what STONE accepts or means bumps its MINOR (or MAJOR, see below) in the same PR as
+  the format change; the Boulder package version bumps independently, per its own semver history.
 - Removing or renaming a STONE key within a MAJOR needs a load-time migration (extend
   `LEGACY_METADATA_KEYS` or add a step to `migrate_stone_config`) plus a test in
   `tests/test_legacy_metadata_keys.py` — old files must keep loading, with a warning, never an
-  error. Changes that break old files bump the MAJOR. The release introducing `stone_version` is
-  `2.0.0` (the existing "STONE v2" shape is STONE 2.0).
+  error. Changes that break old files bump the MAJOR. `stone_version` was introduced with the
+  existing "STONE v2" shape as STONE `2.0`.
 
 ## Pull requests
 
