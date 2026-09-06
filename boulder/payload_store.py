@@ -42,6 +42,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import os
+import time
 from numbers import Real
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -60,6 +63,8 @@ except ImportError as _h5py_exc:  # pragma: no cover - environment-dependent
 else:
     _H5PY_IMPORT_ERROR = None
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def _require_h5py() -> None:
@@ -303,6 +308,11 @@ def write_payload(
         When ``True`` (and no ``group``), any existing file is replaced. For a
         collection (``group`` set) pass ``fresh=False`` to append without wiping
         previously-written scenarios.
+
+    Not atomic by itself: a caller that must survive a reader holding the
+    destination open (Windows) builds into :func:`scratch_path` and swaps in
+    with :func:`replace_file` around this call -- see
+    :func:`boulder.scenario_store.write_entry`.
     """
     _require_h5py()
     h5_path = Path(h5_path)
@@ -370,6 +380,56 @@ def write_payload(
         node.attrs["mechanism"] = stored_mech
         node.attrs["mechanism_sha256"] = sha
         node.attrs["mechanism_name"] = Path(mechanism).name if mechanism else ""
+
+
+def scratch_path(path: Path) -> Path:
+    """Return a unique scratch file for building *path* atomically.
+
+    It lives in a ``.tmp/`` directory next to *path* -- same filesystem, so
+    :func:`replace_file` is a rename, and out of the store's top-level ``*.h5``
+    listing, so a half-built entry is never listed -- and it keeps *path*'s
+    suffix, because Cantera's ``SolutionArray.save`` picks the HDF5 format from
+    the extension.
+    """
+    scratch_dir = path.parent / ".tmp"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    return scratch_dir / f"{path.stem}-{os.getpid()}-{time.monotonic_ns()}{path.suffix}"
+
+
+def replace_file(
+    src: Path, dst: Path, *, attempts: int = 40, delay: float = 0.05
+) -> None:
+    """Move *src* over *dst* atomically, retrying while a reader holds *dst*.
+
+    ``os.replace`` is atomic on every platform Boulder runs on, but on Windows
+    it fails with a sharing violation (``PermissionError``) while another
+    handle has *dst* open -- and readers *do* have it open, briefly: h5py and
+    Cantera's ``SolutionArray.restore`` hold a store entry for the milliseconds
+    it takes to decode it, while the GUI polls the store the whole time a sweep
+    writes it. Those windows are short, so retry for a couple of seconds
+    (``attempts`` x ``delay``) before giving up. Only that one, expected
+    condition is retried; any other error propagates at once. A wait that did
+    happen is logged: the swap succeeded, but contention on the store is worth
+    seeing.
+    """
+    started = time.perf_counter()
+    for attempt in range(attempts):
+        try:
+            os.replace(src, dst)
+            break
+        except PermissionError:
+            if attempt == attempts - 1:
+                src.unlink(missing_ok=True)
+                raise
+            time.sleep(delay)
+    if attempt:
+        logger.warning(
+            "Waited %.2f s for a reader to release %s before replacing it "
+            "(%d retries) -- the store is being read while it is written.",
+            time.perf_counter() - started,
+            dst,
+            attempt,
+        )
 
 
 def read_payload(
