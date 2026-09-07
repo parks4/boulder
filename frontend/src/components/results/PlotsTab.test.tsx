@@ -125,6 +125,44 @@ describe("PlotsTab", () => {
     });
   });
 
+  it("renders one additional chart per plugin-provided extra_series entry", () => {
+    const dataWithExtraSeries = {
+      is_running: false,
+      is_complete: true,
+      times: [],
+      reactors_series: {
+        pfr: {
+          is_spatial: true,
+          x: [0, 1, 2],
+          T: [1200, 1210, 1220],
+          P: [101325, 101325, 101325],
+          X: {},
+          Y: {},
+          extra_series: [
+            {
+              name: "custom quantity",
+              x: [0, 1, 2],
+              x_label: "Position (m)",
+              y: [10, 20, 30],
+              y_label: "Custom unit",
+            },
+          ],
+        },
+      },
+    } as unknown as SimulationProgress;
+
+    useSelectionStore.setState({
+      selectedElement: { type: "node", data: { id: "pfr" } },
+    });
+    render(<PlotsTab data={dataWithExtraSeries} />);
+
+    const extraPlot = plotCalls.find(
+      (plot) => plot.layout?.title?.text === "custom quantity",
+    );
+    expect(extraPlot).toBeDefined();
+    expect(extraPlot?.data[0]).toMatchObject({ x: [0, 1, 2], y: [10, 20, 30] });
+  });
+
   it("applies per-node plot_options.hide_species/show_species to mole fraction traces", () => {
     useConfigStore.setState({
       config: {

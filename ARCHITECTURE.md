@@ -119,6 +119,10 @@ Spatial/PFR-like visualization is opt-in metadata, not inferred from a reactor n
   series.
 - A spatial series sets `is_spatial: true` and provides spatial axes such as `x` (position) and optional
   `t` (residence time). It may also include `fbs_convergence` for the Convergence tab.
+- The same dict may also include `extra_series`: a list of `{name, x, x_label, y, y_label}` objects for
+  arbitrary named x/y series that Boulder itself has no built-in concept of (e.g. a physical quantity a
+  plugin computes along its own axis, per reactor). Each entry renders as its own additional chart in the
+  Plots tab's spatial/residence section — there is no fixed or whitelisted set of expected names.
 - PSR/CSTR-style metadata uses `is_psr: true`, inherited from `reactor_meta[reactor_id]["is_psr"]`.
 
 These flags are part of the public backend-to-frontend data contract. `SimulationWorker` preserves extra

@@ -1,3 +1,17 @@
+/**
+ * A single arbitrary named x/y series a plugin attaches to a reactor's
+ * `extra_series`. Boulder has no built-in concept of what this represents —
+ * it is rendered generically as its own chart in the Plots tab.
+ */
+export interface ExtraSeriesEntry {
+  /** Chart/trace name. */
+  name: string;
+  x: number[];
+  x_label: string;
+  y: number[];
+  y_label: string;
+}
+
 /** Time-series data for a single reactor. */
 export interface ReactorSeries {
   T: number[];
@@ -16,6 +30,14 @@ export interface ReactorSeries {
   t?: number[];
   /** Per-FBS-iteration heat-loss [kW] — only present when is_spatial is true. */
   fbs_convergence?: number[];
+  /**
+   * Arbitrary plugin-defined named x/y series not covered by the built-in
+   * T/P/X/Y fields (e.g. a physical quantity a plugin computes along a
+   * spatial or residence-time axis, per reactor). Each entry renders as its
+   * own additional chart in the Plots tab's spatial/residence section —
+   * there is no fixed or whitelisted set of expected names.
+   */
+  extra_series?: ExtraSeriesEntry[];
   /** True when the reactor is a Perfectly Stirred Reactor (PSR/CSTR). */
   is_psr?: boolean;
   /**

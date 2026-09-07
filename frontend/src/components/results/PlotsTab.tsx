@@ -287,6 +287,38 @@ export function PlotsTab({ data }: Props) {
             />
           </div>
         )}
+
+        {/* Extra plugin-defined series: one additional chart per entry, dynamically. */}
+        {(reactorSeries.extra_series ?? []).map((series, i) => (
+          <div key={`${series.name}-${i}`}>
+            <Plot
+              data={[
+                {
+                  x: series.x,
+                  y: series.y,
+                  type: "scatter",
+                  mode: traceModeForSamples(series.x.length),
+                  name: series.name,
+                  line: { width: 2 },
+                },
+              ]}
+              layout={{
+                ...layoutDefaults,
+                title: { text: series.name, font: { size: 14 } },
+                xaxis: {
+                  title: { text: series.x_label, font: { size: 12 } },
+                  gridcolor,
+                  ...xRangeProps,
+                },
+                yaxis: { title: { text: series.y_label, font: { size: 12 } }, gridcolor },
+              }}
+              config={{ responsive: true, displayModeBar: false }}
+              onRelayout={syncXRelayout}
+              useResizeHandler
+              className="w-full"
+            />
+          </div>
+        ))}
       </div>
     );
   }
