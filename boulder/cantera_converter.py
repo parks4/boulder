@@ -343,7 +343,9 @@ def _series_from_stage_states(
     Returns ``None`` when there is no usable (>= 2 point) trajectory. Any extra
     SolutionArray columns (e.g. plugin-specific ``T_e``/``n_e``) and the
     network's JSON-serialisable ``scalars`` are carried through verbatim so
-    downstream panes can consume them.
+    downstream panes can consume them -- including an ``extra_series`` entry in
+    ``scalars``, the same generic named-x/y-series list understood by
+    ``spatial_series_fn`` (see STONE_SPECIFICATIONS.md).
     """
     # Errors expected from a SolutionArray/phase that doesn't support a given
     # accessor (missing attribute, wrong shape/dtype, or a Cantera-native
@@ -2521,7 +2523,10 @@ class DualCanteraConverter:
 
                 # Spatial reactors: if the plugin registered a spatial_series_fn
                 # on reactor_meta, call it to replace the single-point snapshot
-                # with the full converged spatial profile.
+                # with the full converged spatial profile. The returned dict may
+                # also carry an "extra_series" list of arbitrary named x/y series
+                # (each with its own axis) that are stored verbatim and have no
+                # built-in meaning to Boulder -- see STONE_SPECIFICATIONS.md.
                 _spatial_fn = self.reactor_meta.get(reactor_id, {}).get(
                     "spatial_series_fn"
                 )
@@ -2741,7 +2746,8 @@ class DualCanteraConverter:
         """Finalize simulation results with post-processing."""
         # Apply spatial_series_fn overrides and group_series_id aliases.
         # These may not have been applied yet when called from the streaming
-        # simulation path.
+        # simulation path. The override dict is stored verbatim, so any
+        # "extra_series" it carries (arbitrary named x/y series) rides along.
         for reactor_id in list(reactors_series.keys()):
             _meta = self.reactor_meta.get(reactor_id, {})
             _spatial_fn = _meta.get("spatial_series_fn")

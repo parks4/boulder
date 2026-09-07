@@ -1349,9 +1349,10 @@ of the YAML a user writes — documented here alongside the config schema so too
 
 A **spatial PFR profile is a state sequence** (its `x` is just another per-state column) and is stored
 natively in `solution`/`arrays` — not raw. Per-reactor fields that are *not* per-state columns — flags
-(`is_spatial`, `is_psr`, `is_residence`) and off-shape arrays (`fbs_convergence`, which is
-per-FBS-iteration) — ride in the reactor's `meta` (below) and are merged back on load, so the original
-series is reproduced exactly.
+(`is_spatial`, `is_psr`, `is_residence`), off-shape arrays (`fbs_convergence`, which is
+per-FBS-iteration), and generic non-per-state extras such as a plugin's `extra_series` (a list of named
+x/y series, each with its own axis) — ride in the reactor's `meta` (below) and are merged back on load,
+so the original series is reproduced exactly.
 
 ### `payload_json` dataset
 
