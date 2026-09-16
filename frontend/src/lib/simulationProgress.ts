@@ -1,5 +1,20 @@
 import type { SimulationProgress } from "@/types/simulation";
 
+/**
+ * The stage currently solving: the first stage (in `config.groups` declaration
+ * order) not yet in `completed_stage_ids`. Stages solve strictly sequentially,
+ * so this is the one rule every run-path shares — a plain run, a selected
+ * scenario, and each entry of a sweep all report the same list and must light
+ * up the same box. Returns null once every stage is done (or with no groups).
+ */
+export function currentStageId(
+  groups: Record<string, unknown> | undefined,
+  completedStageIds: readonly string[] | undefined,
+): string | null {
+  const done = new Set(completedStageIds ?? []);
+  return Object.keys(groups ?? {}).find((id) => !done.has(id)) ?? null;
+}
+
 // Sub-steps within a single stage, in order.
 // Each occupies an equal slice of that stage's bar segment.
 const SUBSTEPS = ["Building", "Integrating", "Generating output"] as const;
