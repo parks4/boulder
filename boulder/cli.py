@@ -70,6 +70,17 @@ def wait_for_port(
     return False
 
 
+def browsable_url(host: str, port: int) -> str:
+    """Return a URL a browser can open for a server bound to *host*:*port*.
+
+    A server bound to a wildcard address accepts connections on every
+    interface, but the wildcard itself is not a destination a browser can
+    resolve, so it is reported as the loopback address instead.
+    """
+    reachable = {"0.0.0.0": "127.0.0.1", "": "127.0.0.1", "::": "[::1]"}
+    return f"http://{reachable.get(host, host)}:{port}"
+
+
 def schedule_browser_open(
     url: str,
     host: str,
@@ -840,7 +851,7 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     elif args.verbose:
         print(f"Port {args.port} is available.")
 
-    url = f"http://{args.host}:{args.port}"
+    url = browsable_url(args.host, args.port)
     if not args.no_open:
         schedule_browser_open(
             url,
@@ -853,6 +864,16 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
         print(f"Boulder server will start on {url} (port changed from {original_port})")
     elif args.verbose:
         print(f"Boulder server will start on {url}")
+
+    # Always name the address the interface is served at.  Without --verbose
+    # uvicorn logs at warning level and nothing else tells the user where to
+    # look -- least of all when --no-open means no browser appears either.
+    # In --dev mode the interface is Vite's, on its own port; the backend
+    # started here only serves its API.
+    interface_url = "http://localhost:5173" if args.dev else url
+    print()
+    print(f"  Open the interface at {interface_url}")
+    print()
 
     import uvicorn
 

@@ -127,3 +127,69 @@ def test_dev_mode_schedules_vite_browser_open(monkeypatch, tmp_path):
         cli.main(["--dev"])
 
     assert scheduled == [("http://localhost:5173", "127.0.0.1", 5173)]
+
+
+def _stub_server(monkeypatch):
+    """Make main() reach the uvicorn call and stop there."""
+    import types
+
+    monkeypatch.setattr("boulder.cli.schedule_browser_open", lambda *a, **kw: None)
+    monkeypatch.setattr("boulder.cli.is_port_in_use", lambda h, p: False)
+    api_main = types.SimpleNamespace(_converter_class=None, _runner_class=None)
+    monkeypatch.setitem(__import__("sys").modules, "boulder.api.main", api_main)
+
+    import uvicorn
+
+    monkeypatch.setattr(
+        uvicorn, "run", lambda *a, **kw: (_ for _ in ()).throw(SystemExit(0))
+    )
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("127.0.0.1", "http://127.0.0.1:8050"),
+        ("localhost", "http://localhost:8050"),
+        # A wildcard bind accepts every interface but is not a destination a
+        # browser can resolve: report loopback instead.
+        ("0.0.0.0", "http://127.0.0.1:8050"),
+        ("", "http://127.0.0.1:8050"),
+        ("::", "http://[::1]:8050"),
+    ],
+)
+def test_browsable_url_reports_a_reachable_address(host, expected):
+    from boulder.cli import browsable_url
+
+    assert browsable_url(host, 8050) == expected
+
+
+def test_startup_prints_the_interface_url_without_verbose(monkeypatch, capsys):
+    """A plain start must say where the interface is.
+
+    Without --verbose uvicorn logs at warning level, so nothing else names the
+    address -- and with --no-open no browser appears to reveal it either.
+    """
+    _stub_server(monkeypatch)
+
+    import boulder.cli as cli
+
+    with pytest.raises(SystemExit):
+        cli.main(["--no-open", "--port", "8050"])
+
+    assert "Open the interface at http://127.0.0.1:8050" in capsys.readouterr().out
+
+
+def test_dev_mode_points_at_the_frontend_port_not_the_api(monkeypatch, capsys):
+    """In --dev the interface is Vite's; the backend here only serves the API."""
+    monkeypatch.setattr("boulder.cli.Path.exists", lambda self: True)
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr("subprocess.run", lambda *a, **kw: None)
+    _stub_server(monkeypatch)
+
+    import boulder.cli as cli
+
+    with pytest.raises(SystemExit):
+        cli.main(["--dev"])
+
+    out = capsys.readouterr().out
+    assert "Open the interface at http://localhost:5173" in out
