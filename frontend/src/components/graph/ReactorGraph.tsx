@@ -1331,6 +1331,11 @@ export function ReactorGraph() {
         animate,
         animationDuration: animate ? 300 : 0,
       } as any);
+      // Headless capture (schema_export) polls this marker: it holds the
+      // element count the last finished layout was computed for, so a
+      // capture never races an in-flight re-layout.
+      const w = window as unknown as { __boulderLayoutSettledFor?: number };
+      w.__boulderLayoutSettledFor = undefined;
       layout.run();
       return layout.promiseOn("layoutstop").then(() => {
         flipLayoutVertical(cy);
@@ -1358,6 +1363,7 @@ export function ReactorGraph() {
         requestAnimationFrame(() => {
           cy.nodes("[isGroup]").forEach((n) => (n as any).updateCompoundBounds?.());
           cy.fit(undefined, 100);
+          w.__boulderLayoutSettledFor = cy.elements().length;
         });
       });
     },

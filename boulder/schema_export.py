@@ -152,6 +152,19 @@ def render_network_schema_png(
                     "() => !!window.__boulderCy && window.__boulderCy.elements().length > 0",
                     timeout=timeout * 1000,
                 )
+                # Elements exist before dagre has positioned them; the graph
+                # publishes the element count its last finished layout was
+                # computed for, so wait until that matches the live graph.
+                # Best-effort: a frontend build without the marker still
+                # captures (after the timeout) instead of failing.
+                try:
+                    page.wait_for_function(
+                        "() => window.__boulderLayoutSettledFor === "
+                        "window.__boulderCy.elements().length",
+                        timeout=timeout * 1000,
+                    )
+                except Exception:  # noqa: BLE001 - marker missing on old builds
+                    pass
                 b64 = page.evaluate(
                     "([bg, scale]) => window.__boulderCy.png("
                     "{bg, full: true, scale, output: 'base64'})",
