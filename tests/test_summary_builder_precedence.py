@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
+
+import cantera as ct
 
 from boulder.summary_builder import (
     DefaultSummaryBuilder,
@@ -32,7 +34,8 @@ class _PickyBuilder(SummaryBuilder):
 
 def _context(config: Dict[str, Any] | None) -> SummaryContext:
     return SummaryContext(
-        simulation=object(),  # any non-None network
+        # Any non-None network: no builder under test touches it.
+        simulation=cast(ct.ReactorNet, object()),
         config=config,
         simulation_data=None,
         output_config={},
