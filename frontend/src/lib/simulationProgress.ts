@@ -8,7 +8,7 @@ import type { SimulationProgress } from "@/types/simulation";
  * up the same box. Returns null once every stage is done (or with no groups).
  */
 export function currentStageId(
-  groups: Record<string, unknown> | undefined,
+  groups: Record<string, unknown> | null | undefined,
   completedStageIds: readonly string[] | undefined,
 ): string | null {
   const done = new Set(completedStageIds ?? []);
