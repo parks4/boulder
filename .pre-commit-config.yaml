@@ -32,6 +32,11 @@ repos:
     args: [--autofix, --preserve-quotes]
   - id: pretty-format-toml
     args: [--autofix]
+    # toml-sort is an unpinned transitive dependency of this hook, and 0.25.0
+    # spaces inline tables where 0.24.x did not. Unpinned, a fresh CI install
+    # and a warm local cache disagree, so pre-commit fails on PRs that never
+    # touched a TOML file. Pin it so both format identically.
+    additional_dependencies: [toml-sort==0.25.0]
 - repo: https://github.com/gitleaks/gitleaks
   rev: v8.24.0
   hooks:
