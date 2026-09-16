@@ -10,6 +10,7 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
 import { currentStageId } from "@/lib/simulationProgress";
+import { hiddenCompositeNodeIds } from "@/lib/graphVisibility";
 
 /**
  * Per-node problem badges (top-right corner), drawn as self-contained SVG
@@ -95,35 +96,13 @@ export function ReactorGraph() {
   const setConfig = useConfigStore((s) => s.setConfig);
 
   // Node ids that are truly hidden from the visualisation: composite parents
-  // whose unfolder produced visible child nodes.
-  //
-  // Detection heuristic: a skip_viz node is treated as a composite placeholder
-  // (hidden) if it has at least one outgoing, non-Wall connection TO a node
-  // whose id starts with the parent id followed by an underscore (e.g.
-  // cgr → cgr_seg1, wired by mass flow). The type check matters: composite
-  // children are always wired by mass flow, never by a Wall, so a Wall to a
-  // same-group satellite (e.g. pfr → pfr_ambient, its own ambient heat-loss
-  // sink) must never count as a "child" -- regardless of which way the
-  // Wall's source/target point.
-  //
-  // Nodes that are skip_viz but produce no such outgoing-to-child connections are
-  // rendered normally (e.g. RefractoryReactor in A3/A4 whose segments are not
-  // exposed as individual nodes in the visualisation).
-  const trulyHiddenNodeIds = useMemo<Set<string>>(() => {
-    const hidden = new Set<string>();
-    for (const node of config.nodes) {
-      if (!node.metadata?.skip_viz) continue;
-      const prefix = `${node.id}_`;
-      const hasChildConn = config.connections.some(
-        (c) =>
-          c.source === node.id &&
-          c.target.startsWith(prefix) &&
-          c.type !== "Wall",
-      );
-      if (hasChildConn) hidden.add(node.id);
-    }
-    return hidden;
-  }, [config.nodes, config.connections]);
+  // whose unfolder produced visible child nodes. The heuristic (and why Wall
+  // and stream-point edges never count as children) lives in
+  // lib/graphVisibility.ts.
+  const trulyHiddenNodeIds = useMemo<Set<string>>(
+    () => hiddenCompositeNodeIds(config.nodes, config.connections),
+    [config.nodes, config.connections],
+  );
   const setSelectedElement = useSelectionStore((s) => s.setSelectedElement);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
