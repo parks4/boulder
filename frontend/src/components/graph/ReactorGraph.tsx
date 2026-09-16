@@ -9,6 +9,8 @@ import { useSimulationStore } from "@/stores/simulationStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
+import { currentStageId } from "@/lib/simulationProgress";
+import { hiddenCompositeNodeIds } from "@/lib/graphVisibility";
 
 /**
  * Per-node problem badges (top-right corner), drawn as self-contained SVG
@@ -94,35 +96,13 @@ export function ReactorGraph() {
   const setConfig = useConfigStore((s) => s.setConfig);
 
   // Node ids that are truly hidden from the visualisation: composite parents
-  // whose unfolder produced visible child nodes.
-  //
-  // Detection heuristic: a skip_viz node is treated as a composite placeholder
-  // (hidden) if it has at least one outgoing, non-Wall connection TO a node
-  // whose id starts with the parent id followed by an underscore (e.g.
-  // cgr → cgr_seg1, wired by mass flow). The type check matters: composite
-  // children are always wired by mass flow, never by a Wall, so a Wall to a
-  // same-group satellite (e.g. pfr → pfr_ambient, its own ambient heat-loss
-  // sink) must never count as a "child" -- regardless of which way the
-  // Wall's source/target point.
-  //
-  // Nodes that are skip_viz but produce no such outgoing-to-child connections are
-  // rendered normally (e.g. RefractoryReactor in A3/A4 whose segments are not
-  // exposed as individual nodes in the visualisation).
-  const trulyHiddenNodeIds = useMemo<Set<string>>(() => {
-    const hidden = new Set<string>();
-    for (const node of config.nodes) {
-      if (!node.metadata?.skip_viz) continue;
-      const prefix = `${node.id}_`;
-      const hasChildConn = config.connections.some(
-        (c) =>
-          c.source === node.id &&
-          c.target.startsWith(prefix) &&
-          c.type !== "Wall",
-      );
-      if (hasChildConn) hidden.add(node.id);
-    }
-    return hidden;
-  }, [config.nodes, config.connections]);
+  // whose unfolder produced visible child nodes. The heuristic (and why Wall
+  // and stream-point edges never count as children) lives in
+  // lib/graphVisibility.ts.
+  const trulyHiddenNodeIds = useMemo<Set<string>>(
+    () => hiddenCompositeNodeIds(config.nodes, config.connections),
+    [config.nodes, config.connections],
+  );
   const setSelectedElement = useSelectionStore((s) => s.setSelectedElement);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
@@ -460,10 +440,10 @@ export function ReactorGraph() {
         },
       },
       {
-        // The stage box currently being solved during a sweep, set by the
-        // sweep-progress effect below (calc_status='calculating', distinct
-        // from the per-reactor warning/error badges — stages solve strictly
-        // sequentially, so at most one box is ever tinted at a time).
+        // The stage box currently being solved, set by the status effect
+        // below for plain runs and sweeps alike (calc_status='calculating',
+        // distinct from the per-reactor warning/error badges — stages solve
+        // strictly sequentially, so at most one box is ever tinted at a time).
         selector: "node[isGroup][calc_status = 'calculating']",
         style: {
           "background-opacity": 0.15,
@@ -1351,6 +1331,11 @@ export function ReactorGraph() {
         animate,
         animationDuration: animate ? 300 : 0,
       } as any);
+      // Headless capture (schema_export) polls this marker: it holds the
+      // element count the last finished layout was computed for, so a
+      // capture never races an in-flight re-layout.
+      const w = window as unknown as { __boulderLayoutSettledFor?: number };
+      w.__boulderLayoutSettledFor = undefined;
       layout.run();
       return layout.promiseOn("layoutstop").then(() => {
         flipLayoutVertical(cy);
@@ -1378,6 +1363,7 @@ export function ReactorGraph() {
         requestAnimationFrame(() => {
           cy.nodes("[isGroup]").forEach((n) => (n as any).updateCompoundBounds?.());
           cy.fit(undefined, 100);
+          w.__boulderLayoutSettledFor = cy.elements().length;
         });
       });
     },
@@ -1630,10 +1616,11 @@ export function ReactorGraph() {
   // conservation check failed. On a failed solve: an error on the node(s) in
   // the stage that was running when it died — stages solve strictly
   // sequentially, so that is the first stage (in config.groups declaration
-  // order) missing from progress.completed_stage_ids. During a sweep, the
-  // stage box currently being solved is tinted blue instead — a single
-  // combined effect (not two effects touching the same calc_status field)
-  // so there is one place that decides what "clear everything" means.
+  // order) missing from progress.completed_stage_ids. While solving — a
+  // plain run, a selected scenario, or a sweep entry alike — the stage box
+  // currently being solved is tinted blue instead — a single combined effect
+  // (not two effects touching the same calc_status field) so there is one
+  // place that decides what "clear everything" means.
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
@@ -1667,8 +1654,7 @@ export function ReactorGraph() {
     }
 
     if (error && !isRunning) {
-      const completed = new Set(progress?.completed_stage_ids ?? []);
-      const failedStageId = Object.keys(config.groups ?? {}).find((id) => !completed.has(id));
+      const failedStageId = currentStageId(config.groups, progress?.completed_stage_ids);
       cy.nodes().forEach((n) => {
         const group = n.data("parent") as string | undefined;
         const stageId = group?.startsWith("group:") ? group.slice("group:".length) : undefined;
@@ -1677,12 +1663,16 @@ export function ReactorGraph() {
       return;
     }
 
-    if (sweeping) {
-      // Serial sweep runner: at most one scenario, hence one stage, is ever
-      // in flight — take whichever entry scenario_progress holds.
-      const currentStageId = Object.values(scenarioProgress)[0]?.stageId ?? null;
+    if (isRunning || sweeping) {
+      // One rule for every run-path: a plain run (base or selected scenario)
+      // derives the solving stage from its own progress; the serial sweep
+      // runner has at most one scenario in flight and reports the same
+      // derivation as `stage_id`. Either way exactly one box is tinted.
+      const solvingStageId = sweeping
+        ? (Object.values(scenarioProgress)[0]?.stageId ?? null)
+        : currentStageId(config.groups, progress?.completed_stage_ids);
       cy.nodes("[isGroup]").forEach((n) => {
-        n.data("calc_status", currentStageId && n.id() === `group:${currentStageId}` ? "calculating" : null);
+        n.data("calc_status", solvingStageId && n.id() === `group:${solvingStageId}` ? "calculating" : null);
       });
       cy.nodes("[^isGroup]").forEach((n) => setStatus(n, null));
       return;

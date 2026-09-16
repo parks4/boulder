@@ -25,7 +25,7 @@ dependencies = [
 ]
 description = "A visual interface for Cantera reactor networks"
 dynamic = ["version"]
-license = {file = "LICENSE"}
+license = { file = "LICENSE" }
 name = "boulder"
 readme = "README.md"
 
