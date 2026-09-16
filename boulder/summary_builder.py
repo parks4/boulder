@@ -161,12 +161,21 @@ class SummaryBuilderRegistry:
         return self.builders.get(builder_id)
 
     def get_compatible_builders(self, context: SummaryContext) -> List[SummaryBuilder]:
-        """Get list of builders compatible with the given context."""
-        return [
+        """Get list of builders compatible with the given context, most specific first.
+
+        The default builder answers for *every* simulation, and it registers
+        before any plugin can, so ordering by registration alone would always
+        pick it and no registered plugin builder would ever run. It is
+        therefore ordered last: a builder that declares itself compatible is
+        the more specific answer, and the caller takes the first one.
+        """
+        compatible = [
             builder
             for builder in self.builders.values()
             if builder.is_compatible(context)
         ]
+        # Stable: plugins keep their registration order among themselves.
+        return sorted(compatible, key=lambda b: isinstance(b, DefaultSummaryBuilder))
 
 
 # Global registry instance
