@@ -20,10 +20,12 @@ def access_logger():
 
 
 def _kept(logger: logging.Logger, message: str) -> bool:
+    """Whether the logger's filters would let this access line through."""
     record = logging.LogRecord(
         "uvicorn.access", logging.INFO, "", 0, message, None, None
     )
-    return all(f.filter(record) for f in logger.filters)
+    # Logger.filter applies the chain the same way emitting would.
+    return bool(logger.filter(record))
 
 
 def test_polling_lines_are_dropped_and_real_requests_kept(access_logger):
