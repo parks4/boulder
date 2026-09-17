@@ -87,8 +87,10 @@ class _StageAwareBuilder(SummaryBuilder):
 
 
 def test_stage_networks_reach_the_builder():
-    """The visualization network is flat, so a stage's own solver is the only
-    place a stage-level quantity can come from.
+    """Reach a stage's own solver from a builder.
+
+    The visualization network is flat, so a stage's solver is the only place
+    a stage-level quantity can come from.
     """
     from boulder.summary_builder import (
         build_summary_from_simulation,
