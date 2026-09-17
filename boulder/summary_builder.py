@@ -28,6 +28,14 @@ class SummaryContext:
     # Output configuration from YAML
     output_config: Optional[Dict[str, Any]] = None
 
+    # Per-stage solver networks of a staged solve, keyed by stage id, as the
+    # trajectory recorded them. ``simulation`` above is the *visualization*
+    # network: a single flat ReactorNet that no longer knows which stage
+    # solved what, so a builder reporting a quantity a stage computed (a
+    # marched profile, a stage-level efficiency) cannot get at it from there.
+    # Empty for a single-stage solve, and for a payload rebuilt without one.
+    stage_networks: Dict[str, Any] = field(default_factory=dict)
+
 
 class SummaryBuilder(ABC):
     """Base class for Summary builders.
@@ -197,6 +205,7 @@ def build_summary_from_simulation(
     config: Optional[Dict[str, Any]] = None,
     simulation_data: Optional[Dict[str, Any]] = None,
     builder_id: Optional[str] = None,
+    stage_networks: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Build summary data from a simulation using the specified or default builder.
 
@@ -205,6 +214,8 @@ def build_summary_from_simulation(
         config: Configuration dictionary
         simulation_data: Additional simulation data
         builder_id: ID of specific builder to use, or None for default
+        stage_networks: Per-stage solver networks of a staged solve, keyed by
+            stage id; see :attr:`SummaryContext.stage_networks`
 
     Returns
     -------
@@ -219,6 +230,7 @@ def build_summary_from_simulation(
         config=config,
         simulation_data=simulation_data,
         output_config=output_config,
+        stage_networks=dict(stage_networks or {}),
     )
 
     # Get builder
