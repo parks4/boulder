@@ -2740,6 +2740,17 @@ class DualCanteraConverter:
             results["error_message"] = last_error_message
         return results, "\n".join(self.code_lines)
 
+    def _summary_stage_networks(self) -> Dict[str, Any]:
+        """Return the staged solve's per-stage networks, empty when single-stage.
+
+        Summary builders receive the visualization network, which is flat and
+        no longer attributes anything to a stage; a builder reporting what a
+        stage computed needs the solvers themselves.
+        """
+        trajectory = getattr(self, "_staged_trajectory", None)
+        networks = getattr(trajectory, "networks", None)
+        return dict(networks) if networks else {}
+
     def finalize_results(
         self, times: List[float], reactors_series: Dict[str, Dict[str, Any]]
     ) -> Dict[str, Any]:
@@ -2836,6 +2847,7 @@ class DualCanteraConverter:
                     config=cfg,
                     simulation_data=results,
                     builder_id=summary_builder_id,
+                    stage_networks=self._summary_stage_networks(),
                 )
                 results["summary"] = summary
             elif output_block is not None:
@@ -2851,6 +2863,7 @@ class DualCanteraConverter:
                     simulation=self.last_network,
                     config=cfg,
                     simulation_data=results,
+                    stage_networks=self._summary_stage_networks(),
                 )
                 results["summary"] = summary
 
