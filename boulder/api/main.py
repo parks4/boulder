@@ -54,9 +54,13 @@ _runner_class = None  # overridable by CLI before uvicorn starts
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
-    from ..verbose_utils import ensure_boulder_console_logging
+    from ..verbose_utils import (
+        ensure_boulder_console_logging,
+        quiet_polling_access_logs,
+    )
 
     ensure_boulder_console_logging()
+    quiet_polling_access_logs()
     from ..graphviz_utils import ensure_graphviz_on_path
 
     ensure_graphviz_on_path()
