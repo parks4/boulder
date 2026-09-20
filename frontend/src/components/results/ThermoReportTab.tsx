@@ -149,6 +149,21 @@ export function ThermoReportTab({ results }: Props) {
     <div className="space-y-4 max-h-96 overflow-y-auto">
       <div className="rounded border border-border p-3">
         <h4 className="text-sm font-medium text-foreground mb-2">{selectedId}</h4>
+        {Array.isArray(report.warnings) && report.warnings.length > 0 ? (
+          <div
+            role="alert"
+            className="mb-2 rounded border border-amber-500/60 bg-amber-500/10 p-2"
+          >
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-1">
+              Design warnings
+            </p>
+            <ul className="list-disc pl-4 text-xs text-foreground space-y-1">
+              {(report.warnings as unknown[]).map((line, i) => (
+                <li key={i}>{String(line)}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {report.reactor_report && typeof report.reactor_report === "string" ? (
           <pre className="text-xs text-muted-foreground whitespace-pre-wrap mb-2">
             {report.reactor_report}
