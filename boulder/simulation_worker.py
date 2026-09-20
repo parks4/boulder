@@ -42,8 +42,30 @@ def _copy_reactors_series(
     return out
 
 
+def design_warnings_of(reactor: Any) -> List[str]:
+    """Return the reactor's own design warnings, ``[]`` when it has none.
+
+    A reactor class may expose ``design_warnings() -> list[str]``: one line
+    per design check its solved state violates (an inlet temperature above
+    the equipment's rating, say). Boulder does not know the checks; it only
+    carries the lines to the GUI, where they show in the Thermo Report tab,
+    the Properties panel and as the node's warning badge. Failures inside
+    the method are logged and yield ``[]`` so a report is never lost.
+    """
+    fn = getattr(reactor, "design_warnings", None)
+    if not callable(fn):
+        return []
+    try:
+        return [str(line) for line in (fn() or [])]
+    except Exception as e:  # noqa: BLE001 - a host method must not sink the report
+        logger.warning(f"design_warnings() failed on {type(reactor).__name__}: {e}")
+        return []
+
+
 def generate_reactor_reports(converter: Any, results: Dict[str, Any]) -> Dict[str, Any]:
     """Generate reactor reports for thermo analysis.
+
+    Each report carries a ``warnings`` list, see :func:`design_warnings_of`.
 
     Free function (not a method — reads only *converter*/*results*) so any
     solve path can populate ``reactor_reports`` the same way the live GUI
@@ -75,6 +97,7 @@ def generate_reactor_reports(converter: Any, results: Dict[str, Any]) -> Dict[st
                     f"{current_P:.2e} Pa (Fixed)\nType: Reservoir (Infinite Capacity)",
                     # Use the reactor's own phase to ensure mechanism matches reactor
                     "thermo_report": phase.report(),
+                    "warnings": design_warnings_of(reactor),
                 }
                 continue
 
@@ -101,6 +124,7 @@ def generate_reactor_reports(converter: Any, results: Dict[str, Any]) -> Dict[st
                         f"{final_P:.2e} Pa\nVolume: {reactor.volume:.2e} m³",
                         # Use the reactor's own phase to ensure mechanism matches reactor
                         "thermo_report": phase.report(),
+                        "warnings": design_warnings_of(reactor),
                     }
 
     except Exception as e:

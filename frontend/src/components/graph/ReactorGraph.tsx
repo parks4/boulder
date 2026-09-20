@@ -23,7 +23,8 @@ import { hiddenCompositeNodeIds } from "@/lib/graphVisibility";
  */
 const CALC_STATUS_BADGES = {
   // Amber warning triangle: solve completed but this node's mass/energy
-  // conservation check failed.
+  // conservation check failed, or its reactor reported design warnings
+  // (results.reactor_reports[id].warnings, shown in the Thermo Report tab).
   warning:
     "data:image/svg+xml;utf8," +
     encodeURIComponent(
@@ -1613,7 +1614,8 @@ export function ReactorGraph() {
   // must not disturb node positions or trigger a dagre pass.
   //
   // Only failures are badged. On completion: a warning on each node whose
-  // conservation check failed. On a failed solve: an error on the node(s) in
+  // conservation check failed or whose reactor reported design warnings. On
+  // a failed solve: an error on the node(s) in
   // the stage that was running when it died — stages solve strictly
   // sequentially, so that is the first stage (in config.groups declaration
   // order) missing from progress.completed_stage_ids. While solving — a
@@ -1648,7 +1650,11 @@ export function ReactorGraph() {
         const failed = conservation
           ? !conservation.mass_closes || !conservation.energy_closes
           : false;
-        setStatus(n, failed ? "warning" : "computed");
+        const designWarnings = (
+          results.reactor_reports?.[n.id()] as { warnings?: unknown } | undefined
+        )?.warnings;
+        const flagged = Array.isArray(designWarnings) && designWarnings.length > 0;
+        setStatus(n, failed || flagged ? "warning" : "computed");
       });
       return;
     }

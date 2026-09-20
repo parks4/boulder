@@ -109,6 +109,19 @@ export function PropertiesPanel() {
   const applyScenarioOverlays = useScenarioStore((s) => s.applyOverlays);
   const loadScenarioPreview = useScenarioStore((s) => s.loadPreview);
   const isSimulating = useSimulationStore((s) => s.isRunning);
+  // The selected reactor's design warnings (results.reactor_reports[id].warnings).
+  // The raw field is selected so the store snapshot stays referentially stable.
+  const selectedNodeId =
+    selectedElement?.type === "node" ? String(selectedElement.data.id) : undefined;
+  const rawDesignWarnings = useSimulationStore((s) =>
+    selectedNodeId
+      ? (s.results?.reactor_reports?.[selectedNodeId] as { warnings?: unknown } | undefined)
+          ?.warnings
+      : undefined,
+  );
+  const designWarnings = Array.isArray(rawDesignWarnings)
+    ? (rawDesignWarnings as unknown[]).map(String)
+    : [];
   const isSweeping = useSweepRunStore((s) => s.sweeping);
   const [isEditing, setIsEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
@@ -411,6 +424,22 @@ export function PropertiesPanel() {
 
   return (
     <div id="properties-panel" className="rounded-lg border border-border bg-card p-4 space-y-3">
+      {designWarnings.length > 0 && (
+        <div
+          role="alert"
+          data-testid="design-warnings"
+          className="rounded border border-amber-500/60 bg-amber-500/10 p-2"
+        >
+          <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-1">
+            Design warnings
+          </p>
+          <ul className="list-disc pl-4 text-xs text-foreground space-y-1">
+            {designWarnings.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold text-sm text-foreground">{id}</h3>
