@@ -1305,10 +1305,8 @@ class DualCanteraConverter:
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid
         elif typ == "OutletSink":
-            # DEPRECATED: OutletSink is legacy single-stage diagram syntax.
-            # Prefer inter-stage stream-point diamonds (``{source}_outlet`` Reservoirs
-            # populated by :func:`boulder.staged_solver._update_stream_point`).
-            # Remove this branch when OutletSink is dropped from STONE v2.
+            # Terminal pressure boundary; its T/Y are overwritten with the inflow
+            # state after the solve (boulder.staged_solver._refresh_terminal_sinks).
             validate_explicit_energy(props, ct.Reservoir, typ)
             reactor = ct.Reservoir(gas_for_node, clone=clone)  # type: ignore[assignment]
             reactor.name = rid

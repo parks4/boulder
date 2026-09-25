@@ -561,12 +561,26 @@ Flow rates belong on edges, not on `Reservoir` nodes.
 
 ### `OutletSink`
 
-**Deprecated.** Prefer inter-stage **stream-point diamonds** (`{source}_outlet`
-Reservoirs synthesised by the staged solver and refreshed by
-`_update_stream_point`). `OutletSink` remains for legacy single-stage diagrams
-only and will be removed in a future STONE version.
+The terminal boundary of a flow path: where the products leave the network.
 
-A visualization-only terminal node with no physical state:
+```yaml
+- id: outlet
+  OutletSink:
+    pressure: 1.3 bar   # optional; propagated as the process pressure
+```
+
+It is built as a Cantera `Reservoir`. Through its inbound flow devices, only its **pressure** acts:
+pressure-driven devices (`PressureController`, `Valve`) read it, and a declared `pressure:` is propagated to the
+flow-connected upstream nodes that lack one. Its temperature and composition have no physical
+effect, because flow devices carry the upstream reactor's state and flow cannot reverse. After the
+solve, the sink holds **the stream flowing into it** (the upstream reactor's temperature and
+composition, at the sink's own pressure), so reports, the network diagram and the Sankey show the
+products, not a placeholder.
+
+Terminal sinks are distinct from inter-stage **stream-point diamonds** (`{source}_outlet`), which
+the staged solver synthesises at stage boundaries as the inlet of the next stage.
+
+Minimal form:
 
 ```yaml
 - id: outlet

@@ -1144,10 +1144,12 @@ class TestInterfaceReservoirSolve:
 
 
 def test_refresh_terminal_outlet_sink_copies_upstream_state():
-    """Legacy OutletSink shim: _refresh_terminal_sinks copies upstream reactor phase.
+    """_refresh_terminal_sinks writes the upstream state into the wired sink.
 
-    Remove with OutletSink deprecation.  Multi-stage chains use inter-stage
-    stream-point diamonds (_update_stream_point) instead and do not hit this path.
+    Asserts the sink object is updated in place (``conv.reactors["outlet"]`` is
+    still the Reservoir the flow device would be wired to, not a replacement),
+    takes the upstream reactor's temperature, and keeps its own pressure; and
+    that the node dict gains the ``terminal_sink`` / ``source_node`` display props.
     """
     from boulder.staged_solver import _refresh_terminal_sinks
 
@@ -1163,6 +1165,7 @@ def test_refresh_terminal_outlet_sink_copies_upstream_state():
     sink_gas.TPX = 300.0, 101325.0, "N2:1"
     sink = ct.Reservoir(sink_gas, clone=False)
     sink.name = "outlet"
+    sink_P = sink.phase.P
     conv.reactors["outlet"] = sink
     conv.reactor_meta["outlet"] = {"mechanism": "gri30.yaml"}
 
@@ -1187,19 +1190,17 @@ def test_refresh_terminal_outlet_sink_copies_upstream_state():
     }
     _refresh_terminal_sinks(conv, cfg)
 
-    assert abs(conv.reactors["outlet"].phase.T - 1500.0) < 1.0
+    assert conv.reactors["outlet"] is sink
+    assert abs(sink.phase.T - 1500.0) < 1.0
+    assert sink.phase.P == pytest.approx(sink_P)
     outlet_props = next(n for n in cfg["nodes"] if n["id"] == "outlet")["properties"]
     assert outlet_props.get("terminal_sink") is True
     assert outlet_props.get("source_node") == "reactor"
 
 
-def test_terminal_outlet_sink_matches_upstream_reactor_after_solve():
-    """Legacy OutletSink: terminal sink thermo matches upstream after staged solve.
-
-    Remove with OutletSink deprecation.  Not exercised by multi-stage chains
-    (the stream-point diamond is refreshed via _update_stream_point).
-    """
-    cfg = normalize_config(
+def _terminal_sink_config():
+    """Return feed -> 1500 K reactor -> terminal OutletSink, normalized."""
+    return normalize_config(
         {
             "phases": {"gas": {"mechanism": "gri30.yaml"}},
             "settings": {
@@ -1244,6 +1245,16 @@ def test_terminal_outlet_sink_matches_upstream_reactor_after_solve():
             ],
         }
     )
+
+
+def test_terminal_outlet_sink_matches_upstream_reactor_after_solve():
+    """After solve_staged, the terminal OutletSink carries the upstream reactor state.
+
+    Asserts the sink's temperature and display props match the reactor it is
+    fed by, and that the node props carry volume flow in m³/h (the keys the
+    Properties panel reads) while reactor_meta keeps m³/s.
+    """
+    cfg = _terminal_sink_config()
     conv = DualCanteraConverter(mechanism="gri30.yaml")
     plan = build_stage_graph(cfg)
     solve_staged(conv, plan, cfg)
@@ -1259,3 +1270,38 @@ def test_terminal_outlet_sink_matches_upstream_reactor_after_solve():
     assert props.get("terminal_sink") is True
     assert props.get("source_node") == "reactor"
     assert abs(float(props["temperature"]) - T_reactor) < 1.0
+
+    # Node props carry volume flow in m³/h -- the keys the Properties panel
+    # reads, as for stream points -- while reactor_meta keeps m³/s.
+    meta = conv.reactor_meta["outlet"]
+    assert meta["v_dot_real_m3_s"] > 0
+    assert props["v_dot_real_m3_h"] == pytest.approx(meta["v_dot_real_m3_s"] * 3600)
+    assert props["v_dot_normal_m3_h"] == pytest.approx(meta["v_dot_normal_m3_s"] * 3600)
+    assert "v_dot_real_m3_s" not in props
+
+
+@pytest.mark.parametrize("entry", ["build", "solve"])
+def test_runner_terminal_outlet_sink_reached_through_network(entry):
+    """BoulderRunner.build()/solve() refresh the terminal OutletSink in place.
+
+    Asserts that the sink reached by walking the network (what reports, the
+    network diagram and the Sankey read) is the same object as
+    ``converter.reactors["outlet"]``, and that it carries the upstream
+    reactor's temperature and composition rather than its build-time
+    placeholder.  Before the fix the runner path never refreshed the sink, and
+    the refresh replaced it with a new Reservoir the flow device did not
+    point at.
+    """
+    from boulder.ctutils import collect_all_reactors_and_reservoirs
+    from boulder.runner import BoulderRunner
+
+    runner = getattr(BoulderRunner(_terminal_sink_config()), entry)()
+    reactors = runner.converter.reactors
+    net = getattr(runner.network, "visualization_network", runner.network)
+    wired = {r.name: r for r in collect_all_reactors_and_reservoirs(net)}
+
+    assert wired["outlet"] is reactors["outlet"]
+    reactor, sink = reactors["reactor"].phase, wired["outlet"].phase
+    assert reactor.T > 1000.0
+    assert sink.T == pytest.approx(reactor.T, abs=1e-6)
+    assert sink.Y == pytest.approx(reactor.Y, abs=1e-12)

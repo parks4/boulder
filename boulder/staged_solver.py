@@ -843,9 +843,8 @@ def solve_staged(
                 )
 
     logger.info("Staged solve complete – building visualization ReactorNet.")
-    # Legacy OutletSink only (deprecated — see _refresh_terminal_sinks).  Multi-stage
-    # chains use inter-stage stream-point diamonds refreshed in _update_stream_point
-    # during the stage loop; this call is a no-op for those configs.
+    # Terminal OutletSinks take their inflow state; stream-point diamonds were
+    # already refreshed in the stage loop by _update_stream_point.
     _refresh_terminal_sinks(converter, config)
     viz_net = converter.build_viz_network(
         all_connections=all_connections,
@@ -999,23 +998,25 @@ def _update_stream_point(
 _update_iface_reservoir = _update_stream_point
 
 _FLOW_DEVICE_TYPES = frozenset({"MassFlowController", "PressureController", "Valve"})
-# DEPRECATED with OutletSink — remove when OutletSink is dropped from STONE.
 _TERMINAL_SINK_TYPES = frozenset({"OutletSink"})
 
 
 def _refresh_terminal_sinks(converter: Any, config: Dict[str, Any]) -> None:
-    """Copy upstream reactor outlet state into legacy intra-stage ``OutletSink`` nodes.
+    """Write each terminal ``OutletSink``'s inflow state into the sink itself.
 
-    .. deprecated::
-        ``OutletSink`` is being retired in favour of inter-stage stream-point
-        diamonds (``{source}_outlet``), which are refreshed by
-        :func:`_update_stream_point` during :func:`solve_staged`.  Multi-stage
-        models never use this path.
+    A sink's own temperature and composition are physically inert: flow devices
+    carry the upstream reactor's state, and flow cannot reverse.  Only its
+    pressure acts on the network.  Readers that report the sink (the network
+    diagram, the Sankey, node reports, host reports) read its state as the
+    product stream, so it must hold the stream flowing into it rather than its
+    build-time placeholder.
 
-    This helper exists only so old single-stage YAMLs that still declare a
-    terminal ``OutletSink`` (e.g. tube-furnace examples) show converged thermo
-    in the UI instead of build-time placeholder gas.  Delete this function and
-    its call site when ``OutletSink`` is removed from STONE.
+    The state is written into the Reservoir the inbound flow device is wired
+    to, in place, so the object reached through the network and
+    ``converter.reactors[sink_id]`` stay one object with one state.  The sink
+    keeps its own pressure: it is the network's pressure boundary.  Called
+    before the visualization network is built, by both :func:`solve_staged`
+    and :meth:`~boulder.runner.BoulderRunner.build_viz_network`.
     """
     nodes: List[Dict[str, Any]] = config.get("nodes") or []
     connections: List[Dict[str, Any]] = config.get("connections") or []
@@ -1057,15 +1058,21 @@ def _refresh_terminal_sinks(converter: Any, config: Dict[str, Any]) -> None:
         outlet_gas = _extract_gas_state(source_reactor, mechanism, converter)
         mdot = _measure_outlet_mdot(source_id, converter)
 
-        new_res_gas = converter._get_gas_for_mech(mechanism)
-        new_res_gas.TPY = outlet_gas.T, outlet_gas.P, outlet_gas.Y
-        new_sink = ct.Reservoir(new_res_gas, clone=False)
-        new_sink.name = sink_id
-        converter.reactors[sink_id] = new_sink
+        sink = converter.reactors.get(sink_id)
+        if sink is None:
+            continue
+        # Take the phase once and sync before accessing ``sink.phase`` again:
+        # each access re-syncs the phase from the reactor's stored state, so a
+        # write made through one access is lost at the next.  A dict, not the
+        # Y array, so a species the sink's phase lacks raises instead of
+        # shifting by index.
+        sink_gas = sink.phase
+        sink_gas.TPY = outlet_gas.T, sink_gas.P, outlet_gas.mass_fraction_dict()
+        sink.syncState()
 
         try:
-            rho = float(outlet_gas.density)
-            h_mass = float(outlet_gas.enthalpy_mass)
+            rho = float(sink_gas.density)
+            h_mass = float(sink_gas.enthalpy_mass)
             T_norm = 273.15
             P_norm = 101325.0
             norm_gas = converter._get_gas_for_mech(mechanism)
@@ -1074,8 +1081,7 @@ def _refresh_terminal_sinks(converter: Any, config: Dict[str, Any]) -> None:
             v_dot_norm = mdot / rho_norm if rho_norm > 0 else 0.0
             v_dot_real = mdot / rho if rho > 0 else 0.0
             Y = {
-                sp: float(outlet_gas.Y[i])
-                for i, sp in enumerate(outlet_gas.species_names)
+                sp: float(sink_gas.Y[i]) for i, sp in enumerate(sink_gas.species_names)
             }
             top_Y = dict(sorted(Y.items(), key=lambda kv: kv[1], reverse=True)[:3])
         except Exception:
@@ -1083,33 +1089,40 @@ def _refresh_terminal_sinks(converter: Any, config: Dict[str, Any]) -> None:
             top_Y = {}
 
         display_props = {
-            # DEPRECATED with OutletSink — stream-point diamonds use stream_point=True.
             "terminal_sink": True,
             "source_node": source_id,
-            "temperature": float(outlet_gas.T),
-            "pressure": float(outlet_gas.P),
+            "temperature": float(sink_gas.T),
+            "pressure": float(sink_gas.P),
             "mdot": mdot,
             "density": rho,
             "h_mass": h_mass,
-            "v_dot_normal_m3_s": v_dot_norm,
-            "v_dot_real_m3_s": v_dot_real,
             "top_Y": top_Y,
             "composition": ",".join(f"{sp}:{y:.4f}" for sp, y in top_Y.items()),
         }
+        # Same units split as stream points: reactor_meta in m³/s, node props
+        # (read by the Properties panel) in m³/h.
         converter.reactor_meta.setdefault(sink_id, {}).update(
             {
                 "mechanism": mechanism,
-                "gas_solution": new_res_gas,
+                "gas_solution": sink_gas,
                 **display_props,
+                "v_dot_normal_m3_s": v_dot_norm,
+                "v_dot_real_m3_s": v_dot_real,
             }
         )
-        node.setdefault("properties", {}).update(display_props)
+        node.setdefault("properties", {}).update(
+            {
+                **display_props,
+                "v_dot_normal_m3_h": v_dot_norm * 3600.0,
+                "v_dot_real_m3_h": v_dot_real * 3600.0,
+            }
+        )
 
         logger.debug(
             "Terminal OutletSink '%s' refreshed from '%s': T=%.1f K, mdot=%.4g kg/s",
             sink_id,
             source_id,
-            outlet_gas.T,
+            sink_gas.T,
             mdot,
         )
 
