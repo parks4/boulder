@@ -467,6 +467,11 @@ class BoulderRunner:
                         }
                     )
 
+        # Mirrors solve_staged: terminal OutletSinks take their inflow state.
+        from .staged_solver import _refresh_terminal_sinks
+
+        _refresh_terminal_sinks(converter, self.config)
+
         viz_net = converter.build_viz_network(
             all_connections=all_connections,
             built_conn_ids=already_built,

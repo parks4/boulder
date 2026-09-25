@@ -100,7 +100,7 @@ Clicks are fragile at narrow viewports — resize browser wider if needed. When 
 | **Convergence** | No | Staged-solve progress (redirects residence profiles to Plots when applicable) |
 | **Network** | Plugin | Live reactor network view |
 
-Terminal **OutletSink** nodes: post-solve thermo comes from `_refresh_terminal_sinks` (legacy path). **Inter-stage stream-point** diamonds (`{source}_outlet`) are refreshed during staged solve — preferred for multi-stage models.
+Terminal **OutletSink** nodes: post-solve thermo is the inflow state, written into the wired sink by `_refresh_terminal_sinks` on both solve paths. **Inter-stage stream-point** diamonds (`{source}_outlet`) are refreshed during the staged solve, at stage boundaries.
 
 ## API verification (preferred for agents)
 

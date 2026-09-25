@@ -262,9 +262,8 @@ export function PropertiesPanel() {
   // wrong starting point.
   const renderProperties = previewDisplayProperties;
 
-  // Stream-point nodes (inter-stage diamonds) and legacy terminal OutletSink nodes
-  // are computed from upstream reactors.  OutletSink + terminal_sink is deprecated;
-  // remove isTerminalSink when OutletSink is dropped from STONE.
+  // Stream-point nodes (inter-stage diamonds) and terminal OutletSink nodes
+  // are computed from upstream reactors.
   const isStreamPoint = isNode && Boolean(properties.stream_point);
   const isTerminalSink = isNode && Boolean(properties.terminal_sink);
   const isComputedStream = isStreamPoint || isTerminalSink;
