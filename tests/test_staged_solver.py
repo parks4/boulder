@@ -1251,7 +1251,8 @@ def test_terminal_outlet_sink_matches_upstream_reactor_after_solve():
     """After solve_staged, the terminal OutletSink carries the upstream reactor state.
 
     Asserts the sink's temperature and display props match the reactor it is
-    fed by.
+    fed by, and that the node props carry volume flow in m³/h (the keys the
+    Properties panel reads) while reactor_meta keeps m³/s.
     """
     cfg = _terminal_sink_config()
     conv = DualCanteraConverter(mechanism="gri30.yaml")
@@ -1269,6 +1270,14 @@ def test_terminal_outlet_sink_matches_upstream_reactor_after_solve():
     assert props.get("terminal_sink") is True
     assert props.get("source_node") == "reactor"
     assert abs(float(props["temperature"]) - T_reactor) < 1.0
+
+    # Node props carry volume flow in m³/h -- the keys the Properties panel
+    # reads, as for stream points -- while reactor_meta keeps m³/s.
+    meta = conv.reactor_meta["outlet"]
+    assert meta["v_dot_real_m3_s"] > 0
+    assert props["v_dot_real_m3_h"] == pytest.approx(meta["v_dot_real_m3_s"] * 3600)
+    assert props["v_dot_normal_m3_h"] == pytest.approx(meta["v_dot_normal_m3_s"] * 3600)
+    assert "v_dot_real_m3_s" not in props
 
 
 @pytest.mark.parametrize("entry", ["build", "solve"])

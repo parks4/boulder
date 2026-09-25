@@ -1096,19 +1096,27 @@ def _refresh_terminal_sinks(converter: Any, config: Dict[str, Any]) -> None:
             "mdot": mdot,
             "density": rho,
             "h_mass": h_mass,
-            "v_dot_normal_m3_s": v_dot_norm,
-            "v_dot_real_m3_s": v_dot_real,
             "top_Y": top_Y,
             "composition": ",".join(f"{sp}:{y:.4f}" for sp, y in top_Y.items()),
         }
+        # Same units split as stream points: reactor_meta in m³/s, node props
+        # (read by the Properties panel) in m³/h.
         converter.reactor_meta.setdefault(sink_id, {}).update(
             {
                 "mechanism": mechanism,
                 "gas_solution": sink_gas,
                 **display_props,
+                "v_dot_normal_m3_s": v_dot_norm,
+                "v_dot_real_m3_s": v_dot_real,
             }
         )
-        node.setdefault("properties", {}).update(display_props)
+        node.setdefault("properties", {}).update(
+            {
+                **display_props,
+                "v_dot_normal_m3_h": v_dot_norm * 3600.0,
+                "v_dot_real_m3_h": v_dot_real * 3600.0,
+            }
+        )
 
         logger.debug(
             "Terminal OutletSink '%s' refreshed from '%s': T=%.1f K, mdot=%.4g kg/s",
