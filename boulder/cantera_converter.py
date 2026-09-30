@@ -723,6 +723,13 @@ class DualCanteraConverter:
 
     SCRIPT_EMITTER_CLASS: type = _CanteraScriptEmitter
 
+    # Tolerance for the "does this composition sum to 1.0" sanity check in
+    # ``parse_composition``. Coarser than a numerical-precision tolerance on
+    # purpose: legitimate rounding in a hand-written config (e.g. mole
+    # fractions given to 3-4 significant figures) should not trip it, while a
+    # real omission (e.g. a forgotten species leaving the sum at ~0.8) must.
+    _COMPOSITION_SUM_TOL: float = 1e-3
+
     def __init__(
         self,
         mechanism: Optional[str] = None,
@@ -804,6 +811,11 @@ class DualCanteraConverter:
         Values are always plain floats, so a fragment is only a complete entry
         once the text after its last ``:`` parses as one; until then the next
         comma-separated fragment is folded into the same (comma-bearing) name.
+
+        Logs a warning (without raising) if the parsed fractions don't sum to
+        1.0 within ``_COMPOSITION_SUM_TOL`` — Cantera silently renormalizes a
+        composition when it's assigned to a gas state, so an omission or typo
+        here would otherwise pass unnoticed.
         """
         comp_dict: Dict[str, float] = {}
         buf: Optional[str] = None
@@ -819,6 +831,13 @@ class DualCanteraConverter:
             buf = None
         if buf is not None:
             raise ValueError(f"Malformed composition string: {comp_str!r}")
+
+        total = sum(comp_dict.values())
+        if abs(total - 1.0) > self._COMPOSITION_SUM_TOL:
+            logger.warning(
+                f"Composition {comp_str!r} sums to {total:g}, not 1.0; "
+                "Cantera will silently renormalize it."
+            )
         return comp_dict
 
     # ------------------------------------------------------------------
