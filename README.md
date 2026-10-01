@@ -175,6 +175,12 @@ connections:
 
 See [`configs/README.md`](configs/README.md) for comprehensive YAML with 🪨 STONE standard documentation and examples.
 
+## Example Gallery
+
+Ready-to-run examples live in the [boulder_examples](https://github.com/parks4/boulder_examples)
+repository. Browse the [Example Gallery](https://parks4.github.io/boulder_examples/catalog.html)
+to see them rendered.
+
 ## Supported Components
 
 ### Reactors

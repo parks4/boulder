@@ -24,6 +24,14 @@ From the CLI::
     boulder                 # launches the server & opens the interface
     boulder some_file.yaml  # launches the server preloading a YAML config
 
+Example Gallery
+---------------
+
+Ready-to-run Boulder examples live in a dedicated repository,
+`parks4/boulder_examples <https://github.com/parks4/boulder_examples>`_.
+Browse the rendered `Example Gallery <https://parks4.github.io/boulder_examples/catalog.html>`_
+to see what each example does, then clone the repository to run them locally.
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
