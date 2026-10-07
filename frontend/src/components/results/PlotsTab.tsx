@@ -71,8 +71,11 @@ export function PlotsTab({ data }: Props) {
       height: 300,
       showlegend: true,
       legend: { x: 1, xanchor: "right" as const, y: 1 },
+      // Keep the user's y zoom/pan across re-renders (x is synced via state);
+      // reset only when switching reactor, whose data has a different scale.
+      uirevision: selectedReactorId ?? undefined,
     }),
-    [theme],
+    [theme, selectedReactorId],
   );
 
   // reactorSeries must be resolved before any early return so that the

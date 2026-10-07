@@ -26,6 +26,7 @@ interface PlotProps {
   layout?: {
     yaxis?: Record<string, unknown>;
     title?: { text?: string };
+    uirevision?: string | null;
   };
 }
 
@@ -105,6 +106,15 @@ describe("PlotsTab", () => {
       rangemode: "tozero",
       tickformat: ",.0f",
     });
+  });
+
+  it("sets uirevision per reactor so y zoom survives re-renders", () => {
+    render(<PlotsTab data={steadySingleSample} />);
+
+    expect(plotCalls.length).toBeGreaterThan(0);
+    for (const plot of plotCalls) {
+      expect(plot.layout?.uirevision).toBe("steady_reactor");
+    }
   });
 
   it("uses a zero baseline for spatial pressure profiles", () => {
