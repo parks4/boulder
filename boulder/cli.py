@@ -464,6 +464,71 @@ def _run_validate_subcommand(argv: list[str]) -> int:
     return 0
 
 
+def _run_results_subcommand(argv: list[str]) -> int:
+    """Handle ``boulder results list|export|plot`` -- read a stored result set.
+
+    Works on a copied or moved store: see :mod:`boulder.results`.
+    """
+    from .results import MechanismMismatchError, open_results
+
+    parser = argparse.ArgumentParser(
+        prog="boulder results", description="Read stored simulation results."
+    )
+    parser.add_argument(
+        "--mechanism", help="mechanism file, overriding the stored path"
+    )
+    parser.add_argument(
+        "--search-path",
+        action="append",
+        default=[],
+        help="directory searched for the mechanism",
+    )
+    parser.add_argument(
+        "--allow-mismatch",
+        action="store_true",
+        help="warn instead of failing on a SHA-256 mismatch",
+    )
+    sub = parser.add_subparsers(dest="action", required=True)
+    p_list = sub.add_parser("list", help="one line per scenario: id, label, inputs")
+    p_list.add_argument("store", help="store directory or STONE config")
+    p_exp = sub.add_parser("export", help="write one reactor trajectory to CSV")
+    p_exp.add_argument("store")
+    p_exp.add_argument("scenario", help="scenario id (see 'list')")
+    p_exp.add_argument("--reactor", required=True)
+    p_exp.add_argument("--csv", required=True, help="output CSV file")
+    p_plot = sub.add_parser("plot", help="plot a variable vs time for every scenario")
+    p_plot.add_argument("store")
+    p_plot.add_argument("--reactor", required=True)
+    p_plot.add_argument(
+        "--var", required=True, help='"T", "P", "X:<species>", "Y:<species>", ...'
+    )
+    p_plot.add_argument("--out", required=True, help="output image file")
+    args = parser.parse_args(argv)
+
+    try:
+        rs = open_results(
+            args.store,
+            mechanism=args.mechanism,
+            search_path=args.search_path,
+            allow_mismatch=args.allow_mismatch,
+        )
+        if args.action == "list":
+            for sc in rs.values():
+                inputs = ", ".join(f"{k[3:]}={v}" for k, v in sc.inputs.items())
+                print(f"{sc.id}	{sc.label}	{inputs}")
+        elif args.action == "export":
+            rs[args.scenario].states(args.reactor).save(args.csv, overwrite=True)
+            print(f"wrote {args.csv}")
+        elif args.action == "plot":
+            ax = rs.plot(args.reactor, args.var)
+            ax.figure.savefig(args.out, dpi=150, bbox_inches="tight")
+            print(f"wrote {args.out}")
+    except (FileNotFoundError, KeyError, ValueError, MechanismMismatchError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _run_describe_subcommand(argv: list[str]) -> int:
     """Handle ``boulder describe <kind>|--list`` — dump a plugin's schema."""
     from .schema_registry import describe_kind, registered_kinds
@@ -561,7 +626,7 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
     # Subcommand dispatch (kept outside argparse to preserve backward-compat
     # with the flag-based invocation ``boulder path/to.yaml``).
-    if argv and argv[0] in {"plugins", "validate", "describe"}:
+    if argv and argv[0] in {"plugins", "validate", "describe", "results"}:
         sub = argv[0]
         rc = 0
         if sub == "plugins":
@@ -570,6 +635,8 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
             rc = _run_validate_subcommand(argv[1:])
         elif sub == "describe":
             rc = _run_describe_subcommand(argv[1:])
+        elif sub == "results":
+            rc = _run_results_subcommand(argv[1:])
         sys.exit(rc)
 
     args = parse_args(argv)

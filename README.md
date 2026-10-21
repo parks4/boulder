@@ -97,6 +97,16 @@ boulder some_file.yaml --sweep --headless   # no GUI: run every scenario, write
                                              # .boulder-cache/<config-stem>/
 ```
 
+The stored results open without the GUI or the original config, including from a
+copied store, through `boulder.results` (Cantera `SolutionArray` per reactor;
+nothing is re-solved) or the CLI:
+
+```bash
+boulder results list .boulder-cache/<config-stem>/
+boulder results export <store> <scenario> --reactor r0 --csv r0.csv
+boulder results plot <store> --reactor r0 --var T --out T.png
+```
+
 ### Development Mode
 
 You can start both the backend and frontend development server with a single command:
