@@ -12,6 +12,8 @@ misparsed any composition string containing such a species and raised
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from boulder.cantera_converter import DualCanteraConverter
@@ -53,3 +55,38 @@ def test_parse_composition_multiple_comma_species(
         "C8H131-5,3,SA": pytest.approx(2e-07),
         "NC7H16": pytest.approx(0.005),
     }
+
+
+def test_parse_composition_normalized_does_not_warn(
+    converter: DualCanteraConverter, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A composition summing to ~1.0 (within tolerance) logs no warning."""
+    with caplog.at_level(logging.WARNING):
+        parsed = converter.parse_composition("H2:0.667,O2:0.333")
+    assert parsed == {
+        "H2": pytest.approx(0.667),
+        "O2": pytest.approx(0.333),
+    }
+    assert not any("sums to" in record.message for record in caplog.records)
+
+
+def test_parse_composition_non_normalized_warns(
+    converter: DualCanteraConverter, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A composition summing well away from 1.0 logs a warning.
+
+    It still parses and returns the (unrescaled) fractions as given --
+    Cantera itself is the one that renormalizes them once assigned to a gas
+    state.
+    """
+    with caplog.at_level(logging.WARNING):
+        parsed = converter.parse_composition("H2:0.5,O2:0.3")
+    assert parsed == {
+        "H2": pytest.approx(0.5),
+        "O2": pytest.approx(0.3),
+    }
+    warnings = [
+        record.message for record in caplog.records if "sums to" in record.message
+    ]
+    assert len(warnings) == 1
+    assert "H2:0.5,O2:0.3" in warnings[0]
