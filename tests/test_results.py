@@ -34,7 +34,7 @@ def _batch(mech: Path, T0: float) -> ct.SolutionArray:
     states = ct.SolutionArray(gas, extra=["t"])
     for t in np.linspace(0.0, 2e-3, 21):
         net.advance(t)
-        states.append(reactor.phase.state, t=t)
+        states.append(reactor.phase.state, t=t)  # type: ignore[call-arg]
     return states
 
 
