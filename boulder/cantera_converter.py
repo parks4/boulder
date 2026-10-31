@@ -1768,6 +1768,18 @@ class DualCanteraConverter:
                 inlet = inlet_states[rid]
                 node_mech = stage_mechanism
                 gas_for_node = self._get_gas_for_mech(node_mech)
+                # A state copied from another mechanism is only meaningful on the
+                # same species list; otherwise it fails on array length, or silently
+                # maps mass fractions onto the wrong species when the counts match.
+                if list(inlet.species_names) != list(gas_for_node.species_names):
+                    raise ValueError(
+                        f"Node '{rid}' (mechanism '{node_mech}', "
+                        f"{gas_for_node.n_species} species) receives an inter-stage "
+                        f"state on a different species list ({inlet.n_species} "
+                        "species, from the upstream stage's mechanism). Declare a "
+                        "'mechanism_switch' on the inter-stage connection into "
+                        f"'{rid}', or run both stages on the same mechanism."
+                    )
                 gas_for_node.TPY = inlet.T, inlet.P, inlet.Y
             else:
                 node_mech = str(
