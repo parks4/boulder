@@ -319,6 +319,22 @@ class TestStagedSolveInert:
         assert n_reactors == 2
 
 
+def test_cross_mechanism_handoff_without_switch_raises():
+    """Stages on different mechanisms with no ``mechanism_switch`` fail with a clear error.
+
+    Asserts the build raises ``ValueError`` naming the receiving node and pointing
+    at ``mechanism_switch`` -- instead of Cantera's opaque "Array has incorrect
+    length" from copying a 53-species state into a 10-species phase.
+    """
+    import copy
+
+    cfg = copy.deepcopy(_INERT_TWO_STAGE)
+    cfg["groups"]["stage_b"]["mechanism"] = "h2o2.yaml"
+    conv = DualCanteraConverter(mechanism="gri30.yaml")
+    with pytest.raises(ValueError, match=r"'r_b'.*mechanism_switch"):
+        conv.build_network(cfg)
+
+
 # ---------------------------------------------------------------------------
 # End-to-end staged solve from the example YAML config file
 # ---------------------------------------------------------------------------
