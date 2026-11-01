@@ -9,7 +9,7 @@
  *   so right-click-on-graph and Stage-panel triggers reach the same modal.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
@@ -177,6 +177,10 @@ vi.mock("@/stores/configStore", () => ({
 import { AppShell } from "./AppShell";
 
 describe("AppShell", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockConfig = { nodes: [], connections: [] };
@@ -206,7 +210,6 @@ describe("AppShell", () => {
     render(<AppShell />);
     await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/ui/header-links"));
     expect(screen.queryByRole("link", { name: "Reports" })).not.toBeInTheDocument();
-    vi.unstubAllGlobals();
   });
 
   it("renders a registered header link with its href, tooltip and new-tab target", async () => {
@@ -217,7 +220,7 @@ describe("AppShell", () => {
     expect(link).toHaveAttribute("href", "/reports");
     expect(link).toHaveAttribute("title", "Past runs");
     expect(link).toHaveAttribute("target", "_blank");
-    vi.unstubAllGlobals();
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
   it("does not render the Add Reactor modal when the store says it's closed", () => {

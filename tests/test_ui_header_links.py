@@ -51,6 +51,10 @@ def test_registered_link_is_served(monkeypatch):
         ("Reports", "reports"),
         ("Reports", "data:text/html,x"),
         ("Reports", ""),
+        ("Reports", "/\\evil"),
+        ("Reports", "/a\tb"),
+        ("Reports", "/a\nb"),
+        ("Reports", "/a b"),
     ],
 )
 def test_invalid_link_rejected(label, href):
