@@ -53,8 +53,9 @@ Reader rules (Boulder at `STONE_FORMAT_VERSION = M.m`, file at `stone_version = 
 
 Version history:
 
-- **2.2**: optional top-level `references:` mapping (Section 2).
-- **2.1**: first versioned format (`metadata.stone_version`).
+- **2.2**: optional top-level `references:` mapping (Section 3).
+- **2.1**: sequential `for:`/`while:` chains in `scenarios_sweep`.
+- **2.0**: first versioned format (`metadata.stone_version`), never released.
 
 ### Compatibility promise
 
