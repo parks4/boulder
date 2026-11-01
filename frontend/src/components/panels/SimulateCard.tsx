@@ -105,8 +105,13 @@ export function SimulateCard() {
         .then((actions) => {
           if (!cancelled) setGuiActions(actions);
         })
-        .catch(() => {
-          if (!cancelled) setGuiActions([]);
+        .catch((err) => {
+          if (cancelled) return;
+          setGuiActions([]);
+          // Not silent: an empty list would read as "this host has no actions".
+          toast.error(
+            `Could not load GUI actions: ${err instanceof Error ? err.message : err}`,
+          );
         });
 
     doFetch();

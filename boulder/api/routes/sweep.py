@@ -48,6 +48,7 @@ from ...runset import (
     sweeps_of,
 )
 from ...sweep_runner import (
+    converter_mechanism_resolver,
     final_states_of,
     prepare_scenario,
     solve_scenario,
@@ -368,14 +369,13 @@ async def sweep_run(
             # the same source `/api/simulations` reads. `get_plugins()` is a
             # *different*, entry-point/env-var-driven registry that a host
             # need not populate the same way, so it can't be relied on here.
+            # `app.state` (set once by the CLI), not `get_plugins()`, is the
+            # source -- same as `/api/simulations`.
             converter_cls = (
                 getattr(request.app.state, "converter_class", None)
                 or DualCanteraConverter
             )
-            # `__new__` avoids constructing a real instance (which would
-            # eagerly load a Cantera Solution) just to obtain a method
-            # reference -- same trick `_default_resolve_mechanism` uses.
-            resolve_mechanism = converter_cls.__new__(converter_cls).resolve_mechanism
+            resolve_mechanism = converter_mechanism_resolver(converter_cls)
             for i, (sid, cfg) in enumerate(iter_run_set(raw, cursor)):
                 visited.add(sid)
                 if stop_event.is_set():

@@ -214,7 +214,9 @@ def test_the_source_never_reaches_the_fingerprint(tmp_path: Path) -> None:
     expected = result_cache.compute_fingerprint(
         normalize_config(copy.deepcopy(expanded["hot"]), plugins=plugins),
         # The identity the run hashes: the mechanism as the converter resolves it.
-        mechanism=sweep_runner._default_resolve_mechanism(plugins)("gri30.yaml"),
+        mechanism=sweep_runner.converter_mechanism_resolver(plugins.converter_class)(
+            "gri30.yaml"
+        ),
     )
 
     store_dir = sweep_runner.run(cfg)
