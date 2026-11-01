@@ -534,7 +534,7 @@ def _normalize_v2(raw: Dict[str, Any], dialect: str) -> Dict[str, Any]:
         pipeline (unit coercion, port shortcuts — now rejected — and group
         synthesis).
     """
-    if "references" in raw and not isinstance(raw["references"], dict):
+    if raw.get("references") is not None and not isinstance(raw["references"], dict):
         raise ValueError(
             "STONE v2 error: 'references:' must be a mapping, got "
             f"{type(raw['references']).__name__}. See STONE_SPECIFICATIONS.md."

@@ -11,7 +11,9 @@ from boulder.config import (
 )
 from boulder.runset import expand_scenarios
 
-REFS = {"pid": {"doc_no": "EX-PID-001", "rev": "A", "sheet": 1, "title": "Example P&ID"}}
+REFS = {
+    "pid": {"doc_no": "EX-PID-001", "rev": "A", "sheet": 1, "title": "Example P&ID"}
+}
 
 _NET = [
     {"id": "feed", "Reservoir": {"temperature": 300, "composition": "N2:1"}},
@@ -63,7 +65,7 @@ def test_references_survive_normalize_validate_and_export(make):
 
 
 def test_references_survive_scenario_expansion():
-    """An overlay that does not touch references: keeps the base's section."""
+    """Guard (also passes on main): an overlay keeps the base's references:."""
     base = _single(references=REFS, scenarios={"hot": {"settings": {"dt": 0.5}}})
     expanded = dict(expand_scenarios(base))
     assert expanded["hot"]["references"] == REFS
@@ -81,3 +83,11 @@ def test_references_must_be_a_mapping(make):
     """A non-mapping references: raises a clear error naming the key."""
     with pytest.raises(ValueError, match="'references:' must be a mapping"):
         normalize_config(make(references=["EX-PID-001"]))
+
+
+@pytest.mark.parametrize("make", [_single, _staged])
+def test_config_without_references_round_trips(make):
+    """No references: -> validate -> export -> YAML -> reload works (no null key)."""
+    validated = validate_config(normalize_config(make()))
+    exported = yaml.safe_load(yaml.safe_dump(convert_to_stone_format(validated)))
+    assert normalize_config(exported).get("references") is None
