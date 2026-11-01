@@ -28,7 +28,7 @@ Files that mix `stages:` and `network:` at the same level are rejected.
 
 ```yaml
 metadata:
-  stone_version: "2.1"   # quoted string, MAJOR.MINOR
+  stone_version: "2.2"   # quoted string, MAJOR.MINOR
 ```
 
 - Versioned independently of the Boulder package version. **MAJOR** bumps when old files stop
@@ -50,6 +50,12 @@ Reader rules (Boulder at `STONE_FORMAT_VERSION = M.m`, file at `stone_version = 
 | `X == M`, `y > m` | accepted with a warning (written by a newer Boulder; unknown keys fail validation) |
 | `X != M` | accepted with a warning; the 1.x shape is still a hard error |
 | not `MAJOR.MINOR` | accepted with a warning, treated as `M.m` |
+
+Version history:
+
+- **2.2**: optional top-level `references:` mapping (Section 3).
+- **2.1**: sequential `for:`/`while:` chains in `scenarios_sweep`.
+- **2.0**: first versioned format (`metadata.stone_version`), never released.
 
 ### Compatibility promise
 

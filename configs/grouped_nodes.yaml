@@ -1,5 +1,5 @@
 metadata:
-  stone_version: "2.1"
+  stone_version: "2.2"
   name: "Grouped Reactors"
   description: "Two reactors in series in a single advance_to_steady_state stage."
   version: "1.0"

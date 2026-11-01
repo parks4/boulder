@@ -9,7 +9,7 @@ See [STONE_SPECIFICATIONS.md](../STONE_SPECIFICATIONS.md) for the full normative
 **v2** (current) uses a `network:` key (single stage) or `stages:` + dynamic stage blocks (multi-stage).
 STONE v1 files with top-level `nodes:`/`connections:`/`groups:` are rejected.
 
-Every example carries `metadata.stone_version: "2.1"`, the STONE format version (versioned
+Every example carries `metadata.stone_version: "2.2"`, the STONE format version (versioned
 independently of the Boulder package version). Files without it are older STONE 2.x files: Boulder
 loads them and stamps the version when they are saved again. See STONE_SPECIFICATIONS.md §1.
 

@@ -1319,7 +1319,7 @@ def drop_legacy_metadata_keys(config: Dict[str, Any]) -> List[str]:
 #: load. Bump it in the same PR as the format change (see AGENTS.md, "Git and
 #: releases"). Written into ``metadata.stone_version`` by
 #: :func:`migrate_stone_config` on every load.
-STONE_FORMAT_VERSION = "2.1"
+STONE_FORMAT_VERSION = "2.2"
 
 
 def _parse_stone_version(value: Any) -> Optional[Tuple[int, int]]:
