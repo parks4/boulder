@@ -23,6 +23,7 @@ import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { AddReactorModal } from "@/components/modals/AddReactorModal";
 import { AddMFCModal } from "@/components/modals/AddMFCModal";
 import { Button } from "@/components/ui/Button";
+import { applyScenarioDeepLink } from "@/lib/scenarioDeepLink";
 import { toast } from "sonner";
 
 export function AppShell() {
@@ -94,6 +95,7 @@ export function AppShell() {
         if (resp.preloaded && resp.config) {
           setConfig(resp.config, resp.filename || "config.yaml", resp.yaml);
           toast.success(`Loaded ${resp.filename || "configuration"}`);
+          void applyScenarioDeepLink();
 
           // Try to populate the UI with cached results for this config.
           return fetchCachedResult().then((cacheResp) => {
