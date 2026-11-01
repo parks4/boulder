@@ -439,8 +439,9 @@ def notify_cached(
 ) -> None:
     """Tell the host's ``on_cached`` hook that *sid* was served from the store.
 
-    The counterpart of :func:`store_solved_scenario`'s ``on_solved`` call, shared
-    by every path that skips a solve on a fingerprint hit. The hook gets
+    Shared by every re-run path that skips a solve on a fingerprint hit; it is
+    silent on a fresh solve, and may be called repeatedly for the same entry
+    (once per re-run), so the host must handle it idempotently. The hook gets
     ``(scenario_id, config, fingerprint, artifacts_dir, computed_at)``;
     ``computed_at`` is the entry's original solve time (epoch seconds, ``0.0``
     when the entry records none). Best-effort, like ``on_solved``: a raising hook
@@ -518,7 +519,9 @@ def run(
         silent). ``artifacts_dir`` is the entry's existing artifacts directory
         and ``computed_at`` the entry's original solve time (epoch seconds), not
         the time of this run. Lets a host keep a side index complete when a
-        model is re-run without changes. Defaults to ``plugins.on_scenario_cached``;
+        model is re-run without changes. Fires on every re-run served from the
+        store, possibly repeatedly for the same entry, so the host must handle
+        repeated calls idempotently. Defaults to ``plugins.on_scenario_cached``;
         exceptions are caught and logged, like ``on_solved``.
 
     Returns

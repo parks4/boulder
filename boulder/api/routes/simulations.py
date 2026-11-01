@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from ruamel.yaml.error import YAMLError
 
-from ...cantera_converter import DualCanteraConverter
+from ...cantera_converter import DualCanteraConverter, get_plugins
 from ...config import TRANSIENT_SOLVER_KINDS, synthesize_default_group
 from ...simulation_worker import SimulationWorker
 from ..sse import sanitize_for_json, simulation_event_stream
@@ -93,7 +93,6 @@ def _scenario_config(
     if not body.scenario_id or body.scenario_id == BASELINE_SCENARIO_ID:
         return None
 
-    from ...cantera_converter import get_plugins
     from ...config import normalize_config
     from .sweep import _merged_raw
 
@@ -492,8 +491,6 @@ async def check_simulation_cache(
         "Cache HIT (fingerprint %s): retrieving result from cache, skipping solve.",
         fingerprint[:12],
     )
-    from ...cantera_converter import get_plugins
-
     notify_cached(
         get_plugins().on_scenario_cached,
         store_dir,

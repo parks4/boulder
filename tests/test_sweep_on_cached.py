@@ -1,8 +1,8 @@
 """``on_cached`` fires for every scenario served from the store, never for a solve.
 
 ``on_solved`` is silent on a fingerprint hit, so a host that indexes runs from it
-never sees a re-run of an unchanged model. ``on_cached`` is the cache-hit
-counterpart: ``(scenario_id, config, fingerprint, artifacts_dir, computed_at)``.
+never sees a re-run of an unchanged model. ``on_cached`` fires on every re-run
+served from the store: ``(scenario_id, config, fingerprint, artifacts_dir, computed_at)``.
 These tests solve a real two-entry run-set on a neutral gri30 network and check
 the contract on the headless sweep, the GUI sweep and the single-run cache check.
 """
@@ -74,13 +74,13 @@ _HOT = {"network": [{"id": "feed", "Reservoir": {"temperature": 350}}]}
 
 
 @pytest.fixture
-def cached_calls():
+def cached_calls(monkeypatch):
     """Register a recording ``on_scenario_cached`` plugin hook for the test."""
-    plugins = get_plugins()
     calls: List[Tuple[Any, ...]] = []
-    plugins.on_scenario_cached = lambda *args: calls.append(args)
-    yield calls
-    plugins.on_scenario_cached = None
+    monkeypatch.setattr(
+        get_plugins(), "on_scenario_cached", lambda *args: calls.append(args)
+    )
+    return calls
 
 
 def _config(tmp_path: Path) -> Path:
@@ -108,10 +108,11 @@ def test_headless_cached_run_fires_on_cached_once_per_scenario(
     assert cached_calls == [], "a fresh solve must not fire on_cached"
     stored = _fingerprints(store_dir)
     assert len(stored) == 2
-    first = {
-        sid: scenario_store.entry_attrs(store_dir, sid, "")["computed_at"]
-        for sid in stored
-    }
+    first = {}
+    for sid in stored:
+        attrs = scenario_store.entry_attrs(store_dir, sid, "")
+        assert attrs is not None
+        first[sid] = attrs["computed_at"]
 
     time.sleep(0.05)
     sweep_runner.run(cfg)
@@ -167,6 +168,7 @@ def test_gui_sweep_cached_rerun_fires_on_cached(tmp_path, cached_calls) -> None:
         _run()
         assert cached_calls == []
         store_dir = resolve_store_dir(app.state.preloaded_raw, str(cfg))
+        assert store_dir is not None
         stored = _fingerprints(store_dir)
         assert len(stored) == 2
 
@@ -210,6 +212,10 @@ def test_check_cache_hit_fires_on_cached(tmp_path, cached_calls) -> None:
         sid, _cfg, fingerprint, _dir, _computed_at = cached_calls[0]
         assert fingerprint == stored[sid]
 
+        # Each press of Run on the stored result is a re-run: it fires again.
+        client.post("/api/simulations/check-cache", json=_body())
+        assert len(cached_calls) == 2
+
         cached_calls.clear()
         base["network"][0]["Reservoir"]["temperature"] = 999
         body = _body()
@@ -218,26 +224,27 @@ def test_check_cache_hit_fires_on_cached(tmp_path, cached_calls) -> None:
         assert cached_calls == []
 
 
-def test_startup_preload_of_a_stored_result_fires_on_cached(
+def test_opening_a_stored_config_does_not_fire_on_cached(
     tmp_path, cached_calls, monkeypatch
 ) -> None:
-    """Opening a config whose result is stored fires on_cached once, at startup."""
+    """Starting the GUI on a config whose result is stored fires no on_cached.
+
+    The hook is for re-runs only: opening a config is not a run.
+    """
     from boulder import sweep_runner
+    from boulder.api.main import create_app
 
     base = {
         k: v for k, v in yaml.safe_load(_CONFIG_YAML).items() if k not in _RUNSET_KEYS
     }
     cfg = tmp_path / "single.yaml"
     cfg.write_text(yaml.safe_dump(base), encoding="utf-8")
-    resolver = sweep_runner.converter_mechanism_resolver(None)
-    store_dir = sweep_runner.run(cfg, resolve_mechanism=resolver)
-    stored = _fingerprints(store_dir)
-    assert cached_calls == []
-
-    from boulder.api.main import create_app
+    sweep_runner.run(
+        cfg, resolve_mechanism=sweep_runner.converter_mechanism_resolver(None)
+    )
 
     monkeypatch.setenv("BOULDER_CONFIG_PATH", str(cfg))
     with TestClient(create_app()) as client:
         client.get("/api/health")
 
-    assert [(c[0], c[2]) for c in cached_calls] == list(stored.items())
+    assert cached_calls == []

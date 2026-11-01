@@ -182,11 +182,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # Attempt to load a matching cache entry for the preloaded config.
             try:
                 from .. import scenario_store
-                from ..cantera_converter import get_plugins
                 from ..runset import resolve_store_dir
                 from ..sweep_runner import (
                     converter_mechanism_resolver,
-                    notify_cached,
                     scenario_fingerprint,
                 )
 
@@ -221,18 +219,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         cached.get("fingerprint") if cached else None
                     )
                     if cached:
-                        # Reopening a stored result is a cache hit like any
-                        # other: tell the host (nothing was solved).
-                        notify_cached(
-                            get_plugins().on_scenario_cached,
-                            store_dir,
-                            cached["id"],
-                            validated,
-                            str(cached.get("fingerprint") or fingerprint),
-                            identity=scenario_store.config_identity(
-                                str(actual_yaml_path)
-                            ),
-                        )
                         meta = cached.get("meta", {})
                         created = meta.get("created_at", 0.0)
                         actual_fp = str(cached.get("fingerprint") or fingerprint or "")
