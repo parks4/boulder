@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from typing import Any, Dict, List
 
 import pytest
@@ -13,7 +14,51 @@ from boulder.summary_builder import (
     SummaryContext,
     get_summary_builder_registry,
 )
-from tests.test_runner import MINIMAL_YAML_CONTENT
+
+MINIMAL_YAML_CONTENT = textwrap.dedent("""\
+    metadata:
+      description: minimal test
+
+    phases:
+      gas:
+        mechanism: gri30.yaml
+
+    nodes:
+      - id: feed
+        type: Reservoir
+        properties:
+          temperature: 300
+          pressure: 101325
+          composition: "N2:1"
+      - id: reactor
+        type: IdealGasConstPressureMoleReactor
+        properties:
+          temperature: 300
+          pressure: 101325
+          composition: "N2:1"
+          volume: 1.0e-6
+      - id: outlet
+        type: Reservoir
+        properties:
+          temperature: 300
+          pressure: 101325
+          composition: "N2:1"
+
+    connections:
+      - id: feed_to_r
+        type: MassFlowController
+        source: feed
+        target: reactor
+        properties:
+          mass_flow_rate: 1.0e-5
+      - id: r_to_out
+        type: PressureController
+        source: reactor
+        target: outlet
+        properties:
+          master: feed_to_r
+          pressure_coeff: 0.0
+""")
 
 ROW = {"label": "export", "value": 1.0}
 
