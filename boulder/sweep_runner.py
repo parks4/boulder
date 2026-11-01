@@ -427,6 +427,41 @@ def store_solved_scenario(
             say(f"  WARNING: on_solved hook failed for scenario '{sid}': {exc}")
 
 
+def notify_cached(
+    on_cached: Optional[Callable[..., Any]],
+    store_dir: Path,
+    sid: str,
+    config: Dict[str, Any],
+    fingerprint: str,
+    *,
+    identity: str = "",
+    warn: Optional[Callable[[str], None]] = None,
+) -> None:
+    """Tell the host's ``on_cached`` hook that *sid* was served from the store.
+
+    The counterpart of :func:`store_solved_scenario`'s ``on_solved`` call, shared
+    by every path that skips a solve on a fingerprint hit. The hook gets
+    ``(scenario_id, config, fingerprint, artifacts_dir, computed_at)``;
+    ``computed_at`` is the entry's original solve time (epoch seconds, ``0.0``
+    when the entry records none). Best-effort, like ``on_solved``: a raising hook
+    is reported through *warn* and never aborts the run.
+    """
+    if on_cached is None:
+        return
+    say = warn or (lambda msg: print(msg, flush=True))
+    attrs = scenario_store.entry_attrs(store_dir, sid, identity) or {}
+    try:
+        on_cached(
+            sid,
+            config,
+            fingerprint,
+            store_artifacts_dir(store_dir, sid),
+            float(attrs.get("computed_at", 0.0) or 0.0),
+        )
+    except Exception as exc:  # noqa: BLE001
+        say(f"  WARNING: on_cached hook failed for scenario '{sid}': {exc}")
+
+
 def run(
     cfg_path: Path,
     *,
@@ -441,6 +476,7 @@ def run(
             None,
         ]
     ] = None,
+    on_cached: Optional[Callable[[str, Dict[str, Any], str, Path, float], None]] = None,
 ) -> Path:
     """Expand and solve *cfg_path*'s run-set into its collection store.
 
@@ -475,6 +511,15 @@ def run(
         can reuse the sweep's solve work instead of re-solving.
         Exceptions raised by the hook are caught and logged so one scenario's
         artifact failure does not abort the whole sweep.
+    on_cached : callable, optional
+        ``(scenario_id, config, fingerprint, artifacts_dir, computed_at) ->
+        None`` called once per scenario *served from the store* (the
+        fingerprint matched, so nothing was solved and ``on_solved`` stays
+        silent). ``artifacts_dir`` is the entry's existing artifacts directory
+        and ``computed_at`` the entry's original solve time (epoch seconds), not
+        the time of this run. Lets a host keep a side index complete when a
+        model is re-run without changes. Defaults to ``plugins.on_scenario_cached``;
+        exceptions are caught and logged, like ``on_solved``.
 
     Returns
     -------
@@ -492,6 +537,8 @@ def run(
         scenario_attrs = getattr(plugins, "scenario_attrs", None)
     if on_solved is None:
         on_solved = getattr(plugins, "on_scenario_solved", None)
+    if on_cached is None:
+        on_cached = getattr(plugins, "on_scenario_cached", None)
     _do_resolve = resolve_mechanism or converter_mechanism_resolver(
         plugins.converter_class
     )
@@ -536,6 +583,9 @@ def run(
             scenario_store.update_display_attrs(store_dir, sid, label=label, order=i)
             # A skipped chain step still seeds the next one.
             cursor.previous_states = stored_final_states(store_dir, sid, identity)
+            notify_cached(
+                on_cached, store_dir, sid, config, fingerprint, identity=identity
+            )
             continue
         print(f"scenario {i + 1}/{total_label} ({sid})", flush=True)
         gui, resolved_mech, conv = solve_scenario(config, mech_name)

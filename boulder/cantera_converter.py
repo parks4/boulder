@@ -138,6 +138,17 @@ class BoulderPlugins:
     #: argument, which defaults to this when not passed explicitly.
     on_scenario_solved: Optional[Callable[..., None]] = None
 
+    #: Called as ``(scenario_id, config, fingerprint, artifacts_dir,
+    #: computed_at) -> None`` for each scenario *served from the result store*
+    #: instead of solved (the counterpart of :attr:`on_scenario_solved`, which
+    #: cache hits never fire). ``computed_at`` is the entry's original solve time
+    #: in epoch seconds. Fires from the headless sweep, the GUI sweep and the
+    #: single-run cache check. Exceptions are caught and logged.
+    #:
+    #: Same contract as :func:`boulder.sweep_runner.run`'s ``on_cached``
+    #: argument, which defaults to this when not passed explicitly.
+    on_scenario_cached: Optional[Callable[..., None]] = None
+
     #: Axis-name/path-leaf → symbol mapping used by
     #: :func:`boulder.runset.expand_scenarios` to label sweep points in
     #: scenario ids (e.g. ``diameter`` → ``TF_D`` gives ``BASELINE__TF_D=0.03``).

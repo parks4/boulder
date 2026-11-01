@@ -449,7 +449,11 @@ async def check_simulation_cache(
     """
     from ... import scenario_store
     from ...runset import resolve_store_dir
-    from ...sweep_runner import converter_mechanism_resolver, scenario_fingerprint
+    from ...sweep_runner import (
+        converter_mechanism_resolver,
+        notify_cached,
+        scenario_fingerprint,
+    )
 
     # Normalize exactly like a run would (transient re-runs included).
     config = normalize_config_for_fingerprint(
@@ -487,6 +491,16 @@ async def check_simulation_cache(
     logger.info(
         "Cache HIT (fingerprint %s): retrieving result from cache, skipping solve.",
         fingerprint[:12],
+    )
+    from ...cantera_converter import get_plugins
+
+    notify_cached(
+        get_plugins().on_scenario_cached,
+        store_dir,
+        cached["id"],
+        config,
+        fingerprint,
+        identity=scenario_store.config_identity(config_path),
     )
     meta = cached.get("meta", {})
     # gui_payload was written to disk unsanitized (result_cache/payload_store
