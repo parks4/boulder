@@ -87,7 +87,7 @@ def test_references_must_be_a_mapping(make):
 
 @pytest.mark.parametrize("make", [_single, _staged])
 def test_config_without_references_round_trips(make):
-    """No references: -> validate -> export -> YAML -> reload works (no null key)."""
+    """No references: -> validate -> export -> YAML -> reload works (exported null is accepted)."""
     validated = validate_config(normalize_config(make()))
     exported = yaml.safe_load(yaml.safe_dump(convert_to_stone_format(validated)))
     assert normalize_config(exported).get("references") is None
