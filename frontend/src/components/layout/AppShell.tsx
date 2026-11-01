@@ -95,7 +95,6 @@ export function AppShell() {
         if (resp.preloaded && resp.config) {
           setConfig(resp.config, resp.filename || "config.yaml", resp.yaml);
           toast.success(`Loaded ${resp.filename || "configuration"}`);
-          void applyScenarioDeepLink();
 
           // Try to populate the UI with cached results for this config.
           return fetchCachedResult().then((cacheResp) => {
@@ -146,7 +145,11 @@ export function AppShell() {
             const ageMin = Math.round((Date.now() / 1000 - created) / 60);
             const ageStr = ageMin < 2 ? "just now" : `${ageMin} min ago`;
             toast.success(`Loaded cached results from ${ageStr}. Re-run skipped.`);
-          });
+          })
+            // Last on every branch (cached, not cached, failed fetch): both write
+            // the results store and the scenario selection must win. Rejections
+            // reach the outer catch.
+            .finally(() => applyScenarioDeepLink());
         } else {
           // No preloaded config, load default
           return fetchDefaultConfig().then((defResp) => {

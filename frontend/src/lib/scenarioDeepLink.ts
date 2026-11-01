@@ -8,8 +8,8 @@ export const SCENARIO_DEEP_LINK_PARAM = "scenario";
  * Honour a ``/?scenario=<id>`` deep link: select that scenario in this tab only.
  *
  * Call once the preloaded config is in place. The parameter is removed from the
- * URL first, so a reload never re-applies it. The scenario list is re-seeded
- * from the newly loaded config before the lookup; an unknown id yields a
+ * URL first, so a reload never re-applies it. The scenario list is refreshed
+ * from the server before the lookup; an unknown id yields a
  * non-blocking toast and leaves the selection untouched.
  */
 export async function applyScenarioDeepLink(): Promise<void> {
@@ -20,7 +20,9 @@ export async function applyScenarioDeepLink(): Promise<void> {
   url.searchParams.delete(SCENARIO_DEEP_LINK_PARAM);
   window.history.replaceState(window.history.state, "", url);
 
-  await useScenarioStore.getState().resetForNewConfig();
+  // The server's overlays are already current after an upload and this is a
+  // fresh page load (the mount-time refresh seeded the store), so no reset.
+  await useScenarioStore.getState().refresh();
   const { authoredIds, scenarios, setActive } = useScenarioStore.getState();
   if (authoredIds.includes(id) || scenarios.some((s) => s.id === id)) {
     await setActive(id);

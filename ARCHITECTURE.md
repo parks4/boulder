@@ -333,9 +333,10 @@ SSE subscriber.
 
 A host that has just loaded a config (e.g. `POST /api/configs/upload` with `replace=True`) can send the
 user to `/?scenario=<url-encoded id>` to land on one scenario. Once the preloaded config has loaded, the
-frontend re-seeds the scenario list from it, selects the raw scenario id in the scenarios pane (ids may
+frontend refreshes the scenario list, selects the raw scenario id in the scenarios pane (ids may
 contain `/` or `=`; encode them), and strips the parameter from the URL. An id that does not exist in the
-loaded config shows a non-blocking toast and selects nothing. Unlike the focus channel above, this acts
+loaded config shows a non-blocking toast and selects nothing. The parameter is ignored (and left in the
+URL) when no preloaded config exists, e.g. when the default config is loaded instead. Unlike the focus channel above, this acts
 only on the tab that opened the link: nothing is broadcast and no store is needed at upload time.
 
 ### Frontend (`frontend/src/`)
