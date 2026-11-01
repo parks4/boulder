@@ -523,6 +523,15 @@ header then shows the host application name and version instead of the plain
 Boulder title (config `metadata.gui_app_title/-version` still takes
 precedence). Exposed at `GET /api/ui/branding`.
 
+**Header links.** A plugin package that serves extra pages of its own can
+add a link to the GUI top bar with
+`plugins.add_header_link("Reports", "/reports", tooltip=None, new_tab=False)`.
+`href` must be a relative path or an `http(s)` URL (`javascript:` and other
+schemes raise `ValueError`). No link is shown when none is registered. Exposed
+at `GET /api/ui/header-links`. The host must serve the linked path itself (e.g.
+from an outer ASGI wrapper placed before Boulder's app); otherwise the SPA
+catch-all returns `index.html`.
+
 **Custom connection kinds.** `plugins.connection_builders["MyEdgeKind"]`
 registers a builder `(converter, conn_dict) -> device` dispatched before the
 built-in flow devices. The returned object need not be a Cantera flow device —
@@ -536,6 +545,7 @@ as first-class STONE edges.
   `supported_element_types`, `supported_node_types` (`boulder/api/routes/plugins.py`)
 - `POST /api/plugins/{plugin_id}/render` — body maps to `OutputPaneContext`; returns `{available, data}`
 - `GET /api/ui/branding` — host branding declared by a plugin package
+- `GET /api/ui/header-links` — top-bar links declared by a plugin package
 
 ### Optional spatial-style output pane (downstream plugin)
 

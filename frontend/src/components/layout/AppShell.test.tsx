@@ -9,8 +9,8 @@
  *   so right-click-on-graph and Stage-panel triggers reach the same modal.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 
 vi.mock("@/stores/themeStore", () => ({
@@ -177,6 +177,10 @@ vi.mock("@/stores/configStore", () => ({
 import { AppShell } from "./AppShell";
 
 describe("AppShell", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockConfig = { nodes: [], connections: [] };
@@ -199,6 +203,24 @@ describe("AppShell", () => {
 
     expect(screen.queryByTestId("solver-mode-badge")).not.toBeInTheDocument();
     expect(screen.queryByText("test.yaml")).not.toBeInTheDocument();
+  });
+
+  it("renders no header link when the plugin registered none", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ links: [] }) }));
+    render(<AppShell />);
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/ui/header-links"));
+    expect(screen.queryByRole("link", { name: "Reports" })).not.toBeInTheDocument();
+  });
+
+  it("renders a registered header link with its href, tooltip and new-tab target", async () => {
+    const links = [{ label: "Reports", href: "/reports", tooltip: "Past runs", new_tab: true }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ links }) }));
+    render(<AppShell />);
+    const link = await screen.findByRole("link", { name: "Reports" });
+    expect(link).toHaveAttribute("href", "/reports");
+    expect(link).toHaveAttribute("title", "Past runs");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
   it("does not render the Add Reactor modal when the store says it's closed", () => {

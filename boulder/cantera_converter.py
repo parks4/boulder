@@ -150,6 +150,10 @@ class BoulderPlugins:
     #: the Boulder title.
     branding: Optional[Dict[str, str]] = None
 
+    #: Top-bar links to pages a host serves itself, added with
+    #: :meth:`add_header_link`. Exposed at ``GET /api/ui/header-links``.
+    header_links: List[Dict[str, Any]] = field(default_factory=list)
+
     #: ``(config: dict) -> list[dict]`` callables that synthesize additional
     #: display-only Cytoscape elements (nodes/edges) for
     #: :func:`~boulder.utils.config_to_cyto_elements`, appended after its own
@@ -186,6 +190,38 @@ class BoulderPlugins:
             "env_var": [],
         }
     )
+
+    def add_header_link(
+        self,
+        label: str,
+        href: str,
+        tooltip: Optional[str] = None,
+        new_tab: bool = False,
+    ) -> None:
+        """Register a link shown in the GUI top bar, e.g. ``("Reports", "/reports")``.
+
+        ``href`` is a relative path (``/reports``) or an ``http(s)`` URL; anything
+        else (``javascript:``, ``//host``, ``data:``) raises ``ValueError``.
+        """
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError("Header link label must be a non-empty string")
+        ok = isinstance(href, str) and not any(c.isspace() or c == "\\" for c in href)
+        ok = ok and (
+            (href.startswith("/") and not href.startswith("//"))
+            or href.lower().startswith(("http://", "https://"))
+        )
+        if not ok:
+            raise ValueError(
+                f"Header link href must be a relative path or an http(s) URL, got {href!r}"
+            )
+        self.header_links.append(
+            {
+                "label": label.strip(),
+                "href": href,
+                "tooltip": tooltip,
+                "new_tab": new_tab,
+            }
+        )
 
 
 # Global cache to ensure plugins are discovered only once

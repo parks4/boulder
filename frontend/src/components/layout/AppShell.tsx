@@ -207,6 +207,17 @@ export function AppShell() {
       .catch(() => setBranding(null));
   }, []);
 
+  // Top-bar links to host-served pages, registered by a Boulder plugin.
+  const [headerLinks, setHeaderLinks] = useState<
+    { label: string; href: string; tooltip?: string | null; new_tab?: boolean }[]
+  >([]);
+  useEffect(() => {
+    fetch("/api/ui/header-links")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setHeaderLinks(data?.links ?? []))
+      .catch(() => setHeaderLinks([]));
+  }, []);
+
   // Title priority: per-config metadata > plugin branding > "Boulder".
   const headerTitle = useMemo(() => {
     const raw = config.metadata?.gui_app_title;
@@ -297,6 +308,17 @@ export function AppShell() {
             </span>
           )}
           </Button>
+          {headerLinks.map((l) => (
+            <a
+              key={`${l.label}|${l.href}`}
+              href={l.href}
+              title={l.tooltip ?? undefined}
+              {...(l.new_tab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+              className="text-sm px-2 py-1 rounded border border-border hover:bg-muted"
+            >
+              {l.label}
+            </a>
+          ))}
         </div>
       </header>
 
