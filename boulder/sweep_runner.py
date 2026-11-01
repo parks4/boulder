@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type
 
 from . import scenario_store
-from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
+from .cantera_converter import DualCanteraConverter, get_plugins
 from .config import normalize_config, synthesize_default_group
 from .result_cache import get_cache_contributor_registry, run_contributors
 from .runset import (
@@ -67,37 +67,23 @@ def _mechanism_of(raw: Dict[str, Any]) -> str:
     return str(gas.get("mechanism") or "")
 
 
-def _default_resolve_mechanism(plugins: BoulderPlugins) -> Callable[[str], str]:
-    """Derive a mechanism-name resolver from ``plugins.converter_class``.
-
-    Used whenever a caller doesn't pass ``resolve_mechanism`` explicitly, so a
-    host that registers its own converter subclass (for its own mechanism
-    search convention) gets consistent resolution everywhere -- the actual
-    solve (:func:`solve_scenario`), the cache fingerprint, and what's persisted to the
-    store -- without every call site needing to know about the plugin. Falls
-    back to the base :class:`DualCanteraConverter`'s passthrough
-    (``resolve_mechanism`` returns its argument unchanged) when no converter
-    class is registered.
-
-    Uses ``__new__`` rather than a normal constructor call: ``__init__``
-    eagerly loads a real ``ct.Solution`` for the (possibly default)
-    mechanism, which would be wasteful -- or outright fail for a host with no
-    sensible default -- just to obtain a method reference. This assumes
-    ``resolve_mechanism`` overrides don't depend on ``__init__``-set instance
-    state (true for the base class, and any host override should preserve
-    this too).
-    """
-    return converter_mechanism_resolver(plugins.converter_class)
-
-
 def converter_mechanism_resolver(
     converter_cls: Optional[Type[DualCanteraConverter]],
 ) -> Callable[[str], str]:
     """Bound ``resolve_mechanism`` of ``converter_cls`` (base class if ``None``).
 
-    Lets the cache-check route and the startup preload fingerprint with the
-    converter class the app was started with (see
-    :func:`_default_resolve_mechanism` for why ``__new__``).
+    One resolver for every fingerprint site -- the solve (:func:`solve_scenario`),
+    the cache key, the store, the cache-check route and the startup preload -- so
+    a host's converter subclass (its own mechanism search convention) resolves
+    consistently everywhere. The base :class:`DualCanteraConverter` passes the
+    name through unchanged.
+
+    Uses ``__new__`` rather than a constructor call: ``__init__`` eagerly loads a
+    real ``ct.Solution`` for the (possibly default) mechanism, which would be
+    wasteful -- or fail for a host with no sensible default -- just to obtain a
+    method reference. This assumes ``resolve_mechanism`` overrides don't depend
+    on ``__init__``-set instance state (true for the base class; a host override
+    must preserve this).
     """
     converter_cls = converter_cls or DualCanteraConverter
     return converter_cls.__new__(converter_cls).resolve_mechanism
@@ -119,7 +105,7 @@ def scenario_fingerprint(
     inputs into the hash (e.g. a save grid that lives outside the solved
     network config). ``resolve_mechanism`` maps a bare mechanism name to the
     identity actually hashed -- defaults to the resolver derived from
-    ``plugins.converter_class`` (see :func:`_default_resolve_mechanism`) so
+    ``plugins.converter_class`` (see :func:`converter_mechanism_resolver`) so
     fingerprints match the store contents without the caller needing to pass
     its own resolver explicitly. Resolver errors propagate.
 
@@ -139,7 +125,9 @@ def scenario_fingerprint(
     else:
         config = normalize_config(config, plugins=plugins)
     name = mechanism or _mechanism_of(raw_cfg) or DEFAULT_MECHANISM
-    resolve_mechanism = resolve_mechanism or _default_resolve_mechanism(plugins)
+    resolve_mechanism = resolve_mechanism or converter_mechanism_resolver(
+        plugins.converter_class
+    )
     return compute_fingerprint(config, mechanism=resolve_mechanism(name), extra=extra)
 
 
@@ -467,7 +455,7 @@ def run(
         ``name -> str`` mapping a bare mechanism name to the identity stored
         and hashed (typically an absolute path). Defaults to the resolver
         derived from ``plugins.converter_class`` (see
-        :func:`_default_resolve_mechanism`).
+        :func:`converter_mechanism_resolver`).
     scenario_attrs : callable, optional
         ``(scenario_id, merged_config, gui_payload) -> dict`` of extra scalar
         attributes written onto the scenario's HDF5 group after each solve —
@@ -504,7 +492,9 @@ def run(
         scenario_attrs = getattr(plugins, "scenario_attrs", None)
     if on_solved is None:
         on_solved = getattr(plugins, "on_scenario_solved", None)
-    _do_resolve = resolve_mechanism or _default_resolve_mechanism(plugins)
+    _do_resolve = resolve_mechanism or converter_mechanism_resolver(
+        plugins.converter_class
+    )
     _resolve = lambda name: _do_resolve(name) if name else name  # noqa: E731
     raw = load_yaml_with_inheritance(cfg_path)
     store_dir = resolve_store_dir(raw, cfg_path)

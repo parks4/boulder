@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 
 from boulder.cantera_converter import BoulderPlugins, DualCanteraConverter
 from boulder.sweep_runner import (
-    _default_resolve_mechanism,
+    converter_mechanism_resolver,
     prepare_scenario,
     scenario_fingerprint,
 )
@@ -25,11 +25,11 @@ class _FakeHostConverter(DualCanteraConverter):
 
     def __init__(self, mechanism: Optional[str] = None, plugins=None) -> None:
         # Deliberately skip DualCanteraConverter.__init__: it eagerly loads a
-        # real ct.Solution, which _default_resolve_mechanism must never
+        # real ct.Solution, which converter_mechanism_resolver must never
         # trigger just to obtain a method reference.
         raise AssertionError(
             "_FakeHostConverter.__init__ must not be called by "
-            "_default_resolve_mechanism -- it should use __new__."
+            "converter_mechanism_resolver -- it should use __new__."
         )
 
     def resolve_mechanism(self, name: str) -> str:
@@ -47,12 +47,12 @@ class TestDefaultResolveMechanism:
     def test_uses_new_not_init(self):
         """Deriving the resolver must not construct a real converter instance."""
         plugins = BoulderPlugins(converter_class=_FakeHostConverter)
-        resolve = _default_resolve_mechanism(plugins)
+        resolve = converter_mechanism_resolver(plugins.converter_class)
         assert resolve("gri30.yaml") == "/resolved/gri30.yaml"
 
     def test_falls_back_to_base_converter_when_unregistered(self):
         plugins = BoulderPlugins()
-        resolve = _default_resolve_mechanism(plugins)
+        resolve = converter_mechanism_resolver(plugins.converter_class)
         assert resolve("gri30.yaml") == "gri30.yaml"  # passthrough default
 
 

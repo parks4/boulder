@@ -9,6 +9,7 @@
  * - startSimulation is called without simulation_time/time_step in steady mode.
  * - startSimulation is called with simulation_time/time_step in transient mode.
  * - Force Run skips the cache lookup and starts a fresh simulation.
+ * - A failing GUI-action listing (HTTP 500) shows an error toast with the server message.
  * - GUI actions sync YAML before fetching/running, so exports reflect GUI edits.
  */
 
@@ -197,6 +198,16 @@ describe("SimulateCard", () => {
     await act(async () => {});
     expect(mockSyncYaml).toHaveBeenCalled();
     expect(mockFetchGuiActions).toHaveBeenCalled();
+  });
+
+  it("shows an error toast with the server message when listing GUI actions fails", async () => {
+    mockFetchGuiActions.mockRejectedValueOnce(new Error("API 500: mechanism not found"));
+    render(<SimulateCard />);
+    await act(async () => {});
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("API 500: mechanism not found"),
+      { id: "gui-actions-error" },
+    );
   });
 
   it("syncs YAML before running a GUI export action, so the export reflects GUI edits", async () => {
