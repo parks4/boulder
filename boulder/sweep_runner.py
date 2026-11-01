@@ -45,7 +45,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type
 
 from . import scenario_store
 from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
-from .config import normalize_config
+from .config import normalize_config, synthesize_default_group
 from .result_cache import get_cache_contributor_registry, run_contributors
 from .runset import (
     RunSetCursor,
@@ -57,6 +57,9 @@ from .runset import (
     store_artifacts_dir,
     sweep_point_of,
 )
+
+#: Mechanism hashed (and solved) when a scenario names none.
+DEFAULT_MECHANISM = "gri30.yaml"
 
 
 def _mechanism_of(raw: Dict[str, Any]) -> str:
@@ -84,11 +87,20 @@ def _default_resolve_mechanism(plugins: BoulderPlugins) -> Callable[[str], str]:
     state (true for the base class, and any host override should preserve
     this too).
     """
-    converter_cls: Type[DualCanteraConverter] = (
-        plugins.converter_class or DualCanteraConverter
-    )
-    instance = converter_cls.__new__(converter_cls)
-    return instance.resolve_mechanism
+    return converter_mechanism_resolver(plugins.converter_class)
+
+
+def converter_mechanism_resolver(
+    converter_cls: Optional[Type[DualCanteraConverter]],
+) -> Callable[[str], str]:
+    """Bound ``resolve_mechanism`` of ``converter_cls`` (base class if ``None``).
+
+    Lets the cache-check route and the startup preload fingerprint with the
+    converter class the app was started with (see
+    :func:`_default_resolve_mechanism` for why ``__new__``).
+    """
+    converter_cls = converter_cls or DualCanteraConverter
+    return converter_cls.__new__(converter_cls).resolve_mechanism
 
 
 def scenario_fingerprint(
@@ -96,27 +108,39 @@ def scenario_fingerprint(
     *,
     extra: Optional[Dict[str, Any]] = None,
     resolve_mechanism: Optional[Callable[[str], str]] = None,
+    normalized: bool = False,
+    mechanism: Optional[str] = None,
 ) -> str:
-    """Boulder cache fingerprint for one merged (``from:``-resolved) scenario.
+    """Boulder cache fingerprint for one scenario.
 
-    THE fingerprint every scenario store uses — this runner and any host batch
-    writer both call this; do not re-implement the cache key elsewhere.
-    ``extra`` mixes caller-specific inputs into the hash (e.g. a save grid that
-    lives outside the solved network config). ``resolve_mechanism`` maps a bare
-    mechanism name to the identity actually hashed — defaults to the resolver
-    derived from ``plugins.converter_class`` (see
-    :func:`_default_resolve_mechanism`) so fingerprints match the store
-    contents without the caller needing to pass its own resolver explicitly.
+    THE fingerprint every scenario store uses -- this runner, the single-run
+    worker, the cache-check route and any host batch writer all call this; do
+    not re-implement the cache key elsewhere. ``extra`` mixes caller-specific
+    inputs into the hash (e.g. a save grid that lives outside the solved
+    network config). ``resolve_mechanism`` maps a bare mechanism name to the
+    identity actually hashed -- defaults to the resolver derived from
+    ``plugins.converter_class`` (see :func:`_default_resolve_mechanism`) so
+    fingerprints match the store contents without the caller needing to pass
+    its own resolver explicitly. Resolver errors propagate.
+
+    ``raw_cfg`` is a merged (``from:``-resolved) scenario by default. With
+    ``normalized=True`` it is already in the internal form (what the GUI holds
+    and sends back): ``normalize_config`` is skipped because it is not
+    idempotent, and only the idempotent default-group synthesis is applied.
+    ``mechanism`` overrides ``phases.gas.mechanism``; with neither, the
+    converter's own default (``gri30.yaml``) is hashed.
     """
     from .result_cache import compute_fingerprint  # noqa: PLC0415
 
     plugins = get_plugins()
-    config = normalize_config(copy.deepcopy(raw_cfg), plugins=plugins)
-    mechanism = _mechanism_of(raw_cfg)
-    if mechanism:
-        resolve_mechanism = resolve_mechanism or _default_resolve_mechanism(plugins)
-        mechanism = resolve_mechanism(mechanism)
-    return compute_fingerprint(config, mechanism=mechanism, extra=extra)
+    config = copy.deepcopy(raw_cfg)
+    if normalized:
+        synthesize_default_group(config)
+    else:
+        config = normalize_config(config, plugins=plugins)
+    name = mechanism or _mechanism_of(raw_cfg) or DEFAULT_MECHANISM
+    resolve_mechanism = resolve_mechanism or _default_resolve_mechanism(plugins)
+    return compute_fingerprint(config, mechanism=resolve_mechanism(name), extra=extra)
 
 
 def prepare_scenario(
@@ -131,17 +155,14 @@ def prepare_scenario(
     one scenario the same way this runner does (e.g. an "Export" GUI action
     solving a cache-miss scenario on demand).
     """
-    from .result_cache import compute_fingerprint  # noqa: PLC0415
-
-    plugins = get_plugins()
-    config = normalize_config(copy.deepcopy(raw_cfg), plugins=plugins)
+    config = normalize_config(copy.deepcopy(raw_cfg), plugins=get_plugins())
     mechanism = _mechanism_of(raw_cfg)
-    if mechanism:
-        resolve_mechanism = resolve_mechanism or _default_resolve_mechanism(plugins)
-        hashed = resolve_mechanism(mechanism)
-    else:
-        hashed = mechanism
-    fingerprint = compute_fingerprint(config, mechanism=hashed)
+    fingerprint = scenario_fingerprint(
+        config,
+        normalized=True,
+        mechanism=mechanism,
+        resolve_mechanism=resolve_mechanism,
+    )
     return config, mechanism, fingerprint
 
 

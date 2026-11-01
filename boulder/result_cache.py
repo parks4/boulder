@@ -338,44 +338,6 @@ def _plugins_source_identity() -> Dict[str, str]:
     return identities
 
 
-def mechanism_from_config(
-    config: Dict[str, Any],
-    body_mechanism: Optional[str] = None,
-) -> str:
-    """Extract the mechanism string from *config* or an explicit POST override."""
-    if body_mechanism:
-        return body_mechanism
-    phases = config.get("phases", {})
-    if isinstance(phases, dict):
-        gas = phases.get("gas", {})
-        if isinstance(gas, dict):
-            mechanism = gas.get("mechanism")
-            if mechanism:
-                return str(mechanism)
-    return "gri30.yaml"
-
-
-def resolve_mechanism_for_fingerprint(
-    config: Dict[str, Any],
-    converter_class: Any = None,
-    body_mechanism: Optional[str] = None,
-) -> str:
-    """Resolve the mechanism string used for cache fingerprinting.
-
-    Applies :meth:`~boulder.cantera_converter.DualCanteraConverter.resolve_mechanism`
-    from *converter_class* when provided, without constructing a full converter
-    (avoids loading Cantera during cache lookups).
-    """
-    raw = mechanism_from_config(config, body_mechanism=body_mechanism)
-    if converter_class is None:
-        return raw
-    try:
-        instance = object.__new__(converter_class)
-        return converter_class.resolve_mechanism(instance, raw)
-    except Exception:
-        return raw
-
-
 def compute_fingerprint(
     config: Dict[str, Any],
     mechanism: Optional[str] = None,

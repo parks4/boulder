@@ -110,7 +110,16 @@ def test_the_entry_answers_to_the_post_build_fingerprint_too(cfg: Path) -> None:
     staged solver enriches the network while building, so what the browser
     sends back afterwards hashes differently from what was stored.
     """
-    from boulder.result_cache import compute_fingerprint
+    from boulder.sweep_runner import scenario_fingerprint
+
+    def compute_fingerprint(config: Dict[str, Any], mechanism: str) -> str:
+        # The one cache key; the stub converter resolves names to themselves.
+        return scenario_fingerprint(
+            config,
+            normalized=True,
+            mechanism=mechanism,
+            resolve_mechanism=lambda name: name,
+        )
 
     enriched = dict(_CONFIG)
     enriched["nodes"] = [

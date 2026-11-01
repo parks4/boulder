@@ -650,12 +650,20 @@ class SimulationWorker:
         """
         try:
             from . import scenario_store
-            from .result_cache import compute_fingerprint, run_contributors
+            from .result_cache import run_contributors
             from .runset import resolve_store_dir, store_artifacts_dir
             from .simulation_result import make_simulation_result
+            from .sweep_runner import DEFAULT_MECHANISM, scenario_fingerprint
 
-            mechanism_raw = getattr(converter, "mechanism", None) or "gri30.yaml"
+            mechanism_raw = getattr(converter, "mechanism", None) or DEFAULT_MECHANISM
             mechanism = converter.resolve_mechanism(mechanism_raw)
+            # The one cache key (parks4/boulder#210): the same function a sweep
+            # uses, fed this run's converter mechanism and resolver.
+            fp_kwargs = {
+                "normalized": True,
+                "mechanism": mechanism_raw,
+                "resolve_mechanism": converter.resolve_mechanism,
+            }
             config_path = getattr(converter, "_download_config_path", None)
             store_dir = resolve_store_dir(self._raw_config or {}, config_path)
             if store_dir is None:
@@ -673,7 +681,7 @@ class SimulationWorker:
             # Use pre-build snapshot for fingerprinting when available so the hash
             # matches the startup fingerprint (computed from the un-enriched config).
             fp_config = pre_build_config if pre_build_config is not None else config
-            fingerprint = compute_fingerprint(fp_config, mechanism=mechanism)
+            fingerprint = scenario_fingerprint(fp_config, **fp_kwargs)
 
             # Expose the fingerprint immediately so GUI actions can detect this
             # cache entry before contributors finish writing artifacts.
@@ -710,7 +718,7 @@ class SimulationWorker:
             # added stream-point/interface nodes while building), so this entry
             # answers to its fingerprint too -- otherwise the frontend, which
             # holds the post-build config, would re-solve on every click.
-            post_build_fp = compute_fingerprint(config, mechanism=mechanism)
+            post_build_fp = scenario_fingerprint(config, **fp_kwargs)
 
             scenario_store.write_entry(
                 store_dir,
