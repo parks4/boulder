@@ -2895,7 +2895,10 @@ class DualCanteraConverter:
 
         # Evaluate custom output summary if configured
         try:
-            cfg = self._last_config or {}
+            # The runner path sets only _download_config (a snapshot of the
+            # config the run used); setting _last_config there would change
+            # other readers of it (spatial inference, worker post-config).
+            cfg = self._last_config or self._download_config or {}
             output_block = cfg.get("output") if isinstance(cfg, dict) else None
 
             # Check if custom summary builder is specified
