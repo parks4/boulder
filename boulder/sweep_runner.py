@@ -105,7 +105,7 @@ def scenario_fingerprint(
     inputs into the hash (e.g. a save grid that lives outside the solved
     network config). ``resolve_mechanism`` maps a bare mechanism name to the
     identity actually hashed -- defaults to the resolver derived from
-    ``plugins.converter_class`` (see :func:`_default_resolve_mechanism`) so
+    ``plugins.converter_class`` (see :func:`converter_mechanism_resolver`) so
     fingerprints match the store contents without the caller needing to pass
     its own resolver explicitly. Resolver errors propagate.
 
@@ -455,7 +455,7 @@ def run(
         ``name -> str`` mapping a bare mechanism name to the identity stored
         and hashed (typically an absolute path). Defaults to the resolver
         derived from ``plugins.converter_class`` (see
-        :func:`_default_resolve_mechanism`).
+        :func:`converter_mechanism_resolver`).
     scenario_attrs : callable, optional
         ``(scenario_id, merged_config, gui_payload) -> dict`` of extra scalar
         attributes written onto the scenario's HDF5 group after each solve —

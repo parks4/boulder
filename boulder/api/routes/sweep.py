@@ -369,8 +369,6 @@ async def sweep_run(
             # the same source `/api/simulations` reads. `get_plugins()` is a
             # *different*, entry-point/env-var-driven registry that a host
             # need not populate the same way, so it can't be relied on here.
-            # `app.state` (set once by the CLI), not `get_plugins()`, is the
-            # source -- same as `/api/simulations`.
             converter_cls = (
                 getattr(request.app.state, "converter_class", None)
                 or DualCanteraConverter

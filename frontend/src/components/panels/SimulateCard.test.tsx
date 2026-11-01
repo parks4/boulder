@@ -206,6 +206,7 @@ describe("SimulateCard", () => {
     await act(async () => {});
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringContaining("API 500: mechanism not found"),
+      { id: "gui-actions-error" },
     );
   });
 

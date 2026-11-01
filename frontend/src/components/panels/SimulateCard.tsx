@@ -111,6 +111,7 @@ export function SimulateCard() {
           // Not silent: an empty list would read as "this host has no actions".
           toast.error(
             `Could not load GUI actions: ${err instanceof Error ? err.message : err}`,
+            { id: "gui-actions-error" },
           );
         });
 
