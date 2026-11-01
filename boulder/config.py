@@ -65,6 +65,7 @@ STONE_V2_BASE_KEYS: frozenset = frozenset(
         "network",
         "output",
         "export",
+        "references",
         "scenarios_sweep",
         "sweeps",  # legacy spelling of scenarios_sweep (renamed on load)
         "sweep",  # legacy spelling of scenarios_sweep (renamed on load)
@@ -533,6 +534,11 @@ def _normalize_v2(raw: Dict[str, Any], dialect: str) -> Dict[str, Any]:
         pipeline (unit coercion, port shortcuts — now rejected — and group
         synthesis).
     """
+    if raw.get("references") is not None and not isinstance(raw["references"], dict):
+        raise ValueError(
+            "STONE v2 error: 'references:' must be a mapping, got "
+            f"{type(raw['references']).__name__}. See STONE_SPECIFICATIONS.md."
+        )
     if dialect == "v2_network":
         return _normalize_v2_network(raw)
     return _normalize_v2_staged(raw)
@@ -572,6 +578,7 @@ def _normalize_v2_network(raw: Dict[str, Any]) -> Dict[str, Any]:
     for k in (
         "output",
         "export",
+        "references",
         "scenarios_sweep",
         "sweeps",
         "sweep",
@@ -877,6 +884,7 @@ def _normalize_v2_staged(raw: Dict[str, Any]) -> Dict[str, Any]:
     for k in (
         "output",
         "export",
+        "references",
         "scenarios_sweep",
         "sweeps",
         "sweep",
@@ -2145,6 +2153,7 @@ def convert_to_stone_format(config: dict) -> dict:
     for passthrough in (
         "output",
         "export",
+        "references",
         "scenarios_sweep",
         "sweeps",
         "sweep",

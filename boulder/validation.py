@@ -297,6 +297,8 @@ class NormalizedConfigModel(BaseModel):
     output: Optional[Any] = None
     #: Reporting/export block (host-package metadata).
     export: Optional[Any] = None
+    #: Source documents the model cites; free-form mapping defined by the host.
+    references: Optional[Dict[str, Any]] = None
     #: Staged-solving group definitions.
     #: ``{group_id: {stage_order, mechanism, solve, advance_time}}``
     groups: Optional[Dict[str, Any]] = None
