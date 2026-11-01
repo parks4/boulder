@@ -154,35 +154,36 @@ def _load_yaml_with_inheritance(path: "str | Path") -> dict:
 
     yaml = YAML()
     yaml.preserve_quotes = True
-    path = Path(path)
 
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        data = yaml.load(f)
+    def _own(file: Path) -> dict:
+        with open(file, "r", encoding="utf-8", errors="replace") as f:
+            data = yaml.load(f)
+        own = dict(data) if data is not None else {}
+        own.pop("from", None)
+        return own
 
-    if data is None:
-        return {}
-
-    data_dict = dict(data)
-    from_path = data_dict.get("from")
-    if not from_path:
-        return data_dict
-
-    overlay = copy.deepcopy(data_dict)
-    overlay.pop("from", None)
-
-    parent_path = (path.parent / str(from_path)).resolve()
-    base = _load_yaml_with_inheritance(parent_path)
-    base.pop("scenarios", None)  # the named run-set is not inherited (sweeps are)
-    return deep_merge(base, overlay)
+    # One resolver (and one cycle check): the chain, farthest parent first.
+    files = [Path(path), *inheritance_chain(path)]
+    merged = _own(files[-1])
+    for file in reversed(files[:-1]):
+        merged.pop("scenarios", None)  # the named run-set is not inherited (sweeps are)
+        merged = deep_merge(merged, copy.deepcopy(_own(file)))
+    return merged
 
 
-def inheritance_chain(path: "str | Path") -> List[Path]:
+def inheritance_chain(
+    path: "str | Path", leaf_text: Optional[str] = None
+) -> List[Path]:
     """Return the ``from:`` parents of the STONE YAML at *path*, nearest first.
 
     The leaf itself is not included. Each entry is the resolved path of one file
     :func:`load_yaml_with_inheritance` merges in; an empty list means the file
     has no ``from:``. Relative ``from`` paths resolve against the directory of
     the file that names them, as in the loader. A cycle raises ``ValueError``.
+
+    *leaf_text*, when given, is read instead of the leaf file's content (a
+    browser edit): the leaf's ``from:`` comes from it, resolved against the
+    leaf's directory.
     """
     from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
 
@@ -190,8 +191,11 @@ def inheritance_chain(path: "str | Path") -> List[Path]:
     current = Path(path).resolve()
     seen = {current}
     while True:
-        with open(current, "r", encoding="utf-8", errors="replace") as f:
-            data = YAML().load(f)
+        if leaf_text is not None and not chain:
+            data = YAML().load(leaf_text)
+        else:
+            with open(current, "r", encoding="utf-8", errors="replace") as f:
+                data = YAML().load(f)
         from_path = data.get("from") if isinstance(data, dict) else None
         if not from_path:
             return chain

@@ -268,6 +268,10 @@ class SimulationWorker:
         #: The raw config, needed only to resolve the store location (it may
         #: declare ``metadata.extra.cache_store``).
         self._raw_config: Optional[Dict[str, Any]] = None
+        #: The run source captured when the run started (see
+        #: :func:`boulder.scenario_store.build_source`); never rebuilt after
+        #: the solve, when the file or the session's text may have changed.
+        self._source: Optional[Any] = None
 
     def set_run_identity(
         self,
@@ -276,6 +280,7 @@ class SimulationWorker:
         label: Optional[str] = None,
         order: Optional[int] = None,
         raw_config: Optional[Dict[str, Any]] = None,
+        source: Optional[Any] = None,
     ) -> None:
         """Name the run-set entry this worker is about to solve.
 
@@ -293,6 +298,7 @@ class SimulationWorker:
         self._scenario_label = label
         self._scenario_order = order
         self._raw_config = raw_config
+        self._source = source
 
     def start_simulation(
         self,
@@ -657,14 +663,8 @@ class SimulationWorker:
             # calls its base BASELINE, not BASE. Defaulting to BASE stored the
             # same result under a second name.
             scenario_id = self._scenario_id or base_entry_id(self._raw_config or {})
-            assert config_path is not None  # a store directory implies a config path
-            # The definition as the session holds it (browser text, upload name).
-            source = scenario_store.build_source(
-                self._raw_config or {},
-                config_path,
-                leaf_text=getattr(self._app_state, "preloaded_yaml", None),
-                display_name=getattr(self._app_state, "preloaded_filename", None),
-            )
+            # The definition as the session held it when the run started.
+            source = self._source
 
             progress = self.get_progress()
             # Use pre-build snapshot for fingerprinting when available so the hash

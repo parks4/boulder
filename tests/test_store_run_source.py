@@ -9,6 +9,7 @@ chain and the display name back, through every path that writes an entry.
 
 from __future__ import annotations
 
+import copy
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -16,7 +17,11 @@ from typing import Any, Dict, List
 import pytest
 
 from boulder import result_cache, scenario_store, sweep_runner
-from boulder.runset import inheritance_chain, store_artifacts_dir
+from boulder.runset import (
+    inheritance_chain,
+    load_yaml_with_inheritance,
+    store_artifacts_dir,
+)
 
 _BASE_YAML = """\
 phases:
@@ -194,23 +199,29 @@ def test_an_entry_without_a_source_reads_as_none(tmp_path: Path) -> None:
 
 
 def test_the_source_never_reaches_the_fingerprint(tmp_path: Path) -> None:
-    """The fingerprint attr is what the caller passed, with or without a source."""
-    store_dir = tmp_path / "store"
-    source = scenario_store.RunSource(
-        definition="a: 1\n", leaf_text="a: 1\n", chain=(), display_name="x.yaml"
-    )
-    for sid, src in (("plain", None), ("withsrc", source)):
-        scenario_store.write_entry(
-            store_dir,
-            sid,
-            gui_payload={"status": "complete"},
-            mechanism="gri30.yaml",
-            fingerprint="f" * 64,
-            identity="",
-            source=src,
-        )
+    """A sweep entry's stored fingerprint is ``compute_fingerprint`` of its config.
 
-    assert {e["fingerprint"] for e in _entries(store_dir)} == {"f" * 64}
+    The config is the fixture's base scenario, normalised and hashed with no
+    source involved: recording the source does not change the cache key.
+    """
+    from boulder.cantera_converter import get_plugins
+    from boulder.config import normalize_config
+    from boulder.runset import RunSetCursor, iter_run_set
+
+    cfg = _write(tmp_path)
+    expanded = dict(iter_run_set(load_yaml_with_inheritance(cfg), RunSetCursor()))
+    plugins = get_plugins()
+    expected = result_cache.compute_fingerprint(
+        normalize_config(copy.deepcopy(expanded["hot"]), plugins=plugins),
+        # The identity the run hashes: the mechanism as the converter resolves it.
+        mechanism=sweep_runner._default_resolve_mechanism(plugins)("gri30.yaml"),
+    )
+
+    store_dir = sweep_runner.run(cfg)
+
+    hot = next(e for e in _entries(store_dir) if e["id"] == "hot")
+    assert hot["source_sha256"]
+    assert hot["fingerprint"] == expected
 
 
 # --------------------------------------------------------------------------- #
@@ -343,10 +354,10 @@ def test_a_single_run_records_its_source(tmp_path: Path) -> None:
         resolve_mechanism=lambda name: name,
     )
     worker = SimulationWorker()
-    worker._app_state = SimpleNamespace(
-        preloaded_yaml="edited: true\n", preloaded_filename="my_model.yaml"
+    source = scenario_store.build_source(
+        raw, cfg, leaf_text="edited: true\n", display_name="my_model.yaml"
     )
-    worker.set_run_identity("a=1", raw_config=raw)
+    worker.set_run_identity("a=1", raw_config=raw, source=source)
 
     with patch(
         "boulder.simulation_result.make_simulation_result", return_value=object()
@@ -363,4 +374,122 @@ def test_a_single_run_records_its_source(tmp_path: Path) -> None:
     assert "a=1" in src.definition
     assert src.leaf_text == "edited: true\n"
     assert src.display_name == "my_model.yaml"
-    assert src.chain == ("base.yaml",)
+    # The browser's text has no `from:`, so no chain, whatever the file says.
+    assert src.chain == ()
+
+
+def test_the_chain_follows_the_leaf_text_given(tmp_path: Path) -> None:
+    """With ``leaf_text``, the ``from:`` chain is read from that text.
+
+    The text names ``other.yaml`` (next to the leaf) while the file on disk names
+    ``base.yaml``: the chain is ``("other.yaml",)``.
+    """
+    cfg = _write(tmp_path)
+    (tmp_path / "other.yaml").write_text(_BASE_YAML, encoding="utf-8")
+
+    src = scenario_store.build_source({}, cfg, leaf_text="from: other.yaml\n")
+
+    assert src.chain == ("other.yaml",)
+    assert scenario_store.build_source({}, cfg).chain == ("base.yaml",)
+
+
+def test_a_cyclic_from_chain_raises_instead_of_recursing(tmp_path: Path) -> None:
+    """``load_yaml_with_inheritance`` raises ``ValueError`` on a ``from:`` cycle."""
+    (tmp_path / "a.yaml").write_text("from: b.yaml\n", encoding="utf-8")
+    (tmp_path / "b.yaml").write_text("from: a.yaml\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cycle"):
+        load_yaml_with_inheritance(tmp_path / "a.yaml")
+
+
+def _run_config(app: Any) -> Dict[str, Any]:
+    """Return the session base config, normalised as the frontend submits it."""
+    from boulder.cantera_converter import get_plugins
+    from boulder.config import normalize_config
+
+    return normalize_config(
+        copy.deepcopy(app.state.preloaded_raw), plugins=get_plugins()
+    )
+
+
+def _start_run(client: TestClient, app: Any, during_solve) -> Dict[str, Any]:
+    """POST a plain run; *during_solve* fires once the solve has started."""
+    from boulder.simulation_worker import SimulationWorker
+
+    original = SimulationWorker.start_simulation
+
+    def start(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        during_solve()
+
+    SimulationWorker.start_simulation = start  # type: ignore[method-assign]
+    try:
+        resp = client.post("/api/simulations", json={"config": _run_config(app)})
+    finally:
+        SimulationWorker.start_simulation = original  # type: ignore[method-assign]
+    assert resp.status_code == 200, resp.text
+    from boulder.runset import resolve_store_dir
+
+    store_dir = resolve_store_dir(
+        app.state.preloaded_raw, app.state.preloaded_config_path
+    )
+    assert store_dir is not None
+    deadline = time.time() + 120
+    while not _entries(store_dir):
+        assert time.time() < deadline, "the solved entry was never written"
+        time.sleep(0.05)
+    return {"store_dir": store_dir}
+
+
+def test_a_run_keeps_the_source_it_started_with_when_the_file_vanishes(
+    tmp_path: Path,
+) -> None:
+    """The leaf and its parent disappearing mid-solve still leaves the entry.
+
+    The source is captured when the run starts, so the solved entry is written
+    with that source instead of being lost to a failed re-read after the solve.
+    """
+    client, app, cfg = _gui(tmp_path)
+    try:
+
+        def vanish() -> None:
+            cfg.unlink()
+            (tmp_path / "base.yaml").unlink()
+
+        store_dir = _start_run(client, app, vanish)["store_dir"]
+        src = scenario_store.read_source(store_dir, _entries(store_dir)[0]["id"])
+        assert src is not None
+        assert src.leaf_text == _LEAF_YAML
+        assert src.chain == ("base.yaml",)
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_a_run_keeps_the_leaf_text_it_started_with(tmp_path: Path) -> None:
+    """A live edit of ``preloaded_yaml`` mid-solve does not reach the stored source."""
+    client, app, _cfg = _gui(tmp_path)
+    try:
+
+        def edit() -> None:
+            app.state.preloaded_yaml = "edited: later\n"
+
+        store_dir = _start_run(client, app, edit)["store_dir"]
+        src = scenario_store.read_source(store_dir, _entries(store_dir)[0]["id"])
+        assert src is not None
+        assert src.leaf_text == _LEAF_YAML
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_a_run_whose_source_cannot_be_built_fails_before_the_solve(
+    tmp_path: Path,
+) -> None:
+    """A missing parent file makes the run request fail (500) before any solve."""
+    client, app, _cfg = _gui(tmp_path)
+    try:
+        (tmp_path / "base.yaml").unlink()
+        resp = client.post("/api/simulations", json={"config": _run_config(app)})
+        assert resp.status_code == 500
+        assert "base.yaml" in resp.text
+    finally:
+        client.__exit__(None, None, None)

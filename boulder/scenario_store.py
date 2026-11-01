@@ -166,11 +166,15 @@ class RunSource:
     display_name: str
 
 
-def _yaml_text(data: Any) -> str:
+def _yaml_text(data: Any, *, safe: bool = False) -> str:
+    """Dump *data* as YAML (``safe``: plain containers only, block style)."""
     from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
 
+    yaml = YAML(typ="safe") if safe else YAML()
+    if safe:
+        yaml.default_flow_style = False
     buffer = io.StringIO()
-    YAML().dump(data, buffer)
+    yaml.dump(data, buffer)
     return buffer.getvalue()
 
 
@@ -194,7 +198,7 @@ def build_source(
         leaf_text = leaf.read_text(encoding="utf-8")
     chain = tuple(
         Path(os.path.relpath(parent, leaf.resolve().parent)).as_posix()
-        for parent in inheritance_chain(leaf)
+        for parent in inheritance_chain(leaf, leaf_text)
     )
     return RunSource(
         definition=_yaml_text(raw),
@@ -206,8 +210,6 @@ def build_source(
 
 def _write_source(store_dir: Path, source: RunSource) -> str:
     """Store *source* once, content-addressed; return its sha256."""
-    from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
-
     from .payload_store import replace_file, scratch_path  # noqa: PLC0415
 
     record = {
@@ -216,11 +218,7 @@ def _write_source(store_dir: Path, source: RunSource) -> str:
         "leaf": source.leaf_text,
         "definition": source.definition,
     }
-    buffer = io.StringIO()
-    safe = YAML(typ="safe")
-    safe.default_flow_style = False
-    safe.dump(record, buffer)
-    data = buffer.getvalue().encode("utf-8")
+    data = _yaml_text(record, safe=True).encode("utf-8")
     sha = hashlib.sha256(data).hexdigest()
     path = store_dir / "sources" / f"{sha}.yaml"
     if not path.is_file():
