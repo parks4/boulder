@@ -108,6 +108,14 @@ async def get_branding() -> Dict[str, Any]:
     return {"branding": branding}
 
 
+@router.get("/header-links")
+async def get_header_links() -> Dict[str, Any]:
+    """Return the top-bar links host plugins registered (``[]`` when none)."""
+    from ...cantera_converter import get_plugins
+
+    return {"links": get_plugins().header_links}
+
+
 @router.get("/species-colors")
 async def get_species_colors() -> Dict[str, Any]:
     """Return the species -> hex color palette set by a plugin, if any.
