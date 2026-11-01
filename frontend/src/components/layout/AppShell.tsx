@@ -23,6 +23,7 @@ import { ResultsTabs } from "@/components/results/ResultsTabs";
 import { AddReactorModal } from "@/components/modals/AddReactorModal";
 import { AddMFCModal } from "@/components/modals/AddMFCModal";
 import { Button } from "@/components/ui/Button";
+import { applyScenarioDeepLink } from "@/lib/scenarioDeepLink";
 import { toast } from "sonner";
 
 export function AppShell() {
@@ -144,7 +145,11 @@ export function AppShell() {
             const ageMin = Math.round((Date.now() / 1000 - created) / 60);
             const ageStr = ageMin < 2 ? "just now" : `${ageMin} min ago`;
             toast.success(`Loaded cached results from ${ageStr}. Re-run skipped.`);
-          });
+          })
+            // Last on every branch (cached, not cached, failed fetch): both write
+            // the results store and the scenario selection must win. Rejections
+            // reach the outer catch.
+            .finally(() => applyScenarioDeepLink());
         } else {
           // No preloaded config, load default
           return fetchDefaultConfig().then((defResp) => {
