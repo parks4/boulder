@@ -46,6 +46,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type
 from . import scenario_store
 from .cantera_converter import BoulderPlugins, DualCanteraConverter, get_plugins
 from .config import normalize_config
+from .result_cache import get_cache_contributor_registry, run_contributors
 from .runset import (
     RunSetCursor,
     iter_run_set,
@@ -53,6 +54,7 @@ from .runset import (
     node_property_attrs,
     resolve_store_dir,
     run_set_size,
+    store_artifacts_dir,
     sweep_point_of,
 )
 
@@ -346,8 +348,12 @@ def store_solved_scenario(
     KPI with its display unit as ``(value, unit)``; the number becomes the attr
     and the unit is recorded separately, since HDF5 attrs are flat scalars.
 
-    Both hooks are best-effort: a KPI or artifact failure must not lose a
-    scenario that already solved. *warn* receives the message; the default
+    After the write, the registered cache contributors run for the entry (into
+    its artifacts directory), then ``on_solved`` -- a host that called
+    ``run_contributors`` from ``on_solved`` now runs its contributors twice.
+
+    The hooks and contributors are best-effort: a KPI or artifact failure must
+    not lose a scenario that already solved. *warn* receives the message; the default
     prints it.
     """
     say = warn or (lambda msg: print(msg, flush=True))
@@ -382,19 +388,30 @@ def store_solved_scenario(
         extra_attrs=entry_attrs,
     )
 
+    contributors = get_cache_contributor_registry().contributors
+    if on_solved is None and not contributors:
+        return
+    # One SimulationResult, shared by the contributors and the host hook.
+    try:
+        from .simulation_result import make_simulation_result  # noqa: PLC0415
+
+        simulation_result = make_simulation_result(conv, config)
+    except Exception as exc:  # noqa: BLE001
+        say(f"  WARNING: building the result failed for scenario '{sid}': {exc}")
+        return
+    # Same as a single run: artifacts land in the entry's directory, best-effort
+    # (run_contributors logs a failing contributor and carries on).
+    run_contributors(
+        contributors,
+        config,
+        conv,
+        simulation_result,
+        fingerprint,
+        store_artifacts_dir(store_dir, sid),
+    )
     if on_solved is not None:
         try:
-            from .simulation_result import make_simulation_result  # noqa: PLC0415
-
-            on_solved(
-                sid,
-                config,
-                conv,
-                make_simulation_result(conv, config),
-                fingerprint,
-                gui,
-                mechanism,
-            )
+            on_solved(sid, config, conv, simulation_result, fingerprint, gui, mechanism)
         except Exception as exc:  # noqa: BLE001
             say(f"  WARNING: on_solved hook failed for scenario '{sid}': {exc}")
 
