@@ -326,12 +326,12 @@ def write_entry(
             attrs = handle.attrs
             attrs[_ATTR_VERSION] = STORE_VERSION
             attrs[_ATTR_CONFIG_IDENTITY] = identity
-            attrs["id"] = scenario_id
+            attrs["id"] = str(scenario_id)
             if source_sha is not None:
                 attrs[_ATTR_SOURCE] = source_sha
             attrs["computed_at"] = float(time.time())
             if label is not None:
-                attrs["label"] = label
+                attrs["label"] = str(label)
             if order is not None:
                 attrs["order"] = int(order)
             alts = tuple(
@@ -342,7 +342,7 @@ def write_entry(
             if units:
                 attrs["units"] = json.dumps(units)
             for key, value in (extra_attrs or {}).items():
-                attrs[key] = value
+                attrs[key] = str(value) if isinstance(value, str) else value
             handle.flush()
             # Last, even inside the scratch file: `fingerprint` is the validity
             # signal, so a crash between here and the swap still leaves nothing
@@ -376,7 +376,7 @@ def update_display_attrs(
     try:
         with h5py.File(str(path), "a") as handle:
             if label is not None:
-                handle.attrs["label"] = label
+                handle.attrs["label"] = str(label)
             if order is not None:
                 handle.attrs["order"] = int(order)
         return True

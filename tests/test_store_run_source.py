@@ -224,6 +224,36 @@ def test_the_source_never_reaches_the_fingerprint(tmp_path: Path) -> None:
     assert hot["fingerprint"] == expected
 
 
+def test_quoted_yaml_scenario_keys_are_stored_with_plain_str_ids(
+    tmp_path: Path,
+) -> None:
+    """Scenarios whose YAML keys are quoted (``"cold/1":``) are stored, id as plain str.
+
+    ruamel hands quoted keys over as ``DoubleQuotedScalarString`` (a ``str``
+    subclass) that h5py cannot write as an attr; every entry must still be
+    written and read back with its raw id.
+    """
+    leaf = """\
+from: base.yaml
+scenarios:
+  "cold/1":
+    network:
+      - id: feed
+        Reservoir:
+          temperature: 300
+  "hot/2":
+    network:
+      - id: feed
+        Reservoir:
+          temperature: 350
+"""
+    store_dir = sweep_runner.run(_write(tmp_path, leaf))
+
+    ids = {e["id"] for e in _entries(store_dir)}
+    assert {"cold/1", "hot/2"} <= ids
+    assert all(type(i) is str for i in ids)
+
+
 # --------------------------------------------------------------------------- #
 # GUI paths
 # --------------------------------------------------------------------------- #
