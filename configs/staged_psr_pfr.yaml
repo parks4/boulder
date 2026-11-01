@@ -1,5 +1,5 @@
 metadata:
-  stone_version: "2.1"
+  stone_version: "2.2"
   title: "Staged PSR + PFR (staged solver demo)"
   description: |-
     Demonstrates Boulder staged solving architecture.

@@ -92,3 +92,12 @@ def test_unquoted_float_version_is_tolerated() -> None:
     cfg["metadata"]["stone_version"] = 2.0
     assert migrate_stone_config(cfg) == []
     assert cfg["metadata"]["stone_version"] == STONE_FORMAT_VERSION
+
+
+def test_previous_minor_loads_silently_and_is_restamped() -> None:
+    """A file declaring STONE 2.1 loads without notice and is stamped current."""
+    cfg = copy.deepcopy(_CLEAN)
+    cfg["metadata"]["stone_version"] = "2.1"
+    assert migrate_stone_config(cfg) == []
+    assert cfg["metadata"]["stone_version"] == STONE_FORMAT_VERSION
+    validate_config(normalize_config(cfg))

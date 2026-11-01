@@ -1,5 +1,5 @@
 metadata:
-  stone_version: "2.1"
+  stone_version: "2.2"
   title: Two-stream reactor
   description: >-
     Two inlet streams (air and methane) feeding a single stirred reactor with
