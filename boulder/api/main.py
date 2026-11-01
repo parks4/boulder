@@ -182,11 +182,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # Attempt to load a matching cache entry for the preloaded config.
             try:
                 from .. import scenario_store
-                from ..result_cache import (
-                    compute_fingerprint,
-                    resolve_mechanism_for_fingerprint,
-                )
                 from ..runset import resolve_store_dir
+                from ..sweep_runner import (
+                    converter_mechanism_resolver,
+                    scenario_fingerprint,
+                )
 
                 store_dir = resolve_store_dir(
                     app.state.preloaded_raw or {}, str(actual_yaml_path)
@@ -197,10 +197,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     app.state.preloaded_fingerprint = None
                     print("[cache] disabled (--no-cache) — will recompute", flush=True)
                 elif store_dir is not None:
-                    mechanism = resolve_mechanism_for_fingerprint(
-                        validated, converter_class=app.state.converter_class
+                    fingerprint = scenario_fingerprint(
+                        validated,
+                        normalized=True,
+                        resolve_mechanism=converter_mechanism_resolver(
+                            app.state.converter_class
+                        ),
                     )
-                    fingerprint = compute_fingerprint(validated, mechanism=mechanism)
                     # Which run-set entry the preloaded config is (BASE, or
                     # BASELINE once scenarios exist) is not knowable here, so
                     # match by fingerprint rather than guessing the name. Since

@@ -34,7 +34,6 @@ from boulder.result_cache import (
     _source_identity,
     cache_dir_for,
     compute_fingerprint,
-    resolve_mechanism_for_fingerprint,
     run_contributors,
 )
 from boulder.runset import resolve_store_dir
@@ -233,34 +232,31 @@ class TestSourceIdentity:
         assert fp_clean != fp_dirty
 
 
-class TestResolveMechanismForFingerprint:
+class TestConverterMechanismResolver:
     def test_subclass_override_is_applied(self):
-        """resolve_mechanism_for_fingerprint honours converter subclass overrides."""
-
-        class _RedirectConverter:
-            def resolve_mechanism(self, name: str) -> str:
-                return "/custom/mech.yaml"
-
-        resolved = resolve_mechanism_for_fingerprint(
-            SIMPLE_CONFIG,
-            converter_class=_RedirectConverter,
+        """The fingerprint hashes the converter subclass's resolved mechanism."""
+        from boulder.sweep_runner import (
+            converter_mechanism_resolver,
+            scenario_fingerprint,
         )
-        assert resolved == "/custom/mech.yaml"
-
-    def test_reader_writer_use_same_resolved_mechanism(self):
-        """Fingerprint with resolved mechanism matches worker-style hashing."""
 
         class _RedirectConverter:
             def resolve_mechanism(self, name: str) -> str:
                 return "h2o2.yaml"
 
-        mechanism = resolve_mechanism_for_fingerprint(
+        fp_reader = scenario_fingerprint(
             SIMPLE_CONFIG,
-            converter_class=_RedirectConverter,
+            normalized=True,
+            resolve_mechanism=converter_mechanism_resolver(_RedirectConverter),
         )
-        fp_reader = compute_fingerprint(SIMPLE_CONFIG, mechanism=mechanism)
-        fp_writer = compute_fingerprint(SIMPLE_CONFIG, mechanism="h2o2.yaml")
-        assert fp_reader == fp_writer
+        # A bare normalized config also gets the default group synthesised.
+        fp_direct = scenario_fingerprint(
+            SIMPLE_CONFIG,
+            normalized=True,
+            mechanism="h2o2.yaml",
+            resolve_mechanism=lambda name: name,
+        )
+        assert fp_reader == fp_direct
 
 
 # ---------------------------------------------------------------------------
@@ -368,10 +364,16 @@ def _seed_store(
     seeded entry is one the endpoint can actually match.
     """
     from boulder.api.routes.simulations import normalize_config_for_fingerprint
+    from boulder.sweep_runner import converter_mechanism_resolver, scenario_fingerprint
 
     normalized = normalize_config_for_fingerprint(config, simulation_time, time_step)
-    mechanism = resolve_mechanism_for_fingerprint(normalized)
-    fingerprint = compute_fingerprint(normalized, mechanism=mechanism)
+    mechanism = "gri30.yaml"
+    # The app's converter class (the base class when unset) resolves the mechanism.
+    fingerprint = scenario_fingerprint(
+        normalized,
+        normalized=True,
+        resolve_mechanism=converter_mechanism_resolver(None),
+    )
     store_dir = resolve_store_dir({}, str(cfg))
     assert store_dir is not None
     scenario_store.write_entry(

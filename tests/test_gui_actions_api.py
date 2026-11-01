@@ -239,9 +239,9 @@ class TestGuiActionCacheContext:
         """_build_context and check-cache agree on has_cached_result for body.config."""
         from boulder.api.routes.gui_actions import _build_context
         from boulder.api.routes.simulations import normalize_config_for_fingerprint
-        from boulder.result_cache import (
-            compute_fingerprint,
-            resolve_mechanism_for_fingerprint,
+        from boulder.sweep_runner import (
+            converter_mechanism_resolver,
+            scenario_fingerprint,
         )
 
         yaml_path = tmp_path / "model.yaml"
@@ -249,8 +249,12 @@ class TestGuiActionCacheContext:
         # Write the entry the way a real run does: the worker fingerprints
         # the normalized (default-group-synthesized) config, not the raw one.
         snapshot = normalize_config_for_fingerprint(SIMPLE_CONFIG)
-        mechanism = resolve_mechanism_for_fingerprint(snapshot)
-        fingerprint = compute_fingerprint(snapshot, mechanism=mechanism)
+        mechanism = "gri30.yaml"
+        fingerprint = scenario_fingerprint(
+            snapshot,
+            normalized=True,
+            resolve_mechanism=converter_mechanism_resolver(None),
+        )
         scenario_store.write_entry(
             resolve_store_dir({}, str(yaml_path)),
             "BASE",

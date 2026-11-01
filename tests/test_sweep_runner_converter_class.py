@@ -71,30 +71,29 @@ class TestScenarioFingerprintUsesConverterClass:
         # fingerprint must differ from a plain-passthrough resolution.
         assert fp_resolved != fp_plain
 
-    def test_empty_mechanism_never_calls_resolver(self, monkeypatch):
-        """No phases.gas.mechanism declared -- must not invoke the resolver at all.
+    def test_empty_mechanism_resolves_the_default_name(self, monkeypatch):
+        """No phases.gas.mechanism declared -- the default name goes to the resolver.
 
-        A host's resolve_mechanism may not handle an empty/missing mechanism
-        name sensibly (e.g. it might resolve "" to a directory instead of
-        raising) -- scenario_fingerprint must not call it in that case.
+        A single run always solves with a mechanism (the default when none is
+        declared), so the key hashes that same default, never an empty name.
         """
         import boulder.sweep_runner as sweep_runner
 
-        def _boom(name: str) -> str:
-            raise AssertionError("resolver must not be called for an empty mechanism")
+        seen = []
 
-        class _BoomConverter(DualCanteraConverter):
+        class _SpyConverter(DualCanteraConverter):
             def __init__(self, mechanism=None, plugins=None):
                 raise AssertionError("must not construct via __init__")
 
             def resolve_mechanism(self, name: str) -> str:
-                return _boom(name)
+                seen.append(name)
+                return name
 
-        plugins = BoulderPlugins(converter_class=_BoomConverter)
+        plugins = BoulderPlugins(converter_class=_SpyConverter)
         monkeypatch.setattr(sweep_runner, "get_plugins", lambda: plugins)
 
-        # Must not raise.
         scenario_fingerprint(_config(""))
+        assert seen == [sweep_runner.DEFAULT_MECHANISM]
 
 
 class TestPrepareUsesConverterClass:

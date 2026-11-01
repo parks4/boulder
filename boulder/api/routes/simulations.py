@@ -448,23 +448,14 @@ async def check_simulation_cache(
     or ``{"cached": false}``.
     """
     from ... import scenario_store
-    from ...result_cache import (
-        compute_fingerprint,
-        resolve_mechanism_for_fingerprint,
-    )
     from ...runset import resolve_store_dir
+    from ...sweep_runner import converter_mechanism_resolver, scenario_fingerprint
 
     # Normalize exactly like a run would (transient re-runs included).
     config = normalize_config_for_fingerprint(
         _scenario_config(request, body) or body.config,
         body.simulation_time,
         body.time_step,
-    )
-    converter_cls = getattr(request.app.state, "converter_class", None)
-    mechanism = resolve_mechanism_for_fingerprint(
-        config,
-        converter_class=converter_cls,
-        body_mechanism=body.mechanism,
     )
 
     config_path = getattr(request.app.state, "preloaded_config_path", None)
@@ -475,7 +466,14 @@ async def check_simulation_cache(
         logger.info("Result cache disabled (no config path); running a fresh solve.")
         return {"cached": False}
 
-    fingerprint = compute_fingerprint(config, mechanism=mechanism)
+    fingerprint = scenario_fingerprint(
+        config,
+        normalized=True,
+        mechanism=body.mechanism,
+        resolve_mechanism=converter_mechanism_resolver(
+            getattr(request.app.state, "converter_class", None)
+        ),
+    )
     cached = scenario_store.load_matching(
         store_dir, fingerprint, scenario_store.config_identity(config_path)
     )
