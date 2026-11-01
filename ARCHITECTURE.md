@@ -239,16 +239,18 @@ cache; `no_cache` in the request recreates the store) → solve each one through
 out-of-process runner for headless/CLI use — the GUI route above does not call it. `boulder --sweep --headless` invokes it by default; `plugins.sweep_runner` overrides that argv for a host whose CLI
 sweep is genuinely different. Sweep-id naming is customized via `plugins.sweep_symbols`.
 
-**Per-scenario host hooks fire on both paths.** Two seams let a host attach to each freshly solved
-scenario (cache hits fire neither):
+**Per-scenario host hooks fire on both sweep paths.** Three seams let a host attach to a scenario:
+`scenario_attrs` and `on_scenario_solved` for each freshly solved sweep scenario (cache hits fire
+neither), and `on_scenario_cached` for each scenario served from the result store on a re-run:
 
 | Plugin field | Signature | Purpose |
 |---|---|---|
 | `scenario_attrs` | `(scenario_id, merged_config, gui_payload) -> dict` | Extra **scalar** attrs on the scenario's HDF5 group — the per-run KPIs the Scenario pane's Sweep Results plot offers as axes |
 | `on_scenario_solved` | `(scenario_id, config, converter, simulation_result, fingerprint, gui_payload, mechanism) -> None` | Persist per-scenario artifacts keyed by the same fingerprint — e.g. writing each scenario into the single-run result cache so a later "Export" reuses the sweep's work instead of re-solving |
+| `on_scenario_cached` | `(scenario_id, config, fingerprint, artifacts_dir, computed_at) -> None` | Fires on every re-run served from the store (headless sweep, GUI sweep, and the single-run cache check behind the Run button), so a host-side index stays complete when a model is re-run unchanged. It does not fire when the GUI merely opens a config with a stored result, and it may fire repeatedly for the same entry, so a host must handle repeated calls idempotently. A fresh single-run solve never reaches `on_scenario_solved` (only sweeps do); a host sees it through its result-cache contributors. `computed_at` is the entry's original solve time |
 
-`sweep_runner.run()` also accepts both as arguments (an explicit argument wins; otherwise it falls
-back to the plugin fields), so the CLI and the GUI record identical attributes. Both are best-effort:
+`sweep_runner.run()` also accepts the hooks as arguments (an explicit argument wins; otherwise it falls
+back to the plugin fields), so the CLI and the GUI record identical attributes. All three are best-effort:
 a raising hook is caught and logged, never aborting the run.
 
 These were originally `run()` parameters only, which meant a host could reach them *solely* through

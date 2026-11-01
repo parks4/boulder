@@ -17,7 +17,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from ruamel.yaml.error import YAMLError
 
-from ...cantera_converter import DualCanteraConverter
+from ...cantera_converter import DualCanteraConverter, get_plugins
 from ...config import TRANSIENT_SOLVER_KINDS, synthesize_default_group
 from ...simulation_worker import SimulationWorker
 from ..sse import sanitize_for_json, simulation_event_stream
@@ -93,7 +93,6 @@ def _scenario_config(
     if not body.scenario_id or body.scenario_id == BASELINE_SCENARIO_ID:
         return None
 
-    from ...cantera_converter import get_plugins
     from ...config import normalize_config
     from .sweep import _merged_raw
 
@@ -449,7 +448,11 @@ async def check_simulation_cache(
     """
     from ... import scenario_store
     from ...runset import resolve_store_dir
-    from ...sweep_runner import converter_mechanism_resolver, scenario_fingerprint
+    from ...sweep_runner import (
+        converter_mechanism_resolver,
+        notify_cached,
+        scenario_fingerprint,
+    )
 
     # Normalize exactly like a run would (transient re-runs included).
     config = normalize_config_for_fingerprint(
@@ -487,6 +490,14 @@ async def check_simulation_cache(
     logger.info(
         "Cache HIT (fingerprint %s): retrieving result from cache, skipping solve.",
         fingerprint[:12],
+    )
+    notify_cached(
+        get_plugins().on_scenario_cached,
+        store_dir,
+        cached["id"],
+        config,
+        fingerprint,
+        identity=scenario_store.config_identity(config_path),
     )
     meta = cached.get("meta", {})
     # gui_payload was written to disk unsanitized (result_cache/payload_store

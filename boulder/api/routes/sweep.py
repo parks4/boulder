@@ -50,6 +50,7 @@ from ...runset import (
 from ...sweep_runner import (
     converter_mechanism_resolver,
     final_states_of,
+    notify_cached,
     prepare_scenario,
     solve_scenario,
     store_solved_scenario,
@@ -410,6 +411,15 @@ async def sweep_run(
                     # A skipped chain step still seeds the next one.
                     cursor.previous_states = stored_final_states(
                         store_dir, sid, identity
+                    )
+                    notify_cached(
+                        plugins.on_scenario_cached,
+                        store_dir,
+                        sid,
+                        config,
+                        fingerprint,
+                        identity=identity,
+                        warn=lambda msg: print(f"[sweep]{msg}", flush=True),
                     )
                     continue
 
