@@ -32,6 +32,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from ruamel.yaml.error import YAMLError
 
 from ... import scenario_store
 from ...cantera_converter import DualCanteraConverter, get_plugins
@@ -273,12 +274,17 @@ async def sweep_run(
     assert cfg_path is not None  # a store directory implies a config path
     # The definition as the session holds it: the browser's text and the
     # name the user loaded the file under, not the file on disk.
-    source = scenario_store.build_source(
-        raw,
-        cfg_path,
-        leaf_text=getattr(request.app.state, "preloaded_yaml", None),
-        display_name=getattr(request.app.state, "preloaded_filename", None),
-    )
+    try:
+        source = scenario_store.build_source(
+            raw,
+            cfg_path,
+            leaf_text=getattr(request.app.state, "preloaded_yaml", None),
+            display_name=getattr(request.app.state, "preloaded_filename", None),
+        )
+    except (OSError, ValueError, YAMLError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Cannot read the run's source: {exc}"
+        ) from exc
     state: Dict[str, Any] = {
         "status": "running",
         "current": 0,

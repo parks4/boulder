@@ -412,7 +412,9 @@ def _run_config(app: Any) -> Dict[str, Any]:
     )
 
 
-def _start_run(client: TestClient, app: Any, during_solve) -> Dict[str, Any]:
+def _start_run(
+    client: TestClient, app: Any, during_solve, monkeypatch: pytest.MonkeyPatch
+) -> Dict[str, Any]:
     """POST a plain run; *during_solve* fires once the solve has started."""
     from boulder.simulation_worker import SimulationWorker
 
@@ -422,11 +424,8 @@ def _start_run(client: TestClient, app: Any, during_solve) -> Dict[str, Any]:
         original(self, *args, **kwargs)
         during_solve()
 
-    SimulationWorker.start_simulation = start  # type: ignore[method-assign]
-    try:
-        resp = client.post("/api/simulations", json={"config": _run_config(app)})
-    finally:
-        SimulationWorker.start_simulation = original  # type: ignore[method-assign]
+    monkeypatch.setattr(SimulationWorker, "start_simulation", start)
+    resp = client.post("/api/simulations", json={"config": _run_config(app)})
     assert resp.status_code == 200, resp.text
     from boulder.runset import resolve_store_dir
 
@@ -442,7 +441,7 @@ def _start_run(client: TestClient, app: Any, during_solve) -> Dict[str, Any]:
 
 
 def test_a_run_keeps_the_source_it_started_with_when_the_file_vanishes(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The leaf and its parent disappearing mid-solve still leaves the entry.
 
@@ -456,7 +455,7 @@ def test_a_run_keeps_the_source_it_started_with_when_the_file_vanishes(
             cfg.unlink()
             (tmp_path / "base.yaml").unlink()
 
-        store_dir = _start_run(client, app, vanish)["store_dir"]
+        store_dir = _start_run(client, app, vanish, monkeypatch)["store_dir"]
         src = scenario_store.read_source(store_dir, _entries(store_dir)[0]["id"])
         assert src is not None
         assert src.leaf_text == _LEAF_YAML
@@ -465,7 +464,9 @@ def test_a_run_keeps_the_source_it_started_with_when_the_file_vanishes(
         client.__exit__(None, None, None)
 
 
-def test_a_run_keeps_the_leaf_text_it_started_with(tmp_path: Path) -> None:
+def test_a_run_keeps_the_leaf_text_it_started_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A live edit of ``preloaded_yaml`` mid-solve does not reach the stored source."""
     client, app, _cfg = _gui(tmp_path)
     try:
@@ -473,7 +474,7 @@ def test_a_run_keeps_the_leaf_text_it_started_with(tmp_path: Path) -> None:
         def edit() -> None:
             app.state.preloaded_yaml = "edited: later\n"
 
-        store_dir = _start_run(client, app, edit)["store_dir"]
+        store_dir = _start_run(client, app, edit, monkeypatch)["store_dir"]
         src = scenario_store.read_source(store_dir, _entries(store_dir)[0]["id"])
         assert src is not None
         assert src.leaf_text == _LEAF_YAML
@@ -482,14 +483,44 @@ def test_a_run_keeps_the_leaf_text_it_started_with(tmp_path: Path) -> None:
 
 
 def test_a_run_whose_source_cannot_be_built_fails_before_the_solve(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A missing parent file makes the run request fail (500) before any solve."""
+    """A missing parent gives a 422 naming it; no solve starts, no entry is written."""
+    from boulder.runset import resolve_store_dir
+    from boulder.simulation_worker import SimulationWorker
+
+    started: list = []
+    monkeypatch.setattr(
+        SimulationWorker, "start_simulation", lambda *a, **k: started.append(1)
+    )
     client, app, _cfg = _gui(tmp_path)
     try:
         (tmp_path / "base.yaml").unlink()
         resp = client.post("/api/simulations", json={"config": _run_config(app)})
-        assert resp.status_code == 500
-        assert "base.yaml" in resp.text
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert "Cannot read the run's source" in detail
+        assert "base.yaml" in detail
+        assert started == []
+        store_dir = resolve_store_dir(
+            app.state.preloaded_raw, app.state.preloaded_config_path
+        )
+        assert store_dir is None or _entries(store_dir) == []
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_a_sweep_whose_source_cannot_be_built_is_refused_with_422(
+    tmp_path: Path,
+) -> None:
+    """A missing parent makes ``POST /api/sweep/run`` answer 422, not a bare 500."""
+    client, app, _cfg = _gui(tmp_path)
+    try:
+        (tmp_path / "base.yaml").unlink()
+        resp = client.post("/api/sweep/run", json={"scenarios": _hot(350)})
+        assert resp.status_code == 422, resp.text
+        detail = resp.json()["detail"]
+        assert "Cannot read the run's source" in detail
+        assert "base.yaml" in detail
     finally:
         client.__exit__(None, None, None)

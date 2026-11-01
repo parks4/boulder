@@ -138,9 +138,10 @@ def deep_merge(base: dict, overlay: dict) -> dict:
 def _load_yaml_with_inheritance(path: "str | Path") -> dict:
     """Load a STONE YAML with optional ``from:`` inheritance (keys as written).
 
-    If a top-level ``from`` key is present, that file is loaded first
-    (recursively) and deep-merged with the current file content (excluding
-    ``from``). Relative ``from`` paths are resolved against the current file
+    If a top-level ``from`` key is present, the chain of parents is resolved
+    (:func:`inheritance_chain`; a cycle raises ``ValueError``), the farthest
+    parent is loaded first and each file is deep-merged over it, without its
+    ``from`` key. Relative ``from`` paths are resolved against the current file
     directory.
 
     The ``scenarios:`` directive is **not inherited**: a named scenario mapping
@@ -163,6 +164,8 @@ def _load_yaml_with_inheritance(path: "str | Path") -> dict:
         return own
 
     # One resolver (and one cycle check): the chain, farthest parent first.
+    # ponytail: each chain file is parsed twice (here and in inheritance_chain);
+    # negligible for config-sized files, share the parse if that ever shows.
     files = [Path(path), *inheritance_chain(path)]
     merged = _own(files[-1])
     for file in reversed(files[:-1]):

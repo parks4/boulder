@@ -3,12 +3,15 @@
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import cantera as ct  # type: ignore
 
 from .runset import base_entry_id
 from .verbose_utils import get_verbose_logger
+
+if TYPE_CHECKING:
+    from .scenario_store import RunSource
 
 logger = get_verbose_logger(__name__)
 
@@ -271,7 +274,7 @@ class SimulationWorker:
         #: The run source captured when the run started (see
         #: :func:`boulder.scenario_store.build_source`); never rebuilt after
         #: the solve, when the file or the session's text may have changed.
-        self._source: Optional[Any] = None
+        self._source: Optional["RunSource"] = None
 
     def set_run_identity(
         self,
@@ -280,7 +283,7 @@ class SimulationWorker:
         label: Optional[str] = None,
         order: Optional[int] = None,
         raw_config: Optional[Dict[str, Any]] = None,
-        source: Optional[Any] = None,
+        source: Optional["RunSource"] = None,
     ) -> None:
         """Name the run-set entry this worker is about to solve.
 
