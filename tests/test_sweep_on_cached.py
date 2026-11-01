@@ -216,3 +216,28 @@ def test_check_cache_hit_fires_on_cached(tmp_path, cached_calls) -> None:
         miss = client.post("/api/simulations/check-cache", json=body).json()
         assert miss["cached"] is False
         assert cached_calls == []
+
+
+def test_startup_preload_of_a_stored_result_fires_on_cached(
+    tmp_path, cached_calls, monkeypatch
+) -> None:
+    """Opening a config whose result is stored fires on_cached once, at startup."""
+    from boulder import sweep_runner
+
+    base = {
+        k: v for k, v in yaml.safe_load(_CONFIG_YAML).items() if k not in _RUNSET_KEYS
+    }
+    cfg = tmp_path / "single.yaml"
+    cfg.write_text(yaml.safe_dump(base), encoding="utf-8")
+    resolver = sweep_runner.converter_mechanism_resolver(None)
+    store_dir = sweep_runner.run(cfg, resolve_mechanism=resolver)
+    stored = _fingerprints(store_dir)
+    assert cached_calls == []
+
+    from boulder.api.main import create_app
+
+    monkeypatch.setenv("BOULDER_CONFIG_PATH", str(cfg))
+    with TestClient(create_app()) as client:
+        client.get("/api/health")
+
+    assert [(c[0], c[2]) for c in cached_calls] == list(stored.items())
