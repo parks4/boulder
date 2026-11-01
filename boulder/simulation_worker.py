@@ -657,6 +657,14 @@ class SimulationWorker:
             # calls its base BASELINE, not BASE. Defaulting to BASE stored the
             # same result under a second name.
             scenario_id = self._scenario_id or base_entry_id(self._raw_config or {})
+            assert config_path is not None  # a store directory implies a config path
+            # The definition as the session holds it (browser text, upload name).
+            source = scenario_store.build_source(
+                self._raw_config or {},
+                config_path,
+                leaf_text=getattr(self._app_state, "preloaded_yaml", None),
+                display_name=getattr(self._app_state, "preloaded_filename", None),
+            )
 
             progress = self.get_progress()
             # Use pre-build snapshot for fingerprinting when available so the hash
@@ -711,6 +719,7 @@ class SimulationWorker:
                 label=self._scenario_label,
                 order=self._scenario_order,
                 alt_fingerprints=(post_build_fp,),
+                source=source,
             )
 
             artifacts_dir = store_artifacts_dir(store_dir, scenario_id)

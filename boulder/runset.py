@@ -176,6 +176,32 @@ def _load_yaml_with_inheritance(path: "str | Path") -> dict:
     return deep_merge(base, overlay)
 
 
+def inheritance_chain(path: "str | Path") -> List[Path]:
+    """Return the ``from:`` parents of the STONE YAML at *path*, nearest first.
+
+    The leaf itself is not included. Each entry is the resolved path of one file
+    :func:`load_yaml_with_inheritance` merges in; an empty list means the file
+    has no ``from:``. Relative ``from`` paths resolve against the directory of
+    the file that names them, as in the loader. A cycle raises ``ValueError``.
+    """
+    from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
+
+    chain: List[Path] = []
+    current = Path(path).resolve()
+    seen = {current}
+    while True:
+        with open(current, "r", encoding="utf-8", errors="replace") as f:
+            data = YAML().load(f)
+        from_path = data.get("from") if isinstance(data, dict) else None
+        if not from_path:
+            return chain
+        current = (current.parent / str(from_path)).resolve()
+        if current in seen:
+            raise ValueError(f"'from:' cycle at {current}")
+        seen.add(current)
+        chain.append(current)
+
+
 def load_yaml_with_inheritance(path: "str | Path") -> dict:
     """Load a STONE YAML (``from:`` resolved) with its run-set block canonicalized.
 
