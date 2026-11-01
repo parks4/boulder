@@ -9,6 +9,7 @@ recorded under that name is the staleness check.
     <store_dir>/
         BASELINE.h5 | <scenario_id>.h5
         artifacts/<scenario_id>/...
+        sources/<sha256>.yaml      (one per distinct run-set definition)
 
 Consequence worth stating plainly: an entry holds **one** result, the latest.
 Re-running an unchanged entry is a cache hit; going *back* to a previous value
@@ -37,12 +38,16 @@ let every later run cache-hit onto a broken payload: strictly worse than a miss.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import logging
+import os
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .runset import store_artifacts_dir, store_entry_path
 
@@ -65,6 +70,7 @@ STORE_VERSION: int = 1
 _ATTR_VERSION = "store_version"
 _ATTR_CONFIG_IDENTITY = "config_identity"
 _ATTR_FINGERPRINT = "fingerprint"
+_ATTR_SOURCE = "source_sha256"
 
 #: Additional fingerprints the same entry also answers to.
 #:
@@ -90,6 +96,7 @@ NON_KPI_ATTRS = frozenset(
         _ATTR_CONFIG_IDENTITY,
         _ATTR_FINGERPRINT,
         _ATTR_ALT_FINGERPRINTS,
+        _ATTR_SOURCE,
         "label",
         "order",
         "computed_at",
@@ -138,6 +145,139 @@ def _usable(handle: Any, identity: str) -> bool:
     return True
 
 
+@dataclass(frozen=True)
+class RunSource:
+    """The inputs a run-set entry was solved from, as the user loaded them.
+
+    ``definition``
+        The un-normalised run-set definition as YAML text: ``from:`` parents
+        merged, ``scenarios:`` overlays and ``scenarios_sweep:`` intact.
+    ``leaf_text``
+        The leaf file's text, verbatim (the browser's copy in a GUI session).
+    ``chain``
+        File names of the ``from:`` parents, nearest first, relative to the leaf.
+    ``display_name``
+        The name the user loaded the file under (an upload's original name).
+    """
+
+    definition: str
+    leaf_text: str
+    chain: Tuple[str, ...]
+    display_name: str
+
+
+def _yaml_text(data: Any, *, safe: bool = False) -> str:
+    """Dump *data* as YAML (``safe``: plain containers only, block style)."""
+    from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
+
+    yaml = YAML(typ="safe") if safe else YAML()
+    if safe:
+        yaml.default_flow_style = False
+    buffer = io.StringIO()
+    yaml.dump(data, buffer)
+    return buffer.getvalue()
+
+
+def build_source(
+    raw: Dict[str, Any],
+    config_path: "Path | str",
+    *,
+    leaf_text: Optional[str] = None,
+    display_name: Optional[str] = None,
+) -> RunSource:
+    """Assemble the :class:`RunSource` of a run whose un-normalised config is *raw*.
+
+    *config_path* is the leaf file the run is stored against. *leaf_text* and
+    *display_name* default to that file's text and name; pass them when the
+    session holds something else (browser edits, an uploaded file's own name).
+    """
+    from .runset import inheritance_chain  # noqa: PLC0415 — avoid import cycle
+
+    leaf = Path(config_path)
+    if leaf_text is None:
+        leaf_text = leaf.read_text(encoding="utf-8")
+    chain = tuple(
+        Path(os.path.relpath(parent, leaf.resolve().parent)).as_posix()
+        for parent in inheritance_chain(leaf, leaf_text)
+    )
+    return RunSource(
+        definition=_yaml_text(raw),
+        leaf_text=leaf_text,
+        chain=chain,
+        display_name=display_name or leaf.name,
+    )
+
+
+def _write_source(store_dir: Path, source: RunSource) -> str:
+    """Store *source* once, content-addressed; return its sha256."""
+    from .payload_store import replace_file, scratch_path  # noqa: PLC0415
+
+    record = {
+        "display_name": source.display_name,
+        "chain": list(source.chain),
+        "leaf": source.leaf_text,
+        "definition": source.definition,
+    }
+    data = _yaml_text(record, safe=True).encode("utf-8")
+    sha = hashlib.sha256(data).hexdigest()
+    path = store_dir / "sources" / f"{sha}.yaml"
+    if not path.is_file():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = scratch_path(path)
+        try:
+            tmp.write_bytes(data)
+            replace_file(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+    return sha
+
+
+def _source_of_entry(store_dir: Path, entry_path: Path) -> Optional[RunSource]:
+    if h5py is None or not entry_path.is_file():
+        return None
+    try:
+        with h5py.File(str(entry_path), "r") as handle:
+            sha = _to_py(handle.attrs.get(_ATTR_SOURCE))
+    except OSError:
+        return None
+    if not sha:
+        return None
+    path = store_dir / "sources" / f"{sha}.yaml"
+    if not path.is_file():
+        raise FileNotFoundError(f"{entry_path.name} points to a missing source: {path}")
+    from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
+
+    record = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
+    return RunSource(
+        definition=record["definition"],
+        leaf_text=record["leaf"],
+        chain=tuple(record["chain"]),
+        display_name=record["display_name"],
+    )
+
+
+def read_source(store_dir: Path, scenario_id: str) -> Optional[RunSource]:
+    """Return the :class:`RunSource` of one entry, or ``None`` if it has none.
+
+    ``None`` covers an absent entry and one written before sources were
+    recorded; the caller decides how to fail. A recorded source whose file is
+    gone raises ``FileNotFoundError``.
+    """
+    return _source_of_entry(store_dir, store_entry_path(store_dir, scenario_id))
+
+
+def read_source_for_artifacts_dir(artifacts_dir: Path) -> Optional[RunSource]:
+    """Return the :class:`RunSource` of the entry owning *artifacts_dir*.
+
+    Same as :func:`read_source`, from an entry's ``artifacts_dir``.
+
+    The form a cache contributor has: ``artifacts_dir`` is the value
+    :func:`~boulder.runset.store_artifacts_dir` returned for the entry.
+    """
+    store_dir = Path(artifacts_dir).parent.parent
+    return _source_of_entry(store_dir, store_dir / f"{Path(artifacts_dir).name}.h5")
+
+
 def write_entry(
     store_dir: Path,
     scenario_id: str,
@@ -151,8 +291,13 @@ def write_entry(
     alt_fingerprints: "Optional[tuple[str, ...]]" = None,
     units: Optional[Dict[str, str]] = None,
     extra_attrs: Optional[Dict[str, Any]] = None,
+    source: Optional[RunSource] = None,
 ) -> Path:
     """Write one solved entry, atomically, recording ``fingerprint`` last.
+
+    The raw *scenario_id* is stored as attr ``id`` (the file stem is sanitised).
+    A *source* is stored once under ``sources/<sha256>.yaml`` and the entry
+    records its hash as ``source_sha256``; it is never part of the fingerprint.
 
     Returns the file written. The payload goes through the same
     :func:`boulder.payload_store.write_payload` every result uses, so there is
@@ -174,12 +319,16 @@ def write_entry(
     store_dir.mkdir(parents=True, exist_ok=True)
     path = store_entry_path(store_dir, scenario_id)
     tmp = scratch_path(path)
+    source_sha = _write_source(store_dir, source) if source is not None else None
     try:
         write_payload(tmp, gui_payload, mechanism, fresh=False)
         with h5py.File(str(tmp), "a") as handle:
             attrs = handle.attrs
             attrs[_ATTR_VERSION] = STORE_VERSION
             attrs[_ATTR_CONFIG_IDENTITY] = identity
+            attrs["id"] = scenario_id
+            if source_sha is not None:
+                attrs[_ATTR_SOURCE] = source_sha
             attrs["computed_at"] = float(time.time())
             if label is not None:
                 attrs["label"] = label

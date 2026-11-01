@@ -3,12 +3,15 @@
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import cantera as ct  # type: ignore
 
 from .runset import base_entry_id
 from .verbose_utils import get_verbose_logger
+
+if TYPE_CHECKING:
+    from .scenario_store import RunSource
 
 logger = get_verbose_logger(__name__)
 
@@ -268,6 +271,10 @@ class SimulationWorker:
         #: The raw config, needed only to resolve the store location (it may
         #: declare ``metadata.extra.cache_store``).
         self._raw_config: Optional[Dict[str, Any]] = None
+        #: The run source captured when the run started (see
+        #: :func:`boulder.scenario_store.build_source`); never rebuilt after
+        #: the solve, when the file or the session's text may have changed.
+        self._source: Optional["RunSource"] = None
 
     def set_run_identity(
         self,
@@ -276,6 +283,7 @@ class SimulationWorker:
         label: Optional[str] = None,
         order: Optional[int] = None,
         raw_config: Optional[Dict[str, Any]] = None,
+        source: Optional["RunSource"] = None,
     ) -> None:
         """Name the run-set entry this worker is about to solve.
 
@@ -293,6 +301,7 @@ class SimulationWorker:
         self._scenario_label = label
         self._scenario_order = order
         self._raw_config = raw_config
+        self._source = source
 
     def start_simulation(
         self,
@@ -657,6 +666,8 @@ class SimulationWorker:
             # calls its base BASELINE, not BASE. Defaulting to BASE stored the
             # same result under a second name.
             scenario_id = self._scenario_id or base_entry_id(self._raw_config or {})
+            # The definition as the session held it when the run started.
+            source = self._source
 
             progress = self.get_progress()
             # Use pre-build snapshot for fingerprinting when available so the hash
@@ -711,6 +722,7 @@ class SimulationWorker:
                 label=self._scenario_label,
                 order=self._scenario_order,
                 alt_fingerprints=(post_build_fp,),
+                source=source,
             )
 
             artifacts_dir = store_artifacts_dir(store_dir, scenario_id)

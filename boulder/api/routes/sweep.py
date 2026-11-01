@@ -32,6 +32,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+from ruamel.yaml.error import YAMLError
 
 from ... import scenario_store
 from ...cantera_converter import DualCanteraConverter, get_plugins
@@ -270,6 +271,20 @@ async def sweep_run(
             status_code=400, detail="Could not resolve a result store directory"
         )
     identity = scenario_store.config_identity(cfg_path)
+    assert cfg_path is not None  # a store directory implies a config path
+    # The definition as the session holds it: the browser's text and the
+    # name the user loaded the file under, not the file on disk.
+    try:
+        source = scenario_store.build_source(
+            raw,
+            cfg_path,
+            leaf_text=getattr(request.app.state, "preloaded_yaml", None),
+            display_name=getattr(request.app.state, "preloaded_filename", None),
+        )
+    except (OSError, ValueError, YAMLError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Cannot read the run's source: {exc}"
+        ) from exc
     state: Dict[str, Any] = {
         "status": "running",
         "current": 0,
@@ -482,6 +497,7 @@ async def sweep_run(
                     mechanism=stored_mech,
                     scenario_attrs=plugins.scenario_attrs,
                     on_solved=plugins.on_scenario_solved,
+                    source=source,
                     warn=lambda msg: print(f"[sweep]{msg}", flush=True),
                 )
                 cursor.previous_states = final_states_of(gui)

@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from ruamel.yaml.error import YAMLError
 
 from ...cantera_converter import DualCanteraConverter
 from ...config import TRANSIENT_SOLVER_KINDS, synthesize_default_group
@@ -292,10 +293,28 @@ async def start_simulation(
 
         # The scenario id is its only name -- the entry's label is the id.
         run_id = body.scenario_id if scenario_config is not None else None
+        raw_config = _merged_raw(request, body.scenarios)
+        # Capture the run's source now, from the session as it is at the click:
+        # after the solve the file may be gone and a live edit may have replaced
+        # the text, and a failure here must stop the run, not lose its entry.
+        from ...runset import resolve_store_dir  # noqa: PLC0415
+        from ...scenario_store import build_source  # noqa: PLC0415
+
+        source = None
+        if config_path is not None and resolve_store_dir(raw_config, config_path):
+            try:
+                source = build_source(
+                    raw_config,
+                    config_path,
+                    leaf_text=getattr(request.app.state, "preloaded_yaml", None),
+                    display_name=getattr(request.app.state, "preloaded_filename", None),
+                )
+            except (OSError, ValueError, YAMLError) as exc:
+                raise HTTPException(
+                    status_code=422, detail=f"Cannot read the run's source: {exc}"
+                ) from exc
         worker.set_run_identity(
-            run_id,
-            label=run_id,
-            raw_config=_merged_raw(request, body.scenarios),
+            run_id, label=run_id, raw_config=raw_config, source=source
         )
         worker.start_simulation(
             converter,

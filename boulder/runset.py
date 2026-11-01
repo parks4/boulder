@@ -138,9 +138,10 @@ def deep_merge(base: dict, overlay: dict) -> dict:
 def _load_yaml_with_inheritance(path: "str | Path") -> dict:
     """Load a STONE YAML with optional ``from:`` inheritance (keys as written).
 
-    If a top-level ``from`` key is present, that file is loaded first
-    (recursively) and deep-merged with the current file content (excluding
-    ``from``). Relative ``from`` paths are resolved against the current file
+    If a top-level ``from`` key is present, the chain of parents is resolved
+    (:func:`inheritance_chain`; a cycle raises ``ValueError``), the farthest
+    parent is loaded first and each file is deep-merged over it, without its
+    ``from`` key. Relative ``from`` paths are resolved against the current file
     directory.
 
     The ``scenarios:`` directive is **not inherited**: a named scenario mapping
@@ -154,26 +155,58 @@ def _load_yaml_with_inheritance(path: "str | Path") -> dict:
 
     yaml = YAML()
     yaml.preserve_quotes = True
-    path = Path(path)
 
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        data = yaml.load(f)
+    def _own(file: Path) -> dict:
+        with open(file, "r", encoding="utf-8", errors="replace") as f:
+            data = yaml.load(f)
+        own = dict(data) if data is not None else {}
+        own.pop("from", None)
+        return own
 
-    if data is None:
-        return {}
+    # One resolver (and one cycle check): the chain, farthest parent first.
+    # ponytail: each chain file is parsed twice (here and in inheritance_chain);
+    # negligible for config-sized files, share the parse if that ever shows.
+    files = [Path(path), *inheritance_chain(path)]
+    merged = _own(files[-1])
+    for file in reversed(files[:-1]):
+        merged.pop("scenarios", None)  # the named run-set is not inherited (sweeps are)
+        merged = deep_merge(merged, copy.deepcopy(_own(file)))
+    return merged
 
-    data_dict = dict(data)
-    from_path = data_dict.get("from")
-    if not from_path:
-        return data_dict
 
-    overlay = copy.deepcopy(data_dict)
-    overlay.pop("from", None)
+def inheritance_chain(
+    path: "str | Path", leaf_text: Optional[str] = None
+) -> List[Path]:
+    """Return the ``from:`` parents of the STONE YAML at *path*, nearest first.
 
-    parent_path = (path.parent / str(from_path)).resolve()
-    base = _load_yaml_with_inheritance(parent_path)
-    base.pop("scenarios", None)  # the named run-set is not inherited (sweeps are)
-    return deep_merge(base, overlay)
+    The leaf itself is not included. Each entry is the resolved path of one file
+    :func:`load_yaml_with_inheritance` merges in; an empty list means the file
+    has no ``from:``. Relative ``from`` paths resolve against the directory of
+    the file that names them, as in the loader. A cycle raises ``ValueError``.
+
+    *leaf_text*, when given, is read instead of the leaf file's content (a
+    browser edit): the leaf's ``from:`` comes from it, resolved against the
+    leaf's directory.
+    """
+    from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
+
+    chain: List[Path] = []
+    current = Path(path).resolve()
+    seen = {current}
+    while True:
+        if leaf_text is not None and not chain:
+            data = YAML().load(leaf_text)
+        else:
+            with open(current, "r", encoding="utf-8", errors="replace") as f:
+                data = YAML().load(f)
+        from_path = data.get("from") if isinstance(data, dict) else None
+        if not from_path:
+            return chain
+        current = (current.parent / str(from_path)).resolve()
+        if current in seen:
+            raise ValueError(f"'from:' cycle at {current}")
+        seen.add(current)
+        chain.append(current)
 
 
 def load_yaml_with_inheritance(path: "str | Path") -> dict:

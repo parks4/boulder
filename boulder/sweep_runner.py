@@ -332,6 +332,7 @@ def store_solved_scenario(
     scenario_attrs: Optional[Callable[..., Any]] = None,
     on_solved: Optional[Callable[..., Any]] = None,
     warn: Optional[Callable[[str], None]] = None,
+    source: Optional[scenario_store.RunSource] = None,
 ) -> None:
     """Record one freshly solved run-set entry: attrs, the write, the host hook.
 
@@ -386,6 +387,7 @@ def store_solved_scenario(
         order=order,
         units=entry_units or None,
         extra_attrs=entry_attrs,
+        source=source,
     )
 
     contributors = get_cache_contributor_registry().contributors
@@ -488,6 +490,8 @@ def run(
     assert store_dir is not None  # cfg_path is always set here
     identity = scenario_store.config_identity(cfg_path)
     store_dir.mkdir(parents=True, exist_ok=True)
+    # One definition for the whole run-set: every entry points to it.
+    source = scenario_store.build_source(raw, cfg_path)
 
     # Incremental by default: keep the store and skip scenarios whose fingerprint
     # is unchanged. ``--no-cache`` (BOULDER_NO_CACHE) forces a full recompute.
@@ -539,6 +543,7 @@ def run(
             mechanism=stored_mech,
             scenario_attrs=scenario_attrs,
             on_solved=on_solved,
+            source=source,
         )
         cursor.previous_states = final_states_of(gui)
 
