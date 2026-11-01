@@ -67,7 +67,7 @@ ______________________________________________________________________
 ## 2. Allowed Top-Level Keys
 
 ```
-metadata   phases   settings   stages   network   export   scenarios   scenarios_sweep
+metadata   phases   settings   stages   network   export   references   scenarios   scenarios_sweep
 signals   bindings   scopes
 ```
 
@@ -252,6 +252,14 @@ is tagged accordingly so the frontend plots it against position (m) instead of t
 
 KPI functions, figure generators, calc-note targets. Consumed by downstream
 host packages. Not interpreted by Boulder core.
+
+### `references:`
+
+Optional mapping that cites the source documents a model implements (e.g. a process flow
+diagram, P&ID or datasheet), so downstream reports and consistency checks can refer to them.
+Boulder only checks that it is a mapping and carries it through normalization, scenarios and
+saves unchanged; the content of each entry is defined by the host, e.g.
+`references: {pid: {doc_no: EX-PID-001, rev: A, sheet: 1, title: Example P&ID}}`.
 
 ______________________________________________________________________
 
