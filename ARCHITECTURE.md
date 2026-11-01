@@ -246,7 +246,7 @@ scenario (cache hits fire neither; a third, `on_scenario_cached`, fires only for
 |---|---|---|
 | `scenario_attrs` | `(scenario_id, merged_config, gui_payload) -> dict` | Extra **scalar** attrs on the scenario's HDF5 group — the per-run KPIs the Scenario pane's Sweep Results plot offers as axes |
 | `on_scenario_solved` | `(scenario_id, config, converter, simulation_result, fingerprint, gui_payload, mechanism) -> None` | Persist per-scenario artifacts keyed by the same fingerprint — e.g. writing each scenario into the single-run result cache so a later "Export" reuses the sweep's work instead of re-solving |
-| `on_scenario_cached` | `(scenario_id, config, fingerprint, artifacts_dir, computed_at) -> None` | The cache-hit counterpart: fires instead of the two above when a scenario is served from the store (headless sweep, GUI sweep, single-run cache check), so a host-side index stays complete when a model is re-run unchanged. `computed_at` is the entry's original solve time |
+| `on_scenario_cached` | `(scenario_id, config, fingerprint, artifacts_dir, computed_at) -> None` | The cache-hit counterpart: fires instead of the two above when a scenario is served from the store (headless sweep, GUI sweep, startup preload, single-run cache check), so a host-side index stays complete when a model is re-run unchanged. `computed_at` is the entry's original solve time |
 
 `sweep_runner.run()` also accepts the hooks as arguments (an explicit argument wins; otherwise it falls
 back to the plugin fields), so the CLI and the GUI record identical attributes. Both are best-effort:

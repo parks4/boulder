@@ -142,8 +142,8 @@ class BoulderPlugins:
     #: computed_at) -> None`` for each scenario *served from the result store*
     #: instead of solved (the counterpart of :attr:`on_scenario_solved`, which
     #: cache hits never fire). ``computed_at`` is the entry's original solve time
-    #: in epoch seconds. Fires from the headless sweep, the GUI sweep and the
-    #: single-run cache check. Exceptions are caught and logged.
+    #: in epoch seconds. Fires from the headless sweep, the GUI sweep, the startup
+    #: preload of a stored result and the single-run cache check. Exceptions are caught and logged.
     #:
     #: Same contract as :func:`boulder.sweep_runner.run`'s ``on_cached``
     #: argument, which defaults to this when not passed explicitly.
