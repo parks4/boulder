@@ -33,6 +33,8 @@ export function HeaderStatus() {
   const isRunning = useSimulationStore((s) => s.isRunning);
   const sweeping = useSweepRunStore((s) => s.sweeping);
   const metadata = useConfigStore((s) => s.config.metadata);
+  // The chip is also asked with no config loaded; loading one re-asks.
+  const hasConfig = useConfigStore((s) => s.config.nodes.length > 0);
   const [status, setStatus] = useState<HostStatus | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   // The scenario the shown answer is about: never show it against another one.
@@ -73,7 +75,7 @@ export function HeaderStatus() {
     return () => {
       stale = true;
     };
-  }, [activeId, results, isRunning, sweeping, metadata]);
+  }, [activeId, results, isRunning, sweeping, metadata, hasConfig]);
 
   if (answeredFor !== (activeId ?? "") || isRunning || sweeping) return null;
   if (failure !== null) {

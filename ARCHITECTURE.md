@@ -558,6 +558,11 @@ Unsaved GUI edits and in-memory overlays are not included, so a host must not
 rely on `config` for them; `fingerprints` are exact in every case, because they
 come from the stored entry.
 
+With no configuration loaded the provider is still called, with
+`HeaderStatusContext(config=None, scenario_id="", fingerprints=())` (a
+`scenario_id` query parameter is ignored, never a 404), so a host chip can be the
+header's only entry point.
+
 The route answers `{"status": null}` (no provider, or the provider returned `None`), or
 
 ```json
