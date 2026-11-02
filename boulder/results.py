@@ -305,7 +305,9 @@ class Scenario:
             arr = self.states(reactor)
             for name in names:
                 if name[:2] in {"X:", "Y:"}:
-                    out[name] = np.asarray(getattr(arr(name[2:]), name[0])[:, 0])
+                    # column slice, not arr("SP"): that resizes a live view (fails on Python 3.14)
+                    col = arr.species_index(name[2:])
+                    out[name] = np.asarray(getattr(arr, name[0])[:, col])
                 else:
                     out[name] = np.asarray(getattr(arr, name))
             return out

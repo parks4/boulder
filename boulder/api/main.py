@@ -66,11 +66,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ensure_graphviz_on_path()
 
     # Startup: register built-in plugins and create global converter
-    from ..cantera_converter import DualCanteraConverter
+    from ..cantera_converter import select_converter_class
     from ..network_plugin import register_network_plugin
 
     register_network_plugin()
-    converter_cls = _converter_class or DualCanteraConverter
+    converter_cls = select_converter_class(_converter_class)
     # Store converter class so simulation routes can instantiate their own.
     app.state.converter_class = converter_cls
     # Store runner class so routes can use its normalize/validate pipeline.

@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type
 
 from . import scenario_store
-from .cantera_converter import DualCanteraConverter, get_plugins
+from .cantera_converter import DualCanteraConverter, get_plugins, select_converter_class
 from .config import normalize_config, synthesize_default_group
 from .result_cache import get_cache_contributor_registry, run_contributors
 from .runset import (
@@ -227,7 +227,7 @@ def solve_scenario(
 
     started = time.perf_counter()
     plugins = get_plugins()
-    converter_cls = converter_cls or plugins.converter_class or DualCanteraConverter
+    converter_cls = select_converter_class(converter_cls, plugins)
     conv = converter_cls(mechanism=mechanism or None, plugins=plugins)
 
     sim_t, dt = solver_window(config)
