@@ -4,6 +4,8 @@ import os
 import tempfile
 from typing import Optional
 
+import yaml
+
 # sim2stone only accepts a .yaml/.yml output path, so the temporary name keeps it.
 _TEMP_SUFFIX = ".tmp.yaml"
 
@@ -78,8 +80,6 @@ def _yaml_files_are_different(yaml_path1: str, yaml_path2: str) -> bool:
     -------
         True if files are different, False if they are the same
     """
-    import yaml
-
     with open(yaml_path1, "r", encoding="utf-8") as f1:
         content1 = yaml.safe_load(f1)
     with open(yaml_path2, "r", encoding="utf-8") as f2:
@@ -101,34 +101,45 @@ def _handle_yaml_conflicts(yaml_path: str, verbose: bool = False) -> str:
         content is never modified: the new conversion goes to a ``_converted``
         file instead.
     """
-    if not yaml_path.endswith(_TEMP_SUFFIX):
-        raise ValueError(f"Expected a temporary YAML path, got: {yaml_path}")
     proper_yaml_path = yaml_path[: -len(_TEMP_SUFFIX)] + ".yaml"
 
-    if not os.path.exists(proper_yaml_path):
-        os.rename(yaml_path, proper_yaml_path)
-        if verbose:
-            print(f"[Boulder] Created YAML file: {proper_yaml_path}")
+    try:
+        if not os.path.exists(proper_yaml_path):
+            os.rename(yaml_path, proper_yaml_path)
+            if verbose:
+                print(f"[Boulder] Created YAML file: {proper_yaml_path}")
+            return proper_yaml_path
+
+        try:
+            different = _yaml_files_are_different(proper_yaml_path, yaml_path)
+        except yaml.YAMLError:
+            # A broken hand-edited YAML counts as different: keep it, write a new file.
+            different = True
+        if different:
+            unique_yaml_path = _generate_unique_yaml_path(proper_yaml_path)
+            os.rename(yaml_path, unique_yaml_path)
+            print("⚠️  WARNING: Existing YAML file has different content!")
+            print(f"⚠️  Created new file: {unique_yaml_path}")
+            print(f"⚠️  Original file unchanged: {proper_yaml_path}")
+            print(
+                "⚠️  The data currently loaded in Boulder is the one from the .py file."
+            )
+            print(
+                "⚠️  Investigate the differences manually, and choose whether to load the"
+            )
+            print(f"⚠️  python file or the other YAML file {proper_yaml_path}")
+            return unique_yaml_path
+
+        print("⚠️  WARNING: YAML file already exists with identical content!")
+        print("⚠️ You could have loaded the YAML file directly.")
+        print("⚠️  It will be faster, for the same results. Use:")
+        print("⚠️ Bash/Terminal:")
+        print(f"⚠️       boulder {os.path.basename(proper_yaml_path)}")
         return proper_yaml_path
-
-    if _yaml_files_are_different(proper_yaml_path, yaml_path):
-        unique_yaml_path = _generate_unique_yaml_path(proper_yaml_path)
-        os.rename(yaml_path, unique_yaml_path)
-        print("⚠️  WARNING: Existing YAML file has different content!")
-        print(f"⚠️  Created new file: {unique_yaml_path}")
-        print(f"⚠️  Original file unchanged: {proper_yaml_path}")
-        print("⚠️  The data currently loaded in Boulder is the one from the .py file.")
-        print("⚠️  Investigate the differences manually, and choose whether to load the")
-        print(f"⚠️  python file or the other YAML file {proper_yaml_path}")
-        return unique_yaml_path
-
-    os.remove(yaml_path)
-    print("⚠️  WARNING: YAML file already exists with identical content!")
-    print("⚠️ You could have loaded the YAML file directly.")
-    print("⚠️  It will be faster, for the same results. Use:")
-    print("⚠️ Bash/Terminal:")
-    print(f"⚠️       boulder {os.path.basename(proper_yaml_path)}")
-    return proper_yaml_path
+    finally:
+        # No-op after a rename; removes the temp file on identical content or error.
+        if os.path.exists(yaml_path):
+            os.remove(yaml_path)
 
 
 def convert_py_to_yaml(
@@ -182,6 +193,10 @@ def convert_py_to_yaml(
         # Run the conversion
         yaml_path = _run_sim2stone_conversion(py_path, verbose)
 
+        existing_yaml = yaml_path[: -len(_TEMP_SUFFIX)] + ".yaml"
+        if not os.path.exists(existing_yaml):
+            existing_yaml = None
+
         # Settle the temporary file against any existing YAML
         final_yaml_path = _handle_yaml_conflicts(yaml_path, verbose)
 
@@ -189,7 +204,11 @@ def convert_py_to_yaml(
         if output_path and final_yaml_path != output_path:
             import shutil
 
-            shutil.move(final_yaml_path, output_path)
+            # Never move the user's own existing YAML away: copy it.
+            if final_yaml_path == existing_yaml:
+                shutil.copyfile(final_yaml_path, output_path)
+            else:
+                shutil.move(final_yaml_path, output_path)
             final_yaml_path = output_path
 
         if verbose:

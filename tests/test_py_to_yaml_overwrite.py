@@ -62,3 +62,37 @@ def test_identical_existing_yaml_is_reused(tmp_path: Path) -> None:
     assert first == second == tmp_path / "case.yaml"
     assert not list(tmp_path.glob("*.tmp.yaml"))
     assert not list(tmp_path.glob("*_converted*"))
+
+
+def test_unparsable_existing_yaml_is_kept_and_no_temp_left(tmp_path: Path) -> None:
+    """A broken existing YAML is kept; the conversion goes to ``_converted``.
+
+    No exception escapes and no ``.tmp.yaml`` stays on disk.
+    """
+    script = tmp_path / "case.py"
+    script.write_text(textwrap.dedent(SCRIPT), encoding="utf-8")
+    existing = tmp_path / "case.yaml"
+    broken = "key: [unclosed\n  : : bad\n"
+    existing.write_text(broken, encoding="utf-8")
+
+    result = Path(convert_py_to_yaml(str(script)))
+
+    assert existing.read_text(encoding="utf-8") == broken
+    assert result.name == "case_converted.yaml"
+    assert not list(tmp_path.glob("*.tmp.yaml"))
+
+
+def test_output_path_copies_identical_existing_yaml(tmp_path: Path) -> None:
+    """With ``output_path`` set, the user's own identical ``<script>.yaml`` stays."""
+    script = tmp_path / "case.py"
+    script.write_text(textwrap.dedent(SCRIPT), encoding="utf-8")
+    existing = Path(convert_py_to_yaml(str(script)))
+    content = existing.read_text(encoding="utf-8")
+    out = tmp_path / "out.yaml"
+
+    result = Path(convert_py_to_yaml(str(script), output_path=str(out)))
+
+    assert result == out
+    assert existing.read_text(encoding="utf-8") == content
+    assert out.read_text(encoding="utf-8") == content
+    assert not list(tmp_path.glob("*.tmp.yaml"))
