@@ -566,8 +566,8 @@ export function ReactorGraph() {
         },
       },
       {
-        // Energy Stream (host-plugin concept, e.g. Bloc): a non-mass energy
-        // flow -- either a display-only synthesized edge (e.g. a torch's
+        // Energy Stream (host-plugin concept): a non-mass energy
+        // flow -- either a display-only synthesized edge (e.g. a heating device's
         // electrical power, which never becomes a real Wall/Reservoir) or a
         // real Wall additionally flagged `_is_energy_stream` so it renders
         // identically (e.g. a PFR's ambient heat-loss wall). Leading
