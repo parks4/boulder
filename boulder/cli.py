@@ -641,6 +641,11 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
 
     args = parse_args(argv)
 
+    if args.no_cache:
+        # Ignore cached results (read by the lifespan and the sweep subprocess,
+        # so set it before either starts).
+        os.environ["BOULDER_NO_CACHE"] = "1"
+
     # --sweep is "Run Sweep mode":
     #   * with --headless → run the whole run-set now, no GUI (delegates to the
     #     host-registered BoulderPlugins.sweep_runner; Boulder stays host-agnostic).
@@ -700,9 +705,6 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     if args.run and not args.headless:
         # GUI auto-run on startup — read by the lifespan / frontend.
         os.environ["BOULDER_AUTORUN"] = "1"
-    if args.no_cache:
-        # Ignore cached results (read by the lifespan).
-        os.environ["BOULDER_NO_CACHE"] = "1"
 
     # --runner flag overrides the kwarg (shell users)
     if args.runner:
