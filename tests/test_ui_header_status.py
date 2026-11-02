@@ -155,6 +155,7 @@ def test_provider_gets_base_id_and_all_fingerprints(cfg):
             "href": "/runs/1",
             "tooltip": None,
             "new_tab": False,
+            "order": 10,
         }
     }
     ctx = seen[0]
@@ -278,3 +279,19 @@ def test_no_config_loaded_still_asks_the_provider():
         assert ctx.config is None
         assert ctx.scenario_id == ""
         assert ctx.fingerprints == ()
+
+
+def test_status_order_defaults_to_10_and_is_served(cfg):
+    """The chip's ``order`` defaults to 10 and an integer one is passed through."""
+    plain = _get(cfg, lambda ctx: {"text": "x", "tone": "ok"}).json()
+    assert plain["status"]["order"] == 10
+    first = _get(cfg, lambda ctx: {"text": "x", "tone": "ok", "order": -10}).json()
+    assert first["status"]["order"] == -10
+
+
+@pytest.mark.parametrize("order", ["1", 1.5, True])
+def test_bad_status_order_is_500_with_detail(cfg, order):
+    """A non-integer (or bool) ``order`` is a 500 naming the field."""
+    resp = _get(cfg, lambda ctx: {"text": "x", "tone": "ok", "order": order})
+    assert resp.status_code == 500
+    assert "order" in resp.json()["detail"]

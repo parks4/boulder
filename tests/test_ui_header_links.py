@@ -36,6 +36,7 @@ def test_registered_link_is_served(monkeypatch):
         "href": "/reports",
         "tooltip": "Past runs",
         "new_tab": True,
+        "order": 10,
     }
     assert links[1]["href"] == "https://example.com/docs"
 
@@ -60,3 +61,19 @@ def test_registered_link_is_served(monkeypatch):
 def test_invalid_link_rejected(label, href):
     with pytest.raises(ValueError):
         BoulderPlugins().add_header_link(label, href)
+
+
+def test_link_order_defaults_to_10_and_is_served(monkeypatch):
+    """A link's integer ``order`` is served; it defaults to 10 (after the toggle)."""
+    plugins = BoulderPlugins()
+    plugins.add_header_link("A", "/a")
+    plugins.add_header_link("B", "/b", order=-5)
+    links = _client(monkeypatch, plugins).get("/api/ui/header-links").json()["links"]
+    assert [link["order"] for link in links] == [10, -5]
+
+
+@pytest.mark.parametrize("order", ["1", 1.5, True, None])
+def test_non_integer_link_order_rejected(order):
+    """A non-int (or bool) ``order`` raises ValueError like any bad link field."""
+    with pytest.raises(ValueError, match="order"):
+        BoulderPlugins().add_header_link("Reports", "/reports", order=order)
