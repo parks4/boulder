@@ -19,6 +19,10 @@ unit-tests:
 verification-tests:
 	python -m pytest -vv tests/test_sim2stone/test_verification_upstream_physics.py
 
+# Tests marked `slow` are deselected by default (see pyproject.toml addopts).
+slow-tests:
+	python -m pytest -vv -m slow tests
+
 type-check:
 	python -m mypy . --exclude docs/cantera_examples
 

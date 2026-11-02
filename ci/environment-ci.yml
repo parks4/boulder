@@ -1,4 +1,5 @@
 # environment-ci.yml: Additional dependencies to install in the CI environment.
+# Keep the pip list below in step with the `dev` extra in pyproject.toml.
 channels:
 - conda-forge
 - nodefaults
