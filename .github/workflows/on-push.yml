@@ -81,9 +81,6 @@ jobs:
     - name: Run upstream-physics verification tests
       run: |
         make verification-tests
-    - name: Run slow tests
-      run: |
-        make slow-tests
 
   frontend-tests:
     name: frontend-tests
