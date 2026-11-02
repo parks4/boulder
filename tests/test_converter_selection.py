@@ -86,7 +86,6 @@ def test_headless_run_then_sweep_share_the_plugin_converter(
     With a plugin converter registered, the run's fingerprint equals the sweep's,
     so the sweep reports "1 cached, 0 solved".
     """
-
     shutil.copy(Path(ct.__file__).parent / "data" / "gri30.yaml", tmp_path)
     plugins = BoulderPlugins()
     plugins.converter_class = type("C", (_Rewriting,), {"mech_dir": str(tmp_path)})

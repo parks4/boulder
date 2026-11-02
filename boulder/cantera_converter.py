@@ -616,7 +616,7 @@ def select_converter_class(
     runner_converter_class: Optional[Type[Any]] = None,
     plugins: Optional[BoulderPlugins] = None,
 ) -> Type["DualCanteraConverter"]:
-    """The one converter-selection rule: runner class, then plugin, then default.
+    """Pick the converter class: runner class, then plugin, then the default.
 
     Used by the runner, the GUI startup and the sweep so all three compute the
     same cache fingerprint for the same file.
