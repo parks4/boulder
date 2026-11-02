@@ -6,6 +6,12 @@ interface SimulationState {
   simulationId: string | null;
   progress: SimulationProgress | null;
   results: SimulationResults | null;
+  /**
+   * Cache fingerprint of `results`, known only when they were served from the
+   * result cache (the cache check answers with it). A fresh solve's completion
+   * event carries none, so this is null then.
+   */
+  fingerprint: string | null;
   pythonCode: string;
   error: string | null;
 
@@ -14,7 +20,7 @@ interface SimulationState {
   beginSimulationRun: () => void;
   startSimulation: (simulationId: string) => void;
   updateProgress: (progress: SimulationProgress) => void;
-  setResults: (results: SimulationResults) => void;
+  setResults: (results: SimulationResults, fingerprint?: string) => void;
   setError: (error: string) => void;
   /** The SSE stream's terminal "stopped" event: the solve thread has exited
    * after a stop request, with no completion and no error. */
@@ -28,6 +34,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
   simulationId: null,
   progress: null,
   results: null,
+  fingerprint: null,
   pythonCode: "",
   error: null,
 
@@ -37,6 +44,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       simulationId: null,
       progress: null,
       results: null,
+      fingerprint: null,
       pythonCode: "",
       error: null,
     }),
@@ -47,16 +55,18 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       simulationId,
       progress: null,
       results: null,
+      fingerprint: null,
       pythonCode: "",
       error: null,
     }),
 
   updateProgress: (progress) => set({ progress }),
 
-  setResults: (results) =>
+  setResults: (results, fingerprint) =>
     set({
       isRunning: false,
       results,
+      fingerprint: fingerprint ?? null,
       pythonCode: results.code_str ?? "",
     }),
 
@@ -70,6 +80,7 @@ export const useSimulationStore = create<SimulationState>((set) => ({
       simulationId: null,
       progress: null,
       results: null,
+      fingerprint: null,
       pythonCode: "",
       error: null,
     }),

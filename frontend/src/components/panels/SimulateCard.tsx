@@ -169,7 +169,7 @@ export function SimulateCard() {
           scenario,
         );
         if (cacheResp.cached) {
-          setResults(cacheResp.result);
+          setResults(cacheResp.result, cacheResp.fingerprint);
           const created = cacheResp.meta.created_at;
           const ageMin = Math.round((Date.now() / 1000 - created) / 60);
           const ageStr = ageMin < 2 ? "just now" : `${ageMin} min ago`;

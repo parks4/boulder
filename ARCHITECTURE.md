@@ -534,6 +534,33 @@ at `GET /api/ui/header-links`. The host must serve the linked path itself (e.g.
 from an outer ASGI wrapper placed before Boulder's app); otherwise the SPA
 catch-all returns `index.html`.
 
+**Header status.** A host that wants a status chip for the scenario on screen
+(for example "recorded in the host's index", with a link, or why not) registers
+`plugins.add_header_status("/api/host/status")`: a same-origin path, no query
+string, scheme, `//host`, whitespace or backslash (`ValueError` otherwise).
+Several may be registered; they are listed under `statuses` by
+`GET /api/ui/header-links`. The GUI (`HeaderStatus.tsx`) calls
+`GET <status_url>?scenario=<id>&fingerprint=<fp>` and renders the answer next to
+the header links:
+
+```json
+{"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": "optional"}
+```
+
+`tone` is `ok`, `warn`, `error` or `neutral`; `href` follows the header-link
+rule and the chip is a link only when it is present. A network error, an HTTP
+error or an invalid answer (bad tone, missing text, unsafe href) renders a
+neutral "status unavailable" chip whose tooltip is the reason; it is never
+hidden. There is no timer: the chip is asked again only when the selected
+scenario changes and when a solve finishes (single run, result served from the
+cache, or sweep end), and not while a run or sweep is in flight.
+`scenario` is `scenarioStore.activeId` (`BASELINE` when none is selected).
+`fingerprint` comes from `simulationStore.fingerprint`, set when a result is
+served from the result cache (the cache check answers with it); after a fresh
+solve, or when only the scenario changed, the GUI holds none and omits the
+parameter, so a host must resolve those from `scenario` alone. There is no
+`poll_on` option: both triggers always apply.
+
 **Custom connection kinds.** `plugins.connection_builders["MyEdgeKind"]`
 registers a builder `(converter, conn_dict) -> device` dispatched before the
 built-in flow devices. The returned object need not be a Cantera flow device —
@@ -547,7 +574,7 @@ as first-class STONE edges.
   `supported_element_types`, `supported_node_types` (`boulder/api/routes/plugins.py`)
 - `POST /api/plugins/{plugin_id}/render` — body maps to `OutputPaneContext`; returns `{available, data}`
 - `GET /api/ui/branding` — host branding declared by a plugin package
-- `GET /api/ui/header-links` — top-bar links declared by a plugin package
+- `GET /api/ui/header-links` — top-bar links (`links`) and status endpoints (`statuses`) declared by a plugin package
 
 ### Optional spatial-style output pane (downstream plugin)
 

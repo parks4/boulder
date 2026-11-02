@@ -170,6 +170,11 @@ class BoulderPlugins:
     #: :meth:`add_header_link`. Exposed at ``GET /api/ui/header-links``.
     header_links: List[Dict[str, Any]] = field(default_factory=list)
 
+    #: Same-origin URLs of host status endpoints, added with
+    #: :meth:`add_header_status`. Listed under ``statuses`` at
+    #: ``GET /api/ui/header-links``.
+    header_statuses: List[Dict[str, str]] = field(default_factory=list)
+
     #: ``(config: dict) -> list[dict]`` callables that synthesize additional
     #: display-only Cytoscape elements (nodes/edges) for
     #: :func:`~boulder.utils.config_to_cyto_elements`, appended after its own
@@ -238,6 +243,33 @@ class BoulderPlugins:
                 "new_tab": new_tab,
             }
         )
+
+    def add_header_status(self, status_url: str) -> None:
+        """Register a status chip for the scenario on screen in the GUI top bar.
+
+        ``status_url`` is a same-origin path the host serves (``/api/host/status``).
+        The GUI calls ``GET <status_url>?scenario=<id>&fingerprint=<fp>`` after every
+        solve (single run and sweep) and whenever the selected scenario changes, then
+        renders the JSON answer as a chip next to the header links::
+
+            {"text": str, "tone": "ok" | "warn" | "error" | "neutral",
+             "href": str (optional; relative path or http(s) URL), "tooltip": str (optional)}
+
+        ``fingerprint`` is sent only when the GUI holds one (a result served from the
+        cache); a host must resolve a fresh solve from ``scenario`` alone. A failed
+        request or an invalid answer shows a neutral "status unavailable" chip. There
+        is no timer. Several statuses may be registered. A path with a query string,
+        fragment, scheme, ``//host``, whitespace or backslash raises ``ValueError``.
+        """
+        ok = isinstance(status_url, str) and status_url.startswith("/")
+        ok = ok and not status_url.startswith("//")
+        ok = ok and not any(c.isspace() or c in "\\?#" for c in status_url)
+        if not ok:
+            raise ValueError(
+                f"Header status_url must be a same-origin path like '/api/status', "
+                f"got {status_url!r}"
+            )
+        self.header_statuses.append({"status_url": status_url})
 
 
 # Global cache to ensure plugins are discovered only once

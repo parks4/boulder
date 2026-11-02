@@ -110,10 +110,11 @@ async def get_branding() -> Dict[str, Any]:
 
 @router.get("/header-links")
 async def get_header_links() -> Dict[str, Any]:
-    """Return the top-bar links host plugins registered (``[]`` when none)."""
+    """Return the top-bar links and status endpoints host plugins registered."""
     from ...cantera_converter import get_plugins
 
-    return {"links": get_plugins().header_links}
+    plugins = get_plugins()
+    return {"links": plugins.header_links, "statuses": plugins.header_statuses}
 
 
 @router.get("/species-colors")

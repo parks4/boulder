@@ -24,6 +24,7 @@ import { AddReactorModal } from "@/components/modals/AddReactorModal";
 import { AddMFCModal } from "@/components/modals/AddMFCModal";
 import { Button } from "@/components/ui/Button";
 import { applyScenarioDeepLink } from "@/lib/scenarioDeepLink";
+import { HeaderStatus } from "@/components/layout/HeaderStatus";
 import { toast } from "sonner";
 
 export function AppShell() {
@@ -101,7 +102,7 @@ export function AppShell() {
             if (!cacheResp.cached) return;
 
             const result = cacheResp.result;
-            setResults(result);
+            setResults(result, cacheResp.fingerprint ?? undefined);
 
             // Sync graph topology: apply updated_nodes / updated_connections
             // exactly as the SSE complete handler does.
@@ -211,11 +212,21 @@ export function AppShell() {
   const [headerLinks, setHeaderLinks] = useState<
     { label: string; href: string; tooltip?: string | null; new_tab?: boolean }[]
   >([]);
+  // Host status endpoints (`plugins.add_header_status`), served by the same call.
+  const [headerStatusUrls, setHeaderStatusUrls] = useState<string[]>([]);
   useEffect(() => {
     fetch("/api/ui/header-links")
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setHeaderLinks(data?.links ?? []))
-      .catch(() => setHeaderLinks([]));
+      .then((data) => {
+        setHeaderLinks(data?.links ?? []);
+        setHeaderStatusUrls(
+          (data?.statuses ?? []).map((s: { status_url: string }) => s.status_url),
+        );
+      })
+      .catch(() => {
+        setHeaderLinks([]);
+        setHeaderStatusUrls([]);
+      });
   }, []);
 
   // Title priority: per-config metadata > plugin branding > "Boulder".
@@ -308,6 +319,9 @@ export function AppShell() {
             </span>
           )}
           </Button>
+          {headerStatusUrls.map((u) => (
+            <HeaderStatus key={u} statusUrl={u} />
+          ))}
           {headerLinks.map((l) => (
             <a
               key={`${l.label}|${l.href}`}
