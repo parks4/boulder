@@ -1,4 +1,4 @@
-/** Cytoscape node fill scale (matches ``boulder/styles.py`` and ``ReactorGraph``). */
+/** Cytoscape node fill scale (matches ``ReactorGraph``). */
 export const CYTOSCAPE_TEMP_MIN_K = 300;
 export const CYTOSCAPE_TEMP_MAX_K = 2273;
 

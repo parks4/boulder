@@ -43,8 +43,6 @@ Routers mounted in `main.py`:
 
 - `/api/configs` — default / preload / parse / validate / export YAML
 - `/api/simulations` — start sim, SSE stream, results, cleanup
-- `/api/mechanisms` — mechanism-related API
-- `/api/graph` — config → Cytoscape elements and stylesheet
 - `/api/plugins` — list metadata and render output-pane plugins (JSON payloads)
 - `/api/health` — health check
 
@@ -343,7 +341,7 @@ only on the tab that opened the link: nothing is broadcast and no store is neede
 
 ### Frontend (`frontend/src/`)
 
-- **API** — `api/client.ts`, `configs.ts`, `simulations.ts`, `mechanisms.ts`, `plugins.ts`
+- **API** — `api/client.ts`, `configs.ts`, `simulations.ts`, `plugins.ts`
 - **State** — Zustand stores (`configStore`, `simulationStore`, `selectionStore`, etc.)
 - **Graph / results** — `ReactorGraph`, `ResultsTabs`, `PluginTab`, `useSimulationSSE`, `useScenarioFocus`
 

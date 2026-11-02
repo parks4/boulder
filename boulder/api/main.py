@@ -16,27 +16,21 @@ from typing import AsyncGenerator
 
 # Load .env from the repository root (one level above the package directory)
 # so that BOULDER_PLUGINS and other settings can be configured per-project
-# without modifying this file.  python-dotenv is an optional dependency;
-# a missing file or missing package is silently ignored.
-try:
-    from dotenv import load_dotenv  # type: ignore
+# without modifying this file. A missing file is silently ignored.
+from dotenv import load_dotenv
 
-    _env_file = Path(__file__).resolve().parent.parent.parent / ".env"
-    if _env_file.is_file():
-        load_dotenv(dotenv_path=_env_file, override=False)
-        logging.getLogger(__name__).debug(f"Loaded .env from {_env_file}")
-except ImportError:
-    pass  # python-dotenv not installed; rely on system environment
+_env_file = Path(__file__).resolve().parent.parent.parent / ".env"
+if _env_file.is_file():
+    load_dotenv(dotenv_path=_env_file, override=False)
+    logging.getLogger(__name__).debug(f"Loaded .env from {_env_file}")
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 
-from .routes import (
+from .routes import (  # noqa: E402
     configs,
-    graph,
     gui_actions,
-    mechanisms,
     plugins,
     scenarios,
     simulations,
@@ -78,14 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.runner_class = _runner_class or _BoulderRunner
     # Store a shared converter on the app state for routes to access
-    # Handle potential Unicode issues on Windows by creating with a safe default
-    try:
-        app.state.converter = converter_cls()
-    except (UnicodeEncodeError, ValueError) as e:
-        logger.warning(f"Failed to initialize converter with plugins: {e}")
-        logger.warning("Starting with minimal plugin support")
-        # Create a basic converter without problematic plugins
-        app.state.converter = converter_cls()
+    app.state.converter = converter_cls()
 
     # Load initial configuration from environment variable if provided
     env_config_path = os.environ.get("BOULDER_CONFIG_PATH") or os.environ.get(
@@ -351,8 +338,6 @@ def create_app() -> FastAPI:
     app.include_router(
         simulations.router, prefix="/api/simulations", tags=["simulations"]
     )
-    app.include_router(mechanisms.router, prefix="/api/mechanisms", tags=["mechanisms"])
-    app.include_router(graph.router, prefix="/api/graph", tags=["graph"])
     app.include_router(plugins.router, prefix="/api/plugins", tags=["plugins"])
     app.include_router(
         gui_actions.router, prefix="/api/gui-actions", tags=["gui-actions"]
