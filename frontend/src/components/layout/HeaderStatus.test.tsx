@@ -3,12 +3,14 @@
  *
  * Asserts:
  * - the chip renders the host's text, tone and tooltip, and links to `href`;
- * - the request carries the selected scenario id, and the fingerprint when held;
- * - it re-fetches when the selected scenario changes and after a solve
- *   (single run, and a sweep ending), but not while a run is in flight;
+ * - the request is `/api/ui/header-status` with only the scenario id (none for the base);
+ * - it re-fetches when the selected scenario changes, when a result lands, when a
+ *   sweep ends and when `config.metadata` changes, but not while a run is in flight;
+ * - a null status renders nothing, and a 500's `detail` is the chip's tooltip;
  * - a network error, an HTTP error or an invalid response renders a neutral
  *   "status unavailable" chip with the reason as tooltip;
- * - an unsafe `href` is never rendered as a link.
+ * - an unsafe `href` is never rendered as a link;
+ * - a late response for a superseded request is dropped.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -16,6 +18,7 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { HeaderStatus } from "./HeaderStatus";
 import { parseHostStatus, safeHref } from "@/lib/hostStatus";
+import { useConfigStore } from "@/stores/configStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
@@ -38,7 +41,9 @@ describe("HeaderStatus", () => {
     useScenarioStore.setState({ activeId: null });
     useSimulationStore.getState().clearResults();
     useSweepRunStore.setState({ sweeping: false });
-    answer({ text: "recorded", tone: "ok", href: "/runs/1", tooltip: "in the index" });
+    answer({
+      status: { text: "recorded", tone: "ok", href: "/runs/1", tooltip: "in the index" },
+    });
   });
 
   afterEach(() => {
@@ -46,45 +51,50 @@ describe("HeaderStatus", () => {
   });
 
   it("renders the response as a link chip", async () => {
-    render(<HeaderStatus statusUrl="/api/host/status" />);
+    render(<HeaderStatus />);
     const chip = await screen.findByTestId("header-status");
     expect(chip).toHaveTextContent("recorded");
     expect(chip).toHaveAttribute("data-tone", "ok");
     expect(chip).toHaveAttribute("href", "/runs/1");
     expect(chip).toHaveAttribute("title", "in the index");
-    expect(lastUrl().pathname).toBe("/api/host/status");
-    expect(lastUrl().searchParams.get("scenario")).toBe("BASELINE");
-    expect(lastUrl().searchParams.has("fingerprint")).toBe(false);
+    expect(lastUrl().pathname).toBe("/api/ui/header-status");
+    expect(lastUrl().search).toBe("");
   });
 
   it("renders a plain chip without href", async () => {
-    answer({ text: "not recorded", tone: "warn" });
-    render(<HeaderStatus statusUrl="/s" />);
+    answer({ status: { text: "not recorded", tone: "warn" } });
+    render(<HeaderStatus />);
     const chip = await screen.findByTestId("header-status");
     expect(chip.tagName).toBe("SPAN");
     expect(chip).toHaveAttribute("data-tone", "warn");
   });
 
+  it("renders nothing for a null status", async () => {
+    answer({ status: null });
+    render(<HeaderStatus />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("header-status")).toBeNull();
+  });
+
   it("re-fetches on scenario change, with the scenario id", async () => {
-    render(<HeaderStatus statusUrl="/s" />);
+    render(<HeaderStatus />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     act(() => useScenarioStore.setState({ activeId: "case 2/a" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(lastUrl().searchParams.get("scenario")).toBe("case 2/a");
+    expect(lastUrl().searchParams.get("scenario_id")).toBe("case 2/a");
   });
 
-  it("re-fetches after a solve, sending the fingerprint when the GUI holds one", async () => {
-    render(<HeaderStatus statusUrl="/s" />);
+  it("re-fetches when a result lands, not while a run is in flight", async () => {
+    render(<HeaderStatus />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     act(() => useSimulationStore.getState().beginSimulationRun());
     expect(fetchMock).toHaveBeenCalledTimes(1); // nothing asked mid-run
-    act(() => useSimulationStore.getState().setResults({} as never, "abc123"));
+    act(() => useSimulationStore.getState().setResults({} as never));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(lastUrl().searchParams.get("fingerprint")).toBe("abc123");
   });
 
   it("re-fetches when a sweep ends, not while it runs", async () => {
-    render(<HeaderStatus statusUrl="/s" />);
+    render(<HeaderStatus />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     act(() => useSweepRunStore.setState({ sweeping: true }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -92,13 +102,42 @@ describe("HeaderStatus", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
+  it("re-fetches when config.metadata changes", async () => {
+    render(<HeaderStatus />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    act(() => {
+      const { config } = useConfigStore.getState();
+      useConfigStore.setState({ config: { ...config, metadata: { title: "x" } } });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("drops a late response for a superseded request", async () => {
+    let releaseFirst: (v: unknown) => void = () => {};
+    fetchMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseFirst = resolve;
+      }),
+    );
+    render(<HeaderStatus />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    answer({ status: { text: "second", tone: "ok" } });
+    act(() => useScenarioStore.setState({ activeId: "other" }));
+    expect(await screen.findByText("second")).toBeInTheDocument();
+    await act(async () => {
+      releaseFirst({ ok: true, status: 200, json: async () => ({ status: { text: "first", tone: "ok" } }) });
+    });
+    expect(screen.queryByText("first")).toBeNull();
+    expect(screen.getByText("second")).toBeInTheDocument();
+  });
+
   it.each([
-    ["an invalid tone", { text: "x", tone: "purple" }, "invalid tone"],
-    ["a missing text", { tone: "ok" }, "missing text"],
+    ["an invalid tone", { status: { text: "x", tone: "purple" } }, "invalid tone"],
+    ["a missing text", { status: { tone: "ok" } }, "missing text"],
     ["a non-object", "oops", "not an object"],
   ])("shows 'status unavailable' for %s", async (_name, body, reason) => {
     answer(body);
-    render(<HeaderStatus statusUrl="/s" />);
+    render(<HeaderStatus />);
     const chip = await screen.findByTestId("header-status");
     expect(chip).toHaveTextContent("status unavailable");
     expect(chip).toHaveAttribute("data-tone", "neutral");
@@ -107,7 +146,7 @@ describe("HeaderStatus", () => {
 
   it("shows 'status unavailable' on a network error", async () => {
     fetchMock.mockRejectedValue(new Error("offline"));
-    render(<HeaderStatus statusUrl="/s" />);
+    render(<HeaderStatus />);
     const chip = await screen.findByTestId("header-status");
     expect(chip).toHaveTextContent("status unavailable");
     expect(chip).toHaveAttribute("title", "offline");
@@ -115,13 +154,21 @@ describe("HeaderStatus", () => {
 
   it("shows 'status unavailable' on an HTTP error", async () => {
     answer({}, false);
-    render(<HeaderStatus statusUrl="/s" />);
+    render(<HeaderStatus />);
     expect(await screen.findByTestId("header-status")).toHaveAttribute("title", "HTTP 503");
   });
 
+  it("shows the server's 500 detail as the tooltip", async () => {
+    answer({ detail: "index down" }, false);
+    render(<HeaderStatus />);
+    const chip = await screen.findByTestId("header-status");
+    expect(chip).toHaveTextContent("status unavailable");
+    expect(chip).toHaveAttribute("title", "index down");
+  });
+
   it("never renders an unsafe href as a link", async () => {
-    answer({ text: "x", tone: "ok", href: "javascript:alert(1)" });
-    render(<HeaderStatus statusUrl="/s" />);
+    answer({ status: { text: "x", tone: "ok", href: "javascript:alert(1)" } });
+    render(<HeaderStatus />);
     const chip = await screen.findByTestId("header-status");
     expect(chip).toHaveTextContent("status unavailable");
     expect(chip).not.toHaveAttribute("href");
@@ -143,12 +190,9 @@ describe("safeHref", () => {
     expect(safeHref(href)).toBe(expected);
   });
 
-  it("parseHostStatus drops nothing it accepts", () => {
-    expect(parseHostStatus({ text: "t", tone: "error", tooltip: "w", href: "/p" })).toEqual({
-      text: "t",
-      tone: "error",
-      tooltip: "w",
-      href: "/p",
-    });
+  it("parseHostStatus fills the optional fields", () => {
+    expect(
+      parseHostStatus({ status: { text: "t", tone: "error", tooltip: "w", href: "/p" } }),
+    ).toEqual({ text: "t", tone: "error", tooltip: "w", href: "/p", new_tab: false });
   });
 });

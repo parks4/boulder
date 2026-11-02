@@ -43,6 +43,8 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("@/components/layout/HeaderStatus", () => ({ HeaderStatus: () => null }));
+
 vi.mock("@/components/panels/NetworkCard", () => ({
   NetworkCard: ({ onEditYaml }: { onEditYaml: () => void }) => (
     <div data-testid="network-card">

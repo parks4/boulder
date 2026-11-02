@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BASELINE_SCENARIO_ID } from "@/api/scenarios";
 import { parseHostStatus, type HostStatus } from "@/lib/hostStatus";
+import { useConfigStore } from "@/stores/configStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
@@ -15,32 +16,40 @@ const TONE_CLASS: Record<HostStatus["tone"], string> = {
 const UNAVAILABLE_TEXT = "status unavailable";
 
 /**
- * Top-bar chip showing one host status endpoint's answer for the scenario on
- * screen (`plugins.add_header_status`).
+ * Top-bar chip showing the host's status for the scenario on screen
+ * (`plugins.header_status`), resolved by the server at
+ * `GET /api/ui/header-status`: the GUI sends only the scenario id (nothing for
+ * the base run) and the server finds the config and stored fingerprints.
  *
- * Re-queried on exactly two triggers, never on a timer: the selected scenario
- * changes, and a solve finishes (single run, cached reopen, or sweep). While a
- * run or sweep is in flight nothing is asked. The fingerprint is sent only when
- * the GUI holds one (see `simulationStore.fingerprint`).
+ * Re-queried, never on a timer, when the selected scenario changes, a result
+ * lands (single run or cached reopen), a sweep ends, or `config.metadata`
+ * changes. While a run or sweep is in flight nothing is asked. A null status
+ * renders nothing.
  */
-export function HeaderStatus({ statusUrl }: { statusUrl: string }) {
-  const activeId = useScenarioStore((s) => s.activeId) ?? BASELINE_SCENARIO_ID;
+export function HeaderStatus() {
+  const activeId = useScenarioStore((s) => s.activeId);
   const results = useSimulationStore((s) => s.results);
-  const fingerprint = useSimulationStore((s) => s.fingerprint);
   const isRunning = useSimulationStore((s) => s.isRunning);
   const sweeping = useSweepRunStore((s) => s.sweeping);
+  const metadata = useConfigStore((s) => s.config.metadata);
   const [status, setStatus] = useState<HostStatus | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   useEffect(() => {
     if (isRunning || sweeping) return;
     let stale = false;
-    const params = new URLSearchParams({ scenario: activeId });
-    if (fingerprint) params.set("fingerprint", fingerprint);
-    fetch(`${statusUrl}?${params}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
+    const query =
+      activeId && activeId !== BASELINE_SCENARIO_ID
+        ? `?${new URLSearchParams({ scenario_id: activeId })}`
+        : "";
+    fetch(`/api/ui/header-status${query}`)
+      .then(async (r) => {
+        if (r.ok) return r.json();
+        // The server's 500 carries the provider's failure as `detail`.
+        const body = await r.json().catch(() => null);
+        throw new Error(
+          typeof body?.detail === "string" ? body.detail : `HTTP ${r.status}`,
+        );
       })
       .then((data) => {
         const parsed = parseHostStatus(data);
@@ -57,7 +66,7 @@ export function HeaderStatus({ statusUrl }: { statusUrl: string }) {
     return () => {
       stale = true;
     };
-  }, [statusUrl, activeId, results, fingerprint, isRunning, sweeping]);
+  }, [activeId, results, isRunning, sweeping, metadata]);
 
   if (failure !== null) {
     return (
@@ -73,18 +82,20 @@ export function HeaderStatus({ statusUrl }: { statusUrl: string }) {
   }
   if (status === null) return null;
   const className = `text-sm px-2 py-1 rounded border ${TONE_CLASS[status.tone]}`;
+  const title = status.tooltip ?? undefined;
   return status.href ? (
     <a
       data-testid="header-status"
       data-tone={status.tone}
       href={status.href}
-      title={status.tooltip}
+      title={title}
+      {...(status.new_tab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
       className={`${className} hover:bg-muted`}
     >
       {status.text}
     </a>
   ) : (
-    <span data-testid="header-status" data-tone={status.tone} title={status.tooltip} className={className}>
+    <span data-testid="header-status" data-tone={status.tone} title={title} className={className}>
       {status.text}
     </span>
   );

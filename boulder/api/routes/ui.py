@@ -7,9 +7,9 @@ light/dark theme. Stored in-memory on ``app.state``; not persisted.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -110,11 +110,79 @@ async def get_branding() -> Dict[str, Any]:
 
 @router.get("/header-links")
 async def get_header_links() -> Dict[str, Any]:
-    """Return the top-bar links and status endpoints host plugins registered."""
+    """Return the top-bar links host plugins registered (``[]`` when none)."""
     from ...cantera_converter import get_plugins
 
-    plugins = get_plugins()
-    return {"links": plugins.header_links, "statuses": plugins.header_statuses}
+    return {"links": get_plugins().header_links}
+
+
+_STATUS_TONES = ("ok", "warn", "error", "neutral")
+
+
+@router.get("/header-status")
+async def get_header_status(
+    request: Request, scenario_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Resolve the host's status chip for one scenario (the base run when omitted).
+
+    The host's ``plugins.header_status`` provider gets the session config with the
+    scenario's overlay applied, the raw store id and the stored entry's
+    fingerprints (``()`` when nothing is stored). Answers ``{"status": null}`` when
+    there is no provider or it returns ``None``, 404 for an id that is neither
+    stored nor authored, and 500 (with the detail) when the provider raises or
+    returns a bad tone or href.
+    """
+    from ... import scenario_store
+    from ...cantera_converter import (
+        HeaderStatusContext,
+        get_plugins,
+        validate_header_href,
+    )
+    from ...runset import base_entry_id, expand_scenarios
+    from .scenarios import _identity, _require_base_raw, _store_dir
+
+    provider = get_plugins().header_status
+    if provider is None:
+        return {"status": None}
+
+    raw = _require_base_raw(request)
+    sid = scenario_id or base_entry_id(raw)
+    stored = {
+        str(e["id"]): e
+        for e in scenario_store.list_entries(_store_dir(request), _identity(request))
+    }
+    expanded = dict(expand_scenarios(raw))
+    if sid not in stored and sid not in expanded and sid != base_entry_id(raw):
+        raise HTTPException(status_code=404, detail=f"Unknown scenario {sid!r}")
+    entry = stored.get(sid)
+    ctx = HeaderStatusContext(
+        config=expanded.get(sid, raw),
+        scenario_id=sid,
+        fingerprints=scenario_store.entry_fingerprints(entry) if entry else (),
+    )
+    try:
+        status = provider(ctx)
+        if status is None:
+            return {"status": None}
+        tone = status["tone"]
+        if tone not in _STATUS_TONES:
+            raise ValueError(f"tone must be one of {_STATUS_TONES}, got {tone!r}")
+        href = status.get("href")
+        if href is not None:
+            validate_header_href(href)
+        return {
+            "status": {
+                "text": str(status["text"]),
+                "tone": tone,
+                "href": href,
+                "tooltip": status.get("tooltip"),
+                "new_tab": bool(status.get("new_tab", False)),
+            }
+        }
+    except Exception as exc:  # noqa: BLE001 - a host provider's failure is reported, not hidden
+        raise HTTPException(
+            status_code=500, detail=f"header_status provider failed: {exc}"
+        ) from exc
 
 
 @router.get("/species-colors")

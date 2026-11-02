@@ -102,7 +102,7 @@ export function AppShell() {
             if (!cacheResp.cached) return;
 
             const result = cacheResp.result;
-            setResults(result, cacheResp.fingerprint ?? undefined);
+            setResults(result);
 
             // Sync graph topology: apply updated_nodes / updated_connections
             // exactly as the SSE complete handler does.
@@ -212,21 +212,11 @@ export function AppShell() {
   const [headerLinks, setHeaderLinks] = useState<
     { label: string; href: string; tooltip?: string | null; new_tab?: boolean }[]
   >([]);
-  // Host status endpoints (`plugins.add_header_status`), served by the same call.
-  const [headerStatusUrls, setHeaderStatusUrls] = useState<string[]>([]);
   useEffect(() => {
     fetch("/api/ui/header-links")
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        setHeaderLinks(data?.links ?? []);
-        setHeaderStatusUrls(
-          (data?.statuses ?? []).map((s: { status_url: string }) => s.status_url),
-        );
-      })
-      .catch(() => {
-        setHeaderLinks([]);
-        setHeaderStatusUrls([]);
-      });
+      .then((data) => setHeaderLinks(data?.links ?? []))
+      .catch(() => setHeaderLinks([]));
   }, []);
 
   // Title priority: per-config metadata > plugin branding > "Boulder".
@@ -319,9 +309,7 @@ export function AppShell() {
             </span>
           )}
           </Button>
-          {headerStatusUrls.map((u) => (
-            <HeaderStatus key={u} statusUrl={u} />
-          ))}
+          <HeaderStatus />
           {headerLinks.map((l) => (
             <a
               key={`${l.label}|${l.href}`}

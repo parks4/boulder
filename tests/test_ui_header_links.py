@@ -23,7 +23,7 @@ def _client(monkeypatch, plugins):
 
 def test_endpoint_empty_without_registration(monkeypatch):
     resp = _client(monkeypatch, BoulderPlugins()).get("/api/ui/header-links")
-    assert resp.json() == {"links": [], "statuses": []}
+    assert resp.json() == {"links": []}
 
 
 def test_registered_link_is_served(monkeypatch):

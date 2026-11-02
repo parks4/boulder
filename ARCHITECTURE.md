@@ -535,31 +535,35 @@ from an outer ASGI wrapper placed before Boulder's app); otherwise the SPA
 catch-all returns `index.html`.
 
 **Header status.** A host that wants a status chip for the scenario on screen
-(for example "recorded in the host's index", with a link, or why not) registers
-`plugins.add_header_status("/api/host/status")`: a same-origin path, no query
-string, scheme, `//host`, whitespace or backslash (`ValueError` otherwise).
-Several may be registered; they are listed under `statuses` by
-`GET /api/ui/header-links`. The GUI (`HeaderStatus.tsx`) calls
-`GET <status_url>?scenario=<id>&fingerprint=<fp>` and renders the answer next to
-the header links:
+(for example "recorded in the host's index", with a link, or why not) sets
+`plugins.header_status`, a callable `(HeaderStatusContext) -> dict | None`
+resolved **on the server**. The GUI sends only the scenario id to
+`GET /api/ui/header-status?scenario_id=<id>` (no parameter for the base run):
+after a fresh solve it holds no reliable fingerprint, and a stored entry answers
+to several (`fingerprint` plus `alt_fingerprints`). The route builds:
 
-```json
-{"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": "optional"}
+```python
+@dataclass(frozen=True)
+class HeaderStatusContext:
+    config: Dict[str, Any]         # session raw config, scenario overlay applied
+    scenario_id: str               # raw store id (base run: runset.base_entry_id)
+    fingerprints: Tuple[str, ...]  # stored entry's primary + alt fingerprints; () if none
 ```
 
-`tone` is `ok`, `warn`, `error` or `neutral`; `href` follows the header-link
-rule and the chip is a link only when it is present. A network error, an HTTP
-error or an invalid answer (bad tone, missing text, unsafe href) renders a
-neutral "status unavailable" chip whose tooltip is the reason; it is never
-hidden. There is no timer: the chip is asked again only when the selected
-scenario changes and when a solve finishes (single run, result served from the
-cache, or sweep end), and not while a run or sweep is in flight.
-`scenario` is `scenarioStore.activeId` (`BASELINE` when none is selected).
-`fingerprint` comes from `simulationStore.fingerprint`, set when a result is
-served from the result cache (the cache check answers with it); after a fresh
-solve, or when only the scenario changed, the GUI holds none and omits the
-parameter, so a host must resolve those from `scenario` alone. There is no
-`poll_on` option: both triggers always apply.
+and answers `{"status": null}` (no provider, or the provider returned `None`), or
+
+```json
+{"status": {"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": null, "new_tab": false}}
+```
+
+`tone` is `ok`, `warn`, `error` or `neutral`; `href` follows the header-link rule
+(`validate_header_href`, shared with `add_header_link`). An id that is neither
+stored nor authored is a 404. A provider that raises, or returns a bad tone or
+href, is a 500 with the detail; the chip then shows a neutral "status
+unavailable" whose tooltip is that detail. A null status renders nothing. There
+is no timer: `HeaderStatus.tsx` asks again when `scenarioStore.activeId`
+changes, when `simulationStore.results` changes while nothing is running, when a
+sweep ends, and when `config.metadata` changes.
 
 **Custom connection kinds.** `plugins.connection_builders["MyEdgeKind"]`
 registers a builder `(converter, conn_dict) -> device` dispatched before the
@@ -574,7 +578,8 @@ as first-class STONE edges.
   `supported_element_types`, `supported_node_types` (`boulder/api/routes/plugins.py`)
 - `POST /api/plugins/{plugin_id}/render` — body maps to `OutputPaneContext`; returns `{available, data}`
 - `GET /api/ui/branding` — host branding declared by a plugin package
-- `GET /api/ui/header-links` — top-bar links (`links`) and status endpoints (`statuses`) declared by a plugin package
+- `GET /api/ui/header-links` — top-bar links declared by a plugin package
+- `GET /api/ui/header-status?scenario_id=` — the host status chip, resolved by `plugins.header_status`
 
 ### Optional spatial-style output pane (downstream plugin)
 

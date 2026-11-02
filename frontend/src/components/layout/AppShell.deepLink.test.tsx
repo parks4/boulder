@@ -19,6 +19,7 @@ const mockSetResults = vi.fn(() => order.push("setResults"));
 const mockFetchPreloaded = vi.fn();
 const mockFetchCached = vi.fn();
 
+vi.mock("@/components/layout/HeaderStatus", () => ({ HeaderStatus: () => null }));
 vi.mock("@/lib/scenarioDeepLink", () => ({ applyScenarioDeepLink: () => mockApplyDeepLink() }));
 vi.mock("@/api/configs", () => ({
   fetchPreloadedConfig: () => mockFetchPreloaded(),
