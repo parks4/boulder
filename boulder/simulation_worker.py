@@ -1,5 +1,6 @@
 """Background simulation worker for streaming updates."""
 
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -8,12 +9,11 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import cantera as ct  # type: ignore
 
 from .runset import base_entry_id
-from .verbose_utils import get_verbose_logger
 
 if TYPE_CHECKING:
     from .scenario_store import RunSource
 
-logger = get_verbose_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _copy_reactors_series(

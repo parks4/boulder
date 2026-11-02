@@ -634,4 +634,7 @@ def main(argv: "list[str] | None" = None) -> None:
 
 
 if __name__ == "__main__":
+    from .verbose_utils import ensure_boulder_console_logging
+
+    ensure_boulder_console_logging()
     main()
