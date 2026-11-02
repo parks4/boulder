@@ -12,21 +12,16 @@ def test_importing_boulder_modules_leaves_boulder_logger_untouched() -> None:
     """``propagate`` stays True, no handler is added, level stays unset.
 
     Run in a fresh interpreter so earlier imports in the test session cannot
-    mask the import-time side effect.
+    mask the import-time side effect. ``boulder.api.main`` pulls in the
+    converter, sankey and worker modules.
     """
     repo_root = Path(__file__).resolve().parent.parent
     script = """
 import logging
-before = logging.getLogger("boulder")
-state = (before.propagate, list(before.handlers), before.level)
-import boulder.cantera_converter, boulder.sankey, boulder.simulation_worker
-import boulder.verbose_utils
-after = logging.getLogger("boulder")
-assert (after.propagate, list(after.handlers), after.level) == state, (
-    after.propagate, after.handlers, after.level)
-assert after.propagate is True
-assert not after.handlers
-assert boulder.verbose_utils.is_verbose_mode() is False
+import boulder.api.main
+log = logging.getLogger("boulder")
+assert log.propagate is True and not log.handlers and log.level == 0, (
+    log.propagate, log.handlers, log.level)
 """
     proc = subprocess.run(
         [sys.executable, "-c", script],

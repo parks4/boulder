@@ -192,6 +192,17 @@ class TestSimulationWorkerStop:
 
         conv = DualCanteraConverter(mechanism="gri30.yaml")
         worker = SimulationWorker()
+
+        # Deterministic ordering: the solve may only start once Stop was
+        # requested, whatever the machine speed.
+        real_build = conv.build_network
+
+        def build_after_stop(*args, **kwargs):
+            assert worker._stop_event.wait(timeout=30)
+            return real_build(*args, **kwargs)
+
+        monkeypatch.setattr(conv, "build_network", build_after_stop)
+
         worker.start_simulation(conv, config, 0.1, 0.05)
         worker.stop_simulation()
 
