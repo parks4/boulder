@@ -275,57 +275,6 @@ def _agg_env() -> dict[str, str]:
     }
 
 
-@pytest.mark.parametrize("script_name,mechanism", _FIXTURES)
-def test_boulder_headless_py_writes_valid_stone_yaml(
-    tmp_path: Path, script_name: str, mechanism: str
-) -> None:
-    """``boulder <example.py> --headless --output-yaml`` writes YAML that ``boulder validate`` accepts."""
-    script = _EXAMPLES_DIR / script_name
-    if not script.is_file():
-        pytest.skip(f"{script_name} not found under docs/cantera_examples")
-
-    if script_name == "nanosecond_pulse_discharge.py":
-        import cantera as ct
-
-        try:
-            ct.Solution(mechanism)
-        except (OSError, ValueError, RuntimeError) as exc:
-            pytest.skip(f"Plasma mechanism not available ({mechanism}): {exc}")
-
-    stone_yaml = (tmp_path / f"{Path(script_name).stem}_boulder.yaml").resolve()
-    conv = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "boulder.cli",
-            str(script),
-            "--headless",
-            "--output-yaml",
-            str(stone_yaml),
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=300,
-        cwd=str(_REPO_ROOT),
-        env=_agg_env(),
-    )
-    assert conv.returncode == 0, (conv.stderr or "") + (conv.stdout or "")
-    assert stone_yaml.is_file()
-
-    val = subprocess.run(
-        [sys.executable, "-m", "boulder.cli", "validate", str(stone_yaml)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        cwd=str(_REPO_ROOT),
-        env=_agg_env(),
-    )
-    assert val.returncode == 0, (val.stderr or "") + (val.stdout or "")
-
-
 @pytest.mark.integration
 @pytest.mark.parametrize("script_name,mechanism", _DOWNLOAD_PARAMS)
 def test_boulder_headless_py_yaml_validate_download_run_roundtrip(
