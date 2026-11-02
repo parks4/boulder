@@ -27,15 +27,15 @@ def _copy_reactors_series(
     independent of the worker's live state.
     """
     out: Dict[str, Dict[str, Any]] = {}
-    for rid, v in series.items():
+    for rid, v in list(series.items()):  # snapshot: a solver thread keeps writing
         entry: Dict[str, Any] = {}
-        for key, val in v.items():
+        for key, val in list(v.items()):
             if key in ("T", "P") and isinstance(val, list):
                 entry[key] = val.copy()
             elif key in ("X", "Y") and isinstance(val, dict):
                 entry[key] = {
                     s: arr.copy() if isinstance(arr, list) else arr
-                    for s, arr in val.items()
+                    for s, arr in list(val.items())
                 }
             elif isinstance(val, list):
                 entry[key] = val.copy()
