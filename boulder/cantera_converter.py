@@ -45,6 +45,41 @@ PostBuildHook = Callable[["DualCanteraConverter", Dict[str, Any]], None]
 ReactorUnfolder = Callable[[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]
 
 
+def validate_header_href(href: Any) -> None:
+    """Raise ``ValueError`` unless *href* is a relative path or an ``http(s)`` URL.
+
+    The one rule for every link the GUI top bar renders (header links and the
+    header status chip): ``javascript:``, ``//host``, ``data:``, whitespace and
+    backslash are rejected.
+    """
+    ok = isinstance(href, str) and not any(c.isspace() or c == "\\" for c in href)
+    ok = ok and (
+        (href.startswith("/") and not href.startswith("//"))
+        or href.lower().startswith(("http://", "https://"))
+    )
+    if not ok:
+        raise ValueError(
+            f"Header link href must be a relative path or an http(s) URL, got {href!r}"
+        )
+
+
+@dataclass(frozen=True)
+class HeaderStatusContext:
+    """What a ``plugins.header_status`` provider is asked about."""
+
+    #: Where the scenario was defined, not what a worker solved. For a stored
+    #: scenario: the entry's recorded definition expanded to this id (``None`` when
+    #: the entry recorded none). Otherwise: the YAML as last parsed or uploaded,
+    #: expanded with its saved ``scenarios:``. Unsaved GUI edits and in-memory
+    #: overlays are not included; use ``fingerprints``, which are exact.
+    config: Optional[Dict[str, Any]]
+    #: Raw result-store id of the scenario (the base run is ``BASELINE``).
+    scenario_id: str
+    #: The stored entry's primary and alternate fingerprints; ``()`` when the
+    #: scenario has no stored result.
+    fingerprints: Tuple[str, ...]
+
+
 @dataclass
 class BoulderPlugins:
     """A container for discovered Boulder plugins."""
@@ -170,6 +205,17 @@ class BoulderPlugins:
     #: :meth:`add_header_link`. Exposed at ``GET /api/ui/header-links``.
     header_links: List[Dict[str, Any]] = field(default_factory=list)
 
+    #: ``(HeaderStatusContext) -> dict | None``: the status chip for the scenario
+    #: on screen, resolved on the server at ``GET /api/ui/header-status``. Return
+    #: ``{"text": str, "tone": "ok" | "warn" | "error" | "neutral", "href": str
+    #: (optional; same rule as :meth:`add_header_link`), "tooltip": str (optional),
+    #: "new_tab": bool (optional)}``, or ``None`` for no chip. An exception, a bad
+    #: tone or a bad href answers HTTP 500 and the GUI shows "status unavailable"
+    #: with the detail as its tooltip.
+    header_status: Optional[
+        Callable[[HeaderStatusContext], Optional[Dict[str, Any]]]
+    ] = None
+
     #: ``(config: dict) -> list[dict]`` callables that synthesize additional
     #: display-only Cytoscape elements (nodes/edges) for
     #: :func:`~boulder.utils.config_to_cyto_elements`, appended after its own
@@ -221,15 +267,7 @@ class BoulderPlugins:
         """
         if not isinstance(label, str) or not label.strip():
             raise ValueError("Header link label must be a non-empty string")
-        ok = isinstance(href, str) and not any(c.isspace() or c == "\\" for c in href)
-        ok = ok and (
-            (href.startswith("/") and not href.startswith("//"))
-            or href.lower().startswith(("http://", "https://"))
-        )
-        if not ok:
-            raise ValueError(
-                f"Header link href must be a relative path or an http(s) URL, got {href!r}"
-            )
+        validate_header_href(href)
         self.header_links.append(
             {
                 "label": label.strip(),

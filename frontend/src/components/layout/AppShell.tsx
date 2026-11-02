@@ -24,6 +24,7 @@ import { AddReactorModal } from "@/components/modals/AddReactorModal";
 import { AddMFCModal } from "@/components/modals/AddMFCModal";
 import { Button } from "@/components/ui/Button";
 import { applyScenarioDeepLink } from "@/lib/scenarioDeepLink";
+import { HeaderStatus } from "@/components/layout/HeaderStatus";
 import { toast } from "sonner";
 
 export function AppShell() {
@@ -308,6 +309,7 @@ export function AppShell() {
             </span>
           )}
           </Button>
+          <HeaderStatus />
           {headerLinks.map((l) => (
             <a
               key={`${l.label}|${l.href}`}

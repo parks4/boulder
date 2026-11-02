@@ -7,9 +7,9 @@ light/dark theme. Stored in-memory on ``app.state``; not persisted.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -114,6 +114,105 @@ async def get_header_links() -> Dict[str, Any]:
     from ...cantera_converter import get_plugins
 
     return {"links": get_plugins().header_links}
+
+
+_STATUS_TONES = ("ok", "warn", "error", "neutral")
+
+
+def _recorded_config(store_dir: Any, sid: str) -> Optional[Dict[str, Any]]:
+    """Return the definition a stored entry was solved from, expanded to *sid*."""
+    from ruamel.yaml import YAML
+
+    from ... import scenario_store
+    from ...runset import expand_scenarios
+
+    source = scenario_store.read_source(store_dir, sid)
+    if source is None:
+        return None
+    definition = YAML(typ="safe").load(source.definition)
+    return dict(expand_scenarios(definition)).get(sid)
+
+
+@router.get("/header-status")
+def get_header_status(
+    request: Request, scenario_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Resolve the host's status chip for one scenario (the base run when omitted).
+
+    The host's ``plugins.header_status`` provider gets the raw store id, the stored
+    entry's fingerprints (``()`` when nothing is stored; exact) and a config: the
+    stored entry's recorded definition for a stored id (``None`` when none was
+    recorded), else the last parsed or uploaded YAML expanded with its saved
+    scenarios. Unsaved GUI edits and in-memory overlays are not included.
+    Answers ``{"status": null}`` when there is no provider or it returns
+    ``None``, 404 for an id that is neither stored nor authored, and 500 (with the
+    detail) when the provider raises or returns a bad text, tone, tooltip or href.
+
+    A plain ``def`` so FastAPI runs it in its threadpool: the provider and the
+    store reads may be slow.
+    """
+    from ... import scenario_store
+    from ...cantera_converter import (
+        HeaderStatusContext,
+        get_plugins,
+        validate_header_href,
+    )
+    from ...runset import base_entry_id, expand_scenarios
+    from .scenarios import _identity, _require_base_raw, _store_dir
+
+    provider = get_plugins().header_status
+    if provider is None:
+        return {"status": None}
+
+    raw = _require_base_raw(request)
+    sid = scenario_id or base_entry_id(raw)
+    stored = {
+        str(e["id"]): e
+        for e in scenario_store.list_entries(_store_dir(request), _identity(request))
+    }
+    expanded = dict(expand_scenarios(raw))
+    if sid not in stored and sid not in expanded and sid != base_entry_id(raw):
+        raise HTTPException(status_code=404, detail=f"Unknown scenario {sid!r}")
+    entry = stored.get(sid)
+    if entry is not None:
+        config = _recorded_config(_store_dir(request), sid)
+        if config is None and sid == base_entry_id(raw):
+            config = raw
+    else:
+        config = expanded.get(sid, raw)
+    ctx = HeaderStatusContext(
+        config=config,
+        scenario_id=sid,
+        fingerprints=scenario_store.entry_fingerprints(entry) if entry else (),
+    )
+    try:
+        status = provider(ctx)
+        if status is None:
+            return {"status": None}
+        tone = status["tone"]
+        if tone not in _STATUS_TONES:
+            raise ValueError(f"tone must be one of {_STATUS_TONES}, got {tone!r}")
+        text, tooltip = status["text"], status.get("tooltip")
+        if not isinstance(text, str) or not text:
+            raise ValueError(f"text must be a non-empty string, got {text!r}")
+        if tooltip is not None and not isinstance(tooltip, str):
+            raise ValueError(f"tooltip must be a string or None, got {tooltip!r}")
+        href = status.get("href")
+        if href is not None:
+            validate_header_href(href)
+        return {
+            "status": {
+                "text": text,
+                "tone": tone,
+                "href": href,
+                "tooltip": tooltip,
+                "new_tab": bool(status.get("new_tab", False)),
+            }
+        }
+    except Exception as exc:  # noqa: BLE001 - a host provider's failure is reported, not hidden
+        raise HTTPException(
+            status_code=500, detail=f"header_status provider failed: {exc}"
+        ) from exc
 
 
 @router.get("/species-colors")
