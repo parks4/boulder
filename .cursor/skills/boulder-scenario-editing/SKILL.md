@@ -36,10 +36,10 @@ STONE v2 is authored **per-stage** (or one flat `network:` list) with
 type-keyed properties — never a generic `nodes:`/`properties:` shape:
 
 ```yaml
-torch_stage:
-- id: torch
-  PlasmaTorchInstantaneousHeating:
-    electric_power_kW: 120
+stage_1:
+- id: reactor
+  IdealGasReactor:
+    volume: 0.001
 ```
 
 A scenario overlay mirrors this shape but only lists the fields that
@@ -58,9 +58,9 @@ no "did I save first?" step.
 ## Prerequisites
 
 ```bash
-conda activate bloc   # or whichever env has an editable `boulder` install
+conda activate <env>   # an env with an editable boulder install
 cd boulder/frontend && npm run build
-bloc path/to/config.yaml --no-open --port 8050 --no-port-search
+boulder path/to/config.yaml --no-open --port 8050 --no-port-search
 ```
 
 The config needs at least one authored scenario. If none exists yet, create
@@ -120,11 +120,11 @@ non-unique). Prefer:
 document.getElementById('scenario-C1T').click();
 
 // Select a node/connection on the graph without pixel coordinates
-window.__boulderCy.getElementById('torch').emit('tap');
+window.__boulderCy.getElementById('reactor').emit('tap');
 
 // Read/write the scenario YAML pane's Monaco content directly
 window.monaco.editor.getModels()[0].getValue();
-window.monaco.editor.getModels()[0].setValue('torch_stage:\n- id: torch\n  ...\n');
+window.monaco.editor.getModels()[0].setValue('stage_1:\n- id: reactor\n  ...\n');
 ```
 
 `window.__boulderCy` is a debug handle exposing the live Cytoscape instance;
@@ -168,7 +168,7 @@ Array.from(document.querySelectorAll('[data-sonner-toast]')).map(t => t.textCont
 | Scenarios pane not visible at all | Right sidebar collapsed (persisted) | Click the sidebar toggle, or `localStorage.setItem('boulder-layout', JSON.stringify({...JSON.parse(localStorage.getItem('boulder-layout')), rightCollapsed: false}))` then reload |
 | YAML pane / Properties panel stays stale after a save elsewhere | Frontend build predates the revision-triggered refetch fix | `npm run build`; hard-reload; confirm the served JS bundle hash changed |
 | A scenario edit "disappeared" | Page was reloaded — see the edge case above; this is expected, not a bug | Re-apply the edit, or use "Download full YAML" before reloading next time |
-| `PATCH .../entities/{id}` → 405 or unexpected response shape | Backend route source changed but the **Python server process** wasn't restarted (unlike frontend static assets, route registration only happens at process startup) | Kill and restart the `bloc`/`boulder` process |
+| `PATCH .../entities/{id}` → 405 or unexpected response shape | Backend route source changed but the **Python server process** wasn't restarted (unlike frontend static assets, route registration only happens at process startup) | Kill and restart the `boulder` process |
 
 ## Further reading
 
