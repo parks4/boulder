@@ -566,7 +566,7 @@ header's only entry point.
 The route answers `{"status": null}` (no provider, or the provider returned `None`), or
 
 ```json
-{"status": {"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": null, "new_tab": false}}
+{"status": {"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": null, "new_tab": false, "order": 10}}
 ```
 
 `tone` is `ok`, `warn`, `error` or `neutral`; `href` follows the header-link rule
@@ -579,6 +579,10 @@ scenario changes or a run starts. There
 is no timer: `HeaderStatus.tsx` asks again when `scenarioStore.activeId`
 changes, when `simulationStore.results` changes while nothing is running, when a
 sweep ends, and when `config.metadata` changes.
+
+Both links and the status chip take an optional integer `order` (default 10, the
+theme toggle is 0, lower comes first; a non-integer is an error), applied by the
+GUI as a CSS flex `order`.
 
 **Custom connection kinds.** `plugins.connection_builders["MyEdgeKind"]`
 registers a builder `(converter, conn_dict) -> device` dispatched before the

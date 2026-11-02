@@ -210,7 +210,7 @@ export function AppShell() {
 
   // Top-bar links to host-served pages, registered by a Boulder plugin.
   const [headerLinks, setHeaderLinks] = useState<
-    { label: string; href: string; tooltip?: string | null; new_tab?: boolean }[]
+    { label: string; href: string; tooltip?: string | null; new_tab?: boolean; order: number }[]
   >([]);
   useEffect(() => {
     fetch("/api/ui/header-links")
@@ -315,6 +315,7 @@ export function AppShell() {
               key={`${l.label}|${l.href}`}
               href={l.href}
               title={l.tooltip ?? undefined}
+              style={{ order: l.order }}
               {...(l.new_tab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
               className="text-sm px-2 py-1 rounded border border-border hover:bg-muted"
             >

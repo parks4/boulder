@@ -78,6 +78,7 @@ export function HeaderStatus() {
   }, [activeId, results, isRunning, sweeping, metadata, hasConfig]);
 
   if (answeredFor !== (activeId ?? "") || isRunning || sweeping) return null;
+  // No host order here (the failure path cannot know it): sits at the CSS default 0, like the theme toggle.
   if (failure !== null) {
     return (
       <span
@@ -91,6 +92,7 @@ export function HeaderStatus() {
     );
   }
   if (status === null) return null;
+  const style = { order: status.order };
   const className = `text-sm px-2 py-1 rounded border ${TONE_CLASS[status.tone]}`;
   const title = status.tooltip ?? undefined;
   return status.href ? (
@@ -99,13 +101,20 @@ export function HeaderStatus() {
       data-tone={status.tone}
       href={status.href}
       title={title}
+      style={style}
       {...(status.new_tab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
       className={`${className} hover:bg-muted`}
     >
       {status.text}
     </a>
   ) : (
-    <span data-testid="header-status" data-tone={status.tone} title={title} className={className}>
+    <span
+      data-testid="header-status"
+      data-tone={status.tone}
+      title={title}
+      style={style}
+      className={className}
+    >
       {status.text}
     </span>
   );

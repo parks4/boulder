@@ -180,15 +180,18 @@ def get_header_status(
     (a host chip can be the header's only entry point).
     Answers ``{"status": null}`` when there is no provider or it returns
     ``None``, 404 for an id that is neither stored nor authored, and 500 (with the
-    detail) when the provider raises or returns a bad text, tone, tooltip or href.
+    detail) when the provider raises or returns a bad text, tone, tooltip, href or
+    order.
 
     A plain ``def`` so FastAPI runs it in its threadpool: the provider and the
     store reads may be slow.
     """
     from ...cantera_converter import (
+        DEFAULT_HEADER_ORDER,
         HeaderStatusContext,
         get_plugins,
         validate_header_href,
+        validate_header_order,
     )
     from .scenarios import _raw_base_config
 
@@ -218,6 +221,7 @@ def get_header_status(
         href = status.get("href")
         if href is not None:
             validate_header_href(href)
+        order = validate_header_order(status.get("order", DEFAULT_HEADER_ORDER))
         return {
             "status": {
                 "text": text,
@@ -225,6 +229,7 @@ def get_header_status(
                 "href": href,
                 "tooltip": tooltip,
                 "new_tab": bool(status.get("new_tab", False)),
+                "order": order,
             }
         }
     except Exception as exc:  # noqa: BLE001 - a host provider's failure is reported, not hidden

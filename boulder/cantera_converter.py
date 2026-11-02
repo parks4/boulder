@@ -63,6 +63,17 @@ def validate_header_href(href: Any) -> None:
         )
 
 
+#: Default CSS flex ``order`` of a host header item; the theme toggle is 0.
+DEFAULT_HEADER_ORDER = 10
+
+
+def validate_header_order(order: Any) -> int:
+    """Return *order* if it is an ``int`` (not a ``bool``), else raise ``ValueError``."""
+    if not isinstance(order, int) or isinstance(order, bool):
+        raise ValueError(f"Header order must be an integer, got {order!r}")
+    return order
+
+
 @dataclass(frozen=True)
 class HeaderStatusContext:
     """What a ``plugins.header_status`` provider is asked about."""
@@ -212,7 +223,8 @@ class BoulderPlugins:
     #: (optional; same rule as :meth:`add_header_link`), "tooltip": str (optional),
     #: "new_tab": bool (optional)}``, or ``None`` for no chip. An exception, a bad
     #: tone or a bad href answers HTTP 500 and the GUI shows "status unavailable"
-    #: with the detail as its tooltip.
+    #: with the detail as its tooltip. An optional integer ``"order"`` places the
+    #: chip in the top bar (see :meth:`add_header_link`).
     header_status: Optional[
         Callable[[HeaderStatusContext], Optional[Dict[str, Any]]]
     ] = None
@@ -260,21 +272,27 @@ class BoulderPlugins:
         href: str,
         tooltip: Optional[str] = None,
         new_tab: bool = False,
+        order: int = DEFAULT_HEADER_ORDER,
     ) -> None:
         """Register a link shown in the GUI top bar, e.g. ``("Reports", "/reports")``.
 
         ``href`` is a relative path (``/reports``) or an ``http(s)`` URL; anything
         else (``javascript:``, ``//host``, ``data:``) raises ``ValueError``.
+        ``order`` is an integer placing the link in the top bar (the theme toggle is
+        0, lower comes first; default 10, after the toggle); a non-integer raises
+        ``ValueError``.
         """
         if not isinstance(label, str) or not label.strip():
             raise ValueError("Header link label must be a non-empty string")
         validate_header_href(href)
+        validate_header_order(order)
         self.header_links.append(
             {
                 "label": label.strip(),
                 "href": href,
                 "tooltip": tooltip,
                 "new_tab": new_tab,
+                "order": order,
             }
         )
 
