@@ -820,7 +820,6 @@ class BoulderRunner:
         """
         if self.config_path is None:
             return
-        from .runset import resolve_store_dir
         from .scenario_store import build_source
         from .simulation_worker import (
             SimulationWorker,
@@ -834,11 +833,7 @@ class BoulderRunner:
         worker.set_run_identity(
             None,
             raw_config=raw,
-            source=(
-                build_source(raw, self.config_path)
-                if resolve_store_dir(raw, self.config_path)
-                else None
-            ),
+            source=build_source(raw, self.config_path),
         )
         reactor_reports = generate_reactor_reports(converter, results)
         connection_reports = generate_connection_reports(converter)
@@ -864,6 +859,7 @@ class BoulderRunner:
         simulate: bool = True,
         end_time: Optional[float] = None,
         dt: Optional[float] = None,
+        persist: bool = True,
     ) -> "BoulderRunner":
         """Solve the network and optionally write a downloadable Python script.
 
@@ -882,6 +878,10 @@ class BoulderRunner:
             Simulation end time in seconds (from ``settings.end_time`` in the YAML).
         dt :
             Simulation time step in seconds (from ``settings.dt`` in the YAML).
+        persist :
+            When ``True`` (default), store the solve and run the cache
+            contributors.  The CLI passes ``--run``, so a bare ``--download``
+            only writes code.
         """
         import copy as _copy
 
@@ -905,7 +905,8 @@ class BoulderRunner:
                 config=self.config,
             )
             self.code = "\n".join(converter.code_lines)
-            self._persist_headless(results, pre_build_config)
+            if persist:
+                self._persist_headless(results, pre_build_config)
         if download_path is not None:
             with open(download_path, "w", encoding="utf-8") as fh:
                 fh.write(self.code or "")

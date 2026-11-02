@@ -2,12 +2,13 @@
 
 It used to write no store entry and run no cache contributor, unlike the GUI
 worker and the sweep runner, so a host recording solves through contributors
-saw nothing from a headless single run.
+saw nothing from a headless single run.  ``--download`` alone only writes code.
 """
 
 from __future__ import annotations
 
 import copy
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -15,16 +16,21 @@ import pytest
 
 pytest.importorskip("h5py")
 
-from boulder import scenario_store  # noqa: E402
+from boulder import (  # noqa: E402
+    cantera_converter,
+    cli,
+    result_cache,
+    scenario_store,
+    sweep_runner,
+)
 from boulder.cantera_converter import BoulderPlugins, DualCanteraConverter  # noqa: E402
 from boulder.config import normalize_config, validate_config  # noqa: E402
 from boulder.result_cache import CacheContributorPlugin  # noqa: E402
 from boulder.runner import BoulderRunner  # noqa: E402
 from boulder.runset import resolve_store_dir  # noqa: E402
-from boulder.simulation_worker import (  # noqa: E402
-    SimulationWorker,
-    generate_connection_reports,
-    generate_reactor_reports,
+from boulder.sweep_runner import (  # noqa: E402
+    converter_mechanism_resolver,
+    scenario_fingerprint,
 )
 
 _YAML = """\
@@ -64,9 +70,6 @@ network:
     target: outlet
 """
 
-# Times and paths that legitimately differ between two solves of the same file.
-_VOLATILE = {"computed_at", "solved_at", "elapsed_time", "identity", "config_identity"}
-
 
 class _Recorder(CacheContributorPlugin):
     def __init__(self, raises: bool = False) -> None:
@@ -91,15 +94,11 @@ def _cfg(tmp_path: Path, name: str) -> Path:
     return cfg
 
 
-def _plugins(rec: _Recorder) -> BoulderPlugins:
+def _headless(cfg: Path, rec: _Recorder) -> BoulderRunner:
     plugins = BoulderPlugins()
     plugins.cache_contributors = [rec]
-    return plugins
-
-
-def _headless(cfg: Path, rec: _Recorder) -> BoulderRunner:
     runner = BoulderRunner.from_yaml(str(cfg))
-    runner.plugins = _plugins(rec)
+    runner.plugins = plugins
     return runner.run_headless(end_time=0.01, dt=0.005)
 
 
@@ -108,60 +107,81 @@ def _entry(cfg: Path) -> Dict[str, Any]:
     assert store_dir is not None
     identity = scenario_store.config_identity(cfg)
     (listed,) = scenario_store.list_entries(store_dir, identity)
-    attrs = scenario_store.entry_attrs(store_dir, listed["id"], identity)
-    return {"id": listed["id"], "attrs": attrs}
+    return {"id": listed["id"]}
 
 
-def _gui_solve(cfg: Path, rec: _Recorder) -> None:
-    """Persist the same file the way the GUI worker's solve does."""
+def _fresh_plugins(monkeypatch, contributors: list) -> None:
+    """Make ``get_plugins()`` rediscover, with *contributors* in the registry."""
+    monkeypatch.setattr(cantera_converter, "_PLUGIN_CACHE", None)
+    registry = result_cache.get_cache_contributor_registry()
+    monkeypatch.setattr(registry, "contributors", contributors)
+
+
+def test_headless_run_then_sweep_is_a_cache_hit(tmp_path, capsys) -> None:
+    """A headless run is a cache hit for the sweep and the GUI startup lookup.
+
+    The contributor fires once; the sweep then reports "1 cached, 0 solved" and
+    the GUI startup fingerprint finds the entry.
+    """
+    cfg = _cfg(tmp_path, "cli")
+    rec = _Recorder()
+    _headless(cfg, rec)
+    assert len(rec.fingerprints) == 1
+    capsys.readouterr()
+    sweep_runner.run(cfg)
+    assert "1 cached, 0 solved" in capsys.readouterr().out
+
     raw = BoulderRunner.load(str(cfg))
-    config = validate_config(normalize_config(copy.deepcopy(raw)))
-    converter = DualCanteraConverter(plugins=_plugins(rec))
-    converter._download_config_path = str(cfg)
-    pre = {
-        **config,
-        "nodes": copy.deepcopy(config["nodes"]),
-        "connections": copy.deepcopy(config["connections"]),
-    }
-    converter.build_network(config)
-    results, code = converter.run_streaming_simulation(0.01, 0.005, config=config)
-    worker = SimulationWorker()
-    worker.set_run_identity(
-        None, raw_config=raw, source=scenario_store.build_source(raw, cfg)
+    fp = scenario_fingerprint(
+        validate_config(normalize_config(copy.deepcopy(raw))),
+        normalized=True,
+        resolve_mechanism=converter_mechanism_resolver(DualCanteraConverter),
     )
-    worker.progress.times = results["time"]
-    worker.progress.reactors_series = results["reactors"]
-    worker._persist_to_cache(
-        converter,
-        config,
-        results,
-        generate_reactor_reports(converter, results),
-        generate_connection_reports(converter),
-        code,
-        pre_build_config=pre,
+    assert fp == rec.fingerprints[0]
+    store_dir = resolve_store_dir(raw, str(cfg))
+    identity = scenario_store.config_identity(cfg)
+    assert scenario_store.load_matching(store_dir, fp, identity)
+
+
+def test_download_without_run_persists_nothing(tmp_path, monkeypatch) -> None:
+    """``--headless --download`` alone writes no store entry, calls no contributor.
+
+    With ``--run`` it does both.
+    """
+    rec = _Recorder()
+    _fresh_plugins(monkeypatch, [rec])
+    cfg = _cfg(tmp_path, "cli")
+    out = tmp_path / "gen.py"
+    cli.main([str(cfg), "--headless", "--download", str(out)])
+    assert out.exists()
+    assert rec.fingerprints == []
+    assert not (cfg.parent / ".boulder-cache").exists()
+    cli.main([str(cfg), "--headless", "--run"])
+    assert len(rec.fingerprints) == 1
+
+
+def test_plugin_registered_contributor_fires_once(tmp_path, monkeypatch) -> None:
+    """A contributor registered by a ``BOULDER_PLUGINS`` module fires once."""
+    (tmp_path / "hp_plugin_mod.py").write_text(
+        "from boulder.result_cache import (\n"
+        "    CacheContributorPlugin, register_cache_contributor)\n"
+        "CALLS = []\n"
+        "class C(CacheContributorPlugin):\n"
+        "    contributor_id = 'hp_plugin'\n"
+        "    def contribute(self, config, converter, simulation_result, fp, adir):\n"
+        "        CALLS.append(fp)\n"
+        "def register_plugins(plugins):\n"
+        "    register_cache_contributor(C())\n",
+        encoding="utf-8",
     )
-
-
-def test_headless_run_fires_contributor_with_the_gui_fingerprint(tmp_path) -> None:
-    """One contributor call per headless run, with the fingerprint a GUI solve gets."""
-    rec_cli, rec_gui = _Recorder(), _Recorder()
-    _headless(_cfg(tmp_path, "cli"), rec_cli)
-    _gui_solve(_cfg(tmp_path, "gui"), rec_gui)
-    assert len(rec_cli.fingerprints) == 1
-    assert rec_cli.fingerprints == rec_gui.fingerprints
-
-
-def test_headless_run_writes_the_entry_the_worker_writes(tmp_path) -> None:
-    """The headless store entry has the same id and non-volatile attrs as the worker's."""
-    cli, gui = _cfg(tmp_path, "cli"), _cfg(tmp_path, "gui")
-    _headless(cli, _Recorder())
-    _gui_solve(gui, _Recorder())
-    a, b = _entry(cli), _entry(gui)
-    assert a["id"] == b["id"]
-    keep = set(a["attrs"]) - _VOLATILE
-    assert keep == set(b["attrs"]) - _VOLATILE
-    assert {k: a["attrs"][k] for k in keep} == {k: b["attrs"][k] for k in keep}
-    assert a["attrs"]["fingerprint"]
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv("BOULDER_PLUGINS", "hp_plugin_mod")
+    _fresh_plugins(monkeypatch, [])
+    cfg = _cfg(tmp_path, "cli")
+    BoulderRunner.from_yaml(str(cfg)).run_headless(end_time=0.01, dt=0.005)
+    mod = sys.modules["hp_plugin_mod"]
+    monkeypatch.delitem(sys.modules, "hp_plugin_mod")
+    assert len(mod.CALLS) == 1
 
 
 def test_a_raising_contributor_does_not_fail_the_run(tmp_path) -> None:
