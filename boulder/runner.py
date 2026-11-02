@@ -809,6 +809,54 @@ class BoulderRunner:
         self.network = self.result.network
         return self
 
+    def _persist_headless(
+        self, results: Dict[str, Any], pre_build_config: Dict[str, Any]
+    ) -> None:
+        """Store this solve and run the cache contributors, as the GUI worker does.
+
+        Drives :meth:`SimulationWorker._persist_to_cache` itself, so the entry,
+        its source, fingerprints and the contributors cannot drift from a GUI
+        solve. Best-effort like there; a no-op without a ``config_path``.
+        """
+        if self.config_path is None:
+            return
+        from .runset import resolve_store_dir
+        from .scenario_store import build_source
+        from .simulation_worker import (
+            SimulationWorker,
+            generate_connection_reports,
+            generate_reactor_reports,
+        )
+
+        raw = self.load(self.config_path)
+        converter = self._ensure_converter()
+        worker = SimulationWorker()
+        worker.set_run_identity(
+            None,
+            raw_config=raw,
+            source=(
+                build_source(raw, self.config_path)
+                if resolve_store_dir(raw, self.config_path)
+                else None
+            ),
+        )
+        reactor_reports = generate_reactor_reports(converter, results)
+        connection_reports = generate_connection_reports(converter)
+        worker.progress.times = results["time"]
+        worker.progress.reactors_series = results["reactors"]
+        worker.progress.summary = results.get("summary", [])
+        worker.progress.sankey_links = results.get("sankey_links")
+        worker.progress.sankey_nodes = results.get("sankey_nodes")
+        worker._persist_to_cache(
+            converter,
+            self.config,
+            results,
+            reactor_reports,
+            connection_reports,
+            "\n".join(converter.code_lines),
+            pre_build_config=pre_build_config,
+        )
+
     def run_headless(
         self,
         *,
@@ -835,6 +883,15 @@ class BoulderRunner:
         dt :
             Simulation time step in seconds (from ``settings.dt`` in the YAML).
         """
+        import copy as _copy
+
+        # Same pre-build snapshot the GUI worker fingerprints (build enriches
+        # the config in place with outlet/interface nodes).
+        pre_build_config = {
+            **self.config,
+            "nodes": _copy.deepcopy(self.config.get("nodes") or []),
+            "connections": _copy.deepcopy(self.config.get("connections") or []),
+        }
         self.solve()
         if simulate:
             # Always call run_streaming_simulation so the downloadable script
@@ -842,12 +899,13 @@ class BoulderRunner:
             # has no end_time we use a dummy 0.0 so only the steady-state report
             # is emitted (no time-stepping), which mirrors the old headless path.
             converter = self._ensure_converter()
-            converter.run_streaming_simulation(
+            results, _ = converter.run_streaming_simulation(
                 simulation_time=float(end_time) if end_time is not None else 0.0,
                 time_step=(dt or 1.0),
                 config=self.config,
             )
             self.code = "\n".join(converter.code_lines)
+            self._persist_headless(results, pre_build_config)
         if download_path is not None:
             with open(download_path, "w", encoding="utf-8") as fh:
                 fh.write(self.code or "")
