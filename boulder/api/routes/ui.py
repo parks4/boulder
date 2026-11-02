@@ -119,18 +119,37 @@ async def get_header_links() -> Dict[str, Any]:
 _STATUS_TONES = ("ok", "warn", "error", "neutral")
 
 
+def _recorded_config(store_dir: Any, sid: str) -> Optional[Dict[str, Any]]:
+    """Return the definition a stored entry was solved from, expanded to *sid*."""
+    from ruamel.yaml import YAML
+
+    from ... import scenario_store
+    from ...runset import expand_scenarios
+
+    source = scenario_store.read_source(store_dir, sid)
+    if source is None:
+        return None
+    definition = YAML(typ="safe").load(source.definition)
+    return dict(expand_scenarios(definition)).get(sid)
+
+
 @router.get("/header-status")
-async def get_header_status(
+def get_header_status(
     request: Request, scenario_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """Resolve the host's status chip for one scenario (the base run when omitted).
 
-    The host's ``plugins.header_status`` provider gets the session config with the
-    scenario's overlay applied, the raw store id and the stored entry's
-    fingerprints (``()`` when nothing is stored). Answers ``{"status": null}`` when
-    there is no provider or it returns ``None``, 404 for an id that is neither
-    stored nor authored, and 500 (with the detail) when the provider raises or
-    returns a bad tone or href.
+    The host's ``plugins.header_status`` provider gets the raw store id, the stored
+    entry's fingerprints (``()`` when nothing is stored; exact) and a config: the
+    stored entry's recorded definition for a stored id (``None`` when none was
+    recorded), else the last parsed or uploaded YAML expanded with its saved
+    scenarios. Unsaved GUI edits and in-memory overlays are not included.
+    Answers ``{"status": null}`` when there is no provider or it returns
+    ``None``, 404 for an id that is neither stored nor authored, and 500 (with the
+    detail) when the provider raises or returns a bad text, tone, tooltip or href.
+
+    A plain ``def`` so FastAPI runs it in its threadpool: the provider and the
+    store reads may be slow.
     """
     from ... import scenario_store
     from ...cantera_converter import (
@@ -155,8 +174,14 @@ async def get_header_status(
     if sid not in stored and sid not in expanded and sid != base_entry_id(raw):
         raise HTTPException(status_code=404, detail=f"Unknown scenario {sid!r}")
     entry = stored.get(sid)
+    if entry is not None:
+        config = _recorded_config(_store_dir(request), sid)
+        if config is None and sid == base_entry_id(raw):
+            config = raw
+    else:
+        config = expanded.get(sid, raw)
     ctx = HeaderStatusContext(
-        config=expanded.get(sid, raw),
+        config=config,
         scenario_id=sid,
         fingerprints=scenario_store.entry_fingerprints(entry) if entry else (),
     )
@@ -167,15 +192,20 @@ async def get_header_status(
         tone = status["tone"]
         if tone not in _STATUS_TONES:
             raise ValueError(f"tone must be one of {_STATUS_TONES}, got {tone!r}")
+        text, tooltip = status["text"], status.get("tooltip")
+        if not isinstance(text, str) or not text:
+            raise ValueError(f"text must be a non-empty string, got {text!r}")
+        if tooltip is not None and not isinstance(tooltip, str):
+            raise ValueError(f"tooltip must be a string or None, got {tooltip!r}")
         href = status.get("href")
         if href is not None:
             validate_header_href(href)
         return {
             "status": {
-                "text": str(status["text"]),
+                "text": text,
                 "tone": tone,
                 "href": href,
-                "tooltip": status.get("tooltip"),
+                "tooltip": tooltip,
                 "new_tab": bool(status.get("new_tab", False)),
             }
         }

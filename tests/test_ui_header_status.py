@@ -4,7 +4,11 @@ Asserts, on a neutral ``gri30.yaml`` network (``feed`` -> ``reactor`` -> ``outle
 - with no provider the status is null, and ``/api/ui/header-links`` is unchanged;
 - after a single run the provider gets the resolved base id, the session config and
   both the primary and the alternate fingerprint of the stored entry;
+- the fingerprints are the two values the worker writes (pre- and post-build);
 - a scenario with no stored result gets ``fingerprints == ()``;
+- a stored id absent from the saved YAML gets its own recorded definition as config,
+  never the base; with no recorded source the config is ``None``;
+- a provider answer with an empty ``text`` or a non-string ``tooltip`` is a 500;
 - an unknown id is a 404;
 - a bad href, a bad tone or a provider exception is a 500 carrying the detail;
 - a provider returning ``None`` gives null; a good answer is normalised.
@@ -30,6 +34,7 @@ from boulder.cantera_converter import BoulderPlugins  # noqa: E402
 from boulder.config import normalize_config  # noqa: E402
 from boulder.runset import resolve_store_dir  # noqa: E402
 from boulder.simulation_worker import SimulationWorker  # noqa: E402
+from boulder.sweep_runner import scenario_fingerprint  # noqa: E402
 
 _RES = {"temperature": 300, "pressure": 101325, "composition": "CH4:1"}
 _RAW: Dict[str, Any] = {
@@ -80,11 +85,21 @@ def cfg(tmp_path: Path) -> Path:
     return path
 
 
-def _store_single_run(cfg: Path) -> None:
-    """Persist the base run the way the worker does, with a distinct alt fingerprint."""
+def _store_single_run(cfg: Path) -> tuple:
+    """Persist the base run like the worker; return its (pre, post) fingerprints."""
     config = normalize_config(copy.deepcopy(_RAW))
     pre_build = copy.deepcopy(config)
     config["metadata"] = {"post_build": True}  # the post-build config differs
+
+    def fingerprint(cfg_: Dict[str, Any]) -> str:
+        return scenario_fingerprint(
+            cfg_,
+            normalized=True,
+            mechanism="gri30.yaml",
+            resolve_mechanism=lambda name: name,
+        )
+
+    expected = (fingerprint(pre_build), fingerprint(config))
     worker = SimulationWorker()
     with patch(
         "boulder.simulation_result.make_simulation_result", return_value=object()
@@ -98,6 +113,7 @@ def _store_single_run(cfg: Path) -> None:
             "# code",
             pre_build_config=pre_build,
         )
+    return expected
 
 
 def _get(cfg, provider, url="/api/ui/header-status"):
@@ -123,7 +139,7 @@ def test_header_links_has_no_statuses(cfg):
 
 
 def test_provider_gets_base_id_and_all_fingerprints(cfg):
-    _store_single_run(cfg)
+    expected = _store_single_run(cfg)
     seen = []
 
     def provider(ctx):
@@ -142,12 +158,8 @@ def test_provider_gets_base_id_and_all_fingerprints(cfg):
         }
     }
     ctx = seen[0]
-    attrs = store.list_entries(resolve_store_dir({}, cfg), store.config_identity(cfg))[
-        0
-    ]
     assert ctx.scenario_id == "BASELINE"
-    assert len(ctx.fingerprints) == 2
-    assert ctx.fingerprints == store.entry_fingerprints(attrs)
+    assert ctx.fingerprints == expected
     assert ctx.config["network"][0]["id"] == "feed"
 
 
@@ -162,6 +174,52 @@ def test_scenario_without_result_has_no_fingerprints(cfg):
     assert seen[0].scenario_id == "hot"
     assert seen[0].fingerprints == ()
     assert seen[0].config["network"][0]["Reservoir"]["temperature"] == 900
+
+
+def _store_scenario(cfg: Path, sid: str, definition: Any) -> None:
+    """Store an entry *sid*, recording *definition* as its source (None: no source)."""
+    source = None
+    if definition is not None:
+        source = store.RunSource(
+            definition=store._yaml_text(definition),
+            leaf_text="",
+            chain=(),
+            display_name="model.yaml",
+        )
+    store_dir = resolve_store_dir({}, cfg)
+    assert store_dir is not None
+    store.write_entry(
+        store_dir,
+        sid,
+        gui_payload={"status": "complete", "is_complete": True},
+        mechanism="gri30.yaml",
+        fingerprint="fp-" + sid,
+        identity=store.config_identity(cfg),
+        source=source,
+    )
+
+
+def test_stored_id_absent_from_saved_yaml_gets_its_own_definition(cfg):
+    recorded = copy.deepcopy(_RAW)
+    recorded["scenarios"] = {
+        "custom": {"network": [{"id": "feed", "Reservoir": {"temperature": 1234}}]}
+    }
+    _store_scenario(cfg, "custom", recorded)
+    seen = []
+    resp = _get(
+        cfg, lambda ctx: seen.append(ctx), "/api/ui/header-status?scenario_id=custom"
+    )
+    assert resp.status_code == 200
+    assert seen[0].fingerprints == ("fp-custom",)
+    assert seen[0].config["network"][0]["Reservoir"]["temperature"] == 1234
+
+
+def test_stored_id_without_recorded_source_gets_no_config(cfg):
+    _store_scenario(cfg, "custom", None)
+    seen = []
+    _get(cfg, lambda ctx: seen.append(ctx), "/api/ui/header-status?scenario_id=custom")
+    assert seen[0].config is None
+    assert seen[0].fingerprints == ("fp-custom",)
 
 
 def test_unknown_id_is_404(cfg):
@@ -185,6 +243,8 @@ def _boom(ctx):
             "href",
         ),
         (lambda ctx: {"text": "x", "tone": "purple"}, "tone"),
+        (lambda ctx: {"text": "", "tone": "ok"}, "text"),
+        (lambda ctx: {"text": "x", "tone": "ok", "tooltip": 3}, "tooltip"),
         (_boom, "index down"),
     ],
 )

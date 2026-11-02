@@ -67,8 +67,12 @@ def validate_header_href(href: Any) -> None:
 class HeaderStatusContext:
     """What a ``plugins.header_status`` provider is asked about."""
 
-    #: The session's raw config with the scenario's overlay applied.
-    config: Dict[str, Any]
+    #: Where the scenario was defined, not what a worker solved. For a stored
+    #: scenario: the entry's recorded definition expanded to this id (``None`` when
+    #: the entry recorded none). Otherwise: the YAML as last parsed or uploaded,
+    #: expanded with its saved ``scenarios:``. Unsaved GUI edits and in-memory
+    #: overlays are not included; use ``fingerprints``, which are exact.
+    config: Optional[Dict[str, Any]]
     #: Raw result-store id of the scenario (the base run is ``BASELINE``).
     scenario_id: str
     #: The stored entry's primary and alternate fingerprints; ``()`` when the

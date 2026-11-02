@@ -43,7 +43,9 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@/components/layout/HeaderStatus", () => ({ HeaderStatus: () => null }));
+vi.mock("@/components/layout/HeaderStatus", () => ({
+  HeaderStatus: () => <span data-testid="header-status" />,
+}));
 
 vi.mock("@/components/panels/NetworkCard", () => ({
   NetworkCard: ({ onEditYaml }: { onEditYaml: () => void }) => (
@@ -205,6 +207,11 @@ describe("AppShell", () => {
 
     expect(screen.queryByTestId("solver-mode-badge")).not.toBeInTheDocument();
     expect(screen.queryByText("test.yaml")).not.toBeInTheDocument();
+  });
+
+  it("mounts the host status chip in the header", () => {
+    render(<AppShell />);
+    expect(screen.getByTestId("header-status")).toBeInTheDocument();
   });
 
   it("renders no header link when the plugin registered none", async () => {

@@ -6,11 +6,13 @@
  * - the request is `/api/ui/header-status` with only the scenario id (none for the base);
  * - it re-fetches when the selected scenario changes, when a result lands, when a
  *   sweep ends and when `config.metadata` changes, but not while a run is in flight;
- * - a null status renders nothing, and a 500's `detail` is the chip's tooltip;
+ * - a null status renders nothing, a 404 (a scenario only in the pane) renders
+ *   nothing, and a 500's `detail` is the chip's tooltip;
  * - a network error, an HTTP error or an invalid response renders a neutral
  *   "status unavailable" chip with the reason as tooltip;
  * - an unsafe `href` is never rendered as a link;
- * - a late response for a superseded request is dropped.
+ * - a late response for a superseded request is dropped;
+ * - the previous scenario's chip is cleared on a scenario change and when a run starts.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -25,8 +27,8 @@ import { useSweepRunStore } from "@/stores/sweepStore";
 
 const fetchMock = vi.fn();
 
-function answer(body: unknown, ok = true) {
-  fetchMock.mockResolvedValue({ ok, status: ok ? 200 : 503, json: async () => body });
+function answer(body: unknown, ok = true, status = ok ? 200 : 503) {
+  fetchMock.mockResolvedValue({ ok, status, json: async () => body });
 }
 
 function lastUrl(): URL {
@@ -156,6 +158,27 @@ describe("HeaderStatus", () => {
     answer({}, false);
     render(<HeaderStatus />);
     expect(await screen.findByTestId("header-status")).toHaveAttribute("title", "HTTP 503");
+  });
+
+  it("renders nothing for a 404 (a scenario that exists only in the pane)", async () => {
+    answer({ detail: "Unknown scenario 'x'" }, false, 404);
+    render(<HeaderStatus />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    expect(screen.queryByTestId("header-status")).toBeNull();
+  });
+
+  it("clears the previous chip when the scenario changes and when a run starts", async () => {
+    render(<HeaderStatus />);
+    expect(await screen.findByText("recorded")).toBeInTheDocument();
+    fetchMock.mockReturnValue(new Promise(() => {})); // a slow provider
+    act(() => useScenarioStore.setState({ activeId: "other" }));
+    expect(screen.queryByText("recorded")).toBeNull();
+    answer({ status: { text: "again", tone: "ok" } });
+    act(() => useScenarioStore.setState({ activeId: "third" }));
+    expect(await screen.findByText("again")).toBeInTheDocument();
+    act(() => useSimulationStore.getState().beginSimulationRun());
+    expect(screen.queryByText("again")).toBeNull();
   });
 
   it("shows the server's 500 detail as the tooltip", async () => {

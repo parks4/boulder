@@ -545,12 +545,20 @@ to several (`fingerprint` plus `alt_fingerprints`). The route builds:
 ```python
 @dataclass(frozen=True)
 class HeaderStatusContext:
-    config: Dict[str, Any]         # session raw config, scenario overlay applied
+    config: Optional[Dict[str, Any]]  # where the scenario was defined, see below
     scenario_id: str               # raw store id (base run: runset.base_entry_id)
     fingerprints: Tuple[str, ...]  # stored entry's primary + alt fingerprints; () if none
 ```
 
-and answers `{"status": null}` (no provider, or the provider returned `None`), or
+`config` is where the scenario was defined, not what a worker solved. For a
+stored scenario it is the entry's recorded definition expanded to that id
+(`None` when the entry recorded none, never the base config). Otherwise it is
+the YAML as last parsed or uploaded, expanded with its saved `scenarios:`.
+Unsaved GUI edits and in-memory overlays are not included, so a host must not
+rely on `config` for them; `fingerprints` are exact in every case, because they
+come from the stored entry.
+
+The route answers `{"status": null}` (no provider, or the provider returned `None`), or
 
 ```json
 {"status": {"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": null, "new_tab": false}}
@@ -558,9 +566,11 @@ and answers `{"status": null}` (no provider, or the provider returned `None`), o
 
 `tone` is `ok`, `warn`, `error` or `neutral`; `href` follows the header-link rule
 (`validate_header_href`, shared with `add_header_link`). An id that is neither
-stored nor authored is a 404. A provider that raises, or returns a bad tone or
-href, is a 500 with the detail; the chip then shows a neutral "status
-unavailable" whose tooltip is that detail. A null status renders nothing. There
+stored nor authored is a 404, which the chip treats as a null status (a scenario
+that exists only in the pane). A provider that raises, or returns an empty or
+non-string `text`, a non-string `tooltip`, a bad tone or href, is a 500 with the detail; the chip then shows a neutral "status
+unavailable" whose tooltip is that detail. A null status renders nothing. The chip is hidden when the
+scenario changes or a run starts. There
 is no timer: `HeaderStatus.tsx` asks again when `scenarioStore.activeId`
 changes, when `simulationStore.results` changes while nothing is running, when a
 sweep ends, and when `config.metadata` changes.

@@ -479,11 +479,6 @@ def entry_fingerprints(attrs: Dict[str, Any]) -> Tuple[str, ...]:
     return tuple(dict.fromkeys(found))
 
 
-def _answers_to(attrs: Dict[str, Any], candidate_fingerprint: str) -> bool:
-    """Whether an entry's attrs match *candidate_fingerprint*, canonical or alternate."""
-    return candidate_fingerprint in entry_fingerprints(attrs)
-
-
 def find_entry(
     store_dir: Optional[Path], fingerprint: str, identity: str = ""
 ) -> Optional[Dict[str, Any]]:
@@ -501,7 +496,7 @@ def find_entry(
     if not fingerprint:
         return None
     for attrs in list_entries(store_dir, identity):
-        if _answers_to(attrs, fingerprint):
+        if fingerprint in entry_fingerprints(attrs):
             return attrs
     return None
 
