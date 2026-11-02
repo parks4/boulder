@@ -193,9 +193,8 @@ def convert_py_to_yaml(
         # Run the conversion
         yaml_path = _run_sim2stone_conversion(py_path, verbose)
 
-        existing_yaml = yaml_path[: -len(_TEMP_SUFFIX)] + ".yaml"
-        if not os.path.exists(existing_yaml):
-            existing_yaml = None
+        proper_yaml = yaml_path[: -len(_TEMP_SUFFIX)] + ".yaml"
+        had_existing = os.path.exists(proper_yaml)
 
         # Settle the temporary file against any existing YAML
         final_yaml_path = _handle_yaml_conflicts(yaml_path, verbose)
@@ -205,7 +204,7 @@ def convert_py_to_yaml(
             import shutil
 
             # Never move the user's own existing YAML away: copy it.
-            if final_yaml_path == existing_yaml:
+            if had_existing and final_yaml_path == proper_yaml:
                 shutil.copyfile(final_yaml_path, output_path)
             else:
                 shutil.move(final_yaml_path, output_path)
