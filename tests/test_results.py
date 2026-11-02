@@ -84,7 +84,7 @@ def test_opens_a_store_written_for_another_config(store):
     np.testing.assert_allclose(arr.T, original.T, rtol=1e-10)
     np.testing.assert_allclose(arr.t, original.t)
     cols = sc.series("r0", "t", "T", "X:CO2")
-    np.testing.assert_allclose(cols["X:CO2"], original("CO2").X[:, 0], rtol=1e-10)
+    np.testing.assert_allclose(cols["X:CO2"], original.X[:, original.species_index("CO2")], rtol=1e-10)
 
 
 def test_mechanism_found_on_search_path_when_stored_path_is_gone(store):
