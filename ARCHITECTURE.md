@@ -534,6 +534,47 @@ at `GET /api/ui/header-links`. The host must serve the linked path itself (e.g.
 from an outer ASGI wrapper placed before Boulder's app); otherwise the SPA
 catch-all returns `index.html`.
 
+**Header status.** A host that wants a status chip for the scenario on screen
+(for example "recorded in the host's index", with a link, or why not) sets
+`plugins.header_status`, a callable `(HeaderStatusContext) -> dict | None`
+resolved **on the server**. The GUI sends only the scenario id to
+`GET /api/ui/header-status?scenario_id=<id>` (no parameter for the base run):
+after a fresh solve it holds no reliable fingerprint, and a stored entry answers
+to several (`fingerprint` plus `alt_fingerprints`). The route builds:
+
+```python
+@dataclass(frozen=True)
+class HeaderStatusContext:
+    config: Optional[Dict[str, Any]]  # where the scenario was defined, see below
+    scenario_id: str               # raw store id (base run: runset.base_entry_id)
+    fingerprints: Tuple[str, ...]  # stored entry's primary + alt fingerprints; () if none
+```
+
+`config` is where the scenario was defined, not what a worker solved. For a
+stored scenario it is the entry's recorded definition expanded to that id
+(`None` when the entry recorded none, never the base config). Otherwise it is
+the YAML as last parsed or uploaded, expanded with its saved `scenarios:`.
+Unsaved GUI edits and in-memory overlays are not included, so a host must not
+rely on `config` for them; `fingerprints` are exact in every case, because they
+come from the stored entry.
+
+The route answers `{"status": null}` (no provider, or the provider returned `None`), or
+
+```json
+{"status": {"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": null, "new_tab": false}}
+```
+
+`tone` is `ok`, `warn`, `error` or `neutral`; `href` follows the header-link rule
+(`validate_header_href`, shared with `add_header_link`). An id that is neither
+stored nor authored is a 404, which the chip treats as a null status (a scenario
+that exists only in the pane). A provider that raises, or returns an empty or
+non-string `text`, a non-string `tooltip`, a bad tone or href, is a 500 with the detail; the chip then shows a neutral "status
+unavailable" whose tooltip is that detail. A null status renders nothing. The chip is hidden when the
+scenario changes or a run starts. There
+is no timer: `HeaderStatus.tsx` asks again when `scenarioStore.activeId`
+changes, when `simulationStore.results` changes while nothing is running, when a
+sweep ends, and when `config.metadata` changes.
+
 **Custom connection kinds.** `plugins.connection_builders["MyEdgeKind"]`
 registers a builder `(converter, conn_dict) -> device` dispatched before the
 built-in flow devices. The returned object need not be a Cantera flow device —
@@ -548,6 +589,7 @@ as first-class STONE edges.
 - `POST /api/plugins/{plugin_id}/render` — body maps to `OutputPaneContext`; returns `{available, data}`
 - `GET /api/ui/branding` — host branding declared by a plugin package
 - `GET /api/ui/header-links` — top-bar links declared by a plugin package
+- `GET /api/ui/header-status?scenario_id=` — the host status chip, resolved by `plugins.header_status`
 
 ### Optional spatial-style output pane (downstream plugin)
 

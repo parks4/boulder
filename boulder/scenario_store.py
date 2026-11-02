@@ -469,14 +469,14 @@ def fingerprints(store_dir: Optional[Path], identity: str = "") -> Dict[str, str
     return found
 
 
-def _answers_to(attrs: Dict[str, Any], candidate_fingerprint: str) -> bool:
-    """Whether an entry's attrs match *candidate_fingerprint*, canonical or alternate."""
-    if str(attrs.get(_ATTR_FINGERPRINT, "")) == candidate_fingerprint:
-        return True
+def entry_fingerprints(attrs: Dict[str, Any]) -> Tuple[str, ...]:
+    """Every fingerprint an entry answers to: the canonical one, then the alternates."""
+    primary = str(attrs.get(_ATTR_FINGERPRINT, ""))
     alts = attrs.get(_ATTR_ALT_FINGERPRINTS) or []
     if isinstance(alts, (str, bytes)):
         alts = [alts]
-    return candidate_fingerprint in {str(_to_py(a)) for a in alts}
+    found = ([primary] if primary else []) + [str(_to_py(a)) for a in alts]
+    return tuple(dict.fromkeys(found))
 
 
 def find_entry(
@@ -496,7 +496,7 @@ def find_entry(
     if not fingerprint:
         return None
     for attrs in list_entries(store_dir, identity):
-        if _answers_to(attrs, fingerprint):
+        if fingerprint in entry_fingerprints(attrs):
             return attrs
     return None
 
