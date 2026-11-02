@@ -164,9 +164,11 @@ class BoulderRunner:
         """Instantiate ``self.converter`` if not already done."""
         if self.converter is not None:
             return self.converter
-        from .cantera_converter import DualCanteraConverter
+        from .cantera_converter import select_converter_class
 
-        converter_cls = self.__class__.converter_class or DualCanteraConverter
+        converter_cls = select_converter_class(
+            self.__class__.converter_class, self.plugins
+        )
         c = converter_cls(
             mechanism=self._default_mechanism_name(),
             plugins=self.plugins,

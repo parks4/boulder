@@ -612,6 +612,19 @@ def resolve_unset_flow_rates(
         )
 
 
+def select_converter_class(
+    runner_converter_class: Optional[Type[Any]] = None,
+    plugins: Optional[BoulderPlugins] = None,
+) -> Type["DualCanteraConverter"]:
+    """The one converter-selection rule: runner class, then plugin, then default.
+
+    Used by the runner, the GUI startup and the sweep so all three compute the
+    same cache fingerprint for the same file.
+    """
+    plugins = plugins if plugins is not None else get_plugins()
+    return runner_converter_class or plugins.converter_class or DualCanteraConverter
+
+
 def get_plugins() -> BoulderPlugins:
     """Discover and load all Boulder plugins, returning them in a container.
 
