@@ -869,6 +869,7 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
                 simulate=True,
                 end_time=float(end_time_val) if end_time_val is not None else None,
                 dt=float(dt_val) if dt_val is not None else None,
+                persist=args.run,
             )
             if args.download:
                 print(f"Python code generated: {args.download}")
