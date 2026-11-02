@@ -19,7 +19,6 @@ sweeps.
 
 from __future__ import annotations
 
-import copy
 import itertools
 import json
 import os
@@ -201,10 +200,9 @@ def _run_gui(cfg: Path, which: str) -> None:
     """Drive the API as ``boulder.cli`` configures it (class attrs set pre-lifespan)."""
     api_main._converter_class = getattr(BoulderRunner, "converter_class", None)
     api_main._runner_class = BoulderRunner
-    os.environ["BOULDER_CONFIG_PATH"] = str(cfg)
     app = api_main.create_app()
     with TestClient(app) as client:
-        overlays = copy.deepcopy(app.state.preloaded_raw.get("scenarios") or {})
+        overlays = app.state.preloaded_raw.get("scenarios") or {}
         if which == "gui_sweep":
             resp = client.post("/api/sweep/run", json={"scenarios": overlays})
             assert resp.status_code == 200, resp.text
@@ -265,7 +263,6 @@ def snapshots(tmp_path_factory) -> Dict[str, Dict[str, Dict[str, Any]]]:
     patch.setattr(api_main, "_converter_class", None)
     patch.setattr(api_main, "_runner_class", None)
     patch.delenv("BOULDER_NO_CACHE", raising=False)
-    patch.delenv("BOULDER_CONFIG_PATH", raising=False)
     snaps: Dict[str, Dict[str, Dict[str, Any]]] = {}
     try:
         for which in PATHS:
@@ -275,6 +272,7 @@ def snapshots(tmp_path_factory) -> Dict[str, Dict[str, Dict[str, Any]]]:
             cfg.write_text(_CONFIG, encoding="utf-8")
             record = folder / "calls.jsonl"
             patch.setenv("EPM_RECORD", str(record))
+            patch.setenv("BOULDER_CONFIG_PATH", str(cfg))
             # Fresh plugin discovery per path, with an empty contributor registry.
             patch.setattr(cantera_converter, "_PLUGIN_CACHE", None)
             patch.setattr(
