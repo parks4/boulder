@@ -73,7 +73,8 @@ class HeaderStatusContext:
     #: expanded with its saved ``scenarios:``. Unsaved GUI edits and in-memory
     #: overlays are not included; use ``fingerprints``, which are exact.
     config: Optional[Dict[str, Any]]
-    #: Raw result-store id of the scenario (the base run is ``BASELINE``).
+    #: Raw result-store id of the scenario (the base run is ``BASELINE``). Empty
+    #: (and ``config`` is ``None``) when no configuration is loaded.
     scenario_id: str
     #: The stored entry's primary and alternate fingerprints; ``()`` when the
     #: scenario has no stored result.

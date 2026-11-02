@@ -114,6 +114,21 @@ describe("HeaderStatus", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
+  it("fetches with no config loaded (no scenario_id) and re-fetches once one loads", async () => {
+    useConfigStore.getState().resetConfig();
+    render(<HeaderStatus />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(lastUrl().searchParams.has("scenario_id")).toBe(false);
+    expect(await screen.findByTestId("header-status")).toBeTruthy();
+    act(() => {
+      const { config } = useConfigStore.getState();
+      useConfigStore.setState({
+        config: { ...config, nodes: [{ id: "r", type: "IdealGasReactor", properties: {} }] },
+      });
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
   it("drops a late response for a superseded request", async () => {
     let releaseFirst: (v: unknown) => void = () => {};
     fetchMock.mockReturnValueOnce(

@@ -133,38 +133,15 @@ def _recorded_config(store_dir: Any, sid: str) -> Optional[Dict[str, Any]]:
     return dict(expand_scenarios(definition)).get(sid)
 
 
-@router.get("/header-status")
-def get_header_status(
-    request: Request, scenario_id: Optional[str] = None
-) -> Dict[str, Any]:
-    """Resolve the host's status chip for one scenario (the base run when omitted).
-
-    The host's ``plugins.header_status`` provider gets the raw store id, the stored
-    entry's fingerprints (``()`` when nothing is stored; exact) and a config: the
-    stored entry's recorded definition for a stored id (``None`` when none was
-    recorded), else the last parsed or uploaded YAML expanded with its saved
-    scenarios. Unsaved GUI edits and in-memory overlays are not included.
-    Answers ``{"status": null}`` when there is no provider or it returns
-    ``None``, 404 for an id that is neither stored nor authored, and 500 (with the
-    detail) when the provider raises or returns a bad text, tone, tooltip or href.
-
-    A plain ``def`` so FastAPI runs it in its threadpool: the provider and the
-    store reads may be slow.
-    """
+def _loaded_header_context(
+    request: Request, raw: Dict[str, Any], scenario_id: Optional[str]
+) -> Any:
+    """Build the provider context for *scenario_id* of the loaded configuration."""
     from ... import scenario_store
-    from ...cantera_converter import (
-        HeaderStatusContext,
-        get_plugins,
-        validate_header_href,
-    )
+    from ...cantera_converter import HeaderStatusContext
     from ...runset import base_entry_id, expand_scenarios
-    from .scenarios import _identity, _require_base_raw, _store_dir
+    from .scenarios import _identity, _store_dir
 
-    provider = get_plugins().header_status
-    if provider is None:
-        return {"status": None}
-
-    raw = _require_base_raw(request)
     sid = scenario_id or base_entry_id(raw)
     stored = {
         str(e["id"]): e
@@ -180,11 +157,52 @@ def get_header_status(
             config = raw
     else:
         config = expanded.get(sid, raw)
-    ctx = HeaderStatusContext(
+    return HeaderStatusContext(
         config=config,
         scenario_id=sid,
         fingerprints=scenario_store.entry_fingerprints(entry) if entry else (),
     )
+
+
+@router.get("/header-status")
+def get_header_status(
+    request: Request, scenario_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Resolve the host's status chip for one scenario (the base run when omitted).
+
+    The host's ``plugins.header_status`` provider gets the raw store id, the stored
+    entry's fingerprints (``()`` when nothing is stored; exact) and a config: the
+    stored entry's recorded definition for a stored id (``None`` when none was
+    recorded), else the last parsed or uploaded YAML expanded with its saved
+    scenarios. Unsaved GUI edits and in-memory overlays are not included.
+    With no configuration loaded the provider gets ``config=None``,
+    ``scenario_id=""`` and ``fingerprints=()`` whatever ``scenario_id`` was asked
+    (a host chip can be the header's only entry point).
+    Answers ``{"status": null}`` when there is no provider or it returns
+    ``None``, 404 for an id that is neither stored nor authored, and 500 (with the
+    detail) when the provider raises or returns a bad text, tone, tooltip or href.
+
+    A plain ``def`` so FastAPI runs it in its threadpool: the provider and the
+    store reads may be slow.
+    """
+    from ...cantera_converter import (
+        HeaderStatusContext,
+        get_plugins,
+        validate_header_href,
+    )
+    from .scenarios import _raw_base_config
+
+    provider = get_plugins().header_status
+    if provider is None:
+        return {"status": None}
+
+    raw = _raw_base_config(request)
+    if raw:
+        ctx = _loaded_header_context(request, raw, scenario_id)
+    else:
+        # No configuration loaded: the host still answers (its chip may be the
+        # header's only entry point), whatever scenario_id was asked.
+        ctx = HeaderStatusContext(config=None, scenario_id="", fingerprints=())
     try:
         status = provider(ctx)
         if status is None:

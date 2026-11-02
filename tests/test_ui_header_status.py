@@ -252,3 +252,29 @@ def test_bad_provider_is_500_with_detail(cfg, provider, detail):
     resp = _get(cfg, provider)
     assert resp.status_code == 500
     assert detail in resp.json()["detail"]
+
+
+def test_no_config_loaded_still_asks_the_provider():
+    """With no configuration, the provider gets config None, scenario_id "", ().
+
+    Also with a ``scenario_id`` query param (no 404); its answer is returned.
+    """
+    seen = []
+
+    def provider(ctx):
+        seen.append(ctx)
+        return {"text": "home", "tone": "neutral", "href": "/home"}
+
+    plugins = BoulderPlugins(header_status=provider)
+    app = create_app()
+    with patch("boulder.cantera_converter.get_plugins", lambda: plugins):
+        with TestClient(app) as client:
+            for url in ("/api/ui/header-status", "/api/ui/header-status?scenario_id=x"):
+                r = client.get(url)
+                assert r.status_code == 200
+                assert r.json()["status"]["text"] == "home"
+    assert len(seen) == 2
+    for ctx in seen:
+        assert ctx.config is None
+        assert ctx.scenario_id == ""
+        assert ctx.fingerprints == ()
