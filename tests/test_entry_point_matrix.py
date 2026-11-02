@@ -153,6 +153,7 @@ PATHS = ("headless", "gui_run", "gui_sweep", "cli_sweep")
 def _snapshot(cfg: Path, record: Path) -> Dict[str, Dict[str, Any]]:
     """Everything one path stored, per entry id."""
     store_dir = resolve_store_dir(BoulderRunner.load(str(cfg)), str(cfg))
+    assert store_dir is not None
     identity = scenario_store.config_identity(cfg)
     calls: List[Dict[str, Any]] = []
     if record.exists():
@@ -161,6 +162,7 @@ def _snapshot(cfg: Path, record: Path) -> Dict[str, Dict[str, Any]]:
     for attrs in scenario_store.list_entries(store_dir, identity):
         sid = attrs["id"]
         payload = scenario_store.read_entry(store_dir, sid, identity)
+        assert payload is not None
         times = [float(t) for t in payload["times"]]
         out[sid] = {
             "fingerprint": attrs["fingerprint"],
@@ -199,7 +201,7 @@ def _wait(poll, done, what: str) -> Any:
 def _run_gui(cfg: Path, which: str) -> None:
     """Drive the API as ``boulder.cli`` configures it (class attrs set pre-lifespan)."""
     api_main._converter_class = getattr(BoulderRunner, "converter_class", None)
-    api_main._runner_class = BoulderRunner
+    api_main._runner_class = BoulderRunner  # type: ignore[assignment]
     app = api_main.create_app()
     with TestClient(app) as client:
         overlays = app.state.preloaded_raw.get("scenarios") or {}
