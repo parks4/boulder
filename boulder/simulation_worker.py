@@ -472,14 +472,8 @@ class SimulationWorker:
 
             update_live_simulation(network, converter.reactors, converter.mechanism)
 
-            logger.info(
-                f"Starting streaming simulation: {simulation_time}s with {time_step}s steps"
-            )
-
-            # Run the streaming simulation using the converter's method
+            # Collect the results of the staged solve that just ran
             results, code_str = converter.run_streaming_simulation(
-                simulation_time=simulation_time,
-                time_step=time_step,
                 progress_callback=progress_callback,
                 config=config,
             )

@@ -25,8 +25,6 @@ def test_output_summary_in_results():
     conv = DualCanteraConverter()
     conv.build_network(config)
     results, _ = conv.run_streaming_simulation(
-        simulation_time=1.0,
-        time_step=1.0,
         config=config,  # Pass config to run_streaming_simulation
     )
 

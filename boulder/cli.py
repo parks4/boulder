@@ -358,20 +358,8 @@ def run_headless_mode(
         if verbose:
             print("Running simulation to generate complete Python code...")
 
-        # The one time-grid rule, read from the prepared config.
-        from .sweep_runner import solver_window
-
-        simulation_time, time_step = solver_window(validated_config)
-
-        if verbose:
-            print(f"Simulation parameters: time={simulation_time}s, step={time_step}s")
-
-        # Run streaming simulation to get complete code
-        results, code_str = converter.run_streaming_simulation(
-            simulation_time=simulation_time,
-            time_step=time_step,
-            config=validated_config,
-        )
+        # Collect the results and complete the code (the solve already ran)
+        results, code_str = converter.run_streaming_simulation(config=validated_config)
 
         if verbose:
             print(f"Simulation completed: {len(results['time'])} time points")

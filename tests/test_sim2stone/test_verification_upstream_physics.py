@@ -154,10 +154,7 @@ def test_periodic_cstr_boulder_reproduces_upstream_oscillation() -> None:
 
     conv = DualCanteraConverter(mechanism="h2o2.yaml")
     conv.build_network(normalized)
-    solver = normalized["settings"]["solver"]
     results, _ = conv.run_streaming_simulation(
-        simulation_time=solver["grid"]["stop"],
-        time_step=solver["grid"]["dt"],
         config=normalized,
     )
     (reactor_id,) = [
@@ -251,10 +248,7 @@ def test_fuel_injection_boulder_reproduces_upstream_pah_formation() -> None:
 
     conv = DualCanteraConverter(mechanism=normalized["phases"]["gas"]["mechanism"])
     conv.build_network(normalized)
-    solver = normalized["settings"]["solver"]
     results, _ = conv.run_streaming_simulation(
-        simulation_time=solver["grid"]["stop"],
-        time_step=solver["grid"]["dt"],
         config=normalized,
     )
     (reactor_id,) = [

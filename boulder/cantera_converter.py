@@ -1,5 +1,4 @@
 import importlib
-import math
 import os
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -2483,16 +2482,15 @@ class DualCanteraConverter:
 
     def run_streaming_simulation(
         self,
-        simulation_time: float,
-        time_step: float,
         progress_callback=None,
         config: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], str]:
-        """Run simulation with streaming progress updates.
+        """Collect the staged solve's results and finish the downloadable script.
 
-        *simulation_time* and *time_step* come from
-        :func:`boulder.sweep_runner.solver_window`; this method has no grid
-        rule of its own.
+        ``build_network`` has already solved every stage (the one staged solve),
+        so nothing is integrated here: the converged states, the transient
+        trajectory the solve recorded and the spatial profiles become the
+        results.
         """
         if self.network is None:
             raise RuntimeError("Network not built. Call build_network() first.")
@@ -2524,15 +2522,8 @@ class DualCanteraConverter:
                     "Please update your YAML to use 'settings' section with 'end_time' and 'dt' keys only."
                 )
 
-        # ``build_network`` always routes through the staged solver, so by the
-        # time we get here the reactor states are already converged.  Calling
-        # ``network.advance()`` on that fully-solved network is not only
-        # redundant, it can diverge numerically (mechanism-switch networks
-        # contain reactors with mismatched species lists that were only
-        # integrated independently inside their own stage sub-network).  We
-        # therefore emit a downloadable script that just prints the final
-        # states, and capture a single-time-point "trajectory" for the UI.
-        already_solved = getattr(self, "_staged_trajectory", None) is not None
+        if getattr(self, "_staged_trajectory", None) is None:
+            raise RuntimeError("Network not solved. Call build_network() first.")
 
         # Determine whether any stage used a transient solver kind.
         _has_transient_stage = False
@@ -2549,47 +2540,23 @@ class DualCanteraConverter:
 
         self.code_lines.append("")
         self.code_lines.append("# ===== SIMULATION EXECUTION =====")
-        if already_solved:
-            if _has_transient_stage:
-                self.code_lines.append(
-                    "# solve_stage() ran transient integration; network holds the final state."
-                )
-            else:
-                self.code_lines.append(
-                    "# solve_stage() has already solved each stage sequentially;"
-                )
-                self.code_lines.append(
-                    "# network = runner.network holds the converged reactor states."
-                )
-            self.code_lines.append("print('Simulation completed (staged solve).')")
-            self.code_lines.append("print('Reactor\\tT [K]\\tP [Pa]')")
-            self.code_lines.append("for r in network.reactors:")
+        if _has_transient_stage:
             self.code_lines.append(
-                '    print(f"{r.name}\\t{r.phase.T:.2f}\\t{r.phase.P:.2f}")'
+                "# solve_stage() ran transient integration; network holds the final state."
             )
         else:
-            self.code_lines.append("# Import numpy for time array generation")
-            self.code_lines.append("import numpy as np")
-            self.code_lines.append("")
             self.code_lines.append(
-                f"# Create time array: 0 to {simulation_time}s with {time_step}s steps"
+                "# solve_stage() has already solved each stage sequentially;"
             )
             self.code_lines.append(
-                f"times = np.arange(0, {simulation_time}, {time_step})"
+                "# network = runner.network holds the converged reactor states."
             )
-            self.code_lines.append("")
-            self.code_lines.append("# Run time integration loop")
-            self.code_lines.append("print('Starting simulation...')")
-            self.code_lines.append("print('Time (s)\\tTemperatures (K)')")
-            self.code_lines.append("for t in times:")
-            self.code_lines.append("    # Advance the reactor network to time t")
-            self.code_lines.append("    network.advance(t)")
-            self.code_lines.append("    # Print current time and reactor temperatures")
-            self.code_lines.append(
-                '    print(f"t={t:.4f}, T={[r.phase.T for r in network.reactors]}")'
-            )
-            self.code_lines.append("")
-            self.code_lines.append("print('Simulation completed!')")
+        self.code_lines.append("print('Simulation completed (staged solve).')")
+        self.code_lines.append("print('Reactor\\tT [K]\\tP [Pa]')")
+        self.code_lines.append("for r in network.reactors:")
+        self.code_lines.append(
+            '    print(f"{r.name}\\t{r.phase.T:.2f}\\t{r.phase.P:.2f}")'
+        )
 
         # Initialize data structures
         times: List[float] = []
@@ -2598,7 +2565,6 @@ class DualCanteraConverter:
         # Per-reactor capture using SolutionArray
         reactors_series: Dict[str, Dict[str, Any]] = {}
         sol_arrays: Dict[str, ct.SolutionArray] = {}
-        last_error_message: str = ""
         for reactor in reactor_list:
             reactor_id = getattr(reactor, "name", "") or str(id(reactor))
             # Use the correct gas solution for this reactor's mechanism
@@ -2613,261 +2579,128 @@ class DualCanteraConverter:
                 "Y": {s: [] for s in reactor_gas.species_names},
             }
 
-        if already_solved:
-            # Network already converged by the staged solver — record the
-            # final per-reactor state as a single time point and skip the
-            # (redundant, potentially-diverging) ``network.advance`` loop.
-            # We still call ``advance(0.0)`` once so that Cantera marks the
-            # flow devices as "ready" (otherwise downstream consumers such as
-            # the Sankey generator would raise ``FlowDevice::massFlowRate:
-            # Flow device is not ready``).
-            try:
-                self.network.advance(0.0)
-            except Exception as e:
-                logger.warning(
-                    f"Post-staged network.advance(0) warmup failed, "
-                    f"flow-device reads may be unavailable: {e}"
-                )
-            times.append(0.0)
-            for reactor in reactor_list:
-                reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
-                    "gas_solution", self.gas
-                )
-                reactor_species_names = reactor_gas.species_names
-                T = float(reactor.phase.T)
-                P = float(reactor.phase.P)
-                X_vec = reactor.phase.X
-                Y_vec = reactor.phase.Y
-                sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
-                reactors_series[reactor_id]["T"].append(T)
-                reactors_series[reactor_id]["P"].append(P)
-                for species_name, x_value in zip(reactor_species_names, X_vec):
-                    cast(
-                        List[float], reactors_series[reactor_id]["X"][species_name]
-                    ).append(float(x_value))
-                for species_name, y_value in zip(reactor_species_names, Y_vec):
-                    cast(
-                        List[float], reactors_series[reactor_id]["Y"][species_name]
-                    ).append(float(y_value))
+        # Network already converged by the staged solver — record the
+        # final per-reactor state as a single time point and skip the
+        # (redundant, potentially-diverging) ``network.advance`` loop.
+        # We still call ``advance(0.0)`` once so that Cantera marks the
+        # flow devices as "ready" (otherwise downstream consumers such as
+        # the Sankey generator would raise ``FlowDevice::massFlowRate:
+        # Flow device is not ready``).
+        try:
+            self.network.advance(0.0)
+        except Exception as e:
+            logger.warning(
+                f"Post-staged network.advance(0) warmup failed, "
+                f"flow-device reads may be unavailable: {e}"
+            )
+        times.append(0.0)
+        for reactor in reactor_list:
+            reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+            reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
+                "gas_solution", self.gas
+            )
+            reactor_species_names = reactor_gas.species_names
+            T = float(reactor.phase.T)
+            P = float(reactor.phase.P)
+            X_vec = reactor.phase.X
+            Y_vec = reactor.phase.Y
+            sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
+            reactors_series[reactor_id]["T"].append(T)
+            reactors_series[reactor_id]["P"].append(P)
+            for species_name, x_value in zip(reactor_species_names, X_vec):
+                cast(
+                    List[float], reactors_series[reactor_id]["X"][species_name]
+                ).append(float(x_value))
+            for species_name, y_value in zip(reactor_species_names, Y_vec):
+                cast(
+                    List[float], reactors_series[reactor_id]["Y"][species_name]
+                ).append(float(y_value))
 
-                # Spatial reactors: if the plugin registered a spatial_series_fn
-                # on reactor_meta, call it to replace the single-point snapshot
-                # with the full converged spatial profile. The returned dict may
-                # also carry an "extra_series" list of arbitrary named x/y series
-                # (each with its own axis) that are stored verbatim and have no
-                # built-in meaning to Boulder -- see STONE_SPECIFICATIONS.md.
-                _spatial_fn = self.reactor_meta.get(reactor_id, {}).get(
-                    "spatial_series_fn"
+            # Spatial reactors: if the plugin registered a spatial_series_fn
+            # on reactor_meta, call it to replace the single-point snapshot
+            # with the full converged spatial profile. The returned dict may
+            # also carry an "extra_series" list of arbitrary named x/y series
+            # (each with its own axis) that are stored verbatim and have no
+            # built-in meaning to Boulder -- see STONE_SPECIFICATIONS.md.
+            _spatial_fn = self.reactor_meta.get(reactor_id, {}).get("spatial_series_fn")
+            _series: Optional[Dict[str, Any]] = None
+            if _spatial_fn is not None:
+                _series = _spatial_fn()
+            if _series is None:
+                _series = try_infer_spatial_reactor_series(self, reactor_id)
+            if _series is not None:
+                reactors_series[reactor_id] = _series
+                # If this reactor is the representative of a composite group
+                # (e.g. CGR placeholder), also register under the group/stage
+                # id so clicking the compound box shows the full profile.
+                _group_series_id = self.reactor_meta.get(reactor_id, {}).get(
+                    "group_series_id"
                 )
-                _series: Optional[Dict[str, Any]] = None
-                if _spatial_fn is not None:
-                    _series = _spatial_fn()
-                if _series is None:
-                    _series = try_infer_spatial_reactor_series(self, reactor_id)
-                if _series is not None:
-                    reactors_series[reactor_id] = _series
-                    # If this reactor is the representative of a composite group
-                    # (e.g. CGR placeholder), also register under the group/stage
-                    # id so clicking the compound box shows the full profile.
-                    _group_series_id = self.reactor_meta.get(reactor_id, {}).get(
-                        "group_series_id"
-                    )
-                    if _group_series_id:
-                        reactors_series[_group_series_id] = _series
+                if _group_series_id:
+                    reactors_series[_group_series_id] = _series
 
-                # PSR reactors: if the plugin flagged this reactor as a PSR,
-                # propagate the flag so the frontend can adapt its visualisation.
-                elif self.reactor_meta.get(reactor_id, {}).get("is_psr"):
-                    reactors_series[reactor_id]["is_psr"] = True
+            # PSR reactors: if the plugin flagged this reactor as a PSR,
+            # propagate the flag so the frontend can adapt its visualisation.
+            elif self.reactor_meta.get(reactor_id, {}).get("is_psr"):
+                reactors_series[reactor_id]["is_psr"] = True
 
-            # Transient solve: replace the converged single-point snapshot with the
-            # T(t) trajectory captured *during* the (single) staged solve by the
-            # recorder. No re-integration; reports/Sankey/code from finalize are
-            # kept; only the series is swapped. Spatial profiles are left untouched.
-            _recorder = getattr(self, "_trajectory_recorder", None)
-            _traj = _recorder.series() if _recorder is not None else {}
-            for _rid, _series in _traj.items():
-                if _rid in reactors_series and not reactors_series[_rid].get(
-                    "is_spatial"
-                ):
-                    reactors_series[_rid] = _series
-                    times[:] = _series["t"]
+        # Transient solve: replace the converged single-point snapshot with the
+        # T(t) trajectory captured *during* the (single) staged solve by the
+        # recorder. No re-integration; reports/Sankey/code from finalize are
+        # kept; only the series is swapped. Spatial profiles are left untouched.
+        _recorder = getattr(self, "_trajectory_recorder", None)
+        _traj = _recorder.series() if _recorder is not None else {}
+        for _rid, _series in _traj.items():
+            if _rid in reactors_series and not reactors_series[_rid].get("is_spatial"):
+                reactors_series[_rid] = _series
+                times[:] = _series["t"]
 
-            # CustomStageNetwork trajectory: a stage network that integrates its
-            # whole stage internally (one ``advance`` call over its own grid)
-            # records the real profile in ``.states`` — the per-step recorder
-            # above cannot capture it. Surface it as the reactor series so the
-            # built-in plots and plugin panes show the full trajectory.
-            _staged = getattr(self, "_staged_trajectory", None)
-            for _net in getattr(_staged, "networks", {}).values() if _staged else ():
-                _net_states = getattr(_net, "states", None)
-                _flat = _series_from_stage_states(
-                    _net_states, getattr(_net, "scalars", None)
-                )
-                if _flat is None:
+        # CustomStageNetwork trajectory: a stage network that integrates its
+        # whole stage internally (one ``advance`` call over its own grid)
+        # records the real profile in ``.states`` — the per-step recorder
+        # above cannot capture it. Surface it as the reactor series so the
+        # built-in plots and plugin panes show the full trajectory.
+        _staged = getattr(self, "_staged_trajectory", None)
+        for _net in getattr(_staged, "networks", {}).values() if _staged else ():
+            _net_states = getattr(_net, "states", None)
+            _flat = _series_from_stage_states(
+                _net_states, getattr(_net, "scalars", None)
+            )
+            if _flat is None:
+                continue
+            _states_species = list(getattr(_net_states, "species_names", []))
+            for _r in getattr(_net, "reactors", []):
+                if isinstance(_r, ct.Reservoir):
                     continue
-                _states_species = list(getattr(_net_states, "species_names", []))
-                for _r in getattr(_net, "reactors", []):
-                    if isinstance(_r, ct.Reservoir):
-                        continue
-                    # The stage records ONE profile: attach it only to the
-                    # reactor(s) whose phase it describes (matched by species
-                    # set), never to co-staged reactors on other mechanisms.
-                    _r_species = list(
-                        getattr(getattr(_r, "phase", None), "species_names", [])
-                    )
-                    if _states_species and _r_species != _states_species:
-                        continue
-                    _rid = getattr(_r, "name", "") or str(id(_r))
-                    _existing = reactors_series.get(_rid)
-                    if _existing is not None and _existing.get("is_spatial"):
-                        continue
-                    _cur_len = len((_existing or {}).get("t", []) or [])
-                    if len(_flat["t"]) > _cur_len:
-                        reactors_series[_rid] = _flat
-                        if len(_flat["t"]) > len(times):
-                            times[:] = _flat["t"]
-
-            if progress_callback:
-                progress_callback(
-                    {
-                        "time": times.copy(),
-                        "reactors": reactors_series,
-                    },
-                    simulation_time,
-                    simulation_time,
+                # The stage records ONE profile: attach it only to the
+                # reactor(s) whose phase it describes (matched by species
+                # set), never to co-staged reactors on other mechanisms.
+                _r_species = list(
+                    getattr(getattr(_r, "phase", None), "species_names", [])
                 )
-            results = self.finalize_results(times, reactors_series)
-            return results, "\n".join(self.code_lines)
+                if _states_species and _r_species != _states_species:
+                    continue
+                _rid = getattr(_r, "name", "") or str(id(_r))
+                _existing = reactors_series.get(_rid)
+                if _existing is not None and _existing.get("is_spatial"):
+                    continue
+                _cur_len = len((_existing or {}).get("t", []) or [])
+                if len(_flat["t"]) > _cur_len:
+                    reactors_series[_rid] = _flat
+                    if len(_flat["t"]) > len(times):
+                        times[:] = _flat["t"]
 
-        # Simulation loop with streaming updates
-        current_time = 0.0
-        while current_time < simulation_time:
-            try:
-                self.network.advance(current_time)
-            except Exception as e:
-                # Log warning but continue with partial results
-                last_error_message = str(e)
-                logger.warning(
-                    f"Cantera advance failed at t={current_time}s: {last_error_message}"
-                )
-                if len(times) == 0:
-                    raise RuntimeError(
-                        "Cantera integration failed before any successful time step "
-                        f"at t={current_time}s: {last_error_message}. "
-                        "Refusing to fabricate reactor state trajectories."
-                    ) from e
-                # Otherwise, break and return partial results
-                logger.warning(f"Returning partial results up to t={times[-1]}s")
-                # Provide a partial-progress callback update containing the error
-                if progress_callback:
-                    progress_callback(
-                        {
-                            "time": times.copy(),
-                            "reactors": {
-                                k: {
-                                    "T": v["T"].copy(),
-                                    "P": v["P"].copy(),
-                                    "X": {s: v["X"][s].copy() for s in v["X"]},
-                                    "Y": {s: v["Y"][s].copy() for s in v["Y"]},
-                                }
-                                for k, v in reactors_series.items()
-                            },
-                            "error_message": last_error_message,
-                        },
-                        current_time,
-                        simulation_time,
-                    )
-                break
-
-            times.append(current_time)
-
-            # Capture reactor states
-            for reactor in reactor_list:
-                reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                T = reactor.phase.T
-                P = reactor.phase.P
-                X_vec = reactor.phase.X
-                Y_vec = reactor.phase.Y
-
-                # Get the correct gas solution for this reactor's mechanism
-                reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
-                    "gas_solution", self.gas
-                )
-                reactor_species_names = reactor_gas.species_names
-
-                # Detect non-finite states and handle gracefully
-                if not (
-                    math.isfinite(T)
-                    and math.isfinite(P)
-                    and all(math.isfinite(float(x)) for x in X_vec)
-                    and all(math.isfinite(float(y)) for y in Y_vec)
-                ):
-                    last_error_message = (
-                        "Non-finite state detected (T/P/X) — using previous values"
-                    )
-                    logger.warning(
-                        f"Non-finite state detected at t={current_time}s for reactor "
-                        f"'{reactor_id}', using previous values"
-                    )
-                    # Duplicate last successful values if available
-                    if len(reactors_series[reactor_id]["T"]) > 0:
-                        T = reactors_series[reactor_id]["T"][-1]
-                        P = reactors_series[reactor_id]["P"][-1]
-                        X_vec_list = [
-                            reactors_series[reactor_id]["X"][s][-1]
-                            for s in reactor_species_names
-                        ]
-                        X_vec = np.array(X_vec_list)
-                        Y_vec_list = [
-                            reactors_series[reactor_id]["Y"][s][-1]
-                            for s in reactor_species_names
-                        ]
-                        Y_vec = np.array(Y_vec_list)
-                    else:
-                        raise ValueError(
-                            f"Reactor {reactor_id!r}: non-finite thermochemical state "
-                            f"(T/P/X/Y) at t={current_time}s and no prior trajectory "
-                            "samples to reuse."
-                        )
-
-                sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
-                reactors_series[reactor_id]["T"].append(T)
-                reactors_series[reactor_id]["P"].append(P)
-                for species_name, x_value in zip(reactor_species_names, X_vec):
-                    cast(
-                        List[float], reactors_series[reactor_id]["X"][species_name]
-                    ).append(float(x_value))
-                for species_name, y_value in zip(reactor_species_names, Y_vec):
-                    cast(
-                        List[float], reactors_series[reactor_id]["Y"][species_name]
-                    ).append(float(y_value))
-
-            # Call progress callback if provided (for streaming updates)
-            if progress_callback:
-                progress_data = {
+        if progress_callback:
+            # One report, at the end of the (already finished) solve: 1 of 1.
+            progress_callback(
+                {
                     "time": times.copy(),
-                    "reactors": {
-                        k: {
-                            "T": v["T"].copy(),
-                            "P": v["P"].copy(),
-                            "X": {s: v["X"][s].copy() for s in v["X"]},
-                            "Y": {s: v["Y"][s].copy() for s in v["Y"]},
-                        }
-                        for k, v in reactors_series.items()
-                    },
-                }
-                if last_error_message:
-                    progress_data["error_message"] = last_error_message
-                progress_callback(progress_data, current_time, simulation_time)
-
-            current_time += time_step
-
-        # Finalize results
+                    "reactors": reactors_series,
+                },
+                1.0,
+                1.0,
+            )
         results = self.finalize_results(times, reactors_series)
-        if last_error_message:
-            results["error_message"] = last_error_message
         return results, "\n".join(self.code_lines)
 
     def _summary_stage_networks(self) -> Dict[str, Any]:

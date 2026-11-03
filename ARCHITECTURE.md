@@ -231,6 +231,13 @@ endpoint uses — same module, so the count can never drift from the expansion),
 **One pipeline.** `sweep_runner.run_set(raw, config_path, only=..., use_cache=...)` is the one
 solve-and-store pipeline. CLI run (`--headless --run`), CLI sweep (`--sweep --headless`), GUI Run, GUI
 Sweep and the Python API all call it; a single run is a run set of one entry (`only={entry_id}`).
+**One per-stage solve.** `staged_solver.solve_one_stage` builds, solves, switches mechanism, fills the
+stream points and records the trajectory of one stage; `solve_staged` is a plain loop over it followed by
+`build_stage_viz`, the one visualization step. Downloaded scripts and `BoulderRunner.run_continuation`
+step the stages themselves through `BoulderRunner.solve_stage` / `build_viz_network`, thin delegates to
+those two functions, so they run the same code as the GUI. (`--download` writes the Cantera-native
+script of `CanteraScriptEmitter`; only the runner-based script, written by `script_lines_for_runner`
+when no config snapshot exists, calls the runner.)
 Per entry: prepare the config with the runner's `normalize` + `validate` → fingerprint → store hit
 (`on_scenario_cached`) or solve through the staged solver (`converter.build_network`, the one staged
 driver) → write the entry (`store_solved_scenario`, the one store writer) → contributors and host hooks.
