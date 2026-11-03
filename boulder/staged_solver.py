@@ -710,6 +710,8 @@ def solve_staged(
 
             # Copy outlet state into a fresh Solution at the stage mechanism
             outlet_gas = _extract_gas_state(source_reactor, stage.mechanism, converter)
+            # Pre-switch gas: what the stream point displays (as `solve_stage` does).
+            outlet_gas_preswitched = outlet_gas
 
             # Apply mechanism switch if requested
             outlet_mechanism = (
@@ -744,6 +746,8 @@ def solve_staged(
                     converter,
                     stream_conns_by_stage.get(ic.target_stage, []),
                     stage_intra_connections=list(stage.intra_connections),
+                    display_gas=outlet_gas_preswitched,
+                    display_mechanism=stage.mechanism,
                 )
                 # Back-fill the node dict with converged state so _sync_streams_into_config
                 # ships the full P&ID stream data to the frontend without a new API call.

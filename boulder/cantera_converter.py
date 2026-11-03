@@ -2483,16 +2483,21 @@ class DualCanteraConverter:
 
     def run_streaming_simulation(
         self,
-        simulation_time: float = 10.0,
-        time_step: float = 1.0,
+        simulation_time: float,
+        time_step: float,
         progress_callback=None,
         config: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], str]:
-        """Run simulation with streaming progress updates."""
+        """Run simulation with streaming progress updates.
+
+        *simulation_time* and *time_step* come from
+        :func:`boulder.sweep_runner.solver_window`; this method has no grid
+        rule of its own.
+        """
         if self.network is None:
             raise RuntimeError("Network not built. Call build_network() first.")
 
-        # Override parameters from config if provided
+        # Reject deprecated time keys
         if config:
             # Only use 'settings' section with 'end_time' and 'dt'
             settings_config = config.get("settings") or {}
@@ -2518,27 +2523,6 @@ class DualCanteraConverter:
                     f"Deprecated configuration keys found: {', '.join(deprecated_keys)}. "
                     "Please update your YAML to use 'settings' section with 'end_time' and 'dt' keys only."
                 )
-
-            # Extract values from settings section only
-            config_simulation_time = settings_config.get("end_time")
-            config_time_step = settings_config.get("dt")
-
-            # Use config values if valid, otherwise keep defaults
-            if config_simulation_time is not None and config_simulation_time > 0:
-                simulation_time = float(config_simulation_time)
-            if config_time_step is not None and config_time_step > 0:
-                time_step = float(config_time_step)
-
-            # Validate time_step is not greater than simulation_time
-            if time_step > simulation_time:
-                logger.warning(
-                    f"time_step ({time_step}s) > simulation_time ({simulation_time}s), adjusting time_step"
-                )
-                time_step = simulation_time / 10.0  # Use 10 steps minimum
-
-            logger.info(
-                f"Using config parameters: time={simulation_time}s, step={time_step}s"
-            )
 
         # ``build_network`` always routes through the staged solver, so by the
         # time we get here the reactor states are already converged.  Calling
@@ -2976,10 +2960,8 @@ class DualCanteraConverter:
 
         # Evaluate custom output summary if configured
         try:
-            # The runner path sets only _download_config (a snapshot of the
-            # config the run used); setting _last_config there would change
-            # other readers of it (spatial inference, worker post-config).
-            cfg = self._last_config or self._download_config or {}
+            # build_network sets _last_config before any solve.
+            cfg = self._last_config or {}
             output_block = cfg.get("output") if isinstance(cfg, dict) else None
 
             # Check if custom summary builder is specified

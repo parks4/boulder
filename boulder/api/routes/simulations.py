@@ -24,7 +24,7 @@ from ruamel.yaml.error import YAMLError
 
 from ...cantera_converter import get_plugins
 from ...runset import base_entry_id, merge_overlays, resolve_store_dir
-from ...simulation_worker import ProgressSource, RunHandle
+from ...simulation_worker import RunHandle
 from ...sweep_runner import (
     notify_cached,
     prepare_entry,
@@ -40,7 +40,7 @@ router = APIRouter()
 
 # In-memory mapping of simulation IDs → (run progress, creation_timestamp)
 # Entries should be removed after completion to prevent memory leaks.
-_simulations: Dict[str, tuple[ProgressSource, float]] = {}
+_simulations: Dict[str, tuple[RunHandle, float]] = {}
 
 
 def get_completed_simulation_data(sim_id: str) -> Optional[Dict[str, Any]]:

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import logging
 import os
 import threading
 import time
@@ -71,6 +72,8 @@ from .runset import (
     store_artifacts_dir,
     sweep_point_of,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Mechanism hashed (and solved) when a scenario names none.
 DEFAULT_MECHANISM = "gri30.yaml"
@@ -154,19 +157,17 @@ def prepare_scenario(
 
     The fingerprint (Boulder's cache key) lets the run skip scenarios that are
     already cached unchanged — computed without building/solving the network.
-    With *runner_cls* the config goes through that runner's ``normalize`` then
-    ``validate`` (a host's own preparation); without one, through the generic
-    :func:`~boulder.config.normalize_config`. Every entry point passes the same
-    runner, so an entry hashes the same whichever one solves it.
+    The config goes through *runner_cls*'s ``normalize`` then ``validate`` (a
+    host's own preparation; default :class:`~boulder.runner.BoulderRunner`), so
+    an entry hashes the same whichever entry point solves it.
     Public: shared with any out-of-process caller that needs to solve exactly
     one scenario the same way this runner does (e.g. an "Export" GUI action
     solving a cache-miss scenario on demand).
     """
-    config = copy.deepcopy(raw_cfg)
-    if runner_cls is not None:
-        config = runner_cls.validate(runner_cls.normalize(config))
-    else:
-        config = normalize_config(config, plugins=get_plugins())
+    from .runner import BoulderRunner  # noqa: PLC0415 — cycle
+
+    runner_cls = runner_cls or BoulderRunner
+    config = runner_cls.validate(runner_cls.normalize(copy.deepcopy(raw_cfg)))
     mechanism = _mechanism_of(raw_cfg)
     fingerprint = scenario_fingerprint(
         config,
@@ -180,26 +181,35 @@ def prepare_scenario(
 def solver_window(config: Dict[str, Any]) -> Tuple[float, float]:
     """Return ``(simulation_time, time_step)`` for one prepared config.
 
-    THE time-grid rule, read by every entry point from the prepared config only:
-    the nominal ``settings.end_time`` / ``settings.dt`` first, then the solver
-    section (``settings.solver.grid.stop`` / ``advance_time``, ``grid.dt``); a
-    missing step is a tenth of the window. A config with no time at all (steady
-    stages only) gets ``(0.0, 0.0)`` -- the time arguments are unused once the
-    staged solve is done. There is no hidden default duration: a *transient*
+    THE time-grid rule, read by every entry point from the prepared config only.
+    The window is what the solve integrates: ``settings.solver.grid.stop`` (the
+    last time of a list grid) or ``advance_time``; ``settings.end_time`` is only
+    the fallback when the solver names no end. When both are given and differ the
+    solver wins and a warning says so. The step is ``grid.dt``, else
+    ``settings.dt``, else a tenth of the window. A config with no time at all
+    (steady stages only) gets ``(0.0, 0.0)`` -- the time arguments are unused once
+    the staged solve is done. There is no hidden default duration: a *transient*
     stage with no grid is an error when it is built
     (:meth:`~boulder.cantera_converter.DualCanteraConverter.build_network`).
     """
     settings = config.get("settings") or {}
     solver = settings.get("solver") or {}
     grid = solver.get("grid")
-    grid = grid if isinstance(grid, dict) else {}
-    sim_t = float(
-        settings.get("end_time")
-        or grid.get("stop")
-        or solver.get("advance_time")
-        or 0.0
-    )
-    dt = float(settings.get("dt") or grid.get("dt") or 0.0) or sim_t / 10.0
+    if isinstance(grid, dict):
+        stop, grid_dt = grid.get("stop"), grid.get("dt")
+    else:
+        stop, grid_dt = (grid[-1] if grid else None), None
+    solver_end = float(stop or solver.get("advance_time") or 0.0)
+    end_time = float(settings.get("end_time") or 0.0)
+    if solver_end and end_time and solver_end != end_time:
+        logger.warning(
+            "settings.end_time (%g) and the solver's end (%g) differ; "
+            "the solver's is what is integrated.",
+            end_time,
+            solver_end,
+        )
+    sim_t = solver_end or end_time
+    dt = float(grid_dt or settings.get("dt") or 0.0) or sim_t / 10.0
     return sim_t, dt
 
 
@@ -230,7 +240,11 @@ def with_time_overrides(
     if solver.get("kind", "") not in TRANSIENT_SOLVER_KINDS:
         solver.setdefault("kind", "advance_grid")
     grid = solver.get("grid")
-    if isinstance(grid, dict):
+    if solver["kind"] == "advance":
+        # `advance` integrates to `advance_time` and has no step or grid.
+        if simulation_time is not None:
+            solver["advance_time"] = simulation_time
+    elif isinstance(grid, dict):
         if simulation_time is not None:
             grid["stop"] = simulation_time
         if time_step is not None:
@@ -547,16 +561,13 @@ def notify_cached(
 class EntryOutcome:
     """What one run-set entry produced: solved now, or read back from the store.
 
-    ``gui`` is the stored payload (what the Scenario pane renders); ``converter``
-    is the solved converter, ``None`` for an entry served from the store.
+    ``gui`` is the stored payload (what the Scenario pane renders).
     """
 
     sid: str
     fingerprint: str
     cached: bool
-    config: Dict[str, Any]
     gui: Dict[str, Any]
-    converter: Optional[Any] = None
 
 
 def _classes(
@@ -603,8 +614,6 @@ def run_set(
     on_solved: Optional[Callable[..., Any]] = None,
     on_cached: Optional[Callable[..., Any]] = None,
     source: Optional[scenario_store.RunSource] = None,
-    leaf_text: Optional[str] = None,
-    display_name: Optional[str] = None,
     on_entry: Optional[Callable[[int, int, str, Dict[str, Any], bool], None]] = None,
     progress_cb: Optional[Callable[[str, Dict[str, Any], Any], None]] = None,
     stop_event: Optional[threading.Event] = None,
@@ -658,9 +667,7 @@ def run_set(
         assert config_path is not None  # a store directory implies a config path
         if source is None:
             # One definition for the whole run-set: every entry points to it.
-            source = scenario_store.build_source(
-                raw, config_path, leaf_text=leaf_text, display_name=display_name
-            )
+            source = scenario_store.build_source(raw, config_path)
         if not use_cache and only is None:
             scenario_store.clear(store_dir)
         store_dir.mkdir(parents=True, exist_ok=True)
@@ -697,7 +704,7 @@ def run_set(
                 warn=say,
             )
             payload = scenario_store.read_entry(store_dir, sid, identity) or {}
-            outcomes.append(EntryOutcome(sid, fingerprint, True, config, payload))
+            outcomes.append(EntryOutcome(sid, fingerprint, True, payload))
             continue
         say(shown)
 
@@ -748,7 +755,7 @@ def run_set(
                 alt_fingerprints=(alt,) if alt != fingerprint else None,
             )
         cursor.previous_states = final_states_of(gui)
-        outcomes.append(EntryOutcome(sid, fingerprint, False, config, gui, conv))
+        outcomes.append(EntryOutcome(sid, fingerprint, False, gui))
 
     stopped = stop_event is not None and stop_event.is_set()
     if store_dir is not None and only is None:

@@ -315,7 +315,7 @@ def _stub_run_set(monkeypatch, captured: dict) -> None:
     def fake_run_set(raw, config_path, **kwargs):
         captured.update(raw=raw, config_path=config_path, **kwargs)
         (sid,) = kwargs["only"]
-        return [EntryOutcome(sid, "fp", False, {}, {"times": [0.0]})]
+        return [EntryOutcome(sid, "fp", False, {"times": [0.0]})]
 
     monkeypatch.setattr(simulation_routes, "run_set", fake_run_set)
 
@@ -468,7 +468,7 @@ class TestSimulationRoutes:
             kwargs["progress_cb"]("BASELINE", {}, SimulationProgress(is_complete=True))
             ((handle, _),) = simulation_routes._simulations.values()
             seen["during_store"] = handle.get_progress().is_complete
-            return [EntryOutcome("BASELINE", "fp", False, {}, {"times": [0.0]})]
+            return [EntryOutcome("BASELINE", "fp", False, {"times": [0.0]})]
 
         monkeypatch.setattr(simulation_routes, "run_set", fake_run_set)
         app = _live_app()

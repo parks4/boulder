@@ -96,7 +96,7 @@ class BoulderRunner:
 
         Returns a ``dict[signal_id, signal_spec]`` where each value is the
         raw spec dict from the ``signals:`` block.  Returns an empty dict if no
-        signals are declared or if :meth:`build` has not been called yet.
+        signals are declared.
 
         .. note::
             This is the Phase E FMU data-shape contract.  No FMU code is
@@ -796,7 +796,12 @@ class BoulderRunner:
         self.solve()
         if simulate:
             converter = self._ensure_converter()
-            converter.run_streaming_simulation(config=self.config)
+            from .sweep_runner import solver_window  # noqa: PLC0415 — cycle
+
+            simulation_time, time_step = solver_window(self.config)
+            converter.run_streaming_simulation(
+                simulation_time, time_step, config=self.config
+            )
             self.code = "\n".join(converter.code_lines)
         if download_path is not None:
             with open(download_path, "w", encoding="utf-8") as fh:

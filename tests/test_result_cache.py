@@ -163,7 +163,8 @@ class TestSolverWindow:
         assert simulation_time == pytest.approx(2.5e-6)
         assert time_step == pytest.approx(2.5e-7)  # a tenth of the window
 
-    def test_nominal_end_time_dt_take_priority_over_grid(self):
+    def test_solver_grid_takes_priority_over_nominal_end_time_dt(self):
+        """The window is what the solve integrates: the grid wins, with a warning."""
         config = {
             "settings": {
                 "end_time": 3.0,
@@ -172,8 +173,8 @@ class TestSolverWindow:
             }
         }
         simulation_time, time_step = solver_window(config)
-        assert simulation_time == pytest.approx(3.0)
-        assert time_step == pytest.approx(0.1)
+        assert simulation_time == pytest.approx(5e-8)
+        assert time_step == pytest.approx(1e-11)
 
     def test_no_time_at_all_has_no_hidden_default(self):
         assert solver_window({"settings": {}}) == (0.0, 0.0)
