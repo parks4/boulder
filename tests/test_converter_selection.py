@@ -10,13 +10,12 @@ import pytest
 
 pytest.importorskip("h5py")
 
-from boulder import cantera_converter, sweep_runner  # noqa: E402
+from boulder import cantera_converter, cli, sweep_runner  # noqa: E402
 from boulder.cantera_converter import (  # noqa: E402
     BoulderPlugins,
     DualCanteraConverter,
     select_converter_class,
 )
-from boulder.runner import BoulderRunner  # noqa: E402
 
 _YAML = """\
 phases:
@@ -92,9 +91,7 @@ def test_headless_run_then_sweep_share_the_plugin_converter(
     monkeypatch.setattr(cantera_converter, "_PLUGIN_CACHE", plugins)
     cfg = tmp_path / "config.yaml"
     cfg.write_text(_YAML, encoding="utf-8")
-    runner = BoulderRunner.from_yaml(str(cfg))
-    runner.plugins = plugins
-    runner.run_headless(end_time=0.01, dt=0.005)
+    cli.main([str(cfg), "--headless", "--run"])
     capsys.readouterr()
     sweep_runner.run(cfg)
     assert "1 cached, 0 solved" in capsys.readouterr().out

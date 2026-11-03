@@ -178,6 +178,16 @@ def _yaml_text(data: Any, *, safe: bool = False) -> str:
     return buffer.getvalue()
 
 
+def definition_text(raw: Dict[str, Any]) -> str:
+    """Dump the resolved config *raw* as the YAML text every run stores.
+
+    The one dump (plain containers, the config's own key order) behind the stored
+    definition, its hash and the YAML pane's download: the same config reads and
+    hashes the same on every entry point.
+    """
+    return _yaml_text(raw)
+
+
 def build_source(
     raw: Dict[str, Any],
     config_path: "Path | str",
@@ -201,7 +211,7 @@ def build_source(
         for parent in inheritance_chain(leaf, leaf_text)
     )
     return RunSource(
-        definition=_yaml_text(raw),
+        definition=definition_text(raw),
         leaf_text=leaf_text,
         chain=chain,
         display_name=display_name or leaf.name,

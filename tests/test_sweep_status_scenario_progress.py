@@ -153,10 +153,12 @@ def test_scenario_progress_tracks_stage_then_moves_to_the_next_scenario(
                 stages_done=1, n_stages=2, completed_stage_ids=["first"]
             )
             _wait_until(
-                lambda: app.state.sweep_job.get("scenario_progress", {})
-                .get("BASELINE", {})
-                .get("stage")
-                == 2
+                lambda: (
+                    app.state.sweep_job.get("scenario_progress", {})
+                    .get("BASELINE", {})
+                    .get("stage")
+                    == 2
+                )
             )
             assert app.state.sweep_job["scenario_progress"] == {
                 "BASELINE": {"stage": 2, "stage_total": 2, "stage_id": "second"}
@@ -253,10 +255,12 @@ def test_scenario_progress_clears_if_a_scenario_errors_mid_solve(
                 stages_done=1, n_stages=1, completed_stage_ids=["default"]
             )
             _wait_until(
-                lambda: app.state.sweep_job.get("scenario_progress", {})
-                .get("BASELINE", {})
-                .get("stage")
-                == 1
+                lambda: (
+                    app.state.sweep_job.get("scenario_progress", {})
+                    .get("BASELINE", {})
+                    .get("stage")
+                    == 1
+                )
             )
             # The only stage has finished, so no stage id is reported -- there
             # is nothing left solving for the graph to tint.

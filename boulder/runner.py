@@ -698,75 +698,33 @@ class BoulderRunner:
     def build(self) -> "BoulderRunner":
         """Instantiate the converter, build and solve the staged network.
 
-        Internally calls :meth:`build_stage_graph`, :meth:`solve_stage` for
-        each stage, and :meth:`build_viz_network` — the same sequence emitted
-        in the downloadable Python script.
+        Delegates to :meth:`~boulder.cantera_converter.DualCanteraConverter.build_network`
+        (the staged solve every entry point uses), then takes its results:
+        there is no second stage loop here.  :meth:`solve_stage` and
+        :meth:`build_viz_network` stay public for the generated scripts and
+        :meth:`run_continuation`, which step the stages themselves.
 
         Returns ``self`` for chaining.  After this call:
 
         - ``self.converter`` is the :class:`~boulder.cantera_converter.DualCanteraConverter`.
+        - ``self.config`` carries the stream-point nodes and connections the
+          staged solve added (updated in place).
         - ``self.network`` is a raw visualization :class:`~cantera.ReactorNet`
           (upgraded to the :class:`~boulder.staged_network.StagedReactorNet`
           facade after :meth:`solve` is called).
         - ``self.code`` is the generated standalone Python script string.
         """
-        from .staged_solver import synthesize_stream_points
-
         converter = self._ensure_converter()
+        converter.build_network(self.config)
 
-        plan = self.build_stage_graph()
-        trajectory = self.new_trajectory()
-        inlet_states: Dict[str, Any] = {}
-
-        # Pre-build stream-point node/connection dicts once for all stages.
-        # Stream reservoirs are always enabled; the YAML config no longer has
-        # a 'settings.staged.stream_reservoirs' toggle.
-        stream_node_dicts: Dict[str, Any] = {}
-        stream_conns_by_stage: Dict[str, Any] = {}
-        stream_nodes, stream_conns = synthesize_stream_points(plan)
-        for nd in stream_nodes:
-            stream_node_dicts[nd["id"]] = nd
-        for cd in stream_conns:
-            grp = cd.get("group", "")
-            stream_conns_by_stage.setdefault(grp, []).append(cd)
-
-        for stage in plan.ordered_stages:
-            self.solve_stage(
-                plan,
-                stage,
-                inlet_states,
-                trajectory,
-                _stream_node_dicts=stream_node_dicts,
-                _stream_conns_by_stage=stream_conns_by_stage,
-            )
-
-        self.build_viz_network(plan, trajectory)
-
-        import copy as _copy
-
-        from .staged_solver import _sync_streams_into_config
-
-        # Snapshot the config BEFORE the stream-sync mutation so the generated
-        # --download script rebuilds the same stage plan as this live solve.
-        converter._download_config = _copy.deepcopy(self.config)
-
-        _sync_streams_into_config(
-            self.config, plan, stream_node_dicts, stream_conns_by_stage
-        )
-
-        # Mark the converter as staged-solved so run_streaming_simulation
-        # knows to emit the steady-state report instead of a time loop.
-        converter._staged_trajectory = trajectory
-
-        # Generate the downloadable script now that stage names are known.
-        config_path = self.config_path or "config.yaml"
-        script_lines = [
-            "# Load configuration from YAML and build Cantera network",
-            "import cantera as ct",
-            *converter.script_load_lines(config_path, plan),
-        ]
-        converter.code_lines = script_lines
-        self.code = "\n".join(script_lines)
+        # `build_network` solved a copy of the config; keep this runner's own
+        # (the caller's) dict current with what the solve synthesised.
+        built = converter._last_config
+        assert built is not None  # set by build_network
+        self.config.clear()
+        self.config.update(built)
+        self.network = converter.network
+        self.code = "\n".join(converter.code_lines)
 
         # Initialize the scope recorder after the network is built so the
         # reactors/connections are populated.  The recorder captures state
@@ -783,7 +741,8 @@ class BoulderRunner:
             converter._scope_recorder = self._scope_recorder  # type: ignore[attr-defined, assignment]
             # Take an initial snapshot at t=0 (or the final time if a trajectory is available)
             last_t = 0.0
-            for _stage_traj in trajectory.networks.values():
+            trajectory = converter._staged_trajectory
+            for _stage_traj in (trajectory.networks if trajectory else {}).values():
                 try:
                     last_t = float(_stage_traj.time)
                 except Exception:
@@ -811,104 +770,34 @@ class BoulderRunner:
         self.network = self.result.network
         return self
 
-    def _persist_headless(
-        self, results: Dict[str, Any], pre_build_config: Dict[str, Any]
-    ) -> None:
-        """Store this solve and run the cache contributors, as the GUI worker does.
-
-        Drives :meth:`SimulationWorker._persist_to_cache` itself, so the entry,
-        its source, fingerprints and the contributors cannot drift from a GUI
-        solve. Best-effort like there; a no-op without a ``config_path``.
-        """
-        if self.config_path is None:
-            return
-        from .scenario_store import build_source
-        from .simulation_worker import (
-            SimulationWorker,
-            generate_connection_reports,
-            generate_reactor_reports,
-        )
-
-        raw = self.load(self.config_path)
-        converter = self._ensure_converter()
-        worker = SimulationWorker()
-        worker.set_run_identity(
-            None,
-            raw_config=raw,
-            source=build_source(raw, self.config_path),
-        )
-        reactor_reports = generate_reactor_reports(converter, results)
-        connection_reports = generate_connection_reports(converter)
-        worker.progress.times = results["time"]
-        worker.progress.reactors_series = results["reactors"]
-        worker.progress.summary = results.get("summary", [])
-        worker.progress.sankey_links = results.get("sankey_links")
-        worker.progress.sankey_nodes = results.get("sankey_nodes")
-        worker._persist_to_cache(
-            converter,
-            self.config,
-            results,
-            reactor_reports,
-            connection_reports,
-            "\n".join(converter.code_lines),
-            pre_build_config=pre_build_config,
-        )
-
     def run_headless(
         self,
         *,
         download_path: Optional[str] = None,
         simulate: bool = True,
-        end_time: Optional[float] = None,
-        dt: Optional[float] = None,
-        persist: bool = True,
     ) -> "BoulderRunner":
         """Solve the network and optionally write a downloadable Python script.
 
         This is the single source of truth for the ``--headless --download``
         CLI flow.  Custom ``BoulderRunner`` subclasses use the same method so the
-        generated scripts stay on one code path (same converter wiring).
+        generated scripts stay on one code path (same converter wiring). It
+        only solves and writes code: storing a run is the run-set pipeline's job
+        (:func:`boulder.sweep_runner.run_set`, what ``--run`` calls).
 
         Parameters
         ----------
         download_path :
             Path to write the standalone Python script.  Skipped when ``None``.
         simulate :
-            When ``True`` and ``end_time`` is set, run ``run_streaming_simulation``
-            to append the time-advance section to the generated code.
-        end_time :
-            Simulation end time in seconds (from ``settings.end_time`` in the YAML).
-        dt :
-            Simulation time step in seconds (from ``settings.dt`` in the YAML).
-        persist :
-            When ``True`` (default), store the solve and run the cache
-            contributors.  The CLI passes ``--run``, so a bare ``--download``
-            only writes code.
+            When ``True``, run ``run_streaming_simulation`` to append the
+            reactor-state reporting section to the generated code. The time
+            arguments are not needed: the staged solve has already run.
         """
-        import copy as _copy
-
-        # Same pre-build snapshot the GUI worker fingerprints (build enriches
-        # the config in place with outlet/interface nodes).
-        pre_build_config = {
-            **self.config,
-            "nodes": _copy.deepcopy(self.config.get("nodes") or []),
-            "connections": _copy.deepcopy(self.config.get("connections") or []),
-        }
         self.solve()
         if simulate:
-            # Always call run_streaming_simulation so the downloadable script
-            # contains the full reactor-state reporting section.  When the YAML
-            # has no end_time we use a dummy 0.0 so only the steady-state report
-            # is emitted (no time-stepping), which mirrors the old headless path.
             converter = self._ensure_converter()
-            results, _ = converter.run_streaming_simulation(
-                simulation_time=float(end_time) if end_time is not None else 0.0,
-                time_step=(dt or 1.0),
-                config=self.config,
-            )
+            converter.run_streaming_simulation(config=self.config)
             self.code = "\n".join(converter.code_lines)
-            if persist:
-                self._persist_headless(results, pre_build_config)
         if download_path is not None:
             with open(download_path, "w", encoding="utf-8") as fh:
                 fh.write(self.code or "")

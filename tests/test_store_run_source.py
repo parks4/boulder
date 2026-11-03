@@ -368,35 +368,26 @@ def test_an_uploaded_config_records_its_original_file_name(tmp_path: Path) -> No
 def test_a_single_run_records_its_source(tmp_path: Path) -> None:
     """A plain run records its source and its raw id.
 
-    The worker's persist step stores the session's definition, the browser's
-    leaf text and the loaded file's name.
+    A run set of one entry stores the session's definition, the browser's leaf
+    text and the loaded file's name.
     """
-    from types import SimpleNamespace
     from unittest.mock import patch
 
     from boulder.runset import resolve_store_dir
-    from boulder.simulation_worker import SimulationWorker
 
     cfg = _write(tmp_path)
-    raw = {"network": [{"id": "feed"}], "scenarios": {"a=1": {}}}
-    converter = SimpleNamespace(
-        mechanism="gri30.yaml",
-        _download_config_path=str(cfg),
-        plugins=SimpleNamespace(cache_contributors=[]),
-        resolve_mechanism=lambda name: name,
-    )
-    worker = SimulationWorker()
+    raw = load_yaml_with_inheritance(cfg)
+    raw["scenarios"] = {"a=1": {}}
     source = scenario_store.build_source(
         raw, cfg, leaf_text="edited: true\n", display_name="my_model.yaml"
     )
-    worker.set_run_identity("a=1", raw_config=raw, source=source)
-
-    with patch(
-        "boulder.simulation_result.make_simulation_result", return_value=object()
+    payload = {"times": [0.0], "reactors_series": {}}
+    with patch.object(
+        sweep_runner,
+        "solve_scenario",
+        return_value=(payload, "gri30.yaml", object()),
     ):
-        worker._persist_to_cache(
-            converter, {}, {"is_complete": True}, {}, {}, "# code", pre_build_config={}
-        )
+        sweep_runner.run_set(raw, cfg, only={"a=1"}, source=source)
 
     store_dir = resolve_store_dir(raw, cfg)
     assert store_dir is not None
@@ -457,7 +448,7 @@ def _start_run(
         during_solve()
 
     monkeypatch.setattr(SimulationWorker, "start_simulation", start)
-    resp = client.post("/api/simulations", json={"config": _run_config(app)})
+    resp = client.post("/api/simulations", json={})
     assert resp.status_code == 200, resp.text
     from boulder.runset import resolve_store_dir
 
@@ -528,7 +519,7 @@ def test_a_run_whose_source_cannot_be_built_fails_before_the_solve(
     client, app, _cfg = _gui(tmp_path)
     try:
         (tmp_path / "base.yaml").unlink()
-        resp = client.post("/api/simulations", json={"config": _run_config(app)})
+        resp = client.post("/api/simulations", json={})
         assert resp.status_code == 422, resp.text
         detail = resp.json()["detail"]
         assert "Cannot read the run's source" in detail

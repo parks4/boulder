@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { toast } from "sonner";
 import { getSweepStatus, startSweep, stopSweep, type SweepStatus } from "@/api/sweep";
 import { useScenarioStore } from "./scenarioStore";
+import { useConfigStore } from "./configStore";
 
 interface SweepRunState {
   sweeping: boolean;
@@ -207,7 +208,11 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
         progress: { current: 0, total: options?.total ?? 0 },
       });
       const scenarios = useScenarioStore.getState().overlays;
-      startSweep({ scenarios, noCache: options?.noCache })
+      // The server sweeps its own live config: hand it this session's edits first.
+      useConfigStore
+        .getState()
+        .syncYaml()
+        .then(() => startSweep({ scenarios, noCache: options?.noCache }))
         .then(() => startPolling())
         .catch((e) => {
           set({ sweeping: false });

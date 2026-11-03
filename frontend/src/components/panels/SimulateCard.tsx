@@ -131,18 +131,21 @@ export function SimulateCard() {
       return;
     }
 
+    // The server runs its own live config, not this one: hand it this session's
+    // edits first. A failed sync is not silently skipped — the run would solve
+    // a config other than the one on screen.
+    try {
+      await syncYaml();
+    } catch (err) {
+      toast.error(`Cannot run: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
     // Run what the Scenario pane has selected, not the baseline. The server
-    // resolves the id against these overlays exactly as Run Sweep does; a
-    // null/BASELINE selection keeps solving the config held here (the only
-    // one carrying this session's base-network edits).
+    // resolves the id against these overlays exactly as Run Sweep does.
     //
-    // Overlays are sent even for a BASELINE run: the server's `_merged_raw`
-    // uses their presence to tell whether the base config declares
-    // `scenarios:` at all, which decides whether the base entry is named
-    // BASELINE or BASE/`metadata.scenario_id` (see `runset.base_entry_id`).
-    // Omitting them here (as this used to do whenever no named scenario was
-    // selected) made a plain "Run Simulation" on BASELINE store its result
-    // under the wrong name, leaving a phantom row next to the real one.
+    // Overlays are sent even for a BASELINE run: the server uses them as the
+    // config's `scenarios:` section, which decides the stored definition.
     const { activeId, overlays } = useScenarioStore.getState();
     const scenario = {
       id: activeId && activeId !== BASELINE_SCENARIO_ID ? activeId : BASELINE_SCENARIO_ID,
@@ -156,14 +159,7 @@ export function SimulateCard() {
     // skips this lookup.
     if (!force) {
       try {
-        const cfgRaw = config as unknown as Record<string, unknown>;
-        const phases = cfgRaw.phases as Record<string, unknown> | undefined;
-        const gas = phases?.gas as Record<string, unknown> | undefined;
-        const mechStr = (gas?.mechanism as string | undefined) ?? null;
-
         const cacheResp = await checkSimulationCache(
-          cfgRaw,
-          mechStr,
           sendTimeOverride ? parseFloat(simTime) : undefined,
           sendTimeOverride ? parseFloat(timeStep) : undefined,
           scenario,
@@ -184,10 +180,10 @@ export function SimulateCard() {
     beginSimulationRun();
     try {
       const resp = await startSimulation(
-        config,
         sendTimeOverride ? parseFloat(simTime) : undefined,
         sendTimeOverride ? parseFloat(timeStep) : undefined,
         scenario,
+        force,
       );
       setStarted(resp.simulation_id);
     } catch (err) {
@@ -195,7 +191,7 @@ export function SimulateCard() {
       toast.error(`Failed: ${msg}`);
       setError(msg);
     }
-  }, [config, simTime, timeStep, sendTimeOverride, beginSimulationRun, setStarted, setError, setResults]);
+  }, [config, simTime, timeStep, sendTimeOverride, syncYaml, beginSimulationRun, setStarted, setError, setResults]);
 
   const handleStop = useCallback(() => {
     if (!simulationId) return;

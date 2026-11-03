@@ -2438,22 +2438,17 @@ class DualCanteraConverter:
 
         from .staged_solver import build_stage_graph, solve_staged
 
-        # Transient solve with no declared checkpoints: inject a default linspace
-        # grid so the recorder still yields a trajectory ("do whatever" when no
-        # required grid is given). Required checkpoints, when present, are left
-        # untouched and advanced through exactly. Config-prep only — not a solver
-        # change.
-        _settings = config.get("settings") or {}
-        _default_end = float(_settings.get("end_time") or 1.0)
-        for _group in (config.get("groups") or {}).values():
+        # The one time-grid rule: a transient stage needs its grid declared. No
+        # hidden default duration (it used to be settings.end_time, else 1 s), so
+        # every entry point solves the same trajectory for the same config.
+        for _gid, _group in (config.get("groups") or {}).items():
             _solver = _group.get("solver") or {}
             if _solver.get("kind") == "advance_grid" and not _solver.get("grid"):
-                _solver["grid"] = {
-                    "start": 0.0,
-                    "stop": _default_end,
-                    "dt": _default_end / 50.0,
-                }
-                _group["solver"] = _solver
+                raise ValueError(
+                    f"Stage '{_gid}' uses the transient solver 'advance_grid' but "
+                    "declares no time grid. Declare settings.solver.grid "
+                    "({start, stop, dt} or a list of times)."
+                )
 
         # Install a full-state trajectory recorder so a transient (advance_grid)
         # solve also yields the per-step T(t) — captured during the *single*

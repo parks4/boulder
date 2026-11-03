@@ -1,17 +1,14 @@
 """Background simulation worker for streaming updates."""
 
+import dataclasses
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Protocol
 
 import cantera as ct  # type: ignore
 
-from .runset import base_entry_id
 from .verbose_utils import get_verbose_logger
-
-if TYPE_CHECKING:
-    from .scenario_store import RunSource
 
 logger = get_verbose_logger(__name__)
 
@@ -258,50 +255,6 @@ class SimulationWorker:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
-        #: Optional reference to FastAPI app.state; updated with cache result on
-        #: successful solve so GUI actions see the new cache without server restart.
-        self._app_state: Optional[Any] = None
-        #: Which run-set entry this solve *is*, and how to label it in the
-        #: Scenario pane. A plain "Run Simulation" solves the base entry
-        #: (:data:`~boulder.runset.base_entry_id`); a sweep names each one.
-        #: Set via :meth:`set_run_identity` before starting.
-        self._scenario_id: Optional[str] = None
-        self._scenario_label: Optional[str] = None
-        self._scenario_order: Optional[int] = None
-        #: The raw config, needed only to resolve the store location (it may
-        #: declare ``metadata.extra.cache_store``).
-        self._raw_config: Optional[Dict[str, Any]] = None
-        #: The run source captured when the run started (see
-        #: :func:`boulder.scenario_store.build_source`); never rebuilt after
-        #: the solve, when the file or the session's text may have changed.
-        self._source: Optional["RunSource"] = None
-
-    def set_run_identity(
-        self,
-        scenario_id: Optional[str],
-        *,
-        label: Optional[str] = None,
-        order: Optional[int] = None,
-        raw_config: Optional[Dict[str, Any]] = None,
-        source: Optional["RunSource"] = None,
-    ) -> None:
-        """Name the run-set entry this worker is about to solve.
-
-        The store keys results by name, so a solve has to know which entry it
-        is. A sweep passes the id it is solving; a plain run passes ``None`` for
-        *scenario_id* and lets *raw_config* decide, since the base entry's name
-        depends on the config (see :func:`boulder.runset.base_entry_id`).
-
-        Pass *raw_config* -- the **un-normalized** config -- even when there is
-        no id: it also determines where the store lives
-        (``metadata.extra.cache_store``). Normalisation strips both, so a worker
-        without it silently falls back to ``BASE`` in the default location.
-        """
-        self._scenario_id = scenario_id
-        self._scenario_label = label
-        self._scenario_order = order
-        self._raw_config = raw_config
-        self._source = source
 
     def start_simulation(
         self,
@@ -309,16 +262,19 @@ class SimulationWorker:
         config: Dict[str, Any],
         simulation_time: float = 10.0,
         time_step: float = 1.0,
-        app_state: Optional[Any] = None,
     ) -> None:
-        """Start a background simulation."""
+        """Start a background simulation.
+
+        The worker only solves. Storing the result is the run-set pipeline's job
+        (:func:`boulder.sweep_runner.run_set`), the one writer every entry point
+        shares.
+        """
         if self._worker_thread and self._worker_thread.is_alive():
             logger.warning("Simulation already running, stopping previous simulation")
             self.stop_simulation()
 
         # Reset state
         self._stop_event.clear()
-        self._app_state = app_state
         with self._lock:
             self.progress = SimulationProgress()
 
@@ -411,18 +367,6 @@ class SimulationWorker:
                 self.progress.n_stages = 0
 
             logger.info("Building Cantera network in background...")
-
-            # Snapshot nodes/connections before build_network mutates the config
-            # in-place (staged solver adds outlet/interface nodes).  The pre-build
-            # snapshot is used for fingerprinting so the startup fingerprint—
-            # computed from the un-enriched validated config—matches the cache entry.
-            import copy as _copy
-
-            pre_build_config: Dict[str, Any] = {
-                **config,
-                "nodes": _copy.deepcopy(config.get("nodes") or []),
-                "connections": _copy.deepcopy(config.get("connections") or []),
-            }
 
             # Callback fired by solve_staged after each stage completes.
             # n_total is passed by the solver on each call, so n_stages stays
@@ -564,23 +508,6 @@ class SimulationWorker:
             logger.info(f"Simulation completed: {len(results['time'])} time points")
             reactor_reports = generate_reactor_reports(converter, results)
             connection_reports = generate_connection_reports(converter)
-            # Persist BEFORE announcing completion. The frontend reacts to
-            # `is_complete` immediately -- re-listing GUI actions, which asks the
-            # store whether a result exists -- so storing afterwards raced it,
-            # and the client papered over that by re-fetching on a 3-second
-            # timer. Writing first makes "complete" mean "complete and stored".
-            # Best-effort: `_persist_to_cache` swallows its own errors, so a
-            # store failure still yields a completed simulation.
-            self._persist_to_cache(
-                converter,
-                config,
-                results,
-                reactor_reports,
-                connection_reports,
-                code_str,
-                pre_build_config=pre_build_config,
-            )
-
             with self._lock:
                 self.progress.times = results["time"]
                 self.progress.reactors_series = results["reactors"]
@@ -618,165 +545,95 @@ class SimulationWorker:
                 self.progress.is_complete = False
                 self.progress.end_time = time.time()
 
-    def _persist_to_cache(
-        self,
-        converter: Any,
-        config: Dict[str, Any],
-        results: Dict[str, Any],
-        reactor_reports: Dict[str, Any],
-        connection_reports: Dict[str, Any],
-        code_str: str,
-        pre_build_config: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """Persist this run's result into the run-set store (best-effort).
 
-        The store keys results by **name**: this run is one entry of the config's
-        run-set (:func:`boulder.runset.expand_scenarios` always yields at least
-        one, so a plain single run is the N=1 case). Writing here is what lets a
-        Run Simulation and a Run Sweep of the same entry see each other's work,
-        instead of each keeping a private cache.
+class ProgressSource(Protocol):
+    """What the simulation routes serve: a run's progress, and a way to stop it."""
 
-        Parameters
-        ----------
-        pre_build_config:
-            Config snapshot taken *before* ``build_network`` enriched it with
-            outlet/interface nodes. This is the **canonical** fingerprint — the
-            one the run-set expansion and the startup check also compute. The
-            post-build config's own fingerprint is recorded alongside it as an
-            alternate, so the config the frontend holds after a solve still finds
-            this entry current on the next click.
+    def get_progress(self) -> SimulationProgress: ...
 
-        Failures are logged at WARNING level and never propagate to the caller.
-        """
-        try:
-            from . import scenario_store
-            from .result_cache import run_contributors
-            from .runset import resolve_store_dir, store_artifacts_dir
-            from .simulation_result import make_simulation_result
-            from .sweep_runner import DEFAULT_MECHANISM, scenario_fingerprint
+    def stop_simulation(self) -> None: ...
 
-            mechanism_raw = getattr(converter, "mechanism", None) or DEFAULT_MECHANISM
-            mechanism = converter.resolve_mechanism(mechanism_raw)
-            # The one cache key (parks4/boulder#210): the same function a sweep
-            # uses, fed this run's converter mechanism and resolver.
-            fp_kwargs = {
-                "normalized": True,
-                "mechanism": mechanism_raw,
-                "resolve_mechanism": converter.resolve_mechanism,
-            }
-            config_path = getattr(converter, "_download_config_path", None)
-            store_dir = resolve_store_dir(self._raw_config or {}, config_path)
-            if store_dir is None:
-                logger.debug("No store directory (no config path); skipping persist.")
-                return
-            # A sweep names the entry it is solving; a plain run must derive the
-            # base's name from the config, because a config with `scenarios:`
-            # calls its base BASELINE, not BASE. Defaulting to BASE stored the
-            # same result under a second name.
-            scenario_id = self._scenario_id or base_entry_id(self._raw_config or {})
-            # The definition as the session held it when the run started.
-            source = self._source
 
-            progress = self.get_progress()
-            # Use pre-build snapshot for fingerprinting when available so the hash
-            # matches the startup fingerprint (computed from the un-enriched config).
-            fp_config = pre_build_config if pre_build_config is not None else config
-            fingerprint = scenario_fingerprint(fp_config, **fp_kwargs)
+class RunHandle:
+    """Progress of a GUI run, which :func:`boulder.sweep_runner.run_set` executes.
 
-            # Expose the fingerprint immediately so GUI actions can detect this
-            # cache entry before contributors finish writing artifacts.
-            if self._app_state is not None:
-                try:
-                    self._app_state.preloaded_fingerprint = fingerprint
-                except Exception:  # noqa: BLE001
-                    pass
+    The run-set pipeline solves, stores, then returns; this object is what
+    ``/api/simulations/{id}`` serves meanwhile. It mirrors the solve's progress
+    but reports *complete* only once the entry is stored (:meth:`finish`):
+    the frontend re-lists the GUI actions on completion, which asks the store
+    whether a result exists.
+    """
 
-            gui_payload: Dict[str, Any] = {
-                "status": "complete",
-                "is_complete": True,
-                "error_message": None,
-                "times": progress.times,
-                "reactors_series": progress.reactors_series,
-                "reactor_reports": reactor_reports,
-                "connection_reports": connection_reports,
-                "code_str": code_str,
-                "summary": progress.summary,
-                "sankey_links": progress.sankey_links,
-                "sankey_nodes": progress.sankey_nodes,
-                "elapsed_time": progress.get_calculation_time(),
-                "updated_nodes": progress.updated_nodes,
-                "updated_connections": progress.updated_connections,
-            }
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._progress = SimulationProgress(is_running=True, start_time=time.time())
+        #: Set by :meth:`stop_simulation`; handed to ``run_set`` as its ``stop_event``.
+        self.stop_event = threading.Event()
 
-            from .api.sse import _serialise_reports
+    def get_progress(self) -> SimulationProgress:
+        """Latest snapshot (published snapshots are never mutated, so a shallow copy)."""
+        with self._lock:
+            return dataclasses.replace(self._progress)
 
-            gui_payload["reactor_reports"] = _serialise_reports(reactor_reports)
+    def stop_simulation(self) -> None:
+        """Request that the run stop, without waiting (cooperative)."""
+        self.stop_event.set()
+        with self._lock:
+            if self._progress.is_running:
+                self._progress.is_stopping = True
 
-            simulation_result = make_simulation_result(converter, config)
-
-            # The post-build config describes the same solve (the staged solver
-            # added stream-point/interface nodes while building), so this entry
-            # answers to its fingerprint too -- otherwise the frontend, which
-            # holds the post-build config, would re-solve on every click.
-            post_build_fp = scenario_fingerprint(config, **fp_kwargs)
-
-            scenario_store.write_entry(
-                store_dir,
-                scenario_id,
-                gui_payload=gui_payload,
-                mechanism=mechanism,
-                fingerprint=fingerprint,
-                identity=scenario_store.config_identity(config_path),
-                label=self._scenario_label,
-                order=self._scenario_order,
-                alt_fingerprints=(post_build_fp,),
-                source=source,
+    def publish(self, progress: SimulationProgress) -> None:
+        """Record a running solve's snapshot, never as complete."""
+        with self._lock:
+            self._progress = dataclasses.replace(
+                progress,
+                is_running=True,
+                is_complete=False,
+                is_stopping=self._progress.is_stopping,
+                start_time=self._progress.start_time,
             )
 
-            artifacts_dir = store_artifacts_dir(store_dir, scenario_id)
-
-            # Publish the result immediately, before contributors run: the entry
-            # is already complete and addressable, and a contributor writing
-            # artifacts can be slow. Without this the frontend would not see the
-            # hit until every artifact landed.
-            # `load_matching`, not `read_entry`: `app.state.preloaded_result`
-            # is a wrapper (`gui_payload`/`artifacts_dir`/`meta`), which is what
-            # the startup check publishes and what `/api/simulations/cached` and
-            # its artifacts sibling read. Publishing the bare payload here made
-            # those two disagree after every live solve -- `/cached` answered
-            # `{"cached": true, "result": {}}` and artifacts 404'd until restart.
-            cached = scenario_store.load_matching(
-                store_dir, fingerprint, scenario_store.config_identity(config_path)
+    def finish(self, gui: Mapping[str, Any]) -> None:
+        """Mark the run complete, serving the stored payload *gui*."""
+        with self._lock:
+            self._progress = dataclasses.replace(
+                self._progress,
+                times=list(gui.get("times") or []),
+                reactors_series=dict(gui.get("reactors_series") or {}),
+                reactor_reports=dict(gui.get("reactor_reports") or {}),
+                connection_reports=dict(gui.get("connection_reports") or {}),
+                code_str=gui.get("code_str") or "",
+                summary=list(gui.get("summary") or []),
+                sankey_links=gui.get("sankey_links"),
+                sankey_nodes=gui.get("sankey_nodes"),
+                updated_nodes=gui.get("updated_nodes"),
+                updated_connections=gui.get("updated_connections"),
+                error_message=None,
+                is_running=False,
+                is_complete=True,
+                end_time=time.time(),
             )
-            if cached is not None and self._app_state is not None:
-                try:
-                    self._app_state.preloaded_result = cached
-                    logger.debug(
-                        "app.state.preloaded_result updated (pre-contributors, %s…)",
-                        fingerprint[:12],
-                    )
-                except Exception as state_exc:  # noqa: BLE001
-                    logger.debug(
-                        "Could not update app.state (pre-contrib): %s", state_exc
-                    )
 
-            contributors = getattr(
-                getattr(converter, "plugins", None), "cache_contributors", []
+    def fail(self, message: str) -> None:
+        """Mark the run failed."""
+        with self._lock:
+            self._progress = dataclasses.replace(
+                self._progress,
+                error_message=message,
+                is_running=False,
+                is_complete=False,
+                end_time=time.time(),
             )
-            if contributors:
-                run_contributors(
-                    contributors,
-                    config,
-                    converter,
-                    simulation_result,
-                    fingerprint,
-                    artifacts_dir,
-                )
 
-        except OSError as exc:
-            logger.warning("Cache persistence failed (OSError): %s", exc)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Cache persistence failed: %s", exc)
+    def stopped(self) -> None:
+        """Mark the run stopped on request (not an error, not complete)."""
+        with self._lock:
+            self._progress = dataclasses.replace(
+                self._progress,
+                is_running=False,
+                is_stopping=True,
+                end_time=time.time(),
+            )
 
 
 # Global worker instance

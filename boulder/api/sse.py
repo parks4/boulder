@@ -7,11 +7,11 @@ import json
 import math
 from typing import Any, AsyncGenerator, Dict
 
-from ..simulation_worker import SimulationWorker
+from ..simulation_worker import ProgressSource
 
 
 async def simulation_event_stream(
-    worker: SimulationWorker,
+    worker: ProgressSource,
     poll_interval: float = 0.5,
 ) -> AsyncGenerator[str, None]:
     r"""Async generator that yields SSE-formatted simulation progress events.

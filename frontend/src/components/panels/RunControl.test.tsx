@@ -25,6 +25,10 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), info: (...args: unknown[]) => mockToastInfo(...args) },
 }));
 
+vi.mock("@/stores/configStore", () => ({
+  useConfigStore: { getState: () => ({ syncYaml: () => Promise.resolve() }) },
+}));
+
 let mockScenarioRevision = 0;
 let mockAuthoredIdsLength = 0;
 const mockRefresh = vi.fn();
@@ -176,8 +180,10 @@ describe("RunControl", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /run sweep/i }));
 
-      expect(mockStartSweep).toHaveBeenCalledWith({ scenarios: {}, noCache: undefined });
+      // The server sweeps its own live config: the sweep starts once the
+      // session's edits have been synced to it.
       await vi.advanceTimersByTimeAsync(0);
+      expect(mockStartSweep).toHaveBeenCalledWith({ scenarios: {}, noCache: undefined });
       await vi.advanceTimersByTimeAsync(1000);
     } finally {
       vi.useRealTimers();

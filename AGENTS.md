@@ -117,11 +117,9 @@ Recipe for verifying a YAML against a running Boulder API without using the brow
    ```python
    import urllib.request, json
 
-   cfg = json.loads(urllib.request.urlopen(
-       "http://localhost:8050/api/configs/preloaded").read())["config"]
    req = urllib.request.Request(
        "http://localhost:8050/api/simulations",
-       data=json.dumps({"config": cfg}).encode(),
+       data=json.dumps({}).encode(),  # the server runs its own live config
        headers={"Content-Type": "application/json"}, method="POST")
    sim_id = json.loads(urllib.request.urlopen(req).read())["simulation_id"]
 

@@ -106,13 +106,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     #     a file *upload*, which is a new file and gets its own private
     #     location.
     #
-    # ``/api/simulations`` still takes the config from the *request body*: the
-    # browser store is the source of truth for a single run, these attrs are
-    # the server-side mirror the sweep and scenario routes work from.
+    # ``/api/simulations`` and ``/api/sweep`` both expand ``preloaded_raw``
+    # (plus the request's scenario overlays): the server's live resolved
+    # config, never one carried by the request.
     #
     # Consequences to keep in mind when adding a route:
-    #   * Content attrs reflect the last *saved* YAML -- an unsaved edit in
-    #     the editor is not yet visible here.
+    #   * Content attrs reflect the last config the browser *synced* (YAML
+    #     Save, upload, or ``/api/configs/sync`` before a run) -- an unsaved
+    #     edit in the editor is not yet visible here.
     #   * ``preloaded_raw`` is additionally the base that every scenario
     #     overlay is merged onto (Run Sweep, scenario preview), so it must
     #     stay byte-identical to the file -- never hand it to a function that
