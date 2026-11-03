@@ -6,15 +6,15 @@ The same run is assembled four ways: headless ``--run``, GUI Run
 solved through each, with a host converter subclass (its own
 ``resolve_mechanism``) and recording hooks registered through a plugin.  For
 each pair of paths the stored fingerprint, the stored entry attributes, the
-hook / contributor calls and the time grid are compared.  Differences that
-exist today are ``xfail(strict=True)`` and name the issue they belong to, so
-fixing one turns the test red until the marker is removed.
+stored run definition, the hook / contributor calls and the time grid are
+compared; the whole matrix runs for a single file and for a ``from:`` leaf.
+The stored definition, run alone as its own file, must hash to the same entry,
+and no path may write the user's files.
 
-Notes on the paths: the CLI sweep runs in a real subprocess (as
-``boulder --sweep --headless`` does); the other three run in-process.  A
-headless single run solves the base entry (``BASELINE``) only; the override
-scenario (``hot``) is reachable through GUI Run (``scenario_id``) and both
-sweeps.
+Notes on the paths: all four run in-process and end in the one run-set
+pipeline.  A headless single run solves the base entry (``BASELINE``) only; the
+override scenario (``hot``) is reachable through GUI Run (``scenario_id``) and
+both sweeps.
 """
 
 from __future__ import annotations
@@ -216,10 +216,7 @@ def _run_gui(cfg: Path, which: str) -> None:
             assert job["status"] == "done", job
             return
         for scenario_id in (None, "hot"):
-            body: Dict[str, Any] = {
-                "config": app.state.preloaded_config,
-                "scenarios": overlays,
-            }
+            body: Dict[str, Any] = {"scenarios": overlays}
             if scenario_id:
                 body["scenario_id"] = scenario_id
             resp = client.post("/api/simulations", json=body)
@@ -244,9 +241,30 @@ def _run_path(which: str, cfg: Path) -> None:
         _run_gui(cfg, which)
 
 
-@pytest.fixture(scope="module")
-def snapshots(tmp_path_factory) -> Dict[str, Dict[str, Dict[str, Any]]]:
-    """Solve the config through each path once; return what each stored."""
+def _split_config() -> Tuple[str, str]:
+    """Return ``(base, leaf)``: the network in a parent file, the run-set in a ``from:`` leaf."""
+    network, _, scenarios = _CONFIG.partition("scenarios:\n")
+    return network, "from: base.yaml\nscenarios:\n" + scenarios
+
+
+def _definition_of(cfg: Path) -> str:
+    """Return the stored run definition of the base entry, as text."""
+    store_dir = resolve_store_dir(BoulderRunner.load(str(cfg)), str(cfg))
+    assert store_dir is not None
+    source = scenario_store.read_source(store_dir, "BASELINE")
+    assert source is not None
+    return source.definition
+
+
+@pytest.fixture(scope="module", params=("flat", "from"))
+def snapshots(request, tmp_path_factory) -> Dict[str, Dict[str, Any]]:
+    """Solve the config through each path once; return what each stored.
+
+    The config is one file (``flat``) or a ``from:`` leaf over a parent file
+    (``from``). ``snaps["_rerun"]`` holds, per path, the fingerprint of the base
+    entry when the stored definition is run alone, as its own file;
+    ``snaps["_files"]`` the user's files, before and after, per path.
+    """
     root = tmp_path_factory.mktemp("epm")
     mech_dir = root / "mech"
     mech_dir.mkdir()
@@ -265,13 +283,18 @@ def snapshots(tmp_path_factory) -> Dict[str, Dict[str, Dict[str, Any]]]:
     patch.setattr(api_main, "_converter_class", None)
     patch.setattr(api_main, "_runner_class", None)
     patch.delenv("BOULDER_NO_CACHE", raising=False)
-    snaps: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    snaps: Dict[str, Any] = {"_rerun": {}, "_files": {}}
     try:
         for which in PATHS:
             folder = root / which
             folder.mkdir()
             cfg = folder / "config.yaml"
-            cfg.write_text(_CONFIG, encoding="utf-8")
+            files = {cfg: _CONFIG}
+            if request.param == "from":
+                base, leaf = _split_config()
+                files = {cfg: leaf, folder / "base.yaml": base}
+            for path, text in files.items():
+                path.write_bytes(text.encode("utf-8"))  # no newline translation
             record = folder / "calls.jsonl"
             patch.setenv("EPM_RECORD", str(record))
             patch.setenv("BOULDER_CONFIG_PATH", str(cfg))
@@ -283,6 +306,22 @@ def snapshots(tmp_path_factory) -> Dict[str, Dict[str, Dict[str, Any]]]:
             sys.modules.pop("epm_host_plugin", None)
             _run_path(which, cfg)
             snaps[which] = _snapshot(cfg, record)
+            snaps["_files"][which] = {
+                path: (text.encode("utf-8"), path.read_bytes())
+                for path, text in files.items()
+            }
+
+            # The stored definition, run alone as its own file.
+            alone = folder / "alone"
+            alone.mkdir()
+            alone_cfg = alone / "config.yaml"
+            alone_cfg.write_text(_definition_of(cfg), encoding="utf-8")
+            patch.setenv("EPM_RECORD", str(alone / "calls.jsonl"))
+            patch.setenv("BOULDER_CONFIG_PATH", str(alone_cfg))
+            cli.main([str(alone_cfg), "--headless", "--run"])
+            snaps["_rerun"][which] = _snapshot(alone_cfg, alone / "calls.jsonl")[
+                "BASELINE"
+            ]["fingerprint"]
     finally:
         patch.undo()
     return snaps
@@ -291,29 +330,11 @@ def snapshots(tmp_path_factory) -> Dict[str, Dict[str, Dict[str, Any]]]:
 #: What is compared for each pair of paths.
 PROPERTIES = ("fingerprint", "attrs", "source", "contributors", "hooks", "grid")
 
-#: Known differences today: ``(property, pair)`` -> the issue it belongs to.
-#: Remove an entry when its issue is fixed (``strict`` makes the test say so).
-_SINGLE = ("headless", "gui_run")
-_SWEEP = ("gui_sweep", "cli_sweep")
-KNOWN_DIFFERENCES: Dict[Tuple[str, frozenset], str] = {}
-for _single, _sweep in itertools.product(_SINGLE, _SWEEP):
-    _pair = frozenset((_single, _sweep))
-    KNOWN_DIFFERENCES["attrs", _pair] = "parks4/boulder#229"
-    KNOWN_DIFFERENCES["hooks", _pair] = "parks4/boulder#229"
-for _other in ("headless", "gui_run", "gui_sweep"):
-    KNOWN_DIFFERENCES["source", frozenset((_other, "cli_sweep"))] = "parks4/boulder#230"
-for _other in ("gui_run", "gui_sweep", "cli_sweep"):
-    KNOWN_DIFFERENCES["grid", frozenset(("headless", _other))] = "parks4/boulder#231"
-
 
 def _cases():
     for prop in PROPERTIES:
         for first, second in itertools.combinations(PATHS, 2):
-            reason = KNOWN_DIFFERENCES.get((prop, frozenset((first, second))))
-            marks = [pytest.mark.xfail(strict=True, reason=reason)] if reason else []
-            yield pytest.param(
-                prop, first, second, marks=marks, id=f"{prop}-{first}-{second}"
-            )
+            yield pytest.param(prop, first, second, id=f"{prop}-{first}-{second}")
 
 
 @pytest.mark.parametrize(("prop", "first", "second"), list(_cases()))
@@ -325,10 +346,28 @@ def test_entry_points_agree(snapshots, prop: str, first: str, second: str) -> No
     converter's ``resolve_mechanism``); ``source``: the stored run definition;
     ``contributors`` / ``hooks``: the recording cache contributor and the
     sweep hooks (``scenario_attrs``, ``on_scenario_solved``) calls per entry;
-    ``grid``: the stored trajectory's point count, end time and step.
+    ``grid``: the stored trajectory's point count, end time and step. Holds for
+    a single file and for a ``from:`` leaf.
     """
     common = sorted(set(snapshots[first]) & set(snapshots[second]))
     assert common, "the two paths share no entry"
     for sid in common:
         a, b = snapshots[first][sid], snapshots[second][sid]
         assert a[prop] == b[prop], f"{sid}: {first}={a[prop]!r} {second}={b[prop]!r}"
+
+
+@pytest.mark.parametrize("which", PATHS)
+def test_stored_definition_run_alone_has_the_same_fingerprint(snapshots, which) -> None:
+    """The stored (resolved) definition, run alone as a file, hashes to the same entry.
+
+    The definition keeps no ``from:``: it is the whole config, so anyone holding
+    only the stored or downloaded YAML reproduces the cache key.
+    """
+    assert snapshots["_rerun"][which] == snapshots[which]["BASELINE"]["fingerprint"]
+
+
+@pytest.mark.parametrize("which", PATHS)
+def test_a_run_never_writes_the_users_files(snapshots, which) -> None:
+    """The user's YAML files are byte-identical after a run, whichever path ran it."""
+    for path, (before, after) in snapshots["_files"][which].items():
+        assert before == after, f"{path.name} was modified"

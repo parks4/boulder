@@ -122,7 +122,7 @@ Start simulation → poll results:
 import time
 req = urllib.request.Request(
     f"{base}/api/simulations",
-    data=json.dumps({"config": pre["config"]}).encode(),
+    data=json.dumps({}).encode(),  # the server runs its own live config
     headers={"Content-Type": "application/json"},
     method="POST",
 )

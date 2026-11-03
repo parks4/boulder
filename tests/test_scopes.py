@@ -275,7 +275,6 @@ bindings:
         )
         cfg = normalize_config(yaml.safe_load(raw))
         runner = BoulderRunner(cfg)
-        runner.build()
         exposed = runner.exposed_inputs
         assert "internal_signal" not in exposed, (
             "Bound signal 'internal_signal' must NOT appear in exposed_inputs"
@@ -306,7 +305,6 @@ bindings:
         )
         cfg = normalize_config(yaml.safe_load(raw))
         runner = BoulderRunner(cfg)
-        runner.build()
         exposed = runner.exposed_inputs
         assert "free_sig" in exposed, "Unbound signal must be in exposed_inputs"
         assert "bound_sig" not in exposed, "Bound signal must not be in exposed_inputs"

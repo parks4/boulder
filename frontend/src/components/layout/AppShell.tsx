@@ -6,6 +6,7 @@ import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 import { useSimulationSSE } from "@/hooks/useSimulationSSE";
 import { useScenarioFocus } from "@/hooks/useScenarioFocus";
 import { startSimulation } from "@/api/simulations";
+import { BASELINE_SCENARIO_ID } from "@/api/scenarios";
 import { fetchDefaultConfig, fetchPreloadedConfig } from "@/api/configs";
 import { fetchCachedResult } from "@/api/resultCache";
 import { NetworkCard } from "@/components/panels/NetworkCard";
@@ -172,9 +173,20 @@ export function AppShell() {
     if (isRunning || useSweepRunStore.getState().sweeping || config.nodes.length === 0) {
       return;
     }
+    try {
+      // The server runs its own live config: hand it this session's edits first.
+      await useConfigStore.getState().syncYaml();
+    } catch (err) {
+      toast.error(`Cannot run: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
     beginSimulationRun();
     try {
-      const resp = await startSimulation(config);
+      const { activeId, overlays } = useScenarioStore.getState();
+      const resp = await startSimulation(undefined, undefined, {
+        id: activeId && activeId !== BASELINE_SCENARIO_ID ? activeId : BASELINE_SCENARIO_ID,
+        overlays: overlays as Record<string, unknown>,
+      });
       setStarted(resp.simulation_id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

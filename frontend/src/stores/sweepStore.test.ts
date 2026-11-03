@@ -37,6 +37,11 @@ vi.mock("./scenarioStore", () => ({
   },
 }));
 
+const mockSyncYaml = vi.fn();
+vi.mock("./configStore", () => ({
+  useConfigStore: { getState: () => ({ syncYaml: mockSyncYaml }) },
+}));
+
 const mockToastSuccess = vi.fn();
 const mockToastError = vi.fn();
 const mockToastInfo = vi.fn();
@@ -53,6 +58,7 @@ import { useSweepRunStore } from "./sweepStore";
 describe("sweepStore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSyncYaml.mockResolvedValue(undefined);
     mockActiveId = null;
     mockScenarios = [];
     mockOverlays = {};
@@ -115,12 +121,14 @@ describe("sweepStore", () => {
     mockGetSweepStatus.mockResolvedValueOnce({ status: "done", current: 1, total: 1 });
 
     useSweepRunStore.getState().run({ total: 1, noCache: true });
+    // The sweep starts once the session's edits are synced to the server.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockSyncYaml).toHaveBeenCalledOnce();
     expect(mockStartSweep).toHaveBeenCalledWith({
       scenarios: { a: { torch_eff: 0.5 } },
       noCache: true,
     });
 
-    await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(1000);
   });
 

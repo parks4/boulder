@@ -11,7 +11,7 @@ Base URL assumed: `http://127.0.0.1:8050`.
 | GET | `/api/configs/default` | Built-in empty template |
 | POST | `/api/configs/upload` | Multipart YAML/YML/PY upload |
 | POST | `/api/configs/validate` | Validate normalized config JSON |
-| POST | `/api/simulations` | Body: `{"config": {...}}` → `{simulation_id}` |
+| POST | `/api/simulations` | Body: `{}` (optional `scenario_id`, `scenarios`, `simulation_time`, `time_step`, `force`) runs the server live config → `{simulation_id}` |
 | GET | `/api/simulations/{id}/stream` | SSE progress (`complete`, `error`, partial updates) |
 | GET | `/api/simulations/{id}/results` | Full results when done; `status: running` while active |
 
@@ -54,7 +54,7 @@ Reservoir / OutletSink entries use the reservoir branch of `_generate_reactor_re
 
 ## Preloaded vs client config
 
-The UI sends the **in-memory normalized config** from Zustand (`useConfigStore`) to `POST /api/simulations`, not a re-read of disk. After server restart, the browser reload pulls fresh preload via `GET /api/configs/preloaded` on mount (`AppShell.tsx`).
+The UI syncs its in-memory config (Zustand `useConfigStore`) to the server (`POST /api/configs/sync`) before every run; `POST /api/simulations` then runs the server live config, not a re-read of disk. After server restart, the browser reload pulls fresh preload via `GET /api/configs/preloaded` on mount (`AppShell.tsx`).
 
 If the header filename is wrong, the client may still hold an old config — reload the page.
 

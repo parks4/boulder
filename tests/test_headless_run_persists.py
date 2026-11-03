@@ -94,12 +94,14 @@ def _cfg(tmp_path: Path, name: str) -> Path:
     return cfg
 
 
-def _headless(cfg: Path, rec: _Recorder) -> BoulderRunner:
-    plugins = BoulderPlugins()
-    plugins.cache_contributors = [rec]
-    runner = BoulderRunner.from_yaml(str(cfg))
-    runner.plugins = plugins
-    return runner.run_headless(end_time=0.01, dt=0.005)
+def _headless(cfg: Path, rec: _Recorder, monkeypatch) -> None:
+    """``--headless --run`` with *rec* registered as the cache contributor."""
+    # Bare plugins (no discovered host converter): the contributor registry is
+    # what the pipeline's store step reads.
+    monkeypatch.setattr(cantera_converter, "_PLUGIN_CACHE", BoulderPlugins())
+    registry = result_cache.get_cache_contributor_registry()
+    monkeypatch.setattr(registry, "contributors", [rec])
+    cli.main([str(cfg), "--headless", "--run"])
 
 
 def _entry(cfg: Path) -> Dict[str, Any]:
@@ -117,7 +119,7 @@ def _fresh_plugins(monkeypatch, contributors: list) -> None:
     monkeypatch.setattr(registry, "contributors", contributors)
 
 
-def test_headless_run_then_sweep_is_a_cache_hit(tmp_path, capsys) -> None:
+def test_headless_run_then_sweep_is_a_cache_hit(tmp_path, capsys, monkeypatch) -> None:
     """A headless run is a cache hit for the sweep and the GUI startup lookup.
 
     The contributor fires once; the sweep then reports "1 cached, 0 solved" and
@@ -125,7 +127,7 @@ def test_headless_run_then_sweep_is_a_cache_hit(tmp_path, capsys) -> None:
     """
     cfg = _cfg(tmp_path, "cli")
     rec = _Recorder()
-    _headless(cfg, rec)
+    _headless(cfg, rec, monkeypatch)
     assert len(rec.fingerprints) == 1
     capsys.readouterr()
     sweep_runner.run(cfg)
@@ -178,17 +180,16 @@ def test_plugin_registered_contributor_fires_once(tmp_path, monkeypatch) -> None
     monkeypatch.setenv("BOULDER_PLUGINS", "hp_plugin_mod")
     _fresh_plugins(monkeypatch, [])
     cfg = _cfg(tmp_path, "cli")
-    BoulderRunner.from_yaml(str(cfg)).run_headless(end_time=0.01, dt=0.005)
+    cli.main([str(cfg), "--headless", "--run"])
     mod = sys.modules["hp_plugin_mod"]
     monkeypatch.delitem(sys.modules, "hp_plugin_mod")
     assert len(mod.CALLS) == 1
 
 
-def test_a_raising_contributor_does_not_fail_the_run(tmp_path) -> None:
+def test_a_raising_contributor_does_not_fail_the_run(tmp_path, monkeypatch) -> None:
     """The run completes and its entry is stored although the contributor raises."""
     cfg = _cfg(tmp_path, "cli")
     rec = _Recorder(raises=True)
-    runner = _headless(cfg, rec)
-    assert runner.result is not None
+    _headless(cfg, rec, monkeypatch)
     assert len(rec.fingerprints) == 1
     assert _entry(cfg)["id"]

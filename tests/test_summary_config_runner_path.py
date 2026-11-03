@@ -110,16 +110,17 @@ def _yaml(tmp_path) -> str:
 def test_runner_path_passes_config_to_summary_builders(tmp_path, export_builder):
     """BoulderRunner.run_headless: a builder keyed on the YAML's ``export`` block runs.
 
-    Before the fix finalize_results handed builders ``{}`` on the runner path
-    (only ``_download_config`` is set there), so ``is_compatible`` declined and
-    no summary rows were produced.
+    finalize_results once handed builders ``{}`` on the runner path, so
+    ``is_compatible`` declined and no summary rows were produced. The runner now
+    solves through ``build_network`` like every other entry point, which sets the
+    config the builders read.
     """
     from boulder.runner import BoulderRunner
 
     runner = BoulderRunner.from_yaml(_yaml(tmp_path))
-    runner.run_headless(end_time=1e-3, dt=1e-4)
+    runner.run_headless()
     converter = runner._ensure_converter()
-    assert converter._last_config is None  # runner path: GUI snapshot unset
+    assert converter._last_config is not None  # one driver: set on this path too
     results = converter.finalize_results([0.0], {})
     assert ROW in results["summary"]
 

@@ -15,6 +15,7 @@ Covers, end to end from the checkpoint up to the API:
 from __future__ import annotations
 
 import asyncio
+import copy
 import threading
 import time
 
@@ -33,10 +34,31 @@ from boulder.config import synthesize_default_group  # noqa: E402
 from boulder.simulation_worker import SimulationProgress, SimulationWorker  # noqa: E402
 from boulder.staged_solver import SolveCancelled  # noqa: E402
 
+#: The server's live config, which a run expands.
+_LIVE_RAW = {
+    "network": [
+        {
+            "id": "reactor1",
+            "IdealGasReactor": {
+                "volume": 1.0,
+                "initial": {
+                    "temperature": 1000,
+                    "pressure": 101325,
+                    "composition": "CH4:1,O2:2,N2:7.52",
+                },
+            },
+        }
+    ],
+    "settings": {"end_time": 0.1, "dt": 0.05},
+}
 
-def _make_client():
-    """Return an AsyncClient bound to a fresh FastAPI app."""
+
+def _make_client(config_path=None):
+    """Return an AsyncClient bound to a fresh app holding a live config."""
     app = create_app()
+    app.state.preloaded_raw = copy.deepcopy(_LIVE_RAW)
+    if config_path is not None:
+        app.state.preloaded_config_path = str(config_path)
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")
 
@@ -166,9 +188,7 @@ class TestSimulationWorkerStop:
         worker.stop_simulation()
         assert worker.get_progress().is_stopping is False
 
-    def test_stopped_single_stage_solve_skips_cache_and_completion(
-        self, minimal_config, monkeypatch
-    ):
+    def test_stopped_single_stage_solve_skips_completion(self, minimal_config):
         """Cover the common case the finalize-guard fix targets.
 
         A single-stage steady solve has no reachable checkpoint before it
@@ -176,13 +196,6 @@ class TestSimulationWorkerStop:
         `_stop_event.is_set()` check in the finalize block (and in the except
         branch) makes Stop take effect here.
         """
-        persist_calls = []
-        monkeypatch.setattr(
-            SimulationWorker,
-            "_persist_to_cache",
-            lambda self, *a, **k: persist_calls.append(1),
-        )
-
         # start_simulation() expects a normalized config -- the POST route
         # calls synthesize_default_group() before constructing the worker;
         # do the same here so build_network doesn't fail for an unrelated
@@ -205,7 +218,6 @@ class TestSimulationWorkerStop:
         assert progress.is_stopping is True
         assert progress.is_complete is False
         assert progress.error_message is None
-        assert persist_calls == []
 
 
 class TestSSEStoppedEvent:
@@ -266,19 +278,13 @@ class TestStopSimulationEndpoint:
     """DELETE /api/simulations/{sim_id} — the API-level contract."""
 
     @pytest.mark.asyncio
-    async def test_delete_returns_immediately_and_keeps_the_registry_entry(
-        self, minimal_config
-    ):
+    async def test_delete_returns_immediately_and_keeps_the_registry_entry(self):
         _simulations.clear()
 
         async with _make_client() as client:
             resp = await client.post(
                 "/api/simulations",
-                json={
-                    "config": minimal_config,
-                    "simulation_time": 0.1,
-                    "time_step": 0.05,
-                },
+                json={"simulation_time": 0.1, "time_step": 0.05},
             )
             assert resp.status_code == 200
             sim_id = resp.json()["simulation_id"]
@@ -307,7 +313,7 @@ class TestStopSimulationEndpoint:
 
     @pytest.mark.asyncio
     async def test_full_stop_flow_via_api_never_completes_or_caches(
-        self, minimal_config, monkeypatch
+        self, tmp_path, monkeypatch
     ):
         """Start, stop, and wait for exit through the real DELETE handler, not the worker directly.
 
@@ -317,12 +323,8 @@ class TestStopSimulationEndpoint:
         guard. build_network is slowed down deterministically so the DELETE
         reliably lands first -- the point of Stop is long solves anyway.
         """
-        persist_calls = []
-        monkeypatch.setattr(
-            SimulationWorker,
-            "_persist_to_cache",
-            lambda self, *a, **k: persist_calls.append(1),
-        )
+        cfg = tmp_path / "model.yaml"
+        cfg.write_text("network: []\n", encoding="utf-8")
         original_build_network = DualCanteraConverter.build_network
 
         def _slow_build_network(self, *args, **kwargs):
@@ -332,14 +334,10 @@ class TestStopSimulationEndpoint:
         monkeypatch.setattr(DualCanteraConverter, "build_network", _slow_build_network)
         _simulations.clear()
 
-        async with _make_client() as client:
+        async with _make_client(cfg) as client:
             resp = await client.post(
                 "/api/simulations",
-                json={
-                    "config": minimal_config,
-                    "simulation_time": 0.1,
-                    "time_step": 0.05,
-                },
+                json={"simulation_time": 0.1, "time_step": 0.05},
             )
             sim_id = resp.json()["simulation_id"]
 
@@ -347,13 +345,15 @@ class TestStopSimulationEndpoint:
             assert resp.json()["stopping"] is True
 
             worker, _ = _simulations[sim_id]
-            for _ in range(50):
+            for _ in range(150):
                 if not worker.get_progress().is_running:
                     break
                 await asyncio.sleep(0.05)
 
             progress = worker.get_progress()
             assert progress.is_complete is False
-            assert persist_calls == []
+            assert progress.is_running is False
+            # Nothing was stored for the stopped run.
+            assert list((tmp_path / ".boulder-cache").rglob("*.h5")) == []
 
         _simulations.clear()

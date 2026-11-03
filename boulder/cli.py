@@ -358,19 +358,10 @@ def run_headless_mode(
         if verbose:
             print("Running simulation to generate complete Python code...")
 
-        # Extract simulation parameters from config.
-        # settings.solver.grid takes precedence; legacy end_time/dt are fallbacks.
-        settings = validated_config.get("settings", {})
-        solver_block = settings.get("solver") if isinstance(settings, dict) else None
-        if isinstance(solver_block, dict) and "grid" in solver_block:
-            _grid = solver_block["grid"]
-            simulation_time = float(_grid.get("stop", _grid.get("end", 10.0)))
-            time_step = float(_grid.get("dt", 1.0))
-        else:
-            simulation_time = float(
-                settings.get("end_time", settings.get("max_time", 10.0))
-            )
-            time_step = float(settings.get("dt", settings.get("time_step", 1.0)))
+        # The one time-grid rule, read from the prepared config.
+        from .sweep_runner import solver_window
+
+        simulation_time, time_step = solver_window(validated_config)
 
         if verbose:
             print(f"Simulation parameters: time={simulation_time}s, step={time_step}s")
@@ -652,27 +643,37 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     #   * without --headless → launch the GUI with Run Sweep as the default action,
     #     auto-started on load (BOULDER_SWEEP_MODE + BOULDER_AUTORUN), and the
     #     (pre-computed) scenario store shown in the pane.
+    # --runner flag overrides the kwarg (shell users)
+    if args.runner:
+        runner_class = _resolve_runner_class(args.runner)
+    if runner_class is None:
+        from .runner import BoulderRunner
+
+        runner_class = BoulderRunner
+
     if args.sweep and args.headless:
         if not args.config:
             print("Error: --sweep requires a config file", file=sys.stderr)
             sys.exit(2)
-        from .cantera_converter import get_plugins
-
-        # Boulder ships a perfectly good runner (`boulder.sweep_runner`, which
-        # has its own main()); a host only needs to override it when its sweep
-        # is genuinely different. Defaulting here means plain Boulder can run
-        # `--sweep --headless` standalone, and a host that registers the
-        # `scenario_attrs` / `on_scenario_solved` plugin hooks gets them applied
-        # by the default runner without providing an entry point at all.
-        runner = getattr(get_plugins(), "sweep_runner", None) or [
-            "-m",
-            "boulder.sweep_runner",
-        ]
-        import subprocess
         from pathlib import Path as _Path
 
-        cmd = [sys.executable, *runner, str(_Path(args.config).resolve())]
-        sys.exit(subprocess.call(cmd))
+        from .cantera_converter import get_plugins
+
+        config_path = _Path(args.config).resolve()
+        # Boulder ships the pipeline (`boulder.sweep_runner.run`), run in this
+        # process so the runner class reaches it, with the host-registered
+        # `scenario_attrs` / `on_scenario_solved` hooks applied. A host whose sweep
+        # is genuinely different registers `plugins.sweep_runner`, a command run
+        # in its own process.
+        host_runner = getattr(get_plugins(), "sweep_runner", None)
+        if host_runner:
+            import subprocess
+
+            sys.exit(subprocess.call([sys.executable, *host_runner, str(config_path)]))
+        from .sweep_runner import run as run_sweep
+
+        run_sweep(config_path, runner_cls=runner_class)
+        sys.exit(0)
     if args.export_schema:
         if not args.headless:
             print("Error: --export-schema requires --headless", file=sys.stderr)
@@ -705,14 +706,6 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     if args.run and not args.headless:
         # GUI auto-run on startup — read by the lifespan / frontend.
         os.environ["BOULDER_AUTORUN"] = "1"
-
-    # --runner flag overrides the kwarg (shell users)
-    if args.runner:
-        runner_class = _resolve_runner_class(args.runner)
-    if runner_class is None:
-        from .runner import BoulderRunner
-
-        runner_class = BoulderRunner
 
     # Handle --dev mode: start both backend and frontend dev server
     if args.dev:
@@ -860,23 +853,34 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
         # thin wrapper that passes runner_class).  --download writes code; --run
         # solves the case (download_path=None just skips the file write).
         try:
-            runner = runner_class.from_yaml(args.config)
-            settings = runner.config.get("settings") or {}
-            end_time_val = settings.get("end_time")
-            dt_val = settings.get("dt")
             if args.run:
+                # A single run is a run set of one entry: the base entry, through
+                # the same pipeline as every other entry point.
+                from .runset import base_entry_id
+                from .sweep_runner import run_set
+
                 print(f"Running {args.config} …", flush=True)
-            runner.run_headless(
-                download_path=args.download,
-                simulate=True,
-                end_time=float(end_time_val) if end_time_val is not None else None,
-                dt=float(dt_val) if dt_val is not None else None,
-                persist=args.run,
-            )
+                raw = runner_class.load(args.config)
+                (outcome,) = run_set(
+                    raw,
+                    args.config,
+                    only={base_entry_id(raw)},
+                    use_cache=not os.environ.get("BOULDER_NO_CACHE"),
+                    runner_cls=runner_class,
+                )
+                if args.download:
+                    # The script the solve generated (stored with the entry).
+                    with open(args.download, "w", encoding="utf-8") as fh:
+                        fh.write(outcome.gui.get("code_str") or "")
+            else:
+                runner = runner_class.from_yaml(args.config)
+                runner.run_headless(download_path=args.download)
             if args.download:
                 print(f"Python code generated: {args.download}")
             if args.run:
-                print(f"Run complete: solved {args.config}")
+                print(
+                    f"Run complete: {'cached' if outcome.cached else 'solved'} {args.config}"
+                )
         except FileNotFoundError as exc:
             print(f"Error: Configuration file not found: {exc.filename}")
             sys.exit(1)

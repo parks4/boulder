@@ -33,10 +33,14 @@ def test_gui_route_does_not_build_its_own_payload() -> None:
     reintroducing a parallel builder, which no behavioural assertion in a
     mocked test would notice until the two silently diverged again.
     """
+    from boulder.api.routes import simulations as simulation_route
     from boulder.api.routes import sweep as sweep_route
 
+    # Both GUI routes call the one pipeline, which owns the shared solve.
+    assert "solve_scenario(" in inspect.getsource(sweep_runner.run_set)
+    assert "run_set(" in inspect.getsource(simulation_route)
     src = inspect.getsource(sweep_route)
-    assert "solve_scenario(" in src, "GUI route no longer calls the shared solve"
+    assert "run_set(" in src, "GUI sweep route no longer calls the pipeline"
     # The payload's distinctive keys should appear only in the shared builder.
     for key in ('"reactors_series"', '"sankey_links"', '"updated_connections"'):
         assert key not in src, (
@@ -67,8 +71,17 @@ def test_solver_window_is_shared_and_defaults_consistently() -> None:
     )
     # dt defaults to a tenth of the window, not to some path-specific constant.
     assert sweep_runner.solver_window({"settings": {"end_time": 2.0}}) == (2.0, 0.2)
-    # No end_time at all -> the documented 1 s fallback, same on both paths.
-    assert sweep_runner.solver_window({}) == (1.0, 0.1)
+    # The solver grid is the fallback when no nominal end_time is declared.
+    solver = {"grid": {"stop": 3.0, "dt": 0.5}}
+    assert sweep_runner.solver_window({"settings": {"solver": solver}}) == (3.0, 0.5)
+    assert sweep_runner.solver_window(
+        {"settings": {"end_time": 9.0, "solver": solver}}
+    ) == (9.0, 0.5)
+    assert sweep_runner.solver_window(
+        {"settings": {"solver": {"kind": "advance", "advance_time": 2.5}}}
+    ) == (2.5, 0.25)
+    # No time at all (steady stages only): no hidden default duration.
+    assert sweep_runner.solver_window({}) == (0.0, 0.0)
 
 
 def test_solve_scenario_honours_an_explicit_converter_class() -> None:

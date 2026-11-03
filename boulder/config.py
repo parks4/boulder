@@ -13,7 +13,6 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-import yaml
 from ruamel.yaml import YAML
 
 logger = logging.getLogger(__name__)
@@ -1074,15 +1073,14 @@ def load_config_file(config_path: str) -> Dict[str, Any]:
     The run-set block's legacy spellings (``sweep:``/``sweeps:``) are renamed to
     ``scenarios_sweep:`` here, with a warning, so every raw config Boulder holds
     (the Run Sweep base included) speaks one dialect -- see
-    :func:`boulder.runset.canonicalize_run_set_keys`.
+    :func:`boulder.runset.canonicalize_run_set_keys`. ``from:`` inheritance is
+    resolved (:func:`boulder.runset.load_yaml_with_inheritance`): this is the one
+    loader every entry point uses.
     """
     _assert_stone_yaml_extension(config_path)
-    with open(config_path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
-    from .runset import canonicalize_run_set_keys  # noqa: PLC0415 — avoid import cycle
+    from .runset import load_yaml_with_inheritance  # noqa: PLC0415 — avoid import cycle
 
-    canonicalize_run_set_keys(raw)
-    return raw
+    return load_yaml_with_inheritance(config_path)
 
 
 def load_config_file_with_comments(config_path: str):

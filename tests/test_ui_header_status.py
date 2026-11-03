@@ -28,13 +28,16 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from boulder import cantera_converter, sweep_runner  # noqa: E402
 from boulder import scenario_store as store  # noqa: E402
 from boulder.api.main import create_app  # noqa: E402
 from boulder.cantera_converter import BoulderPlugins  # noqa: E402
-from boulder.config import normalize_config  # noqa: E402
 from boulder.runset import resolve_store_dir  # noqa: E402
-from boulder.simulation_worker import SimulationWorker  # noqa: E402
-from boulder.sweep_runner import scenario_fingerprint  # noqa: E402
+from boulder.sweep_runner import (  # noqa: E402
+    prepare_entry,
+    run_set,
+    scenario_fingerprint,
+)
 
 _RES = {"temperature": 300, "pressure": 101325, "composition": "CH4:1"}
 _RAW: Dict[str, Any] = {
@@ -63,19 +66,10 @@ _RAW: Dict[str, Any] = {
 }
 
 
-class _StubConverter:
-    mechanism = "gri30.yaml"
-
-    def __init__(self, config_path: Path) -> None:
-        self._download_config_path = str(config_path)
-
-        class _Plugins:
-            cache_contributors = ()
-
-        self.plugins = _Plugins()
-
-    def resolve_mechanism(self, name: str) -> str:
-        return name
+@pytest.fixture(autouse=True)
+def bare_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No discovered host plugin: the default converter and its resolver."""
+    monkeypatch.setattr(cantera_converter, "_PLUGIN_CACHE", BoulderPlugins())
 
 
 @pytest.fixture
@@ -86,34 +80,26 @@ def cfg(tmp_path: Path) -> Path:
 
 
 def _store_single_run(cfg: Path) -> tuple:
-    """Persist the base run like the worker; return its (pre, post) fingerprints."""
-    config = normalize_config(copy.deepcopy(_RAW))
-    pre_build = copy.deepcopy(config)
-    config["metadata"] = {"post_build": True}  # the post-build config differs
+    """Store the base run as a run set of one entry; return its (pre, post) fingerprints."""
+    config, _, pre_build = prepare_entry(copy.deepcopy(_RAW), "BASELINE")
+    post_config = copy.deepcopy(config)
+    post_config["metadata"] = {"post_build": True}  # the post-build config differs
+    post_build = scenario_fingerprint(
+        post_config,
+        normalized=True,
+        mechanism="gri30.yaml",
+        resolve_mechanism=lambda name: name,
+    )
 
-    def fingerprint(cfg_: Dict[str, Any]) -> str:
-        return scenario_fingerprint(
-            cfg_,
-            normalized=True,
-            mechanism="gri30.yaml",
-            resolve_mechanism=lambda name: name,
-        )
+    class _Solved:
+        _last_config = post_config
 
-    expected = (fingerprint(pre_build), fingerprint(config))
-    worker = SimulationWorker()
-    with patch(
-        "boulder.simulation_result.make_simulation_result", return_value=object()
+    payload = {"times": [0.0], "reactors_series": {}}
+    with patch.object(
+        sweep_runner, "solve_scenario", return_value=(payload, "gri30.yaml", _Solved())
     ):
-        worker._persist_to_cache(
-            _StubConverter(cfg),
-            config,
-            {"is_complete": True},
-            {},
-            {},
-            "# code",
-            pre_build_config=pre_build,
-        )
-    return expected
+        run_set(copy.deepcopy(_RAW), cfg, only={"BASELINE"})
+    return (pre_build, post_build)
 
 
 def _get(cfg, provider, url="/api/ui/header-status"):
