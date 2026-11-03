@@ -8,6 +8,9 @@ solved through each, with a host converter subclass (its own
 each pair of paths the stored fingerprint, the stored entry attributes, the
 stored run definition, the hook / contributor calls and the time grid are
 compared; the whole matrix runs for a single file and for a ``from:`` leaf.
+A fifth path, the downloaded script, is run in a subprocess and its reactor,
+stream-point and trajectory states are compared with the pipeline's, for those
+two files and for a two-mechanism case with a by-name switch plugin.
 The stored definition, run alone as its own file, must hash to the same entry,
 and no path may write the user's files.
 
@@ -23,7 +26,9 @@ import itertools
 import json
 import os
 import shutil
+import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -38,6 +43,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from boulder import cantera_converter, cli, result_cache, scenario_store  # noqa: E402
 from boulder.api import main as api_main  # noqa: E402
+from boulder.download_script_emitter import script_lines_for_runner  # noqa: E402
 from boulder.runner import BoulderRunner  # noqa: E402
 from boulder.runset import resolve_store_dir  # noqa: E402
 
@@ -130,8 +136,18 @@ def _solved(sid, config, conv, result, fingerprint, gui, mechanism):
     _record("on_scenario_solved", sid=sid)
 
 
+def _by_name_switch(gas, target, htol, Xtol):
+    import cantera as ct
+
+    out = ct.Solution(target)
+    known = {s: x for s, x in zip(gas.species_names, gas.X) if s in out.species_names}
+    out.TPX = gas.T, gas.P, known
+    return out
+
+
 def register_plugins(plugins):
     plugins.converter_class = HostConverter
+    plugins.mechanism_switch_fn = _by_name_switch
     plugins.scenario_attrs = _attrs
     plugins.on_scenario_solved = _solved
     register_cache_contributor(Recorder())
@@ -371,3 +387,226 @@ def test_a_run_never_writes_the_users_files(snapshots, which) -> None:
     """The user's YAML files are byte-identical after a run, whichever path ran it."""
     for path, (before, after) in snapshots["_files"][which].items():
         assert before == after, f"{path.name} was modified"
+
+
+# ---------------------------------------------------------------------------
+# Fifth path: the downloaded script, and run_continuation
+# ---------------------------------------------------------------------------
+
+#: Two mechanisms, a by-name switch (the plugin above) between them.
+_SWITCH_CONFIG = """\
+phases:
+  gas:
+    mechanism: gri30.yaml
+stages:
+  stage_a:
+    mechanism: gri30.yaml
+    solve: advance_to_steady_state
+  stage_b:
+    mechanism: h2o2.yaml
+    solve: advance_to_steady_state
+stage_a:
+- id: r_a
+  IdealGasConstPressureMoleReactor:
+    volume: 1.0e-5
+    initial: {temperature: 1100, pressure: 101325, composition: "H2:2, O2:1, N2:4, CO2:1"}
+stage_b:
+- id: r_b
+  IdealGasConstPressureMoleReactor:
+    volume: 5.0e-6
+    initial: {temperature: 600, pressure: 101325, composition: "N2:1"}
+- id: a_to_b
+  source: r_a
+  target: r_b
+  MassFlowController: {mass_flow_rate: 1.0e-4}
+  mechanism_switch: {htol: 1.0e-2, Xtol: 1.0e-2}
+"""
+
+#: Dumps what a solve left: every reactor (stream points included) and the
+#: trajectory.  Pasted at the end of the downloaded script and called in-process.
+_DUMP = textwrap.dedent(
+    """
+    def boulder_dump(converter, trajectory):
+        import os
+
+        reactors = {}
+        for rid, r in sorted(converter.reactors.items()):
+            ph = r.phase
+            reactors[rid] = {
+                "T": float(ph.T),
+                "P": float(ph.P),
+                "X": {
+                    s: float(x) for s, x in zip(ph.species_names, ph.X) if x > 1e-12
+                },
+            }
+        segments = [
+            {
+                "stage": seg.stage_id,
+                "mechanism": os.path.basename(seg.mechanism),
+                "T": [float(x) for x in seg.states.T],
+                "P": [float(x) for x in seg.states.P],
+            }
+            for seg in trajectory.segments
+        ]
+        streams = {
+            nid: {
+                "mdot": float(meta.get("mdot") or 0.0),
+                "top_Y": {k: round(float(v), 9) for k, v in (meta.get("top_Y") or {}).items()},
+            }
+            for nid, meta in sorted(converter.reactor_meta.items())
+            if meta.get("stream_point")
+        }
+        return {
+            "reactors": reactors,
+            "trajectory": segments,
+            "streams": streams,
+            "connections": sorted(converter.connections),
+        }
+    """
+)
+
+
+def _assert_same_states(a: Dict[str, Any], b: Dict[str, Any]) -> None:
+    assert a["reactors"].keys() == b["reactors"].keys()
+    for rid, ra in a["reactors"].items():
+        rb = b["reactors"][rid]
+        assert ra["T"] == pytest.approx(rb["T"], rel=1e-9), rid
+        assert ra["P"] == pytest.approx(rb["P"], rel=1e-9), rid
+        assert ra["X"].keys() == rb["X"].keys(), rid
+        for sp, x in ra["X"].items():
+            assert x == pytest.approx(rb["X"][sp], rel=1e-7, abs=1e-12), (rid, sp)
+    assert a["connections"] == b["connections"]
+    assert a["streams"].keys() == b["streams"].keys()
+    for nid, sa in a["streams"].items():
+        assert sa["mdot"] == pytest.approx(b["streams"][nid]["mdot"], rel=1e-9), nid
+        assert sa["top_Y"] == pytest.approx(b["streams"][nid]["top_Y"], abs=1e-8), nid
+    assert len(a["trajectory"]) == len(b["trajectory"])
+    for sa, sb in zip(a["trajectory"], b["trajectory"]):
+        assert sa["stage"] == sb["stage"]
+        assert sa["mechanism"] == sb["mechanism"]
+        assert sa["T"] == pytest.approx(sb["T"], rel=1e-9)
+        assert sa["P"] == pytest.approx(sb["P"], rel=1e-9)
+
+
+def _host_env(patch: pytest.MonkeyPatch, root: Path) -> None:
+    """Put the host plugin and its mechanism directory in force for *root*."""
+    mech_dir = root / "mech"
+    mech_dir.mkdir()
+    data = Path(ct.__file__).parent / "data"
+    for name in ("gri30.yaml", "h2o2.yaml"):
+        shutil.copy(data / name, mech_dir / name)
+    (root / "epm_host_plugin.py").write_text(_PLUGIN, encoding="utf-8")
+    patch.syspath_prepend(str(root))
+    patch.setenv("BOULDER_PLUGINS", "epm_host_plugin")
+    patch.setenv("EPM_MECH_DIR", str(mech_dir))
+    patch.setenv("EPM_RECORD", str(root / "calls.jsonl"))
+    # The script's subprocess must import this checkout's Boulder, not another
+    # editable install.
+    boulder_root = str(Path(cantera_converter.__file__).parent.parent)
+    patch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join([str(root), boulder_root, os.environ.get("PYTHONPATH", "")]),
+    )
+    patch.setattr(cantera_converter, "_PLUGIN_CACHE", None)
+    patch.delitem(sys.modules, "epm_host_plugin", raising=False)
+
+
+@pytest.fixture(scope="module", params=("flat", "from", "switch"))
+def script_and_pipeline(request, tmp_path_factory) -> Dict[str, Any]:
+    """Solve one config by the pipeline and by its downloaded script; return both dumps."""
+    root = tmp_path_factory.mktemp("epm_script")
+    cfg = root / "config.yaml"
+    if request.param == "switch":
+        cfg.write_text(_SWITCH_CONFIG, encoding="utf-8")
+    elif request.param == "from":
+        base, leaf = _split_config()
+        (root / "base.yaml").write_text(base, encoding="utf-8")
+        cfg.write_text(leaf, encoding="utf-8")
+    else:
+        cfg.write_text(_CONFIG, encoding="utf-8")
+
+    patch = pytest.MonkeyPatch()
+    _host_env(patch, root)
+    try:
+        script = root / "downloaded.py"
+        scope: Dict[str, Any] = {}
+        exec(_DUMP, scope)  # noqa: S102 - our own helper text
+
+        runner = BoulderRunner.from_yaml(str(cfg))
+        # The runner-based script: one ``runner.solve_stage`` call per stage.
+        lines = script_lines_for_runner(
+            "from boulder.runner import BoulderRunner",
+            "BoulderRunner",
+            str(cfg),
+            runner.build_stage_graph(),
+        )
+        script.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        runner.build()
+        converter = runner.converter
+        assert converter is not None and converter._staged_trajectory is not None
+        pipeline = scope["boulder_dump"](converter, converter._staged_trajectory)
+
+        out = root / "script_dump.json"
+        script.write_text(
+            script.read_text("utf-8")
+            + _DUMP
+            + "\nimport json\n"
+            + f"json.dump(boulder_dump(converter, trajectory), open({str(out)!r}, 'w'))\n",
+            encoding="utf-8",
+        )
+        run = subprocess.run(
+            [sys.executable, str(script)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(root),
+        )
+        assert run.returncode == 0, run.stderr[-3000:]
+        return {"pipeline": pipeline, "script": json.loads(out.read_text("utf-8"))}
+    finally:
+        patch.undo()
+
+
+def test_downloaded_script_agrees_with_the_pipeline(script_and_pipeline) -> None:
+    """The downloaded script, run in a subprocess, leaves the pipeline's states.
+
+    Asserts the reactor states (stream-point reservoirs included: T, P, X) and
+    the trajectory segments (stage, mechanism, T, P) of the script equal those
+    of the pipeline's one solve, for a single file, a ``from:`` leaf and a
+    gri30 -> h2o2 case switched by name.
+    """
+    _assert_same_states(script_and_pipeline["script"], script_and_pipeline["pipeline"])
+
+
+def test_run_continuation_first_step_agrees_with_the_pipeline(
+    tmp_path, monkeypatch
+) -> None:
+    """One ``run_continuation`` step leaves the states the pipeline computes.
+
+    Asserts reactor and trajectory states after a single-step continuation
+    equal a fresh pipeline solve, on the gri30 -> h2o2 by-name switch case.
+    """
+    _host_env(monkeypatch, tmp_path)
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_SWITCH_CONFIG, encoding="utf-8")
+    scope: Dict[str, Any] = {}
+    exec(_DUMP, scope)  # noqa: S102 - our own helper text
+
+    pipeline = BoulderRunner.from_yaml(str(cfg))
+    pipeline.build()
+    assert pipeline.converter is not None
+    expected = scope["boulder_dump"](
+        pipeline.converter, pipeline.converter._staged_trajectory
+    )
+
+    stepped = BoulderRunner.from_yaml(str(cfg))
+    stepped.run_continuation(
+        {
+            "parameter": "connections.a_to_b.mass_flow_rate",
+            "update": {"multiply": 1.0},
+            "until": {"max_iters": 1},
+        }
+    )
+    assert stepped.converter is not None
+    got = scope["boulder_dump"](stepped.converter, stepped.converter._staged_trajectory)
+    _assert_same_states(got, expected)
