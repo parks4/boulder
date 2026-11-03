@@ -4,7 +4,7 @@ import dataclasses
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Protocol
+from typing import Any, Dict, List, Mapping, Optional
 
 import cantera as ct  # type: ignore
 
@@ -546,14 +546,6 @@ class SimulationWorker:
                 self.progress.end_time = time.time()
 
 
-class ProgressSource(Protocol):
-    """What the simulation routes serve: a run's progress, and a way to stop it."""
-
-    def get_progress(self) -> SimulationProgress: ...
-
-    def stop_simulation(self) -> None: ...
-
-
 class RunHandle:
     """Progress of a GUI run, which :func:`boulder.sweep_runner.run_set` executes.
 
@@ -634,15 +626,3 @@ class RunHandle:
                 is_stopping=True,
                 end_time=time.time(),
             )
-
-
-# Global worker instance
-_global_worker: Optional[SimulationWorker] = None
-
-
-def get_simulation_worker() -> SimulationWorker:
-    """Get the global simulation worker instance."""
-    global _global_worker
-    if _global_worker is None:
-        _global_worker = SimulationWorker()
-    return _global_worker

@@ -111,10 +111,17 @@ def _coerce(obj: Any) -> Any:
 #: depending on the path that produced the config (``scenario_id``, once
 #: stamped by the run-set expansion and still accepted as a legacy key) or on
 #: the Boulder release that stamped ``metadata.stone_version``
-#: (:func:`boulder.config.migrate_stone_config`, on every load). Only keys
-#: Boulder writes itself belong here: user-authored metadata (``title``,
-#: ``description``, …) still participates. See ``tests/test_fingerprint_identity.py``.
-_RUN_LABEL_METADATA_KEYS = ("scenario_id", "stone_version")
+#: (:func:`boulder.config.migrate_stone_config`, on every load), or on the GUI
+#: branding (``gui_app_title`` / ``gui_app_version``: display-only schema keys a
+#: host may stamp with its own release). Only keys Boulder owns belong here:
+#: user-authored metadata (``title``, ``description``, …) still participates.
+#: See ``tests/test_fingerprint_identity.py``.
+_RUN_LABEL_METADATA_KEYS = (
+    "scenario_id",
+    "stone_version",
+    "gui_app_title",
+    "gui_app_version",
+)
 
 
 def _canonical_config(config: Dict[str, Any]) -> Any:

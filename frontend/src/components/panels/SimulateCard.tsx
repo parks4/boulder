@@ -64,7 +64,7 @@ export function SimulateCard() {
   // Only the flat "advance" kind takes a simulation_time/time_step override —
   // advance_grid/micro_step carry their own authoritative grid in
   // settings.solver, which these overrides would otherwise clobber (see
-  // _resolve_run_grid in the backend).
+  // with_time_overrides in the backend).
   const sendTimeOverride = mode === "transient" && kind === "advance";
 
   const [guiActions, setGuiActions] = useState<GuiActionMeta[]>([]);

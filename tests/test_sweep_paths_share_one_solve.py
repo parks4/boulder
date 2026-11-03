@@ -71,12 +71,12 @@ def test_solver_window_is_shared_and_defaults_consistently() -> None:
     )
     # dt defaults to a tenth of the window, not to some path-specific constant.
     assert sweep_runner.solver_window({"settings": {"end_time": 2.0}}) == (2.0, 0.2)
-    # The solver grid is the fallback when no nominal end_time is declared.
+    # The solver grid is what is integrated: it wins over a nominal end_time.
     solver = {"grid": {"stop": 3.0, "dt": 0.5}}
     assert sweep_runner.solver_window({"settings": {"solver": solver}}) == (3.0, 0.5)
     assert sweep_runner.solver_window(
         {"settings": {"end_time": 9.0, "solver": solver}}
-    ) == (9.0, 0.5)
+    ) == (3.0, 0.5)
     assert sweep_runner.solver_window(
         {"settings": {"solver": {"kind": "advance", "advance_time": 2.5}}}
     ) == (2.5, 0.25)

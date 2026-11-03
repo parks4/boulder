@@ -244,8 +244,9 @@ Without `only`, entries whose id left the run set are pruned afterwards.
   config. The GUI's run time/step fields are written into the `settings.solver` of that copy before
   expansion. The stored run definition (`scenario_store.definition_text`) is that resolved config, dumped
   one way on every path; the YAML pane's Download serves the same text (`POST /api/configs/resolved`).
-- **One time-grid rule.** `sweep_runner.solver_window` reads the prepared config only; a transient
-  stage with no grid is an error, not a hidden default duration.
+- **One time-grid rule.** `sweep_runner.solver_window` reads the prepared config only: the solver's
+  end (`grid.stop`, a list grid's last time, or `advance_time`) wins over `settings.end_time`, which
+  is only a fallback; a transient stage with no grid is an error, not a hidden default duration.
 - **Not in a process of its own.** The GUI sweep runs in a background thread and the GUI run in a
   route-held thread (`simulation_worker.RunHandle` serves its progress, complete only once the entry is
   stored); the CLI sweep runs in the calling process, so the runner class reaches it. `plugins.sweep_runner`
