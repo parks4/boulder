@@ -283,8 +283,13 @@ def solve_scenario(
     stop_event: Optional[threading.Event] = None,
     config_path: "Optional[str | Path]" = None,
     runner_cls: Optional[Any] = None,
+    raw: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], str, DualCanteraConverter]:
     """Solve one normalized scenario config → (gui_payload, mechanism, converter).
+
+    ``raw`` is the entry's resolved config *config* was prepared from; the
+    downloadable script embeds it as YAML (the text the run stores) and runs the
+    same ``normalize`` / ``validate`` on it.
 
     **The single solve path for a sweep scenario**, used by both this module's
     CLI runner and the GUI's in-process route (``boulder.api.routes.sweep``).
@@ -332,6 +337,7 @@ def solve_scenario(
 
     # The generated script imports the runner class that prepared this config.
     conv.runner_class = runner_cls
+    conv._download_raw = raw
     sim_t, dt = solver_window(config)
     worker = SimulationWorker()
     worker.start_simulation(conv, config, sim_t, dt)
@@ -733,6 +739,7 @@ def run_set(
             stop_event=stop_event,
             config_path=config_path,
             runner_cls=runner_cls,
+            raw=cfg,
         )
         if store_dir is not None:
             # The post-build config (stream points the staged solver added)

@@ -1,7 +1,7 @@
 """CLI to convert a STONE YAML configuration to a Python simulation script.
 
-This command loads a Boulder STONE YAML file and generates a standalone Python
-script that recreates the same Cantera simulation. The generated script is
+This command loads a Boulder STONE YAML file and generates a Python script
+(it needs Boulder to run) that solves the same simulation. The generated script is
 equivalent to what would be produced by `boulder --headless --download`.
 """
 
@@ -17,7 +17,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="stone2sim",
         description=(
-            "Convert a STONE YAML configuration to a standalone Python simulation script. "
+            "Convert a STONE YAML configuration to a Python simulation script (it needs Boulder to run). "
             "The generated script is equivalent to `boulder config.yaml --headless --download output.py`."
         ),
     )

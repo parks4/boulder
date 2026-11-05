@@ -240,10 +240,16 @@ those two functions, so they run the same code as the GUI. `solve_stage` returns
 built.
 **One download script.** `--download` and the GUI's Download Python write the same runner-based script
 (`download_script_emitter.script_lines_for_runner`, called by `DualCanteraConverter.script_load_lines`):
-the solved config, a per-stage table of the fully qualified class each node was built as (read from
+the run's resolved YAML text (the text the run stores: one resolved YAML, stored, downloaded and
+embedded), loaded with `config.load_config_text` and passed through the solving runner class's
+`normalize` + `validate`; the script imports that class (`converter.runner_class`, `BoulderRunner` when
+unset). It then holds a per-stage table of the fully qualified class each node was built as (read from
 the built objects, so plugin and host subclasses show under their own names), one `runner.solve_stage`
 call per stage that keeps the built objects in `stages`, and a check of those objects against the
-table. There is no separate Cantera-native script. A config with a `continuation:` section runs it with
+table. There is no separate Cantera-native script. Writing the script never fails a solve: when it
+cannot reproduce the run (the runner class is not importable, the config cannot be dumped to YAML) it
+is still written and its first executable line raises a `RuntimeError` naming the cause. Time
+overrides are rejected on staged configs (`with_time_overrides`; the server answers 422). A config with a `continuation:` section runs it with
 `runner.run_continuation()`, which writes each parameter update into the config the next stage solve is
 built from.
 Per entry: prepare the config with the runner's `normalize` + `validate` → fingerprint → store hit

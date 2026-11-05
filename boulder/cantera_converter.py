@@ -906,6 +906,10 @@ class DualCanteraConverter:
         # Runner class that drives this converter; the download script imports it
         # (BoulderRunner when unset).
         self.runner_class: Optional[type] = None
+        # The run's resolved raw config (before the runner's normalize/validate):
+        # the download script embeds it as YAML.  Without it the prepared config
+        # is embedded instead.
+        self._download_raw: Optional[Dict[str, Any]] = None
         # Flow-conservation tracking: populated during connection building
         self._unresolved_mfc_ids: Set[str] = set()
         self._mfc_topology: Dict[str, Tuple[str, str]] = {}  # conn_id -> (src, tgt)
@@ -1126,15 +1130,39 @@ class DualCanteraConverter:
             for node_id in stage.node_ids
             if node_id in self.reactors
         }
+        from ruamel.yaml.error import YAMLError
+
+        from .download_script_emitter import is_importable_class
         from .runner import BoulderRunner
+        from .scenario_store import definition_text
 
         runner_cls = self.runner_class or BoulderRunner
+        runner_name = f"{runner_cls.__module__}.{runner_cls.__qualname__}"
+        problem = None
+        config_yaml = ""
+        prepared = self._download_raw is None
+        to_embed = (
+            self._download_config if self._download_raw is None else self._download_raw
+        )
+        if not is_importable_class(runner_name):
+            problem = (
+                f"the runner class {runner_name} cannot be imported (defined in "
+                "__main__ or inside a function); define it in a module."
+            )
+        else:
+            try:
+                config_yaml = definition_text(to_embed)
+            except YAMLError as exc:
+                problem = f"the run's config cannot be written as YAML: {exc}"
         return script_lines_for_runner(
             f"from {runner_cls.__module__} import {runner_cls.__qualname__}",
             runner_cls.__qualname__,
             self._download_config,
             plan,
             node_classes,
+            config_yaml=config_yaml,
+            prepared=prepared,
+            problem=problem,
         )
 
     def create_solution(
@@ -2434,8 +2462,7 @@ class DualCanteraConverter:
         # same stage-by-stage one, written from the config just solved.
         download_path = getattr(self, "_download_config_path", None) or "config.yaml"
         self.code_lines = [
-            "# Boulder staged solve: the solved config, then one solve per stage",
-            "import cantera as ct",
+            "# Boulder staged solve: the run's resolved config, then one solve per stage",
             *self.script_load_lines(download_path, plan),
         ]
         # viz_network is already set on self.network by build_viz_network
