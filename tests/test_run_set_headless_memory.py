@@ -144,8 +144,8 @@ def test_previous_entrys_network_is_released_before_the_next_build(
     """Entry 1's network is not alive while entry 2 builds.
 
     Asserts: when each solve starts (before its network is built), the
-    live-simulation singleton holds no network and a gc census finds no
-    ``ReactorNet`` left over from an earlier entry.
+    live-simulation singleton holds no network and a gc census finds no more
+    ``ReactorNet`` than at the first solve (none left over from an earlier entry).
     """
     from boulder.simulation_worker import SimulationWorker
 
@@ -160,7 +160,8 @@ def test_previous_entrys_network_is_released_before_the_next_build(
 
     monkeypatch.setattr(SimulationWorker, "start_simulation", start)
     run_set(_gri("a", "b"), cfg)
-    assert len(seen) == 3 and set(seen) == {(0, True)}, seen
+    # Networks left by earlier tests in the process are the baseline (first solve).
+    assert len(seen) == 3 and set(seen) == {(seen[0][0], True)}, seen
 
 
 def test_outcome_carries_the_solve_wall_time(cfg: Path) -> None:
