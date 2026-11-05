@@ -94,8 +94,8 @@ def _store_single_run(cfg: Path) -> tuple:
     class _Solved:
         _last_config = post_config
 
-        def create_solution(self, mechanism, **_):
-            return None  # no template: the writer falls back to the plugin converter
+        def create_solution(self, mechanism, **kw):
+            return _default_solution(mechanism, **kw)
 
     payload = {"times": [0.0], "reactors_series": {}}
     with patch.object(
@@ -284,3 +284,12 @@ def test_bad_status_order_is_500_with_detail(cfg, order):
     resp = _get(cfg, lambda ctx: {"text": "x", "tone": "ok", "order": order})
     assert resp.status_code == 500
     assert "order" in resp.json()["detail"]
+
+
+def _default_solution(mechanism: str, **kw: Any) -> Any:
+    """Return the default converter's Solution, as the store step requires one."""
+    from boulder.cantera_converter import DualCanteraConverter
+
+    return DualCanteraConverter.create_solution(
+        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
+    )

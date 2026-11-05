@@ -80,8 +80,8 @@ class _Solved:
     def __init__(self, last_config: Dict[str, Any] | None = None) -> None:
         self._last_config = last_config
 
-    def create_solution(self, mechanism: str, **_: Any) -> None:
-        return None  # no template: the writer falls back to the plugin converter
+    def create_solution(self, mechanism: str, **kw: Any) -> Any:
+        return _default_solution(mechanism, **kw)
 
 
 def _solve(
@@ -271,3 +271,12 @@ def test_a_global_sweep_config_still_has_a_base_run(cfg: Path) -> None:
     (outcome,) = _solve(raw, cfg)
 
     assert outcome.sid == BASELINE_SCENARIO_ID
+
+
+def _default_solution(mechanism: str, **kw: Any) -> Any:
+    """Return the default converter's Solution, as the store step requires one."""
+    from boulder.cantera_converter import DualCanteraConverter
+
+    return DualCanteraConverter.create_solution(
+        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
+    )

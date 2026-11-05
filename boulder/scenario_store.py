@@ -516,7 +516,10 @@ def find_entry(
 
 
 def load_matching(
-    store_dir: Optional[Path], fingerprint: str, identity: str = ""
+    store_dir: Optional[Path],
+    fingerprint: str,
+    identity: str = "",
+    converter_cls: Optional[type] = None,
 ) -> Optional[Dict[str, Any]]:
     """:func:`find_entry` plus the payload, in the shape the cache routes serve.
 
@@ -530,7 +533,7 @@ def load_matching(
     if attrs is None:
         return None
     scenario_id = str(attrs.get("id") or "")
-    payload = read_entry(store_dir, scenario_id, identity)
+    payload = read_entry(store_dir, scenario_id, identity, converter_cls)
     if payload is None:
         return None
     return {

@@ -169,3 +169,114 @@ def test_outcome_carries_the_solve_wall_time(cfg: Path) -> None:
     solved = run_set(_gri("a"), cfg)
     assert solved[0].elapsed_s > 0 and solved[0].gui == {}
     assert run_set(_gri("a"), cfg)[0].elapsed_s == 0.0
+
+
+def _host_converter(parses: List[str]) -> type:
+    """Build a host-style converter serving parsed mechanisms from its own cache."""
+    parsed: Dict[str, ct.Solution] = {}
+
+    class HostConverter(DualCanteraConverter):
+        def create_solution(
+            self, mech_name: str, *, kinetics: bool = True, transport: bool = False
+        ) -> ct.Solution:
+            path, _ = parse_mechanism_spec(mech_name)
+            if path not in parsed:
+                parses.append(path)
+                parsed[path] = ct.Solution(path)
+            return derive_solution(
+                parsed[path],
+                kinetics=kinetics,
+                transport=transport,
+                mechanism_path=path,
+            )
+
+    return HostConverter
+
+
+def _chain() -> Dict[str, Any]:
+    """Return a two-step ``for`` chain on the gri30 reactor."""
+    raw = _gri()
+    del raw["scenarios"]
+    raw["scenarios_sweep"] = {
+        "for": {
+            "parameter": "network[id=r].IdealGasReactor.initial.temperature",
+            "values": [1000, 1100],
+        }
+    }
+    return raw
+
+
+def test_cached_chain_step_and_gui_read_use_the_solving_converter(
+    cfg: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every store read goes through the converter class that solved.
+
+    Asserts: with a host converter, a fully cached chain re-run (each skipped step
+    is read back to seed the next) and a ``GET /api/scenarios/<id>`` read parse the
+    mechanism file once in total, and the process-wide ``load_solution`` cache stays
+    empty (the default converter was never used to read).
+    """
+    from fastapi.testclient import TestClient
+
+    from boulder import ctutils
+    from boulder.api.main import create_app
+
+    parses: List[str] = []
+    host = _host_converter(parses)
+    monkeypatch.setattr(ctutils, "_PARSED_SOLUTIONS", {})
+    raw = _chain()
+    solved = run_set(copy.deepcopy(raw), cfg, converter_cls=host)
+    again = run_set(copy.deepcopy(raw), cfg, converter_cls=host)
+    assert [o.cached for o in again] == [True] * len(solved)
+
+    app = create_app()
+    with TestClient(app) as client:
+        app.state.preloaded_config_path = str(cfg)
+        app.state.preloaded_raw = copy.deepcopy(raw)
+        app.state.converter_class = host
+        ctutils._PARSED_SOLUTIONS.clear()  # app startup built its own default converter
+        response = client.get(f"/api/scenarios/{solved[0].sid}")
+    assert response.status_code == 200 and response.json()["reactors_series"]
+    assert parses == ["gri30.yaml"]
+    assert ctutils._PARSED_SOLUTIONS == {}
+
+
+def test_store_step_refuses_a_converter_without_a_solution(tmp_path: Path) -> None:
+    """Asserts: ``store_solved_scenario`` raises ``ValueError`` naming the mechanism.
+
+    The solving converter's ``create_solution`` returns ``None``: no fallback to
+    another converter class.
+    """
+    from boulder.sweep_runner import store_solved_scenario
+
+    class NoSolution:
+        def create_solution(self, mechanism: str, **_: Any) -> None:
+            return None
+
+    with pytest.raises(ValueError, match="gri30.yaml"):
+        store_solved_scenario(
+            tmp_path / "store",
+            "a",
+            {},
+            {},
+            {"times": [0.0], "reactors_series": {}},
+            NoSolution(),
+            order=0,
+            label="a",
+            fingerprint="f" * 64,
+            identity="",
+            mechanism="gri30.yaml",
+        )
+
+
+def test_a_cached_entry_does_not_leave_the_previous_runs_network_live(
+    cfg: Path,
+) -> None:
+    """Asserts: after a run set whose only entry is cached, the live simulation is empty.
+
+    The network of the earlier run is not shown for this config.
+    """
+    run_set(_gri("a"), cfg)
+    assert get_live_simulation().get_network() is not None
+    assert run_set(_gri("a"), cfg)[0].cached
+    assert get_live_simulation().get_network() is None

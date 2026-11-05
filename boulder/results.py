@@ -182,7 +182,8 @@ class ScenarioSet(Mapping[str, "Scenario"]):
             from .payload_store import solution_for  # noqa: PLC0415
 
             solution = solution_for(path, kinetics=True)
-            assert solution is not None  # path is a resolved mechanism file
+            if solution is None:
+                raise ValueError(f"No Solution could be built for mechanism {path!r}")
             self._solutions[path] = solution
         return self._solutions[path]
 

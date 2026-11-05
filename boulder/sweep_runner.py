@@ -425,14 +425,17 @@ def final_states_of(gui: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
 
 
 def stored_final_states(
-    store_dir: Path, sid: str, identity: str
+    store_dir: Path,
+    sid: str,
+    identity: str,
+    converter_cls: Optional[type] = None,
 ) -> Optional[Dict[str, Dict[str, Any]]]:
     """Return :func:`final_states_of` a cached store entry, or ``None`` if unreadable.
 
     A cached (skipped) chain step still has to feed the next one, so its
     converged state is read back from the store instead of re-solved.
     """
-    payload = scenario_store.read_entry(store_dir, sid, identity)
+    payload = scenario_store.read_entry(store_dir, sid, identity, converter_cls)
     return final_states_of(payload) if payload else None
 
 
@@ -480,6 +483,12 @@ def store_solved_scenario(
     prints it.
     """
     say = warn or (lambda msg: print(msg, flush=True))
+    template = conv.create_solution(mechanism, kinetics=False) if mechanism else None
+    if mechanism and template is None:
+        raise ValueError(
+            f"{type(conv).__name__}.create_solution returned None for mechanism "
+            f"{mechanism!r}; the store needs the solving converter's Solution."
+        )
 
     entry_attrs: Dict[str, Any] = {
         key: value
@@ -512,7 +521,7 @@ def store_solved_scenario(
         source=source,
         alt_fingerprints=alt_fingerprints,
         # The solving converter's own Solution: one parse of the mechanism.
-        solution=conv.create_solution(mechanism, kinetics=False) if mechanism else None,
+        solution=template,
     )
 
     contributors = get_cache_contributor_registry().contributors
@@ -712,6 +721,8 @@ def run_set(
     for index, sid, cfg in entries:
         if stop_event is not None and stop_event.is_set():
             break
+        # A cached entry solves nothing: do not leave the previous config's network live.
+        clear_live_simulation()
         config, mech_name, fingerprint = prepare_scenario(cfg, resolve, runner_cls)
         hit = store_dir is not None and cached_fps.get(sid) == fingerprint
         if on_entry is not None:
@@ -725,7 +736,9 @@ def run_set(
             scenario_store.update_display_attrs(store_dir, sid, label=sid, order=index)
             # A skipped chain step still seeds the next one.
             if chain:  # no other run set reads the stored payload back
-                cursor.previous_states = stored_final_states(store_dir, sid, identity)
+                cursor.previous_states = stored_final_states(
+                    store_dir, sid, identity, converter_cls
+                )
             notify_cached(
                 on_cached,
                 store_dir,
