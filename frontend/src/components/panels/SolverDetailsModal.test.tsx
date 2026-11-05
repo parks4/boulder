@@ -9,13 +9,17 @@ import "@testing-library/jest-dom";
 import { SolverDetailsModal } from "./SolverDetailsModal";
 import { STEADY_KINDS } from "./solverShared";
 
-function renderModal(kind: (typeof STEADY_KINDS)[number] = "advance_to_steady_state") {
+function renderModal(
+  kind: (typeof STEADY_KINDS)[number] = "advance_to_steady_state",
+  extra: { timeLocked?: boolean; mode?: "steady" | "transient" } = {},
+) {
   return render(
     <SolverDetailsModal
       open
       onCancel={vi.fn()}
       onDone={vi.fn()}
-      mode="steady"
+      mode={extra.mode ?? "steady"}
+      timeLocked={extra.timeLocked}
       kind={kind}
       kinds={STEADY_KINDS}
       onKindChange={vi.fn()}
@@ -56,5 +60,20 @@ describe("SolverDetailsModal doc-link tooltip", () => {
       "href",
       "https://cantera.org/stable/python/zerodim.html#cantera.ReactorNet.solve_steady",
     );
+  });
+});
+
+describe("SolverDetailsModal time fields on a staged config", () => {
+  it("disables the time fields and says where to set the time", () => {
+    renderModal("advance_to_steady_state", { mode: "transient", timeLocked: true });
+    expect(screen.getByTestId("transient-time")).toBeDisabled();
+    expect(screen.getByTestId("transient-step")).toBeDisabled();
+    expect(screen.getByText("set advance_time per stage in the YAML")).toBeInTheDocument();
+  });
+
+  it("keeps the time fields editable on a flat config", () => {
+    renderModal("advance_to_steady_state", { mode: "transient" });
+    expect(screen.getByTestId("transient-time")).toBeEnabled();
+    expect(screen.queryByText("set advance_time per stage in the YAML")).toBeNull();
   });
 });

@@ -8,9 +8,11 @@ solved through each, with a host converter subclass (its own
 each pair of paths the stored fingerprint, the stored entry attributes, the
 stored run definition, the hook / contributor calls and the time grid are
 compared; the whole matrix runs for a single file and for a ``from:`` leaf.
-A fifth path, the downloaded script, is run in a subprocess and its reactor,
+A fifth path, the script users receive (written by the real download entry,
+``--headless --download``), is run in a subprocess and its reactor,
 stream-point and trajectory states are compared with the pipeline's, for those
-two files and for a two-mechanism case with a by-name switch plugin.
+two files and for a two-mechanism case with a by-name switch plugin and a
+host reactor subclass; the script's class listing is checked too.
 The stored definition, run alone as its own file, must hash to the same entry,
 and no path may write the user's files.
 
@@ -43,7 +45,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from boulder import cantera_converter, cli, result_cache, scenario_store  # noqa: E402
 from boulder.api import main as api_main  # noqa: E402
-from boulder.download_script_emitter import script_lines_for_runner  # noqa: E402
 from boulder.runner import BoulderRunner  # noqa: E402
 from boulder.runset import resolve_store_dir  # noqa: E402
 
@@ -106,8 +107,30 @@ import json
 import os
 from pathlib import Path
 
+import cantera as ct
+
+from boulder import register_reactor_builder
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.result_cache import CacheContributorPlugin, register_cache_contributor
+
+
+class ExampleReactor(ct.IdealGasConstPressureMoleReactor):
+    # A host's reactor subclass: the downloaded script must list it by name.
+    pass
+
+
+def _build_example_reactor(converter, node):
+    props = node.get("properties", {})
+    initial = props["initial"]
+    gas = converter.create_solution("gri30.yaml")
+    gas.TPX = (
+        float(initial["temperature"]),
+        float(initial["pressure"]),
+        str(initial["composition"]),
+    )
+    reactor = ExampleReactor(gas)
+    reactor.volume = float(props["volume"])
+    return reactor
 
 
 def _record(kind, **fields):
@@ -148,6 +171,12 @@ def _by_name_switch(gas, target, htol, Xtol):
 def register_plugins(plugins):
     plugins.converter_class = HostConverter
     plugins.mechanism_switch_fn = _by_name_switch
+    register_reactor_builder(
+        plugins,
+        kind="ExampleReactor",
+        builder=_build_example_reactor,
+        reactor_class=ExampleReactor,
+    )
     plugins.scenario_attrs = _attrs
     plugins.on_scenario_solved = _solved
     register_cache_contributor(Recorder())
@@ -184,6 +213,7 @@ def _snapshot(cfg: Path, record: Path) -> Dict[str, Dict[str, Any]]:
             "fingerprint": attrs["fingerprint"],
             "attrs": {k: v for k, v in attrs.items() if k not in _VOLATILE_ATTRS},
             "source": attrs["source_sha256"],
+            "code": payload["code_str"],
             # Contributor calls for this entry (by its fingerprint), then the
             # sweep hooks fired for it (by scenario id).
             "contributors": sum(
@@ -407,7 +437,7 @@ stages:
     solve: advance_to_steady_state
 stage_a:
 - id: r_a
-  IdealGasConstPressureMoleReactor:
+  ExampleReactor:
     volume: 1.0e-5
     initial: {temperature: 1100, pressure: 101325, composition: "H2:2, O2:1, N2:4, CO2:1"}
 stage_b:
@@ -532,15 +562,10 @@ def script_and_pipeline(request, tmp_path_factory) -> Dict[str, Any]:
         scope: Dict[str, Any] = {}
         exec(_DUMP, scope)  # noqa: S102 - our own helper text
 
+        # The script users receive: the real download entry, ``--headless --download``.
+        cli.main([str(cfg), "--headless", "--download", str(script)])
+        text = script.read_text("utf-8")
         runner = BoulderRunner.from_yaml(str(cfg))
-        # The runner-based script: one ``runner.solve_stage`` call per stage.
-        lines = script_lines_for_runner(
-            "from boulder.runner import BoulderRunner",
-            "BoulderRunner",
-            str(cfg),
-            runner.build_stage_graph(),
-        )
-        script.write_text("\n".join(lines) + "\n", encoding="utf-8")
         runner.build()
         converter = runner.converter
         assert converter is not None and converter._staged_trajectory is not None
@@ -562,7 +587,12 @@ def script_and_pipeline(request, tmp_path_factory) -> Dict[str, Any]:
             cwd=str(root),
         )
         assert run.returncode == 0, run.stderr[-3000:]
-        return {"pipeline": pipeline, "script": json.loads(out.read_text("utf-8"))}
+        return {
+            "case": request.param,
+            "text": text,
+            "pipeline": pipeline,
+            "script": json.loads(out.read_text("utf-8")),
+        }
     finally:
         patch.undo()
 
@@ -578,21 +608,73 @@ def test_downloaded_script_agrees_with_the_pipeline(script_and_pipeline) -> None
     _assert_same_states(script_and_pipeline["script"], script_and_pipeline["pipeline"])
 
 
-def test_run_continuation_first_step_agrees_with_the_pipeline(
+#: The class table each case's script must carry: node -> fully qualified class.
+_LISTED = {
+    "flat": {"reactor": "cantera.reactor.IdealGasReactor"},
+    "from": {"reactor": "cantera.reactor.IdealGasReactor"},
+    "switch": {
+        "r_a": "epm_host_plugin.ExampleReactor",
+        "r_b": "cantera.reactor.IdealGasConstPressureMoleReactor",
+    },
+}
+
+
+def test_downloaded_script_lists_the_classes_that_run(script_and_pipeline) -> None:
+    """The downloaded script names, stage by stage, the class each node runs.
+
+    Asserts the script written by ``--headless --download`` has one
+    ``runner.solve_stage`` call per stage, lists every node with its fully
+    qualified class (the host's own subclass included) and checks the built
+    objects against it (``EXPECTED_CLASSES``); the script itself ran in the
+    fixture, so a wrong class would have raised.
+    """
+    case, text = script_and_pipeline["case"], script_and_pipeline["text"]
+    assert text.count("runner.solve_stage(") == (2 if case == "switch" else 1)
+    for node, name in _LISTED[case].items():
+        assert f"#     {node}: {name}\n" in text
+        assert f"{node!r}: {name!r}" in text
+    assert "check_classes(stages[" in text
+
+
+def test_every_path_stores_the_runner_based_script(snapshots) -> None:
+    """Every entry point stores the runner-based script as the entry's code.
+
+    Asserts the stored ``code_str`` of each path is the staged script: a
+    ``runner.solve_stage`` call and the listed class of the reactor.
+    """
+    for which in PATHS:
+        for sid, entry in snapshots[which].items():
+            code = entry["code"]
+            assert "runner.solve_stage(" in code, (which, sid)
+            assert "#     reactor: cantera.reactor.IdealGasReactor" in code, (
+                which,
+                sid,
+            )
+
+
+def test_run_continuation_agrees_with_the_pipeline_at_the_updated_value(
     tmp_path, monkeypatch
 ) -> None:
-    """One ``run_continuation`` step leaves the states the pipeline computes.
+    """Three ``run_continuation`` steps (x0.5) end where the pipeline does at the last value.
 
-    Asserts reactor and trajectory states after a single-step continuation
-    equal a fresh pipeline solve, on the gri30 -> h2o2 by-name switch case.
+    Asserts the recorded parameter is 1e-4, 5e-5, 2.5e-5 and that the reactor and
+    trajectory states after the third step equal a fresh pipeline solve of the
+    same config with the mass flow rate set to 2.5e-5, on the gri30 -> h2o2
+    by-name switch case (the updated connection crosses the stage boundary).
     """
     _host_env(monkeypatch, tmp_path)
     cfg = tmp_path / "config.yaml"
     cfg.write_text(_SWITCH_CONFIG, encoding="utf-8")
+    at_last_value = tmp_path / "last.yaml"
+    assert "mass_flow_rate: 1.0e-4" in _SWITCH_CONFIG
+    at_last_value.write_text(
+        _SWITCH_CONFIG.replace("mass_flow_rate: 1.0e-4", "mass_flow_rate: 2.5e-5"),
+        encoding="utf-8",
+    )
     scope: Dict[str, Any] = {}
     exec(_DUMP, scope)  # noqa: S102 - our own helper text
 
-    pipeline = BoulderRunner.from_yaml(str(cfg))
+    pipeline = BoulderRunner.from_yaml(str(at_last_value))
     pipeline.build()
     assert pipeline.converter is not None
     expected = scope["boulder_dump"](
@@ -603,9 +685,12 @@ def test_run_continuation_first_step_agrees_with_the_pipeline(
     stepped.run_continuation(
         {
             "parameter": "connections.a_to_b.mass_flow_rate",
-            "update": {"multiply": 1.0},
-            "until": {"max_iters": 1},
+            "update": {"multiply": 0.5},
+            "until": {"max_iters": 3},
         }
+    )
+    assert [r["parameter"] for r in stepped._continuation_rows] == pytest.approx(
+        [1.0e-4, 5.0e-5, 2.5e-5]
     )
     assert stepped.converter is not None
     got = scope["boulder_dump"](stepped.converter, stepped.converter._staged_trajectory)

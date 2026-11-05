@@ -228,16 +228,24 @@ endpoint uses — same module, so the count can never drift from the expansion),
 `sweep_axis_values`, `resolve_store_path`, and `load_yaml_with_inheritance` (`from:` chains;
 `scenarios:` is deliberately not inherited, `sweep:` is).
 
-**One pipeline.** `sweep_runner.run_set(raw, config_path, only=..., use_cache=...)` is the one
-solve-and-store pipeline. CLI run (`--headless --run`), CLI sweep (`--sweep --headless`), GUI Run, GUI
-Sweep and the Python API all call it; a single run is a run set of one entry (`only={entry_id}`).
+**One pipeline.** All entry points (CLI run, CLI sweep, GUI run, GUI sweep, Python API) call one
+solve-and-store pipeline, `sweep_runner.run_set(raw, config_path, only=..., use_cache=...)`;
+downloaded scripts and `run_continuation` run the same per-stage solve. A single run is a run set of
+one entry (`only={entry_id}`).
 **One per-stage solve.** `staged_solver.solve_one_stage` builds, solves, switches mechanism, fills the
 stream points and records the trajectory of one stage; `solve_staged` is a plain loop over it followed by
 `build_stage_viz`, the one visualization step. Downloaded scripts and `BoulderRunner.run_continuation`
 step the stages themselves through `BoulderRunner.solve_stage` / `build_viz_network`, thin delegates to
-those two functions, so they run the same code as the GUI. (`--download` writes the Cantera-native
-script of `CanteraScriptEmitter`; only the runner-based script, written by `script_lines_for_runner`
-when no config snapshot exists, calls the runner.)
+those two functions, so they run the same code as the GUI. `solve_stage` returns the objects the stage
+built.
+**One download script.** `--download` and the GUI's Download Python write the same runner-based script
+(`download_script_emitter.script_lines_for_runner`, called by `DualCanteraConverter.script_load_lines`):
+the solved config, a per-stage table of the fully qualified class each node was built as (read from
+the built objects, so plugin and host subclasses show under their own names), one `runner.solve_stage`
+call per stage that keeps the built objects in `stages`, and a check of those objects against the
+table. There is no separate Cantera-native script. A config with a `continuation:` section runs it with
+`runner.run_continuation()`, which writes each parameter update into the config the next stage solve is
+built from.
 Per entry: prepare the config with the runner's `normalize` + `validate` → fingerprint → store hit
 (`on_scenario_cached`) or solve through the staged solver (`converter.build_network`, the one staged
 driver) → write the entry (`store_solved_scenario`, the one store writer) → contributors and host hooks.

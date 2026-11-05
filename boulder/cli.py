@@ -301,10 +301,12 @@ def run_headless_mode(
 
     Notes
     -----
-    The generated Python script is completely standalone and can be executed with:
+    The generated Python script embeds the solved config and solves it stage by
+    stage through ``BoulderRunner`` (Boulder and the host's plugins must be
+    installed); it can be executed with:
         python output.py
 
-    The script will run the simulation and print time-series data to the console.
+    The script will run the simulation and print the reactor states to the console.
     For advanced post-processing, users can modify the generated script to save
     data to files or create custom plots.
 

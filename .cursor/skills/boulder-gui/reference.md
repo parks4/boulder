@@ -11,7 +11,7 @@ Base URL assumed: `http://127.0.0.1:8050`.
 | GET | `/api/configs/default` | Built-in empty template |
 | POST | `/api/configs/upload` | Multipart YAML/YML/PY upload |
 | POST | `/api/configs/validate` | Validate normalized config JSON |
-| POST | `/api/simulations` | Body: `{}` (optional `scenario_id`, `scenarios`, `simulation_time`, `time_step`, `force`) runs the server live config → `{simulation_id}` |
+| POST | `/api/simulations` | Body: `{}` (optional `scenario_id`, `scenarios`, `simulation_time`, `time_step`, `force`) runs the server live config → `{simulation_id}`; a time override on a staged config (`stages:`) is a 422, set `advance_time` per stage |
 | GET | `/api/simulations/{id}/stream` | SSE progress (`complete`, `error`, partial updates) |
 | GET | `/api/simulations/{id}/results` | Full results when done; `status: running` while active |
 

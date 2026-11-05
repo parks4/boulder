@@ -1,188 +1,138 @@
-"""Tests for the CanteraScriptEmitter class and script_lines_for_runner.
+"""Tests for the downloadable script: the runner-based, stage-by-stage solve.
 
-Covers:
-- Class existence and importability from boulder.download_script_emitter
-- __init__ accepts optional ``converter`` kwarg stored as self.converter
-- ``emit(config)`` returns the same lines as the backward-compat wrapper
-  ``emit_cantera_native_script(config)``
-- Backward-compat wrapper ``emit_cantera_native_script`` still works
-- ``script_lines_for_runner`` is importable from boulder.download_script_emitter
-  and returns a list of strings
+Covers ``boulder.download_script_emitter`` and ``DualCanteraConverter.script_load_lines``:
+the class listing per stage, the check of importable classes, the stage objects
+``runner.solve_stage`` returns, and the errors raised instead of a broken script.
 """
 
 from __future__ import annotations
 
+import ast
+import copy
 from typing import Any, Dict
 
-_MINIMAL_CONFIG: Dict[str, Any] = {
+import cantera as ct
+import pytest
+
+from boulder.cantera_converter import DualCanteraConverter
+from boulder.config import normalize_config, validate_config
+from boulder.download_script_emitter import (
+    is_importable_class,
+    qualified_class_name,
+    script_lines_for_runner,
+)
+from boulder.runner import BoulderRunner
+from boulder.staged_solver import build_stage_graph
+
+_CONFIG: Dict[str, Any] = {
     "phases": {"gas": {"mechanism": "gri30.yaml"}},
-    "nodes": [
+    "network": [
         {
             "id": "r1",
-            "type": "IdealGasConstPressureMoleReactor",
-            "properties": {
-                "temperature": 1500,
-                "pressure": 101325,
-                "composition": "H2:1",
+            "IdealGasConstPressureMoleReactor": {
+                "volume": 1.0e-5,
+                "initial": {
+                    "temperature": 1500,
+                    "pressure": 101325,
+                    "composition": "H2:1, O2:1",
+                },
             },
-        }
-    ],
-    "connections": [],
-    "stages": [
-        {
-            "id": "s1",
-            "nodes": ["r1"],
-            "solver": {"kind": "advance_to_steady_state"},
         }
     ],
 }
 
 
-class TestCanteraScriptEmitterClass:
-    """Verify CanteraScriptEmitter class structure and basic behaviour."""
-
-    def test_class_is_importable(self):
-        """CanteraScriptEmitter can be imported from boulder.download_script_emitter."""
-        from boulder.download_script_emitter import CanteraScriptEmitter  # noqa: F401
-
-    def test_class_is_callable(self):
-        """CanteraScriptEmitter() can be instantiated with no arguments."""
-        from boulder.download_script_emitter import CanteraScriptEmitter
-
-        emitter = CanteraScriptEmitter()
-        assert emitter is not None
-
-    def test_init_accepts_converter_kwarg(self):
-        """__init__ accepts optional converter=None and stores it as self.converter."""
-        from boulder.download_script_emitter import CanteraScriptEmitter
-
-        sentinel = object()
-        emitter = CanteraScriptEmitter(converter=sentinel)
-        assert emitter.converter is sentinel
-
-    def test_init_converter_defaults_to_none(self):
-        """Converter defaults to None when not supplied."""
-        from boulder.download_script_emitter import CanteraScriptEmitter
-
-        emitter = CanteraScriptEmitter()
-        assert emitter.converter is None
-
-    def test_emit_returns_list_of_strings(self):
-        """emit(config) returns a non-empty list of strings."""
-        from boulder.download_script_emitter import CanteraScriptEmitter
-
-        lines = CanteraScriptEmitter().emit(_MINIMAL_CONFIG)
-        assert isinstance(lines, list)
-        assert len(lines) > 0
-        assert all(isinstance(line, str) for line in lines)
-
-    def test_emit_output_matches_backward_compat_wrapper(self):
-        """emit(config) produces identical output to emit_cantera_native_script(config)."""
-        from boulder.download_script_emitter import (
-            CanteraScriptEmitter,
-            emit_cantera_native_script,
-        )
-
-        class_lines = CanteraScriptEmitter().emit(_MINIMAL_CONFIG)
-        wrapper_lines = emit_cantera_native_script(_MINIMAL_CONFIG)
-        assert class_lines == wrapper_lines
-
-    def test_emit_contains_cantera_import(self):
-        """Emitted script starts with 'import cantera as ct'."""
-        from boulder.download_script_emitter import CanteraScriptEmitter
-
-        lines = CanteraScriptEmitter().emit(_MINIMAL_CONFIG)
-        assert "import cantera as ct" in lines
+def _prepared() -> Dict[str, Any]:
+    return validate_config(normalize_config(copy.deepcopy(_CONFIG)))
 
 
-class TestBackwardCompatWrapper:
-    """Verify emit_cantera_native_script still works after the refactor."""
-
-    def test_wrapper_still_importable(self):
-        """emit_cantera_native_script is importable from boulder.download_script_emitter."""
-        from boulder.download_script_emitter import (
-            emit_cantera_native_script,  # noqa: F401
-        )
-
-    def test_wrapper_returns_list(self):
-        """emit_cantera_native_script returns a list of strings."""
-        from boulder.download_script_emitter import emit_cantera_native_script
-
-        lines = emit_cantera_native_script(_MINIMAL_CONFIG)
-        assert isinstance(lines, list)
-        assert len(lines) > 0
-
-    def test_wrapper_accepts_converter_class_arg(self):
-        """emit_cantera_native_script accepts converter_class kwarg without error."""
-        from boulder.download_script_emitter import emit_cantera_native_script
-
-        lines = emit_cantera_native_script(
-            _MINIMAL_CONFIG, converter_class="SomeConverter"
-        )
-        assert isinstance(lines, list)
+def _script(config: Dict[str, Any], node_classes: Dict[str, str]) -> str:
+    plan = build_stage_graph(config)
+    lines = script_lines_for_runner(
+        "from boulder.runner import BoulderRunner",
+        "BoulderRunner",
+        config,
+        plan,
+        node_classes,
+    )
+    return "\n".join(lines)
 
 
-class TestIdealGasMoleReactorEmission:
-    """IdealGasMoleReactor must emit like the other reactor kinds, not raise.
+def test_class_names_are_fully_qualified_and_importable() -> None:
+    """``qualified_class_name`` gives ``module.QualName``; importable classes resolve."""
+    name = qualified_class_name(ct.IdealGasReactor(ct.Solution("h2o2.yaml")))
+    assert name == "cantera.reactor.IdealGasReactor"
+    assert is_importable_class(name)
+    assert not is_importable_class("no_such_module.Reactor")
+    assert not is_importable_class("builtins.no_such_class")
 
-    Regression: the runtime solve path (create_reactor_from_node) has
-    supported IdealGasMoleReactor since it gained an ``energy`` kwarg, but
-    the --download code emitter's _emit_reactor had no matching branch and
-    fell through to "Unsupported reactor type" for any config using it (e.g.
-    the continuous_reactor CSTR example, which needs energy="off").
-    """
+    class Local(ct.Reactor):
+        pass
 
-    def test_emits_ideal_gas_mole_reactor_constructor(self):
-        """Exercise ``_emit_reactor`` directly.
-
-        The ``emit()`` wrapper only emits real reactor code when given a
-        pre-built stage plan.
-        """
-        from types import SimpleNamespace
-
-        from boulder.download_script_emitter import CanteraScriptEmitter
-
-        node: Dict[str, Any] = {
-            "id": "r1",
-            "type": "IdealGasMoleReactor",
-            "properties": {
-                "temperature": 925,
-                "pressure": 101325,
-                "composition": "CH4:0.1, O2:0.2, N2:0.7",
-                "energy": "off",
-                "volume": 1.0,
-            },
-        }
-        stage = SimpleNamespace(mechanism="gri30.yaml")
-
-        lines = CanteraScriptEmitter()._emit_reactor(node, stage, conns=[])
-        joined = "\n".join(lines)
-        assert "ct.IdealGasMoleReactor(" in joined
-        assert "Unsupported reactor type" not in joined
+    assert not is_importable_class(
+        qualified_class_name(Local(ct.Solution("h2o2.yaml")))
+    )
 
 
-class TestScriptLinesForRunner:
-    """Verify script_lines_for_runner is importable as a module-level function."""
+def test_script_is_valid_python_and_lists_each_stage_with_its_classes() -> None:
+    """The script parses, has one solve_stage call, lists the node's class and checks it."""
+    config = _prepared()
+    text = _script(config, {"r1": "cantera.reactor.IdealGasConstPressureMoleReactor"})
+    ast.parse(text)
+    assert text.count("runner.solve_stage(") == 1
+    assert "#     r1: cantera.reactor.IdealGasConstPressureMoleReactor\n" in text
+    assert "'r1': 'cantera.reactor.IdealGasConstPressureMoleReactor'" in text
+    assert "check_classes(stages['default'])" in text
 
-    def test_function_is_importable(self):
-        """script_lines_for_runner can be imported from boulder.download_script_emitter."""
-        from boulder.download_script_emitter import (
-            script_lines_for_runner,  # noqa: F401
-        )
 
-    def test_function_returns_list(self):
-        """script_lines_for_runner returns a non-empty list of strings.
+def test_a_class_that_cannot_be_imported_is_listed_but_not_checked() -> None:
+    """A node class with no importable name stays in the table, out of EXPECTED_CLASSES."""
+    text = _script(_prepared(), {"r1": "__main__.Local"})
+    assert "#     r1: __main__.Local\n" in text
+    assert "EXPECTED_CLASSES = {}" in text
 
-        Called with a runner_import, runner_class, config_path, and plan=None.
-        """
-        from boulder.download_script_emitter import script_lines_for_runner
 
-        result = script_lines_for_runner(
-            runner_import="from boulder.runner import BoulderRunner",
-            runner_class="BoulderRunner",
-            config_path="/tmp/test.yaml",
-            plan=None,
-        )
-        assert isinstance(result, list)
-        assert len(result) > 0
-        assert all(isinstance(line, str) for line in result)
+def test_a_continuation_section_is_run_through_run_continuation() -> None:
+    """With a ``continuation:`` section the script calls ``runner.run_continuation()``."""
+    config = _prepared()
+    config["continuation"] = {
+        "parameter": "nodes.r1.volume",
+        "update": {"multiply": 0.5},
+        "until": {"max_iters": 2},
+    }
+    text = _script(config, {})
+    assert "runner.run_continuation()" in text
+    assert "runner.solve_stage(" not in text
+
+
+def test_a_config_that_is_not_a_literal_fails_loud() -> None:
+    """A value that cannot be written as a literal raises instead of emitting a broken script."""
+    config = _prepared()
+    config["settings"] = {"bad": float("nan")}
+    with pytest.raises(ValueError, match="cannot be written into a script"):
+        _script(config, {})
+
+
+def test_script_load_lines_requires_a_solved_config() -> None:
+    """``script_load_lines`` before ``build_network`` raises ``RuntimeError``."""
+    with pytest.raises(RuntimeError, match="build_network"):
+        DualCanteraConverter().script_load_lines("x.yaml", None)
+
+
+def test_solve_stage_returns_the_built_stage_objects() -> None:
+    """``runner.solve_stage`` returns ``{node_id: reactor}`` of what the stage built."""
+    runner = BoulderRunner(_prepared())
+    plan = runner.build_stage_graph()
+    built = runner.solve_stage(
+        plan, plan.ordered_stages[0], {}, runner.new_trajectory()
+    )
+    assert isinstance(built["r1"], ct.IdealGasConstPressureMoleReactor)
+
+
+def test_build_network_script_lists_the_classes_it_built() -> None:
+    """The script a built converter writes names the class of each built node."""
+    converter = DualCanteraConverter()
+    converter.build_network(_prepared())
+    text = "\n".join(converter.code_lines)
+    assert "#     r1: cantera.reactor.IdealGasConstPressureMoleReactor\n" in text
+    assert "runner.solve_stage(" in text

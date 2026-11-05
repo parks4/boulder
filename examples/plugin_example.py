@@ -13,11 +13,8 @@ every extension point:
 - ``post_build_hooks`` — a callable run by Boulder after the network is built.
 - Subclassing :class:`~boulder.cantera_converter.DualCanteraConverter` to
   override :meth:`~boulder.cantera_converter.DualCanteraConverter.resolve_mechanism`.
-- Subclassing :class:`~boulder.download_script_emitter.CanteraScriptEmitter` to
-  override ``_emit_reactor`` and ``_emit_download_imports`` — the *emitter seam*
-  that controls what the generated ``--download`` script looks like.
-- Setting ``SCRIPT_EMITTER_CLASS`` on a :class:`DualCanteraConverter` subclass
-  so Boulder uses the custom emitter automatically.
+- The generated ``--download`` script needs no hook: it lists, per stage, the
+  class each node was built as (``MonolithReactor`` here), and checks it.
 - Subclassing :class:`~boulder.runner.BoulderRunner` to wire the custom
   converter into the full pipeline.
 
@@ -30,7 +27,6 @@ from pydantic import BaseModel, Field
 from boulder import register_reactor_builder
 from boulder.cantera_converter import BoulderPlugins, DualCanteraConverter
 from boulder.config import normalize_config, validate_config
-from boulder.download_script_emitter import CanteraScriptEmitter
 from boulder.runner import BoulderRunner
 
 # %%
@@ -140,50 +136,6 @@ class MonolithConverter(DualCanteraConverter):
         """Return *name* unchanged; Cantera handles built-in mechanisms directly."""
         return name
 
-
-# %%
-# 4b. Override the script emitter to produce Monolith-aware download scripts
-# ---------------------------------------------------------------------------
-# :class:`~boulder.download_script_emitter.CanteraScriptEmitter` exposes four
-# overridable seams:
-#
-# * ``_emit_reactor`` — how each reactor node is constructed in the script.
-# * ``_emit_download_imports`` — the import block at the top of the script.
-# * ``_emit_stage_extra_post_build`` — extra per-stage post-build calls.
-# * ``_network_ctor`` — the ``ct.ReactorNet(...)`` expression per stage.
-#
-# Here we override ``_emit_reactor`` to emit ``MonolithReactor(gas)`` instead of
-# the generic ``ct.IdealGasConstPressureMoleReactor(gas)`` for "Monolith" nodes,
-# and ``_emit_download_imports`` to add the corresponding import line.
-# Setting ``SCRIPT_EMITTER_CLASS`` on ``MonolithConverter`` wires it in
-# automatically whenever ``script_load_lines`` is called.
-
-
-class MonolithScriptEmitter(CanteraScriptEmitter):
-    """Emits download scripts that construct ``MonolithReactor`` for Monolith nodes."""
-
-    def _emit_download_imports(self):
-        lines = super()._emit_download_imports()
-        lines.append("from monolith.reactors import MonolithReactor")
-        return lines
-
-    def _emit_reactor(self, node, stage, conns):
-        if node.get("type") != "Monolith":
-            return super()._emit_reactor(node, stage, conns)
-        rid = node["id"]
-        var = self._vn(rid)
-        props = node.get("properties") or {}
-        out = [f"# {rid}: Monolith"]
-        out.extend(self._emit_gas_state(node, stage, conns))
-        out.append(f"{var} = MonolithReactor(gas_{var})")
-        out.append(f"{var}.volume = {float(props.get('volume', 1e-6))!r}")
-        out.append(f"{var}.name = {rid!r}")
-        out.append(f"reactors[{rid!r}] = {var}")
-        out.append("")
-        return out
-
-
-MonolithConverter.SCRIPT_EMITTER_CLASS = MonolithScriptEmitter
 
 # %%
 # 5. Subclass BoulderRunner to wire the custom converter in
