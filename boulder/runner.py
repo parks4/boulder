@@ -229,13 +229,8 @@ class BoulderRunner:
         stage: "Stage",
         inlet_states: Dict[str, Any],
         trajectory: "LagrangianTrajectory",
-        stream_reservoirs: bool = True,
         _stream_node_dicts: Optional[Dict[str, Any]] = None,
         _stream_conns_by_stage: Optional[Dict[str, Any]] = None,
-        # Backward-compatible aliases
-        interface_reservoirs: Optional[bool] = None,
-        _iface_node_dicts: Optional[Dict[str, Any]] = None,
-        _iface_conns_by_stage: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build and solve one stage, updating *inlet_states* and *trajectory* in place.
 
@@ -258,29 +253,15 @@ class BoulderRunner:
             Updated in place with this stage's outlet states.
         trajectory :
             Accumulates per-stage :class:`~cantera.SolutionArray` segments.
-        stream_reservoirs :
-            When ``True`` (default), use synthesised stream-point reservoirs
-            and real MFCs on the downstream side of each stage boundary.
         _stream_node_dicts, _stream_conns_by_stage :
             Stream-point dicts of *plan*; kept on the runner when omitted.
-        interface_reservoirs, _iface_node_dicts, _iface_conns_by_stage :
-            Deprecated aliases for *stream_reservoirs*, *_stream_node_dicts*
-            and *_stream_conns_by_stage*.
 
         Examples
         --------
         .. minigallery:: boulder.runner.BoulderRunner.solve_stage
            :add-heading: Examples using solve_stage
         """
-        if interface_reservoirs is not None and not stream_reservoirs:
-            stream_reservoirs = interface_reservoirs
-        if _iface_node_dicts is not None and _stream_node_dicts is None:
-            _stream_node_dicts = _iface_node_dicts
-        if _iface_conns_by_stage is not None and _stream_conns_by_stage is None:
-            _stream_conns_by_stage = _iface_conns_by_stage
-        if stream_reservoirs and (
-            _stream_node_dicts is None or _stream_conns_by_stage is None
-        ):
+        if _stream_node_dicts is None or _stream_conns_by_stage is None:
             _stream_node_dicts, _stream_conns_by_stage = self._stream_points(plan)
 
         from .staged_solver import solve_one_stage
@@ -292,7 +273,6 @@ class BoulderRunner:
             self.config,
             inlet_states,
             trajectory,
-            stream_reservoirs,
             _stream_node_dicts,
             _stream_conns_by_stage,
         )
@@ -301,9 +281,6 @@ class BoulderRunner:
         self,
         plan: "StageExecutionPlan",
         trajectory: "LagrangianTrajectory",
-        stream_reservoirs: bool = True,
-        # Backward-compatible alias
-        interface_reservoirs: Optional[bool] = None,
     ) -> None:
         """Assemble the full visualization :class:`~cantera.ReactorNet` from all converged states.
 
@@ -318,30 +295,20 @@ class BoulderRunner:
             Execution plan (provides inter-stage connection list).
         trajectory :
             Updated in place: ``trajectory.viz_network`` is set.
-        stream_reservoirs :
-            Whether the solve used stream-point reservoirs (default).
-        interface_reservoirs :
-            Deprecated alias for *stream_reservoirs*.
 
         Examples
         --------
         .. minigallery:: boulder.runner.BoulderRunner.build_viz_network
            :add-heading: Examples using build_viz_network
         """
-        if interface_reservoirs is not None and not stream_reservoirs:
-            stream_reservoirs = interface_reservoirs
-
         from .staged_solver import build_stage_viz
 
-        node_dicts, conns_by_stage = (
-            self._stream_points(plan) if stream_reservoirs else (None, None)
-        )
+        node_dicts, conns_by_stage = self._stream_points(plan)
         self.network = build_stage_viz(
             self._ensure_converter(),
             plan,
             self.config,
             trajectory,
-            stream_reservoirs,
             node_dicts,
             conns_by_stage,
         )

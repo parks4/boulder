@@ -175,7 +175,7 @@ def test_single_run_then_sweep_is_a_cache_hit(
     with patch.object(
         sweep_runner, "solve_scenario", side_effect=AssertionError("re-solved")
     ):
-        sweep_runner.run(cfg, resolve_mechanism=converter_mechanism_resolver(None))
+        sweep_runner.run(cfg)
 
     assert "cached, skipped" in capsys.readouterr().out
 

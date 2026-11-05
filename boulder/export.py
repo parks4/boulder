@@ -39,10 +39,9 @@ def points_from_streams(
     """Return one dict per stream-point diamond from the post-solve config.
 
     A stream-point is a node whose properties carry ``stream_point: true``.
-    After :func:`~boulder.staged_solver.solve_staged` runs with
-    ``stream_reservoirs=True``, each such node has its properties enriched
-    with the full P&ID stream snapshot: T, P, top_Y, mdot, h_mass, density,
-    and volumetric flow rates.
+    After :func:`~boulder.staged_solver.solve_staged` runs, each such node has
+    its properties enriched with the full P&ID stream snapshot: T, P, top_Y,
+    mdot, h_mass, density, and volumetric flow rates.
 
     This is the single source of truth for the "Points" section of the
     report.  The caller (e.g. a spreadsheet builder) receives a list of

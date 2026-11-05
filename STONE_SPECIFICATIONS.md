@@ -137,9 +137,8 @@ that all flow rates are honoured at solve time and the full topology is visible 
 the Sankey and Network visualisations.
 
 The former `settings.staged.stream_reservoirs` YAML key is no longer recognised;
-remove it from any existing configs. The deprecated code alias
-`interface_reservoirs` is still accepted by `solve_staged()` for backward
-compatibility in tests.
+remove it from any existing configs. The `stream_reservoirs` and
+`interface_reservoirs` parameters of `solve_staged()` are removed.
 
 > **Plugin authors — `post_build` topology constraint.** Boulder's `post_build` hooks
 > receive a *per-stage subset* dict `{"nodes": [...], "connections": [...]}` that is a
