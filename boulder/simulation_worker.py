@@ -256,13 +256,7 @@ class SimulationWorker:
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
 
-    def start_simulation(
-        self,
-        converter: Any,
-        config: Dict[str, Any],
-        simulation_time: float,
-        time_step: float,
-    ) -> None:
+    def start_simulation(self, converter: Any, config: Dict[str, Any]) -> None:
         """Start a background simulation.
 
         The worker only solves. Storing the result is the run-set pipeline's job
@@ -281,7 +275,7 @@ class SimulationWorker:
         # Start worker thread
         self._worker_thread = threading.Thread(
             target=self._run_simulation,
-            args=(converter, config, simulation_time, time_step),
+            args=(converter, config),
             daemon=True,
         )
         self._worker_thread.start()
@@ -344,14 +338,10 @@ class SimulationWorker:
                 total_time=self.progress.total_time,
             )
 
-    def _run_simulation(
-        self,
-        converter: Any,
-        config: Dict[str, Any],
-        simulation_time: float,
-        time_step: float,
-    ) -> None:
+    def _run_simulation(self, converter: Any, config: Dict[str, Any]) -> None:
         """Background worker function that runs the actual simulation."""
+        from .sweep_runner import solver_window  # noqa: PLC0415 — cycle
+
         try:
             # Mark running immediately so the UI overlay appears.
             # n_stages starts at 0 and is updated on the first stage-complete
@@ -362,7 +352,7 @@ class SimulationWorker:
                 self.progress.error_message = None
                 self.progress.start_time = time.time()
                 self.progress.end_time = None
-                self.progress.total_time = simulation_time
+                self.progress.total_time = solver_window(config)[0]
                 self.progress.stages_done = 0
                 self.progress.n_stages = 0
 

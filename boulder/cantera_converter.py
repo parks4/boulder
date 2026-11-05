@@ -162,11 +162,9 @@ class BoulderPlugins:
     #: (flat scalar values only go into each scenario's own HDF5 attrs).
     #: Every node/connection's own numeric properties are recorded separately
     #: and automatically, with no host hook needed — see
-    #: :func:`boulder.runset.node_property_attrs`.
-    #:
-    #: Same contract as :func:`boulder.sweep_runner.run`'s ``scenario_attrs``
-    #: argument, which defaults to this when not passed explicitly, so the GUI
-    #: and CLI record identical attributes.
+    #: :func:`boulder.runset.node_property_attrs`. Read by
+    #: :func:`boulder.sweep_runner.run_set`, so the GUI and CLI record identical
+    #: attributes.
     scenario_attrs: Optional[
         Callable[[str, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
     ] = None
@@ -179,9 +177,6 @@ class BoulderPlugins:
     #: cache so a later "Export" reuses the sweep's work instead of re-solving.
     #: Exceptions are caught and logged: one scenario's artifact failure must
     #: not abort the sweep.
-    #:
-    #: Same contract as :func:`boulder.sweep_runner.run`'s ``on_solved``
-    #: argument, which defaults to this when not passed explicitly.
     on_scenario_solved: Optional[Callable[..., None]] = None
 
     #: Called as ``(scenario_id, config, fingerprint, artifacts_dir,
@@ -195,9 +190,6 @@ class BoulderPlugins:
     #: single-run solve does not reach :attr:`on_scenario_solved` (only sweeps
     #: do); a host sees it through its result-cache contributors. Exceptions
     #: are caught and logged.
-    #:
-    #: Same contract as :func:`boulder.sweep_runner.run`'s ``on_cached``
-    #: argument, which defaults to this when not passed explicitly.
     on_scenario_cached: Optional[Callable[..., None]] = None
 
     #: Axis-name/path-leaf → symbol mapping used by
@@ -244,8 +236,7 @@ class BoulderPlugins:
     ] = field(default_factory=list)
 
     #: Converter class used by :mod:`boulder.sweep_runner` to solve each
-    #: scenario, and (when a caller doesn't pass ``resolve_mechanism``
-    #: explicitly) to derive the mechanism-name resolver used for
+    #: scenario, and to derive the mechanism-name resolver used for
     #: fingerprinting and the persisted store too. ``None`` (the default)
     #: means the plain :class:`DualCanteraConverter` — bare mechanism names
     #: pass through unchanged. A host with its own mechanism search
@@ -2003,11 +1994,11 @@ class DualCanteraConverter:
             stage_reactor_ids.append(rid)
 
         # Build intra-stage (and stream-MFC) connections.
-        # LEGACY WORKAROUND NOTE: _mfc_topology and _mfc_flow_rates are NOT reset
-        # between stages so that build_viz_network can run a second conservation pass
-        # with the full cross-stage topology visible.  With stream_reservoirs=True
-        # the conservation pass is self-contained per stage; this accumulation
-        # becomes a no-op and can be removed when the flag is the default.
+        # NOTE: _mfc_topology and _mfc_flow_rates are NOT reset between stages so
+        # that build_viz_network can run a second conservation pass with the full
+        # cross-stage topology visible.  The per-stage conservation pass is
+        # self-contained (stream-point reservoirs), so this accumulation is a no-op
+        # that could be removed.
         self._unresolved_mfc_ids = set()
         for conn in stage_connections:
             cid = conn["id"]

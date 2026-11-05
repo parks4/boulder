@@ -285,8 +285,8 @@ fire neither) — and `on_scenario_cached` for each entry served from the result
 | `on_scenario_solved` | `(scenario_id, config, converter, simulation_result, fingerprint, gui_payload, mechanism) -> None` | Persist per-scenario artifacts keyed by the same fingerprint — e.g. writing each scenario into the single-run result cache so a later "Export" reuses the sweep's work instead of re-solving |
 | `on_scenario_cached` | `(scenario_id, config, fingerprint, artifacts_dir, computed_at) -> None` | Fires on every re-run served from the store (headless sweep, GUI sweep, and the single-run cache check behind the Run button), so a host-side index stays complete when a model is re-run unchanged. It does not fire when the GUI merely opens a config with a stored result, and it may fire repeatedly for the same entry, so a host must handle repeated calls idempotently. `computed_at` is the entry's original solve time |
 
-`sweep_runner.run()` also accepts the hooks as arguments (an explicit argument wins; otherwise it falls
-back to the plugin fields), so the CLI and the GUI record identical attributes. All three are best-effort:
+`sweep_runner.run_set()` reads the hooks from the plugin fields only (`run()` and `run_set()` take no hook
+arguments), so the CLI and the GUI record identical attributes. All three are best-effort:
 a raising hook is caught and logged, never aborting the run.
 
 These were originally `run()` parameters only, which meant a host could reach them *solely* through

@@ -24,13 +24,11 @@ the run-set are pruned.
 Usage: ``python -m boulder.sweep_runner <config.yaml> [--no-plot]``
 
 Host packages with extra needs keep their own entry point (registered via
-``plugins.sweep_runner``) as a thin wrapper around :func:`run`, passing hooks:
-``setup`` for process-level preparation (e.g. putting a private mechanism
-directory on Cantera's search path), ``resolve_mechanism`` to turn bare
-mechanism names into absolute paths (so the GUI server can read the store
-without the host's search-path setup), and ``scenario_attrs`` to attach extra
-scalar KPI attributes to each scenario group (what the Sweep Results plot
-reads).
+``plugins.sweep_runner``) as a thin wrapper around :func:`run`, passing ``setup``
+for process-level preparation (e.g. putting a private mechanism directory on
+Cantera's search path). Per-scenario hooks (``scenario_attrs``,
+``on_scenario_solved``, ``on_scenario_cached``) come from the plugins, and the
+mechanism resolver from the converter class.
 """
 
 from __future__ import annotations
@@ -339,11 +337,10 @@ def solve_scenario(
     # The generated script imports the runner class that prepared this config.
     conv.runner_class = runner_cls
     conv._download_raw = raw
-    sim_t, dt = solver_window(config)
     # The previous entry's network would otherwise stay alive through this build.
     clear_live_simulation()
     worker = SimulationWorker()
-    worker.start_simulation(conv, config, sim_t, dt)
+    worker.start_simulation(conv, config)
     while True:
         progress = worker.get_progress()
         if progress_cb is not None:
@@ -642,10 +639,6 @@ def run_set(
     use_cache: bool = True,
     converter_cls: Optional[Type[Any]] = None,
     runner_cls: Optional[Any] = None,
-    resolve_mechanism: Optional[Callable[[str], str]] = None,
-    scenario_attrs: Optional[Callable[..., Any]] = None,
-    on_solved: Optional[Callable[..., Any]] = None,
-    on_cached: Optional[Callable[..., Any]] = None,
     source: Optional[scenario_store.RunSource] = None,
     on_entry: Optional[Callable[[int, int, str, Dict[str, Any], bool], None]] = None,
     progress_cb: Optional[Callable[[str, Dict[str, Any], Any], None]] = None,
@@ -686,11 +679,11 @@ def run_set(
     """
     say = log or (lambda msg: print(msg, flush=True))
     plugins = get_plugins()
-    scenario_attrs = scenario_attrs or getattr(plugins, "scenario_attrs", None)
-    on_solved = on_solved or getattr(plugins, "on_scenario_solved", None)
-    on_cached = on_cached or getattr(plugins, "on_scenario_cached", None)
+    scenario_attrs = getattr(plugins, "scenario_attrs", None)
+    on_solved = getattr(plugins, "on_scenario_solved", None)
+    on_cached = getattr(plugins, "on_scenario_cached", None)
     runner_cls, converter_cls = _classes(runner_cls, converter_cls)
-    resolve = resolve_mechanism or converter_mechanism_resolver(converter_cls)
+    resolve = converter_mechanism_resolver(converter_cls)
 
     store_dir = resolve_store_dir(raw, config_path)
     identity = scenario_store.config_identity(config_path)
@@ -864,17 +857,6 @@ def run(
     cfg_path: Path,
     *,
     setup: Optional[Callable[[], None]] = None,
-    resolve_mechanism: Optional[Callable[[str], str]] = None,
-    scenario_attrs: Optional[
-        Callable[[str, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
-    ] = None,
-    on_solved: Optional[
-        Callable[
-            [str, Dict[str, Any], DualCanteraConverter, Any, str, Dict[str, Any], str],
-            None,
-        ]
-    ] = None,
-    on_cached: Optional[Callable[[str, Dict[str, Any], str, Path, float], None]] = None,
     runner_cls: Optional[Any] = None,
 ) -> Path:
     """Expand and solve *cfg_path*'s run-set into its collection store.
@@ -888,42 +870,6 @@ def run(
     setup : callable, optional
         Called once before anything else — host process-level preparation
         (e.g. registering a mechanism directory on Cantera's search path).
-    resolve_mechanism : callable, optional
-        ``name -> str`` mapping a bare mechanism name to the identity stored
-        and hashed (typically an absolute path). Defaults to the resolver
-        derived from the converter class (see :func:`converter_mechanism_resolver`).
-    scenario_attrs : callable, optional
-        ``(scenario_id, merged_config, gui_payload) -> dict`` of extra scalar
-        attributes written onto the scenario's HDF5 group after each solve —
-        the per-run KPIs the Sweep Results plot reads (``t0_K``,
-        ``final_X_<species>``, …). A value may be a bare number, or a
-        ``(value, unit)`` tuple to also label the KPI's display unit; units
-        are collected into a store-level ``units`` JSON attr (see
-        :func:`~boulder.runset.node_property_attrs` for the input-side
-        counterpart, recorded automatically without a host hook). Defaults to
-        ``plugins.scenario_attrs``.
-    on_solved : callable, optional
-        ``(scenario_id, config, converter, simulation_result, fingerprint,
-        gui_payload, mechanism) -> None`` called once per *freshly solved*
-        scenario (skipped runs that hit the store cache do not fire it), right
-        after the payload is written. Lets a host persist per-scenario
-        artifacts keyed by the same ``fingerprint`` used elsewhere — e.g.
-        running its own ``run_contributors`` so a downstream "Export" action
-        can reuse the sweep's solve work instead of re-solving.
-        Exceptions raised by the hook are caught and logged so one scenario's
-        artifact failure does not abort the whole sweep. Defaults to
-        ``plugins.on_scenario_solved``.
-    on_cached : callable, optional
-        ``(scenario_id, config, fingerprint, artifacts_dir, computed_at) ->
-        None`` called once per scenario *served from the store* (the
-        fingerprint matched, so nothing was solved and ``on_solved`` stays
-        silent). ``artifacts_dir`` is the entry's existing artifacts directory
-        and ``computed_at`` the entry's original solve time (epoch seconds), not
-        the time of this run. Lets a host keep a side index complete when a
-        model is re-run without changes. Fires on every re-run served from the
-        store, possibly repeatedly for the same entry, so the host must handle
-        repeated calls idempotently. Defaults to ``plugins.on_scenario_cached``;
-        exceptions are caught and logged, like ``on_solved``.
     runner_cls : type, optional
         The :class:`~boulder.runner.BoulderRunner` subclass whose ``load``,
         ``normalize`` and ``validate`` prepare the config (default: the base
@@ -949,10 +895,6 @@ def run(
         cfg_path,
         use_cache=not os.environ.get("BOULDER_NO_CACHE"),
         runner_cls=runner_cls,
-        resolve_mechanism=resolve_mechanism,
-        scenario_attrs=scenario_attrs,
-        on_solved=on_solved,
-        on_cached=on_cached,
     )
     n_cached = sum(o.cached for o in outcomes)
     print(

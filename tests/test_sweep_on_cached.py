@@ -123,10 +123,10 @@ def test_headless_cached_run_fires_on_cached_once_per_scenario(
         assert computed_at == pytest.approx(first[sid])
 
 
-def test_explicit_on_cached_argument_wins_and_a_raising_hook_is_logged(
-    tmp_path, cached_calls, capsys
+def test_a_raising_on_cached_hook_is_logged_and_aborts_nothing(
+    tmp_path, cached_calls, capsys, monkeypatch
 ) -> None:
-    """The ``run()`` argument overrides the plugin; a raising hook aborts nothing."""
+    """A plugin ``on_scenario_cached`` hook that raises is logged, not fatal."""
     from boulder import sweep_runner
 
     cfg = _config(tmp_path)
@@ -135,9 +135,10 @@ def test_explicit_on_cached_argument_wins_and_a_raising_hook_is_logged(
     def _boom(*args: Any) -> None:
         raise RuntimeError("host hook exploded")
 
-    sweep_runner.run(cfg, on_cached=_boom)
+    monkeypatch.setattr(get_plugins(), "on_scenario_cached", _boom)
+    sweep_runner.run(cfg)
 
-    assert cached_calls == [], "the explicit argument must replace the plugin hook"
+    assert cached_calls == [], "the raising hook replaced the recording one"
     assert "on_cached hook failed" in capsys.readouterr().out
     assert len(_fingerprints(store_dir)) == 2
 
@@ -231,9 +232,7 @@ def test_opening_a_stored_config_does_not_fire_on_cached(
     }
     cfg = tmp_path / "single.yaml"
     cfg.write_text(yaml.safe_dump(base), encoding="utf-8")
-    sweep_runner.run(
-        cfg, resolve_mechanism=sweep_runner.converter_mechanism_resolver(None)
-    )
+    sweep_runner.run(cfg)
 
     monkeypatch.setenv("BOULDER_CONFIG_PATH", str(cfg))
     with TestClient(create_app()) as client:

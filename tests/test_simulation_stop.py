@@ -205,7 +205,7 @@ class TestSimulationWorkerStop:
 
         conv = DualCanteraConverter(mechanism="gri30.yaml")
         worker = SimulationWorker()
-        worker.start_simulation(conv, config, 0.1, 0.05)
+        worker.start_simulation(conv, config)
         worker.stop_simulation()
 
         for _ in range(50):

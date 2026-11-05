@@ -62,7 +62,7 @@ class SweepRunRequest(BaseModel):
     no_cache: bool = False
 
 
-def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
+def has_run_set(raw: Dict[str, Any]) -> bool:
     """Return whether *raw* (the inheritance-resolved config) declares a run-set.
 
     True when it declares one **in the config**: a ``scenarios:`` mapping, a
@@ -70,12 +70,8 @@ def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     a ``scenarios_sweep.runner`` dotted path naming a host function that
     produces the run-set itself.
 
-    Pure function of ``raw`` so both the request-scoped sweep routes and the
-    app-startup lifespan share one detection rule. ``config_path`` is accepted
-    for signature compatibility; it is deliberately *not* consulted — Boulder
-    used to treat any file named ``run_sweep.py`` next to the config as a
-    run-set source, which coupled behaviour to a filename and was invisible in
-    the config itself. Declare the run-set in the config instead.
+    Pure function of ``raw``: a file named ``run_sweep.py`` next to the config
+    is not a run-set source; declare the run-set in the config.
     """
     chain = any(kind in run_set_block(raw) for kind in SEQUENTIAL_KINDS)
     return bool(raw.get("scenarios") or sweeps_of(raw) or sweep_runner_of(raw) or chain)
@@ -175,12 +171,6 @@ class _LastLineHandler(logging.Handler):
             pass
 
 
-def _has_run_set(request: Request) -> bool:
-    return has_run_set(
-        _raw(request), getattr(request.app.state, "preloaded_config_path", None)
-    )
-
-
 def _raw(request: Request) -> Dict[str, Any]:
     return getattr(request.app.state, "preloaded_raw", None) or {}
 
@@ -204,7 +194,7 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
     informational; the actual run in :func:`sweep_run` always uses whatever
     overlays the caller sends).
     """
-    has = _has_run_set(request)
+    has = has_run_set(_raw(request))
     n = run_set_size(_raw(request))
     job = getattr(request.app.state, "sweep_job", None)
     running = bool(job and job.get("status") == "running")

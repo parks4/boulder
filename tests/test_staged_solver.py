@@ -274,8 +274,8 @@ class TestStagedSolveInert:
     def test_all_reactors_registered(self, result):
         """User-declared reactors and the synthesised stream-point reservoir are registered.
 
-        With stream_reservoirs=True (default), solve_staged adds a ct.Reservoir for each
-        inter-stage source node (here r_a_outlet for the r_a → r_b boundary).
+        solve_staged adds a ct.Reservoir for each inter-stage source node
+        (here r_a_outlet for the r_a → r_b boundary).
         """
         conv, _ = result
         assert set(conv.reactors.keys()) == {"r_a", "r_b", "r_a_outlet"}
@@ -406,8 +406,8 @@ class TestStagedSolveExampleConfig:
         n = len(traj.viz_network.reactors)
         assert n == 5
 
-    def test_stream_point_present_when_flag_on(self, result):
-        """With stream_reservoirs=True (staged_psr_pfr.yaml), psr_outlet stream-point exists.
+    def test_stream_point_present(self, result):
+        """On staged_psr_pfr.yaml, the psr_outlet stream-point exists.
 
         Asserts that:
         - The synthesised stream-point reservoir is in converter.reactors.
@@ -415,10 +415,7 @@ class TestStagedSolveExampleConfig:
         - Its temperature matches the PSR outlet temperature (set after upstream solve).
         """
         conv, _ = result
-        stream_id = "psr_outlet"
-        if stream_id not in conv.reactors:
-            pytest.skip("stream_reservoirs flag was off for this build")
-        stream_res = conv.reactors[stream_id]
+        stream_res = conv.reactors["psr_outlet"]
         assert isinstance(stream_res, ct.Reservoir)
         T_psr = conv.reactors["psr"].phase.T
         T_stream = stream_res.phase.T
@@ -437,13 +434,13 @@ class TestStagedSolveExampleConfig:
 
 
 # ---------------------------------------------------------------------------
-# BoulderRunner end-to-end: staged_psr_pfr.yaml with interface_reservoirs=True
+# BoulderRunner end-to-end: staged_psr_pfr.yaml with stream-point reservoirs
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.slow
 class TestRunnerInterfaceReservoirsYAML:
-    """BoulderRunner.from_yaml on staged_psr_pfr.yaml with stream_reservoirs: true.
+    """BoulderRunner.from_yaml on staged_psr_pfr.yaml.
 
     Asserts:
     - build() completes without error.
@@ -796,29 +793,26 @@ class TestSynthesizeInterfaceNodes:
 
 
 # ---------------------------------------------------------------------------
-# Interface-reservoir solve path
+# Stream-point reservoir solve path
 # ---------------------------------------------------------------------------
 
 
 class TestInterfaceReservoirSolve:
-    """End-to-end staged solve with interface_reservoirs=True.
+    """End-to-end staged solve with stream-point reservoirs.
 
     Asserts:
     - Solve completes without error.
-    - Downstream reactor temperature is within 1 K of the legacy (inlet_states) solve.
-    - Interface reservoirs appear in converter.reactors.
-    - Each iface reservoir carries T matching the upstream reactor outlet.
+    - Stream-point reservoirs appear in converter.reactors.
+    - Each stream-point reservoir carries T matching the upstream reactor outlet.
     """
 
     @pytest.fixture(scope="class")
-    def _both_results(self):
-        """Solve a two-stage config with and without interface_reservoirs.
-
-        Returns (conv_legacy, conv_iface) after both builds.
+    def _solved(self):
+        """Solve a two-stage config; return the converter.
 
         Uses a config where r_b has an outlet Reservoir so that the real
-        inlet MFC (from the iface reservoir) does not cause mass accumulation
-        when advance_to_steady_state is used.
+        inlet MFC (from the stream-point reservoir) does not cause mass
+        accumulation when advance_to_steady_state is used.
         """
         from boulder.staged_solver import solve_staged
 
@@ -907,46 +901,22 @@ class TestInterfaceReservoirSolve:
             ],
         }
 
-        # Legacy path (explicit opt-out)
-        conv_legacy = DualCanteraConverter(mechanism="gri30.yaml")
-        plan_legacy = build_stage_graph(_config_with_outlet)
-        solve_staged(
-            conv_legacy, plan_legacy, _config_with_outlet, stream_reservoirs=False
-        )
+        conv = DualCanteraConverter(mechanism="gri30.yaml")
+        plan = build_stage_graph(_config_with_outlet)
+        solve_staged(conv, plan, _config_with_outlet)
+        return conv
 
-        # Stream-reservoir path (now the default)
-        conv_iface = DualCanteraConverter(mechanism="gri30.yaml")
-        plan_iface = build_stage_graph(_config_with_outlet)
-        solve_staged(conv_iface, plan_iface, _config_with_outlet)
-
-        return conv_legacy, conv_iface
-
-    def test_both_builds_complete(self, _both_results):
-        """Both the legacy and interface-reservoir builds finish without raising."""
-        conv_legacy, conv_iface = _both_results
-        assert conv_legacy is not None
-        assert conv_iface is not None
-
-    def test_downstream_T_matches_legacy(self, _both_results):
-        """r_b temperature with interface_reservoirs=True matches legacy within 1 K."""
-        conv_legacy, conv_iface = _both_results
-        T_legacy = conv_legacy.reactors["r_b"].phase.T
-        T_iface = conv_iface.reactors["r_b"].phase.T
-        assert abs(T_iface - T_legacy) < 1.0
-
-    def test_stream_point_in_converter(self, _both_results):
+    def test_stream_point_in_converter(self, _solved):
         """Stream-point reservoir is present in converter.reactors after solve."""
-        _, conv_iface = _both_results
-        assert "r_a_outlet" in conv_iface.reactors
+        assert "r_a_outlet" in _solved.reactors
 
-    def test_stream_point_T_matches_source(self, _both_results):
+    def test_stream_point_T_matches_source(self, _solved):
         """Stream-point reservoir T matches source reactor (r_a) outlet T."""
-        _, conv_iface = _both_results
-        T_source = conv_iface.reactors["r_a"].phase.T
-        T_iface = conv_iface.reactors["r_a_outlet"].phase.T
-        assert abs(T_iface - T_source) < 1.0
+        T_source = _solved.reactors["r_a"].phase.T
+        T_stream = _solved.reactors["r_a_outlet"].phase.T
+        assert abs(T_stream - T_source) < 1.0
 
-    def test_stream_point_node_injected_into_config(self, _both_results):
+    def test_stream_point_node_injected_into_config(self, _solved):
         """Stream-point reservoir node is appended to config['nodes'] after solve_staged.
 
         Verifies that solve_staged back-fills the synthesised stream-point reservoir into
@@ -1046,7 +1016,7 @@ class TestInterfaceReservoirSolve:
             f"config['nodes']: {node_ids}"
         )
 
-    def test_stream_inlet_mfc_injected_into_config(self, _both_results):
+    def test_stream_inlet_mfc_injected_into_config(self, _solved):
         """Inlet MFC for the stream-point reservoir is appended to config['connections'] after solve.
 
         Verifies that the downstream MFC (stream-point → target) is visible in config
