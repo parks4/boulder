@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import gc
+import tracemalloc
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -97,19 +98,22 @@ def test_headless_outcomes_carry_no_payload_and_gui_callers_can_ask(
 def test_peak_memory_does_not_grow_with_entry_count(cfg: Path) -> None:
     """Memory stays flat over a sweep.
 
-    Asserts: on a 1100-species mechanism, RSS at the start of each of the 6
-    solved entries, after the first two (allocator warm-up), grows by less than
-    20 MB: nothing accumulates per entry.
+    Asserts: on a 1100-species mechanism, the Python heap (tracemalloc, immune to
+    allocator noise that makes RSS drift on some platforms) at the start of each
+    of the 6 solved entries grows by less than 1 MB after the first: nothing
+    accumulates per entry.
     """
-    psutil = pytest.importorskip("psutil")
-    proc = psutil.Process()
-    rss: List[float] = []
+    heap: List[float] = []
 
     def on_entry(*_: Any) -> None:
         gc.collect()
-        rss.append(proc.memory_info().rss / 1e6)
+        heap.append(tracemalloc.get_traced_memory()[0] / 1e6)
 
-    outcomes = run_set(copy.deepcopy(_RAW), cfg, on_entry=on_entry)
-    assert len(rss) == len(outcomes) >= 5 and not any(o.cached for o in outcomes)
-    # Measured: flat within 3 MB here; with every payload kept it grew ~40 MB.
-    assert max(rss[2:]) - rss[2] < 20, rss
+    tracemalloc.start()
+    try:
+        outcomes = run_set(copy.deepcopy(_RAW), cfg, on_entry=on_entry)
+    finally:
+        tracemalloc.stop()
+    assert len(heap) == len(outcomes) >= 5 and not any(o.cached for o in outcomes)
+    # Measured: flat within 0.2 MB; with every payload kept it grew 0.6 MB per entry.
+    assert max(heap[1:]) - heap[1] < 1.0, heap
