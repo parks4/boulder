@@ -15,6 +15,7 @@ from typing import Any, Dict
 from unittest.mock import patch
 
 import pytest
+from conftest import default_solution
 
 pytest.importorskip("fastapi")
 pytest.importorskip("h5py")
@@ -64,7 +65,7 @@ class _StubConverter:
         return name
 
     def create_solution(self, mechanism: str, **kw: Any) -> Any:
-        return _default_solution(mechanism, **kw)
+        return default_solution(mechanism, **kw)
 
 
 def _client(tmp_path: Path):
@@ -147,12 +148,3 @@ def test_clearing_the_cache_empties_what_the_sweep_wrote(tmp_path: Path) -> None
         assert client.get("/api/scenarios").json()["scenarios"] == []
     finally:
         client.__exit__(None, None, None)
-
-
-def _default_solution(mechanism: str, **kw: Any) -> Any:
-    """Return the default converter's Solution, as the store step requires one."""
-    from boulder.cantera_converter import DualCanteraConverter
-
-    return DualCanteraConverter.create_solution(
-        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
-    )
