@@ -527,6 +527,9 @@ def test_run_sweep_executes_a_while_chain_point_by_point(tmp_path: Path) -> None
         def resolve_mechanism(self, name: str) -> str:
             return name
 
+        def create_solution(self, mechanism: str, **_: Any) -> None:
+            return None  # no template: the writer falls back to the plugin converter
+
     cfg = tmp_path / "chain.yaml"
     cfg.write_text(_CHAIN_YAML, encoding="utf-8")
     app = create_app()

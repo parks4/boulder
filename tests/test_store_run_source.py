@@ -85,6 +85,13 @@ scenarios_sweep:
 """
 
 
+class _NoSolution:
+    """A solved-converter stand-in with no template: the writer falls back to the plugin."""
+
+    def create_solution(self, mechanism: str, **_: Any) -> None:
+        return None
+
+
 def _write(tmp_path: Path, leaf: str = _LEAF_YAML) -> Path:
     (tmp_path / "base.yaml").write_text(_BASE_YAML, encoding="utf-8")
     cfg = tmp_path / "config.yaml"
@@ -385,7 +392,7 @@ def test_a_single_run_records_its_source(tmp_path: Path) -> None:
     with patch.object(
         sweep_runner,
         "solve_scenario",
-        return_value=(payload, "gri30.yaml", object()),
+        return_value=(payload, "gri30.yaml", _NoSolution()),
     ):
         sweep_runner.run_set(raw, cfg, only={"a=1"}, source=source)
 

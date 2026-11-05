@@ -63,6 +63,9 @@ class _StubConverter:
     def resolve_mechanism(self, name: str) -> str:
         return name
 
+    def create_solution(self, mechanism: str, **_: Any) -> None:
+        return None  # no template: the writer falls back to the plugin converter
+
 
 def _client(tmp_path: Path):
     cfg = tmp_path / "model.yaml"
