@@ -188,7 +188,9 @@ class TestSimulationWorkerStop:
         worker.stop_simulation()
         assert worker.get_progress().is_stopping is False
 
-    def test_stopped_single_stage_solve_skips_completion(self, minimal_config, monkeypatch):
+    def test_stopped_single_stage_solve_skips_completion(
+        self, minimal_config, monkeypatch
+    ):
         """Cover the common case the finalize-guard fix targets.
 
         A single-stage steady solve has no reachable checkpoint before it

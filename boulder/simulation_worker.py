@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Mapping, Optional
 
 import cantera as ct  # type: ignore
 
-
 logger = logging.getLogger(__name__)
 
 
