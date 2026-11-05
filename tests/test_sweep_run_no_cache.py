@@ -97,8 +97,8 @@ class _StubConverter:
     def resolve_mechanism(self, name: str) -> str:
         return name
 
-    def create_solution(self, mechanism: str, **_: Any) -> None:
-        return None  # no template: the writer falls back to the plugin converter
+    def create_solution(self, mechanism: str, **kw: Any) -> Any:
+        return _default_solution(mechanism, **kw)
 
 
 def test_sweep_run_reuses_the_cache_when_unchanged(tmp_path: Path) -> None:
@@ -235,6 +235,10 @@ def test_sweep_run_stores_a_resolved_mechanism_not_convs_raw_attribute(
         def resolve_mechanism(self, name: str) -> str:
             return f"/resolved/{name}"
 
+        def create_solution(self, mechanism: str, **kw: Any) -> Any:
+            # The resolved path is fictitious: build the Solution from the bare name.
+            return _default_solution(mechanism.removeprefix("/resolved/"), **kw)
+
     client, app = _client_with_config(tmp_path)
     app.state.converter_class = _PrefixResolvingConverter
     _StubConverter.instances.clear()
@@ -274,3 +278,12 @@ def test_sweep_run_stores_a_resolved_mechanism_not_convs_raw_attribute(
     finally:
         _StubConverter.instances.clear()
         client.__exit__(None, None, None)
+
+
+def _default_solution(mechanism: str, **kw: Any) -> Any:
+    """Return the default converter's Solution, as the store step requires one."""
+    from boulder.cantera_converter import DualCanteraConverter
+
+    return DualCanteraConverter.create_solution(
+        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
+    )

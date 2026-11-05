@@ -199,6 +199,7 @@ async def start_simulation(
                     store_dir,
                     outcome.fingerprint,
                     scenario_store.config_identity(config_path),
+                    getattr(state, "converter_class", None),
                 )
             handle.finish(outcome.gui)
         except Exception as exc:  # noqa: BLE001 -- reported to the client
@@ -346,7 +347,10 @@ async def check_simulation_cache(
         converter_cls=getattr(request.app.state, "converter_class", None),
     )
     cached = scenario_store.load_matching(
-        store_dir, fingerprint, scenario_store.config_identity(config_path)
+        store_dir,
+        fingerprint,
+        scenario_store.config_identity(config_path),
+        getattr(request.app.state, "converter_class", None),
     )
 
     if cached is None:

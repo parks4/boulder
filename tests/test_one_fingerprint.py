@@ -69,10 +69,10 @@ _NETWORK: Dict[str, Any] = {
 
 
 class _NoSolution:
-    """A solved-converter stand-in with no template: the writer falls back to the plugin."""
+    """A solved-converter stand-in whose Solution is the default converter's."""
 
-    def create_solution(self, mechanism: str, **_: Any) -> None:
-        return None
+    def create_solution(self, mechanism: str, **kw: Any) -> Any:
+        return _default_solution(mechanism, **kw)
 
 
 def _raw(mechanism: str | None) -> Dict[str, Any]:
@@ -204,3 +204,12 @@ def test_cache_check_resolver_error_is_not_swallowed(cfg: Path) -> None:
         app.state.preloaded_raw = _raw("gri30.yaml")
         with pytest.raises(FileNotFoundError):
             client.post("/api/simulations/check-cache", json={})
+
+
+def _default_solution(mechanism: str, **kw: Any) -> Any:
+    """Return the default converter's Solution, as the store step requires one."""
+    from boulder.cantera_converter import DualCanteraConverter
+
+    return DualCanteraConverter.create_solution(
+        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
+    )

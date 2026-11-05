@@ -207,6 +207,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         store_dir,
                         fingerprint,
                         scenario_store.config_identity(str(actual_yaml_path)),
+                        app.state.converter_class,
                     )
                     app.state.preloaded_result = cached
                     app.state.preloaded_fingerprint = (

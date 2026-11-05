@@ -49,7 +49,7 @@ class _FakeWorker:
     def __init__(self) -> None:
         self.progress = SimulationProgress(is_complete=True)
 
-    def start_simulation(self, *a: Any, **kw: Any) -> None:
+    def start_simulation(self, *a: Any, **kw: Any) -> Any:
         pass
 
     def get_progress(self) -> SimulationProgress:
@@ -63,8 +63,8 @@ class _StubConverter:
     def resolve_mechanism(self, name: str) -> str:
         return name
 
-    def create_solution(self, mechanism: str, **_: Any) -> None:
-        return None  # no template: the writer falls back to the plugin converter
+    def create_solution(self, mechanism: str, **kw: Any) -> Any:
+        return _default_solution(mechanism, **kw)
 
 
 def _client(tmp_path: Path):
@@ -147,3 +147,12 @@ def test_clearing_the_cache_empties_what_the_sweep_wrote(tmp_path: Path) -> None
         assert client.get("/api/scenarios").json()["scenarios"] == []
     finally:
         client.__exit__(None, None, None)
+
+
+def _default_solution(mechanism: str, **kw: Any) -> Any:
+    """Return the default converter's Solution, as the store step requires one."""
+    from boulder.cantera_converter import DualCanteraConverter
+
+    return DualCanteraConverter.create_solution(
+        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
+    )

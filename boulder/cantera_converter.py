@@ -1091,7 +1091,9 @@ class DualCanteraConverter:
         Default implementation returns ``name`` unchanged, allowing Cantera to
         handle bare built-in names (e.g. ``"gri30.yaml"``) directly.
         Subclasses may override this to implement custom mechanism search paths
-        without requiring a plugin registration.
+        without requiring a plugin registration. It may be called on a
+        ``cls.__new__(cls)`` instance (no ``__init__`` state): an override must
+        not rely on state set in ``__init__``.
         """
         return name
 
@@ -1174,7 +1176,9 @@ class DualCanteraConverter:
         this hook: the shared per-mechanism gas, reactor and reservoir contents
         (replacing ``clone=True``), state carriers and SolutionArray templates
         (``kinetics=False``). Subclasses may override it -- for example to
-        serve objects from a host-wide mechanism cache.
+        serve objects from a host-wide mechanism cache. It may be called on a
+        ``cls.__new__(cls)`` instance (no ``__init__`` state), for reading a
+        stored entry: an override must not rely on ``__init__`` state.
 
         No phase built here carries a transport model unless asked
         (``transport=True``): fitting one is the dominant per-object cost on a
