@@ -903,6 +903,9 @@ class DualCanteraConverter:
         self._download_config: Optional[Dict[str, Any]] = None
         # Path to config file for --download script (set by CLI in headless mode)
         self._download_config_path: Optional[str] = None
+        # Runner class that drives this converter; the download script imports it
+        # (BoulderRunner when unset).
+        self.runner_class: Optional[type] = None
         # Flow-conservation tracking: populated during connection building
         self._unresolved_mfc_ids: Set[str] = set()
         self._mfc_topology: Dict[str, Tuple[str, str]] = {}  # conn_id -> (src, tgt)
@@ -1123,9 +1126,12 @@ class DualCanteraConverter:
             for node_id in stage.node_ids
             if node_id in self.reactors
         }
+        from .runner import BoulderRunner
+
+        runner_cls = self.runner_class or BoulderRunner
         return script_lines_for_runner(
-            "from boulder.runner import BoulderRunner",
-            "BoulderRunner",
+            f"from {runner_cls.__module__} import {runner_cls.__qualname__}",
+            runner_cls.__qualname__,
             self._download_config,
             plan,
             node_classes,

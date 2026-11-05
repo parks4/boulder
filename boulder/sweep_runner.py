@@ -282,6 +282,7 @@ def solve_scenario(
     poll_interval: float = 0.05,
     stop_event: Optional[threading.Event] = None,
     config_path: "Optional[str | Path]" = None,
+    runner_cls: Optional[Any] = None,
 ) -> Tuple[Dict[str, Any], str, DualCanteraConverter]:
     """Solve one normalized scenario config → (gui_payload, mechanism, converter).
 
@@ -329,6 +330,8 @@ def solve_scenario(
         # The generated script names the file the run came from.
         conv._download_config_path = str(config_path)
 
+    # The generated script imports the runner class that prepared this config.
+    conv.runner_class = runner_cls
     sim_t, dt = solver_window(config)
     worker = SimulationWorker()
     worker.start_simulation(conv, config, sim_t, dt)
@@ -729,6 +732,7 @@ def run_set(
             progress_cb=None if progress_cb is None else _poll,
             stop_event=stop_event,
             config_path=config_path,
+            runner_cls=runner_cls,
         )
         if store_dir is not None:
             # The post-build config (stream points the staged solver added)

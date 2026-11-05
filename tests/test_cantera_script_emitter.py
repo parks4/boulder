@@ -136,3 +136,31 @@ def test_build_network_script_lists_the_classes_it_built() -> None:
     text = "\n".join(converter.code_lines)
     assert "#     r1: cantera.reactor.IdealGasConstPressureMoleReactor\n" in text
     assert "runner.solve_stage(" in text
+
+
+class _SubRunner(BoulderRunner):
+    """A neutral host runner subclass."""
+
+
+def test_script_imports_the_runner_class_that_solved_it() -> None:
+    """The script imports and uses the runner subclass, on both converter routes.
+
+    Asserts the converter made by ``BoulderRunner._ensure_converter`` (headless)
+    and the one made by ``solve_scenario`` (GUI and sweep) write
+    ``from <module> import _SubRunner`` and ``_SubRunner(config)``; with no
+    runner set the script falls back to ``BoulderRunner``.
+    """
+    from boulder.sweep_runner import solve_scenario
+
+    runner = _SubRunner(_prepared())
+    runner.build()
+    assert runner.converter is not None
+    _, _, conv = solve_scenario(_prepared(), "gri30.yaml", runner_cls=_SubRunner)
+    for converter in (runner.converter, conv):
+        text = "\n".join(converter.code_lines)
+        assert f"from {_SubRunner.__module__} import _SubRunner\n" in text
+        assert "runner = _SubRunner(config)" in text
+        assert "BoulderRunner" not in text
+    plain = DualCanteraConverter()
+    plain.build_network(_prepared())
+    assert "runner = BoulderRunner(config)" in "\n".join(plain.code_lines)

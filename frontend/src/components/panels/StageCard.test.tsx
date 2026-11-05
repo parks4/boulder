@@ -262,6 +262,37 @@ describe("StageCard", () => {
       expect(updatedConfig.settings).toEqual(mockConfig.settings);
     });
 
+    it("editing a transient stage's time writes that stage's advance_time, others untouched", () => {
+      const groups = {
+        first_stage: { stage_order: 1, mechanism: "gri30.yaml", solver: { kind: "advance", mode: "transient", advance_time: 1 } },
+        psr_stage: { stage_order: 2, mechanism: "gri30.yaml", solver: { kind: "advance", mode: "transient", advance_time: 2 } },
+      };
+      mockConfig = { ...mockConfig, groups };
+      render(<StageCard stageId="psr_stage" />);
+      openSolverDetails();
+      expect(screen.getByTestId("transient-time")).toBeEnabled();
+      fireEvent.change(screen.getByTestId("transient-time"), { target: { value: "5" } });
+      closeSolverDetailsDone();
+      const [updatedConfig] = mockSetConfig.mock.calls[0];
+      const written = updatedConfig.groups as Record<string, { solver: Record<string, unknown> }>;
+      expect(written.psr_stage.solver.advance_time).toBe(5);
+      expect(written.first_stage.solver.advance_time).toBe(1);
+      expect(updatedConfig.settings).toEqual(mockConfig.settings);
+    });
+
+    it("keeps the global time override locked when a single named stage owns the time", () => {
+      mockConfig = {
+        ...mockConfig,
+        groups: {
+          only_stage: { stage_order: 1, mechanism: "gri30.yaml", solver: { kind: "advance", mode: "transient", advance_time: 2 } },
+        },
+      };
+      useSolverStore.setState({ mode: "transient", kind: "advance" });
+      render(<StageCard stageId="only_stage" />);
+      openSolverDetails();
+      expect(screen.getByTestId("transient-time")).toBeDisabled();
+    });
+
     it("switching the selected stage re-syncs the displayed kind from that stage's own solver", () => {
       mockConfig = {
         ...mockConfig,

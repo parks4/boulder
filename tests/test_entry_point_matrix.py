@@ -112,6 +112,12 @@ import cantera as ct
 from boulder import register_reactor_builder
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.result_cache import CacheContributorPlugin, register_cache_contributor
+from boulder.runner import BoulderRunner
+
+
+class HostRunner(BoulderRunner):
+    # A host's runner subclass: the downloaded script must import and use it.
+    pass
 
 
 class ExampleReactor(ct.IdealGasConstPressureMoleReactor):
@@ -563,7 +569,12 @@ def script_and_pipeline(request, tmp_path_factory) -> Dict[str, Any]:
         exec(_DUMP, scope)  # noqa: S102 - our own helper text
 
         # The script users receive: the real download entry, ``--headless --download``.
-        cli.main([str(cfg), "--headless", "--download", str(script)])
+        from epm_host_plugin import HostRunner  # written by _host_env
+
+        cli.main(
+            [str(cfg), "--headless", "--download", str(script)],
+            runner_class=HostRunner,
+        )
         text = script.read_text("utf-8")
         runner = BoulderRunner.from_yaml(str(cfg))
         runner.build()
@@ -634,6 +645,20 @@ def test_downloaded_script_lists_the_classes_that_run(script_and_pipeline) -> No
         assert f"#     {node}: {name}\n" in text
         assert f"{node!r}: {name!r}" in text
     assert "check_classes(stages[" in text
+
+
+def test_downloaded_script_uses_the_host_runner_class(script_and_pipeline) -> None:
+    """The downloaded script imports and uses the runner class that wrote it.
+
+    Asserts the script written by ``--headless --download`` with a host runner
+    subclass imports it from the host plugin and builds ``HostRunner(config)``,
+    never the base ``BoulderRunner``; the script ran in the fixture and agrees
+    with the pipeline (``test_downloaded_script_agrees_with_the_pipeline``).
+    """
+    text = script_and_pipeline["text"]
+    assert "from epm_host_plugin import HostRunner\n" in text
+    assert "runner = HostRunner(config)" in text
+    assert "BoulderRunner" not in text
 
 
 def test_every_path_stores_the_runner_based_script(snapshots) -> None:

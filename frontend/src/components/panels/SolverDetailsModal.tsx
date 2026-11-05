@@ -29,7 +29,7 @@ interface SolverDetailsModalProps {
   onSimTimeChange: (v: string) => void;
   timeStep: string;
   onTimeStepChange: (v: string) => void;
-  /** Staged config: the time lives in each stage of the YAML, not here. */
+  /** The edit would be a global override a stage's own time wins over: lock it. */
   timeLocked?: boolean;
 }
 
