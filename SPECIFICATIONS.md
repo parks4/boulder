@@ -25,6 +25,11 @@ Key points:
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system architecture, including the config
 pipeline, API layer, plugin system, staged solver, and frontend.
 
+All entry points (CLI run, CLI sweep, GUI run, GUI sweep, Python API) call one solve-and-store
+pipeline; downloaded scripts and `run_continuation` run the same per-stage solve. A single run is a
+run set of one entry. The stored run definition is the resolved config.
+Same config, same stored result. The user's file is never written unless they save.
+
 ## Agents / Development
 
 See [AGENTS.md](AGENTS.md) for development conventions, test commands, and coding guidelines for

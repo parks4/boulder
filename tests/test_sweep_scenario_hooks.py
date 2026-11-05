@@ -70,6 +70,11 @@ class _StubConverter:
     def resolve_mechanism(self, name: str) -> str:
         return name
 
+    def create_solution(self, mechanism: str, **kwargs: Any) -> Any:
+        from boulder.cantera_converter import DualCanteraConverter
+
+        return DualCanteraConverter.create_solution(self, mechanism, **kwargs)  # type: ignore[arg-type]
+
 
 def _client_with_config(tmp_path: Path):
     from boulder.runner import BoulderRunner

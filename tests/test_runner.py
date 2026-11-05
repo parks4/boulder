@@ -392,8 +392,6 @@ def test_spatial_series_inferred_from_custom_stage_network_states():
         conv = DualCanteraConverter()
         conv.build_network(config)
         results, _ = conv.run_streaming_simulation(
-            simulation_time=1.0,
-            time_step=1.0,
             config=config,
         )
 

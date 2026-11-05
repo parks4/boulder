@@ -1,6 +1,5 @@
 import importlib
 import logging
-import math
 import os
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -62,6 +61,17 @@ def validate_header_href(href: Any) -> None:
         raise ValueError(
             f"Header link href must be a relative path or an http(s) URL, got {href!r}"
         )
+
+
+#: Default CSS flex ``order`` of a host header item; the theme toggle is 0.
+DEFAULT_HEADER_ORDER = 10
+
+
+def validate_header_order(order: Any) -> int:
+    """Return *order* if it is an ``int`` (not a ``bool``), else raise ``ValueError``."""
+    if not isinstance(order, int) or isinstance(order, bool):
+        raise ValueError(f"Header order must be an integer, got {order!r}")
+    return order
 
 
 @dataclass(frozen=True)
@@ -153,11 +163,9 @@ class BoulderPlugins:
     #: (flat scalar values only go into each scenario's own HDF5 attrs).
     #: Every node/connection's own numeric properties are recorded separately
     #: and automatically, with no host hook needed — see
-    #: :func:`boulder.runset.node_property_attrs`.
-    #:
-    #: Same contract as :func:`boulder.sweep_runner.run`'s ``scenario_attrs``
-    #: argument, which defaults to this when not passed explicitly, so the GUI
-    #: and CLI record identical attributes.
+    #: :func:`boulder.runset.node_property_attrs`. Read by
+    #: :func:`boulder.sweep_runner.run_set`, so the GUI and CLI record identical
+    #: attributes.
     scenario_attrs: Optional[
         Callable[[str, Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
     ] = None
@@ -170,9 +178,6 @@ class BoulderPlugins:
     #: cache so a later "Export" reuses the sweep's work instead of re-solving.
     #: Exceptions are caught and logged: one scenario's artifact failure must
     #: not abort the sweep.
-    #:
-    #: Same contract as :func:`boulder.sweep_runner.run`'s ``on_solved``
-    #: argument, which defaults to this when not passed explicitly.
     on_scenario_solved: Optional[Callable[..., None]] = None
 
     #: Called as ``(scenario_id, config, fingerprint, artifacts_dir,
@@ -186,9 +191,6 @@ class BoulderPlugins:
     #: single-run solve does not reach :attr:`on_scenario_solved` (only sweeps
     #: do); a host sees it through its result-cache contributors. Exceptions
     #: are caught and logged.
-    #:
-    #: Same contract as :func:`boulder.sweep_runner.run`'s ``on_cached``
-    #: argument, which defaults to this when not passed explicitly.
     on_scenario_cached: Optional[Callable[..., None]] = None
 
     #: Axis-name/path-leaf → symbol mapping used by
@@ -213,7 +215,8 @@ class BoulderPlugins:
     #: (optional; same rule as :meth:`add_header_link`), "tooltip": str (optional),
     #: "new_tab": bool (optional)}``, or ``None`` for no chip. An exception, a bad
     #: tone or a bad href answers HTTP 500 and the GUI shows "status unavailable"
-    #: with the detail as its tooltip.
+    #: with the detail as its tooltip. An optional integer ``"order"`` places the
+    #: chip in the top bar (see :meth:`add_header_link`).
     header_status: Optional[
         Callable[[HeaderStatusContext], Optional[Dict[str, Any]]]
     ] = None
@@ -234,8 +237,7 @@ class BoulderPlugins:
     ] = field(default_factory=list)
 
     #: Converter class used by :mod:`boulder.sweep_runner` to solve each
-    #: scenario, and (when a caller doesn't pass ``resolve_mechanism``
-    #: explicitly) to derive the mechanism-name resolver used for
+    #: scenario, and to derive the mechanism-name resolver used for
     #: fingerprinting and the persisted store too. ``None`` (the default)
     #: means the plain :class:`DualCanteraConverter` — bare mechanism names
     #: pass through unchanged. A host with its own mechanism search
@@ -261,21 +263,27 @@ class BoulderPlugins:
         href: str,
         tooltip: Optional[str] = None,
         new_tab: bool = False,
+        order: int = DEFAULT_HEADER_ORDER,
     ) -> None:
         """Register a link shown in the GUI top bar, e.g. ``("Reports", "/reports")``.
 
         ``href`` is a relative path (``/reports``) or an ``http(s)`` URL; anything
         else (``javascript:``, ``//host``, ``data:``) raises ``ValueError``.
+        ``order`` is an integer placing the link in the top bar (the theme toggle is
+        0, lower comes first; default 10, after the toggle); a non-integer raises
+        ``ValueError``.
         """
         if not isinstance(label, str) or not label.strip():
             raise ValueError("Header link label must be a non-empty string")
         validate_header_href(href)
+        validate_header_order(order)
         self.header_links.append(
             {
                 "label": label.strip(),
                 "href": href,
                 "tooltip": tooltip,
                 "new_tab": new_tab,
+                "order": order,
             }
         )
 
@@ -824,10 +832,6 @@ class DualCanteraConverter:
        :add-heading: Examples using DualCanteraConverter
     """
 
-    from .download_script_emitter import CanteraScriptEmitter as _CanteraScriptEmitter
-
-    SCRIPT_EMITTER_CLASS: type = _CanteraScriptEmitter
-
     # Tolerance for the "does this composition sum to 1.0" sanity check in
     # ``parse_composition``. Coarser than a numerical-precision tolerance on
     # purpose: legitimate rounding in a hand-written config (e.g. mole
@@ -891,6 +895,13 @@ class DualCanteraConverter:
         self._download_config: Optional[Dict[str, Any]] = None
         # Path to config file for --download script (set by CLI in headless mode)
         self._download_config_path: Optional[str] = None
+        # Runner class that drives this converter; the download script imports it
+        # (BoulderRunner when unset).
+        self.runner_class: Optional[type] = None
+        # The run's resolved raw config (before the runner's normalize/validate):
+        # the download script embeds it as YAML.  Without it the prepared config
+        # is embedded instead.
+        self._download_raw: Optional[Dict[str, Any]] = None
         # Flow-conservation tracking: populated during connection building
         self._unresolved_mfc_ids: Set[str] = set()
         self._mfc_topology: Dict[str, Tuple[str, str]] = {}  # conn_id -> (src, tgt)
@@ -1072,91 +1083,81 @@ class DualCanteraConverter:
         Default implementation returns ``name`` unchanged, allowing Cantera to
         handle bare built-in names (e.g. ``"gri30.yaml"``) directly.
         Subclasses may override this to implement custom mechanism search paths
-        without requiring a plugin registration.
+        without requiring a plugin registration. It may be called on a
+        ``cls.__new__(cls)`` instance (no ``__init__`` state): an override must
+        not rely on state set in ``__init__``.
         """
         return name
 
     def script_load_lines(self, config_path: str, plan: Any = None) -> list:
         """Return the staged-solve script block for generated download scripts.
 
-        When a normalised config snapshot is available (``_download_config`` or
-        ``_last_config``), the Cantera-level emitter recomputes the stage plan
-        from that embedded config snapshot and delegates to
-        ``self.SCRIPT_EMITTER_CLASS`` — producing a fully self-contained
-        Cantera-native script with no runner dependency.
-
-        When no config snapshot is available, falls back to a runner-based
-        script that re-loads the YAML at runtime.
+        The one download script (CLI ``--download`` and the GUI alike): the
+        solved config, a table of the class each node runs, and one
+        ``runner.solve_stage`` call per stage, see
+        :mod:`boulder.download_script_emitter`.  The classes are read from the
+        objects this converter built, so a plugin's or a host's own reactor
+        classes appear under their own names.
 
         Parameters
         ----------
         config_path :
-            Path to the original YAML file. Used only as a fallback when no
-            normalised config is available on the converter.
+            Path of the original YAML file.  Not used by the script, which embeds
+            the config it solved; kept for subclasses that override this method.
         plan :
-            :class:`~boulder.staged_solver.StageExecutionPlan` produced by
-            ``build_stage_graph()``. Passed through to the runner-based fallback;
-            the Cantera-level emitter recomputes its own plan from the config
-            snapshot and does not use this argument.
+            :class:`~boulder.staged_solver.StageExecutionPlan` of the solved
+            config, from ``build_stage_graph()``.
         """
-        cfg = self._download_config or self._last_config
-        if cfg is not None:
-            return self._script_lines_for_cantera(
-                "from boulder.cantera_converter import DualCanteraConverter",
-                "DualCanteraConverter",
-                cfg,
+        if self._download_config is None or plan is None:
+            raise RuntimeError(
+                "script_load_lines needs a solved config and its stage plan: "
+                "call build_network() first."
             )
-        return self._script_lines_for_runner(
-            "from boulder.runner import BoulderRunner",
-            "BoulderRunner",
-            config_path,
-            plan,
+        from .download_script_emitter import (
+            qualified_class_name,
+            script_lines_for_runner,
         )
 
-    @staticmethod
-    def _script_lines_for_runner(
-        runner_import: str,
-        runner_class: str,
-        config_path: str,
-        plan: Any,
-        continuation: Any = None,
-        signals_block: Any = None,
-        bindings_block: Any = None,
-    ) -> list:
-        """Thin wrapper kept for backward compatibility with callers using this as an instance method.
+        node_classes = {
+            node_id: qualified_class_name(self.reactors[node_id])
+            for stage in plan.ordered_stages
+            for node_id in stage.node_ids
+            if node_id in self.reactors
+        }
+        from ruamel.yaml.error import YAMLError
 
-        Delegates entirely to :func:`boulder.download_script_emitter.script_lines_for_runner`.
-        """
-        from .download_script_emitter import script_lines_for_runner
+        from .download_script_emitter import is_importable_class
+        from .runner import BoulderRunner
+        from .scenario_store import definition_text
 
+        runner_cls = self.runner_class or BoulderRunner
+        runner_name = f"{runner_cls.__module__}.{runner_cls.__qualname__}"
+        problem = None
+        config_yaml = ""
+        prepared = self._download_raw is None
+        to_embed = (
+            self._download_config if self._download_raw is None else self._download_raw
+        )
+        if not is_importable_class(runner_name):
+            problem = (
+                f"the runner class {runner_name} cannot be imported (defined in "
+                "__main__ or inside a function); define it in a module."
+            )
+        else:
+            try:
+                config_yaml = definition_text(to_embed)
+            except YAMLError as exc:
+                problem = f"the run's config cannot be written as YAML: {exc}"
         return script_lines_for_runner(
-            runner_import,
-            runner_class,
-            config_path,
+            f"from {runner_cls.__module__} import {runner_cls.__qualname__}",
+            runner_cls.__qualname__,
+            self._download_config,
             plan,
-            continuation,
-            signals_block,
-            bindings_block,
+            node_classes,
+            config_yaml=config_yaml,
+            prepared=prepared,
+            problem=problem,
         )
-
-    def _script_lines_for_cantera(
-        self,
-        converter_import: str,
-        converter_class: str,
-        config: Dict[str, Any],
-    ) -> list:
-        """Emit a Cantera-native download script.
-
-        Generates module-level ``reactors`` / ``connections`` / ``walls``
-        registries and direct ``ct.*`` construction per stage — see
-        :mod:`boulder.download_script_emitter`.
-
-        Dispatch is virtual: subclasses override ``SCRIPT_EMITTER_CLASS`` to inject
-        a custom emitter without modifying Boulder.
-        The ``converter_import`` and ``converter_class`` parameters are kept for
-        backward compatibility with existing callers but are ignored.
-        """
-        return self.SCRIPT_EMITTER_CLASS(converter=self).emit(config)
 
     def create_solution(
         self, mech_name: str, *, kinetics: bool = True, transport: bool = False
@@ -1167,7 +1168,9 @@ class DualCanteraConverter:
         this hook: the shared per-mechanism gas, reactor and reservoir contents
         (replacing ``clone=True``), state carriers and SolutionArray templates
         (``kinetics=False``). Subclasses may override it -- for example to
-        serve objects from a host-wide mechanism cache.
+        serve objects from a host-wide mechanism cache. It may be called on a
+        ``cls.__new__(cls)`` instance (no ``__init__`` state), for reading a
+        stored entry: an override must not rely on ``__init__`` state.
 
         No phase built here carries a transport model unless asked
         (``transport=True``): fitting one is the dominant per-object cost on a
@@ -1992,11 +1995,11 @@ class DualCanteraConverter:
             stage_reactor_ids.append(rid)
 
         # Build intra-stage (and stream-MFC) connections.
-        # LEGACY WORKAROUND NOTE: _mfc_topology and _mfc_flow_rates are NOT reset
-        # between stages so that build_viz_network can run a second conservation pass
-        # with the full cross-stage topology visible.  With stream_reservoirs=True
-        # the conservation pass is self-contained per stage; this accumulation
-        # becomes a no-op and can be removed when the flag is the default.
+        # NOTE: _mfc_topology and _mfc_flow_rates are NOT reset between stages so
+        # that build_viz_network can run a second conservation pass with the full
+        # cross-stage topology visible.  The per-stage conservation pass is
+        # self-contained (stream-point reservoirs), so this accumulation is a no-op
+        # that could be removed.
         self._unresolved_mfc_ids = set()
         for conn in stage_connections:
             cid = conn["id"]
@@ -2421,22 +2424,17 @@ class DualCanteraConverter:
 
         from .staged_solver import build_stage_graph, solve_staged
 
-        # Transient solve with no declared checkpoints: inject a default linspace
-        # grid so the recorder still yields a trajectory ("do whatever" when no
-        # required grid is given). Required checkpoints, when present, are left
-        # untouched and advanced through exactly. Config-prep only — not a solver
-        # change.
-        _settings = config.get("settings") or {}
-        _default_end = float(_settings.get("end_time") or 1.0)
-        for _group in (config.get("groups") or {}).values():
+        # The one time-grid rule: a transient stage needs its grid declared. No
+        # hidden default duration (it used to be settings.end_time, else 1 s), so
+        # every entry point solves the same trajectory for the same config.
+        for _gid, _group in (config.get("groups") or {}).items():
             _solver = _group.get("solver") or {}
             if _solver.get("kind") == "advance_grid" and not _solver.get("grid"):
-                _solver["grid"] = {
-                    "start": 0.0,
-                    "stop": _default_end,
-                    "dt": _default_end / 50.0,
-                }
-                _group["solver"] = _solver
+                raise ValueError(
+                    f"Stage '{_gid}' uses the transient solver 'advance_grid' but "
+                    "declares no time grid. Declare settings.solver.grid "
+                    "({start, stop, dt} or a list of times)."
+                )
 
         # Install a full-state trajectory recorder so a transient (advance_grid)
         # solve also yields the per-step T(t) — captured during the *single*
@@ -2456,14 +2454,11 @@ class DualCanteraConverter:
         )
         self._staged_trajectory = trajectory
 
-        # Generate a downloadable script mirroring the staged load+build flow.
-        # When called from BoulderRunner.build(), code_lines is overwritten
-        # afterwards with the plan-aware unrolled version. This fallback
-        # serves direct callers (e.g. SimulationWorker) that bypass the runner.
+        # The downloadable script: every caller (runner, worker, CLI) gets this
+        # same stage-by-stage one, written from the config just solved.
         download_path = getattr(self, "_download_config_path", None) or "config.yaml"
         self.code_lines = [
-            "# Load configuration from YAML and build Cantera network",
-            "import cantera as ct",
+            "# Boulder staged solve: the run's resolved config, then one solve per stage",
             *self.script_load_lines(download_path, plan),
         ]
         # viz_network is already set on self.network by build_viz_network
@@ -2471,16 +2466,20 @@ class DualCanteraConverter:
 
     def run_streaming_simulation(
         self,
-        simulation_time: float = 10.0,
-        time_step: float = 1.0,
         progress_callback=None,
         config: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], str]:
-        """Run simulation with streaming progress updates."""
+        """Collect the staged solve's results and finish the downloadable script.
+
+        ``build_network`` has already solved every stage (the one staged solve),
+        so nothing is integrated here: the converged states, the transient
+        trajectory the solve recorded and the spatial profiles become the
+        results.
+        """
         if self.network is None:
             raise RuntimeError("Network not built. Call build_network() first.")
 
-        # Override parameters from config if provided
+        # Reject deprecated time keys
         if config:
             # Only use 'settings' section with 'end_time' and 'dt'
             settings_config = config.get("settings") or {}
@@ -2507,36 +2506,8 @@ class DualCanteraConverter:
                     "Please update your YAML to use 'settings' section with 'end_time' and 'dt' keys only."
                 )
 
-            # Extract values from settings section only
-            config_simulation_time = settings_config.get("end_time")
-            config_time_step = settings_config.get("dt")
-
-            # Use config values if valid, otherwise keep defaults
-            if config_simulation_time is not None and config_simulation_time > 0:
-                simulation_time = float(config_simulation_time)
-            if config_time_step is not None and config_time_step > 0:
-                time_step = float(config_time_step)
-
-            # Validate time_step is not greater than simulation_time
-            if time_step > simulation_time:
-                logger.warning(
-                    f"time_step ({time_step}s) > simulation_time ({simulation_time}s), adjusting time_step"
-                )
-                time_step = simulation_time / 10.0  # Use 10 steps minimum
-
-            logger.info(
-                f"Using config parameters: time={simulation_time}s, step={time_step}s"
-            )
-
-        # ``build_network`` always routes through the staged solver, so by the
-        # time we get here the reactor states are already converged.  Calling
-        # ``network.advance()`` on that fully-solved network is not only
-        # redundant, it can diverge numerically (mechanism-switch networks
-        # contain reactors with mismatched species lists that were only
-        # integrated independently inside their own stage sub-network).  We
-        # therefore emit a downloadable script that just prints the final
-        # states, and capture a single-time-point "trajectory" for the UI.
-        already_solved = getattr(self, "_staged_trajectory", None) is not None
+        if getattr(self, "_staged_trajectory", None) is None:
+            raise RuntimeError("Network not solved. Call build_network() first.")
 
         # Determine whether any stage used a transient solver kind.
         _has_transient_stage = False
@@ -2553,47 +2524,23 @@ class DualCanteraConverter:
 
         self.code_lines.append("")
         self.code_lines.append("# ===== SIMULATION EXECUTION =====")
-        if already_solved:
-            if _has_transient_stage:
-                self.code_lines.append(
-                    "# solve_stage() ran transient integration; network holds the final state."
-                )
-            else:
-                self.code_lines.append(
-                    "# solve_stage() has already solved each stage sequentially;"
-                )
-                self.code_lines.append(
-                    "# network = runner.network holds the converged reactor states."
-                )
-            self.code_lines.append("print('Simulation completed (staged solve).')")
-            self.code_lines.append("print('Reactor\\tT [K]\\tP [Pa]')")
-            self.code_lines.append("for r in network.reactors:")
+        if _has_transient_stage:
             self.code_lines.append(
-                '    print(f"{r.name}\\t{r.phase.T:.2f}\\t{r.phase.P:.2f}")'
+                "# solve_stage() ran transient integration; network holds the final state."
             )
         else:
-            self.code_lines.append("# Import numpy for time array generation")
-            self.code_lines.append("import numpy as np")
-            self.code_lines.append("")
             self.code_lines.append(
-                f"# Create time array: 0 to {simulation_time}s with {time_step}s steps"
+                "# solve_stage() has already solved each stage sequentially;"
             )
             self.code_lines.append(
-                f"times = np.arange(0, {simulation_time}, {time_step})"
+                "# network = runner.network holds the converged reactor states."
             )
-            self.code_lines.append("")
-            self.code_lines.append("# Run time integration loop")
-            self.code_lines.append("print('Starting simulation...')")
-            self.code_lines.append("print('Time (s)\\tTemperatures (K)')")
-            self.code_lines.append("for t in times:")
-            self.code_lines.append("    # Advance the reactor network to time t")
-            self.code_lines.append("    network.advance(t)")
-            self.code_lines.append("    # Print current time and reactor temperatures")
-            self.code_lines.append(
-                '    print(f"t={t:.4f}, T={[r.phase.T for r in network.reactors]}")'
-            )
-            self.code_lines.append("")
-            self.code_lines.append("print('Simulation completed!')")
+        self.code_lines.append("print('Simulation completed (staged solve).')")
+        self.code_lines.append("print('Reactor\\tT [K]\\tP [Pa]')")
+        self.code_lines.append("for r in network.reactors:")
+        self.code_lines.append(
+            '    print(f"{r.name}\\t{r.phase.T:.2f}\\t{r.phase.P:.2f}")'
+        )
 
         # Initialize data structures
         times: List[float] = []
@@ -2602,7 +2549,6 @@ class DualCanteraConverter:
         # Per-reactor capture using SolutionArray
         reactors_series: Dict[str, Dict[str, Any]] = {}
         sol_arrays: Dict[str, ct.SolutionArray] = {}
-        last_error_message: str = ""
         for reactor in reactor_list:
             reactor_id = getattr(reactor, "name", "") or str(id(reactor))
             # Use the correct gas solution for this reactor's mechanism
@@ -2617,261 +2563,128 @@ class DualCanteraConverter:
                 "Y": {s: [] for s in reactor_gas.species_names},
             }
 
-        if already_solved:
-            # Network already converged by the staged solver — record the
-            # final per-reactor state as a single time point and skip the
-            # (redundant, potentially-diverging) ``network.advance`` loop.
-            # We still call ``advance(0.0)`` once so that Cantera marks the
-            # flow devices as "ready" (otherwise downstream consumers such as
-            # the Sankey generator would raise ``FlowDevice::massFlowRate:
-            # Flow device is not ready``).
-            try:
-                self.network.advance(0.0)
-            except Exception as e:
-                logger.warning(
-                    f"Post-staged network.advance(0) warmup failed, "
-                    f"flow-device reads may be unavailable: {e}"
-                )
-            times.append(0.0)
-            for reactor in reactor_list:
-                reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
-                    "gas_solution", self.gas
-                )
-                reactor_species_names = reactor_gas.species_names
-                T = float(reactor.phase.T)
-                P = float(reactor.phase.P)
-                X_vec = reactor.phase.X
-                Y_vec = reactor.phase.Y
-                sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
-                reactors_series[reactor_id]["T"].append(T)
-                reactors_series[reactor_id]["P"].append(P)
-                for species_name, x_value in zip(reactor_species_names, X_vec):
-                    cast(
-                        List[float], reactors_series[reactor_id]["X"][species_name]
-                    ).append(float(x_value))
-                for species_name, y_value in zip(reactor_species_names, Y_vec):
-                    cast(
-                        List[float], reactors_series[reactor_id]["Y"][species_name]
-                    ).append(float(y_value))
+        # Network already converged by the staged solver — record the
+        # final per-reactor state as a single time point and skip the
+        # (redundant, potentially-diverging) ``network.advance`` loop.
+        # We still call ``advance(0.0)`` once so that Cantera marks the
+        # flow devices as "ready" (otherwise downstream consumers such as
+        # the Sankey generator would raise ``FlowDevice::massFlowRate:
+        # Flow device is not ready``).
+        try:
+            self.network.advance(0.0)
+        except Exception as e:
+            logger.warning(
+                f"Post-staged network.advance(0) warmup failed, "
+                f"flow-device reads may be unavailable: {e}"
+            )
+        times.append(0.0)
+        for reactor in reactor_list:
+            reactor_id = getattr(reactor, "name", "") or str(id(reactor))
+            reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
+                "gas_solution", self.gas
+            )
+            reactor_species_names = reactor_gas.species_names
+            T = float(reactor.phase.T)
+            P = float(reactor.phase.P)
+            X_vec = reactor.phase.X
+            Y_vec = reactor.phase.Y
+            sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
+            reactors_series[reactor_id]["T"].append(T)
+            reactors_series[reactor_id]["P"].append(P)
+            for species_name, x_value in zip(reactor_species_names, X_vec):
+                cast(
+                    List[float], reactors_series[reactor_id]["X"][species_name]
+                ).append(float(x_value))
+            for species_name, y_value in zip(reactor_species_names, Y_vec):
+                cast(
+                    List[float], reactors_series[reactor_id]["Y"][species_name]
+                ).append(float(y_value))
 
-                # Spatial reactors: if the plugin registered a spatial_series_fn
-                # on reactor_meta, call it to replace the single-point snapshot
-                # with the full converged spatial profile. The returned dict may
-                # also carry an "extra_series" list of arbitrary named x/y series
-                # (each with its own axis) that are stored verbatim and have no
-                # built-in meaning to Boulder -- see STONE_SPECIFICATIONS.md.
-                _spatial_fn = self.reactor_meta.get(reactor_id, {}).get(
-                    "spatial_series_fn"
+            # Spatial reactors: if the plugin registered a spatial_series_fn
+            # on reactor_meta, call it to replace the single-point snapshot
+            # with the full converged spatial profile. The returned dict may
+            # also carry an "extra_series" list of arbitrary named x/y series
+            # (each with its own axis) that are stored verbatim and have no
+            # built-in meaning to Boulder -- see STONE_SPECIFICATIONS.md.
+            _spatial_fn = self.reactor_meta.get(reactor_id, {}).get("spatial_series_fn")
+            _series: Optional[Dict[str, Any]] = None
+            if _spatial_fn is not None:
+                _series = _spatial_fn()
+            if _series is None:
+                _series = try_infer_spatial_reactor_series(self, reactor_id)
+            if _series is not None:
+                reactors_series[reactor_id] = _series
+                # If this reactor is the representative of a composite group
+                # (e.g. CGR placeholder), also register under the group/stage
+                # id so clicking the compound box shows the full profile.
+                _group_series_id = self.reactor_meta.get(reactor_id, {}).get(
+                    "group_series_id"
                 )
-                _series: Optional[Dict[str, Any]] = None
-                if _spatial_fn is not None:
-                    _series = _spatial_fn()
-                if _series is None:
-                    _series = try_infer_spatial_reactor_series(self, reactor_id)
-                if _series is not None:
-                    reactors_series[reactor_id] = _series
-                    # If this reactor is the representative of a composite group
-                    # (e.g. CGR placeholder), also register under the group/stage
-                    # id so clicking the compound box shows the full profile.
-                    _group_series_id = self.reactor_meta.get(reactor_id, {}).get(
-                        "group_series_id"
-                    )
-                    if _group_series_id:
-                        reactors_series[_group_series_id] = _series
+                if _group_series_id:
+                    reactors_series[_group_series_id] = _series
 
-                # PSR reactors: if the plugin flagged this reactor as a PSR,
-                # propagate the flag so the frontend can adapt its visualisation.
-                elif self.reactor_meta.get(reactor_id, {}).get("is_psr"):
-                    reactors_series[reactor_id]["is_psr"] = True
+            # PSR reactors: if the plugin flagged this reactor as a PSR,
+            # propagate the flag so the frontend can adapt its visualisation.
+            elif self.reactor_meta.get(reactor_id, {}).get("is_psr"):
+                reactors_series[reactor_id]["is_psr"] = True
 
-            # Transient solve: replace the converged single-point snapshot with the
-            # T(t) trajectory captured *during* the (single) staged solve by the
-            # recorder. No re-integration; reports/Sankey/code from finalize are
-            # kept; only the series is swapped. Spatial profiles are left untouched.
-            _recorder = getattr(self, "_trajectory_recorder", None)
-            _traj = _recorder.series() if _recorder is not None else {}
-            for _rid, _series in _traj.items():
-                if _rid in reactors_series and not reactors_series[_rid].get(
-                    "is_spatial"
-                ):
-                    reactors_series[_rid] = _series
-                    times[:] = _series["t"]
+        # Transient solve: replace the converged single-point snapshot with the
+        # T(t) trajectory captured *during* the (single) staged solve by the
+        # recorder. No re-integration; reports/Sankey/code from finalize are
+        # kept; only the series is swapped. Spatial profiles are left untouched.
+        _recorder = getattr(self, "_trajectory_recorder", None)
+        _traj = _recorder.series() if _recorder is not None else {}
+        for _rid, _series in _traj.items():
+            if _rid in reactors_series and not reactors_series[_rid].get("is_spatial"):
+                reactors_series[_rid] = _series
+                times[:] = _series["t"]
 
-            # CustomStageNetwork trajectory: a stage network that integrates its
-            # whole stage internally (one ``advance`` call over its own grid)
-            # records the real profile in ``.states`` — the per-step recorder
-            # above cannot capture it. Surface it as the reactor series so the
-            # built-in plots and plugin panes show the full trajectory.
-            _staged = getattr(self, "_staged_trajectory", None)
-            for _net in getattr(_staged, "networks", {}).values() if _staged else ():
-                _net_states = getattr(_net, "states", None)
-                _flat = _series_from_stage_states(
-                    _net_states, getattr(_net, "scalars", None)
-                )
-                if _flat is None:
+        # CustomStageNetwork trajectory: a stage network that integrates its
+        # whole stage internally (one ``advance`` call over its own grid)
+        # records the real profile in ``.states`` — the per-step recorder
+        # above cannot capture it. Surface it as the reactor series so the
+        # built-in plots and plugin panes show the full trajectory.
+        _staged = getattr(self, "_staged_trajectory", None)
+        for _net in getattr(_staged, "networks", {}).values() if _staged else ():
+            _net_states = getattr(_net, "states", None)
+            _flat = _series_from_stage_states(
+                _net_states, getattr(_net, "scalars", None)
+            )
+            if _flat is None:
+                continue
+            _states_species = list(getattr(_net_states, "species_names", []))
+            for _r in getattr(_net, "reactors", []):
+                if isinstance(_r, ct.Reservoir):
                     continue
-                _states_species = list(getattr(_net_states, "species_names", []))
-                for _r in getattr(_net, "reactors", []):
-                    if isinstance(_r, ct.Reservoir):
-                        continue
-                    # The stage records ONE profile: attach it only to the
-                    # reactor(s) whose phase it describes (matched by species
-                    # set), never to co-staged reactors on other mechanisms.
-                    _r_species = list(
-                        getattr(getattr(_r, "phase", None), "species_names", [])
-                    )
-                    if _states_species and _r_species != _states_species:
-                        continue
-                    _rid = getattr(_r, "name", "") or str(id(_r))
-                    _existing = reactors_series.get(_rid)
-                    if _existing is not None and _existing.get("is_spatial"):
-                        continue
-                    _cur_len = len((_existing or {}).get("t", []) or [])
-                    if len(_flat["t"]) > _cur_len:
-                        reactors_series[_rid] = _flat
-                        if len(_flat["t"]) > len(times):
-                            times[:] = _flat["t"]
-
-            if progress_callback:
-                progress_callback(
-                    {
-                        "time": times.copy(),
-                        "reactors": reactors_series,
-                    },
-                    simulation_time,
-                    simulation_time,
+                # The stage records ONE profile: attach it only to the
+                # reactor(s) whose phase it describes (matched by species
+                # set), never to co-staged reactors on other mechanisms.
+                _r_species = list(
+                    getattr(getattr(_r, "phase", None), "species_names", [])
                 )
-            results = self.finalize_results(times, reactors_series)
-            return results, "\n".join(self.code_lines)
+                if _states_species and _r_species != _states_species:
+                    continue
+                _rid = getattr(_r, "name", "") or str(id(_r))
+                _existing = reactors_series.get(_rid)
+                if _existing is not None and _existing.get("is_spatial"):
+                    continue
+                _cur_len = len((_existing or {}).get("t", []) or [])
+                if len(_flat["t"]) > _cur_len:
+                    reactors_series[_rid] = _flat
+                    if len(_flat["t"]) > len(times):
+                        times[:] = _flat["t"]
 
-        # Simulation loop with streaming updates
-        current_time = 0.0
-        while current_time < simulation_time:
-            try:
-                self.network.advance(current_time)
-            except Exception as e:
-                # Log warning but continue with partial results
-                last_error_message = str(e)
-                logger.warning(
-                    f"Cantera advance failed at t={current_time}s: {last_error_message}"
-                )
-                if len(times) == 0:
-                    raise RuntimeError(
-                        "Cantera integration failed before any successful time step "
-                        f"at t={current_time}s: {last_error_message}. "
-                        "Refusing to fabricate reactor state trajectories."
-                    ) from e
-                # Otherwise, break and return partial results
-                logger.warning(f"Returning partial results up to t={times[-1]}s")
-                # Provide a partial-progress callback update containing the error
-                if progress_callback:
-                    progress_callback(
-                        {
-                            "time": times.copy(),
-                            "reactors": {
-                                k: {
-                                    "T": v["T"].copy(),
-                                    "P": v["P"].copy(),
-                                    "X": {s: v["X"][s].copy() for s in v["X"]},
-                                    "Y": {s: v["Y"][s].copy() for s in v["Y"]},
-                                }
-                                for k, v in reactors_series.items()
-                            },
-                            "error_message": last_error_message,
-                        },
-                        current_time,
-                        simulation_time,
-                    )
-                break
-
-            times.append(current_time)
-
-            # Capture reactor states
-            for reactor in reactor_list:
-                reactor_id = getattr(reactor, "name", "") or str(id(reactor))
-                T = reactor.phase.T
-                P = reactor.phase.P
-                X_vec = reactor.phase.X
-                Y_vec = reactor.phase.Y
-
-                # Get the correct gas solution for this reactor's mechanism
-                reactor_gas = self.reactor_meta.get(reactor_id, {}).get(
-                    "gas_solution", self.gas
-                )
-                reactor_species_names = reactor_gas.species_names
-
-                # Detect non-finite states and handle gracefully
-                if not (
-                    math.isfinite(T)
-                    and math.isfinite(P)
-                    and all(math.isfinite(float(x)) for x in X_vec)
-                    and all(math.isfinite(float(y)) for y in Y_vec)
-                ):
-                    last_error_message = (
-                        "Non-finite state detected (T/P/X) — using previous values"
-                    )
-                    logger.warning(
-                        f"Non-finite state detected at t={current_time}s for reactor "
-                        f"'{reactor_id}', using previous values"
-                    )
-                    # Duplicate last successful values if available
-                    if len(reactors_series[reactor_id]["T"]) > 0:
-                        T = reactors_series[reactor_id]["T"][-1]
-                        P = reactors_series[reactor_id]["P"][-1]
-                        X_vec_list = [
-                            reactors_series[reactor_id]["X"][s][-1]
-                            for s in reactor_species_names
-                        ]
-                        X_vec = np.array(X_vec_list)
-                        Y_vec_list = [
-                            reactors_series[reactor_id]["Y"][s][-1]
-                            for s in reactor_species_names
-                        ]
-                        Y_vec = np.array(Y_vec_list)
-                    else:
-                        raise ValueError(
-                            f"Reactor {reactor_id!r}: non-finite thermochemical state "
-                            f"(T/P/X/Y) at t={current_time}s and no prior trajectory "
-                            "samples to reuse."
-                        )
-
-                sol_arrays[reactor_id].append(T=T, P=P, X=X_vec)
-                reactors_series[reactor_id]["T"].append(T)
-                reactors_series[reactor_id]["P"].append(P)
-                for species_name, x_value in zip(reactor_species_names, X_vec):
-                    cast(
-                        List[float], reactors_series[reactor_id]["X"][species_name]
-                    ).append(float(x_value))
-                for species_name, y_value in zip(reactor_species_names, Y_vec):
-                    cast(
-                        List[float], reactors_series[reactor_id]["Y"][species_name]
-                    ).append(float(y_value))
-
-            # Call progress callback if provided (for streaming updates)
-            if progress_callback:
-                progress_data = {
+        if progress_callback:
+            # One report, at the end of the (already finished) solve: 1 of 1.
+            progress_callback(
+                {
                     "time": times.copy(),
-                    "reactors": {
-                        k: {
-                            "T": v["T"].copy(),
-                            "P": v["P"].copy(),
-                            "X": {s: v["X"][s].copy() for s in v["X"]},
-                            "Y": {s: v["Y"][s].copy() for s in v["Y"]},
-                        }
-                        for k, v in reactors_series.items()
-                    },
-                }
-                if last_error_message:
-                    progress_data["error_message"] = last_error_message
-                progress_callback(progress_data, current_time, simulation_time)
-
-            current_time += time_step
-
-        # Finalize results
+                    "reactors": reactors_series,
+                },
+                1.0,
+                1.0,
+            )
         results = self.finalize_results(times, reactors_series)
-        if last_error_message:
-            results["error_message"] = last_error_message
         return results, "\n".join(self.code_lines)
 
     def _summary_stage_networks(self) -> Dict[str, Any]:
@@ -2964,10 +2777,8 @@ class DualCanteraConverter:
 
         # Evaluate custom output summary if configured
         try:
-            # The runner path sets only _download_config (a snapshot of the
-            # config the run used); setting _last_config there would change
-            # other readers of it (spatial inference, worker post-config).
-            cfg = self._last_config or self._download_config or {}
+            # build_network sets _last_config before any solve.
+            cfg = self._last_config or {}
             output_block = cfg.get("output") if isinstance(cfg, dict) else None
 
             # Check if custom summary builder is specified

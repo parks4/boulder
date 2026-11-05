@@ -70,6 +70,17 @@ export function exportConfig(config: NormalizedConfig) {
   });
 }
 
+/**
+ * The full resolved YAML (`from:` unfolded, scenario overlays merged in) the
+ * server runs and stores: what the YAML pane downloads.
+ */
+export function fetchResolvedYaml(scenarios: Record<string, unknown>) {
+  return apiFetch<{ yaml: string; filename: string }>("/configs/resolved", {
+    method: "POST",
+    body: JSON.stringify({ scenarios }),
+  });
+}
+
 export function syncConfig(config: NormalizedConfig, originalYaml: string) {
   return apiFetch<SyncResponse>("/configs/sync", {
     method: "POST",

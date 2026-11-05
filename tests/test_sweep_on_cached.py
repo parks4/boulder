@@ -9,7 +9,6 @@ the contract on the headless sweep, the GUI sweep and the single-run cache check
 
 from __future__ import annotations
 
-import copy
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -23,7 +22,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from boulder import scenario_store  # noqa: E402
 from boulder.cantera_converter import get_plugins  # noqa: E402
-from boulder.config import normalize_config  # noqa: E402
 from boulder.runset import store_artifacts_dir  # noqa: E402
 
 _CONFIG_YAML = """\
@@ -125,10 +123,10 @@ def test_headless_cached_run_fires_on_cached_once_per_scenario(
         assert computed_at == pytest.approx(first[sid])
 
 
-def test_explicit_on_cached_argument_wins_and_a_raising_hook_is_logged(
-    tmp_path, cached_calls, capsys
+def test_a_raising_on_cached_hook_is_logged_and_aborts_nothing(
+    tmp_path, cached_calls, capsys, monkeypatch
 ) -> None:
-    """The ``run()`` argument overrides the plugin; a raising hook aborts nothing."""
+    """A plugin ``on_scenario_cached`` hook that raises is logged, not fatal."""
     from boulder import sweep_runner
 
     cfg = _config(tmp_path)
@@ -137,9 +135,10 @@ def test_explicit_on_cached_argument_wins_and_a_raising_hook_is_logged(
     def _boom(*args: Any) -> None:
         raise RuntimeError("host hook exploded")
 
-    sweep_runner.run(cfg, on_cached=_boom)
+    monkeypatch.setattr(get_plugins(), "on_scenario_cached", _boom)
+    sweep_runner.run(cfg)
 
-    assert cached_calls == [], "the explicit argument must replace the plugin hook"
+    assert cached_calls == [], "the raising hook replaced the recording one"
     assert "on_cached hook failed" in capsys.readouterr().out
     assert len(_fingerprints(store_dir)) == 2
 
@@ -194,32 +193,26 @@ def test_check_cache_hit_fires_on_cached(tmp_path, cached_calls) -> None:
     assert len(stored) == 1
     cached_calls.clear()
 
-    def _body() -> Dict[str, Any]:
-        return {
-            "config": normalize_config(copy.deepcopy(base)),
-            "mechanism": "gri30.yaml",
-        }
-
     app = create_app()
     with TestClient(app) as client:
         app.state.preloaded_config_path = str(cfg)
         app.state.preloaded_raw = BoulderRunner.load(str(cfg))
         # Resolve mechanisms like the headless sweep did, whichever host is loaded.
         app.state.converter_class = get_plugins().converter_class
-        hit = client.post("/api/simulations/check-cache", json=_body()).json()
+        hit = client.post("/api/simulations/check-cache", json={}).json()
         assert hit["cached"] is True, hit
         assert len(cached_calls) == 1
         sid, _cfg, fingerprint, _dir, _computed_at = cached_calls[0]
         assert fingerprint == stored[sid]
 
         # Each press of Run on the stored result is a re-run: it fires again.
-        client.post("/api/simulations/check-cache", json=_body())
+        client.post("/api/simulations/check-cache", json={})
         assert len(cached_calls) == 2
 
         cached_calls.clear()
-        base["network"][0]["Reservoir"]["temperature"] = 999
-        body = _body()
-        miss = client.post("/api/simulations/check-cache", json=body).json()
+        # An edit of the live config is a different run: a miss, nothing fires.
+        app.state.preloaded_raw["network"][0]["Reservoir"]["temperature"] = 999
+        miss = client.post("/api/simulations/check-cache", json={}).json()
         assert miss["cached"] is False
         assert cached_calls == []
 
@@ -239,9 +232,7 @@ def test_opening_a_stored_config_does_not_fire_on_cached(
     }
     cfg = tmp_path / "single.yaml"
     cfg.write_text(yaml.safe_dump(base), encoding="utf-8")
-    sweep_runner.run(
-        cfg, resolve_mechanism=sweep_runner.converter_mechanism_resolver(None)
-    )
+    sweep_runner.run(cfg)
 
     monkeypatch.setenv("BOULDER_CONFIG_PATH", str(cfg))
     with TestClient(create_app()) as client:

@@ -20,7 +20,6 @@ import pytest
 
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import load_yaml_string_with_comments, normalize_config
-from boulder.download_script_emitter import CanteraScriptEmitter
 from boulder.sim2stone import sim_to_stone_yaml
 
 
@@ -111,22 +110,6 @@ def test_cantera_converter_builds_dynamic_wall_from_heat_transfer_coeff() -> Non
     assert wall.area == pytest.approx(1.0)
 
 
-def test_download_script_emits_u_kwarg_for_heat_transfer_coeff() -> None:
-    """The --download script constructs ct.Wall(..., U=...), not Q=lambda."""
-    conn = {
-        "id": "wall_0",
-        "type": "Wall",
-        "source": "cstr",
-        "target": "env",
-        "properties": {"heat_transfer_coeff": 0.02, "area": 1.0},
-    }
-    emitter = CanteraScriptEmitter()
-    lines = emitter._emit_connection(conn, "_conn_wall_0", "_conn_wall_0_spec")
-    joined = "\n".join(lines)
-    assert "U=0.02" in joined
-    assert "Q=lambda" not in joined
-
-
 def test_sim2stone_preserves_expansion_rate_coeff() -> None:
     """A moving piston wall (K=) emits expansion_rate_coeff alongside U/area.
 
@@ -195,23 +178,3 @@ def test_cantera_converter_builds_moving_wall_from_expansion_rate_coeff() -> Non
     wall = converter.walls["piston"]
     assert wall.expansion_rate_coeff == pytest.approx(0.5e-4)
     assert wall.heat_transfer_coeff == pytest.approx(100.0)
-
-
-def test_download_script_emits_k_kwarg_for_expansion_rate_coeff() -> None:
-    """The --download script constructs ct.Wall(..., K=...) for a piston."""
-    conn = {
-        "id": "piston",
-        "type": "Wall",
-        "source": "right",
-        "target": "left",
-        "properties": {
-            "heat_transfer_coeff": 100.0,
-            "expansion_rate_coeff": 0.5e-4,
-            "area": 1.0,
-        },
-    }
-    emitter = CanteraScriptEmitter()
-    lines = emitter._emit_connection(conn, "_conn_piston", "_conn_piston_spec")
-    joined = "\n".join(lines)
-    assert "K=5e-05" in joined
-    assert "U=100.0" in joined

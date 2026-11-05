@@ -135,8 +135,13 @@ def deep_merge(base: dict, overlay: dict) -> dict:
     return result
 
 
-def _load_yaml_with_inheritance(path: "str | Path") -> dict:
+def _load_yaml_with_inheritance(
+    path: "str | Path", leaf_text: Optional[str] = None
+) -> dict:
     """Load a STONE YAML with optional ``from:`` inheritance (keys as written).
+
+    *leaf_text*, when given, replaces the leaf file's content (the session's
+    text, edited in the browser); its parents are still read from disk.
 
     If a top-level ``from`` key is present, the chain of parents is resolved
     (:func:`inheritance_chain`; a cycle raises ``ValueError``), the farthest
@@ -153,12 +158,16 @@ def _load_yaml_with_inheritance(path: "str | Path") -> dict:
     """
     from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
 
-    yaml = YAML()
-    yaml.preserve_quotes = True
+    # Plain containers and scalars, as every other raw config Boulder holds:
+    # a round-trip loader's types would dump (and so store) differently.
+    yaml = YAML(typ="safe")
 
     def _own(file: Path) -> dict:
-        with open(file, "r", encoding="utf-8", errors="replace") as f:
-            data = yaml.load(f)
+        if leaf_text is not None and file == Path(path):
+            data = yaml.load(leaf_text)
+        else:
+            with open(file, "r", encoding="utf-8", errors="replace") as f:
+                data = yaml.load(f)
         own = dict(data) if data is not None else {}
         own.pop("from", None)
         return own
@@ -166,7 +175,7 @@ def _load_yaml_with_inheritance(path: "str | Path") -> dict:
     # One resolver (and one cycle check): the chain, farthest parent first.
     # ponytail: each chain file is parsed twice (here and in inheritance_chain);
     # negligible for config-sized files, share the parse if that ever shows.
-    files = [Path(path), *inheritance_chain(path)]
+    files = [Path(path), *inheritance_chain(path, leaf_text)]
     merged = _own(files[-1])
     for file in reversed(files[:-1]):
         merged.pop("scenarios", None)  # the named run-set is not inherited (sweeps are)
@@ -209,14 +218,17 @@ def inheritance_chain(
         chain.append(current)
 
 
-def load_yaml_with_inheritance(path: "str | Path") -> dict:
+def load_yaml_with_inheritance(
+    path: "str | Path", leaf_text: Optional[str] = None
+) -> dict:
     """Load a STONE YAML (``from:`` resolved) with its run-set block canonicalized.
 
-    See :func:`_load_yaml_with_inheritance` for the inheritance rules and
+    THE loader: every entry point reads a config through it. See
+    :func:`_load_yaml_with_inheritance` for the inheritance rules and
     :func:`canonicalize_run_set_keys` for the legacy ``sweep:``/``sweeps:``
     rename (one warning per legacy key, on the merged result only).
     """
-    data = _load_yaml_with_inheritance(path)
+    data = _load_yaml_with_inheritance(path, leaf_text)
     canonicalize_run_set_keys(data)
     return data
 
@@ -578,6 +590,26 @@ def base_entry_id(raw: Dict[str, Any]) -> str:
     under the plain ``BASELINE`` name.
     """
     return BASELINE_SCENARIO_ID
+
+
+def merge_overlays(raw: Dict[str, Any], overlays: Dict[str, Any]) -> Dict[str, Any]:
+    """Return *raw* with its ``scenarios:`` section replaced by *overlays*.
+
+    The GUI holds the scenario overlays in the browser, so a run request carries
+    them and they win over whatever the saved config declares. The key keeps its
+    position (the stored definition then reads like the file); an empty map
+    removes it. *raw* is not mutated.
+    """
+    merged: Dict[str, Any] = {}
+    for key, value in raw.items():
+        if key == "scenarios":
+            if overlays:
+                merged[key] = overlays
+        else:
+            merged[key] = value
+    if overlays and "scenarios" not in merged:
+        merged["scenarios"] = overlays
+    return merged
 
 
 def expand_scenarios(

@@ -112,9 +112,7 @@ def test_spatial_series_fn_extra_series_flows_through_run_streaming_simulation()
         _spatial_series_fn
     )
 
-    results, _ = conv.run_streaming_simulation(
-        simulation_time=1.0, time_step=1.0, config=config
-    )
+    results, _ = conv.run_streaming_simulation(config=config)
 
     series = results["reactors"]["reactor"]
     assert series.get("is_spatial") is True

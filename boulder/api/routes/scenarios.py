@@ -131,7 +131,12 @@ async def get_scenario(scenario_id: str, request: Request) -> Dict[str, Any]:
     if store_dir is None:
         raise HTTPException(status_code=404, detail="No scenario store available")
 
-    payload = scenario_store.read_entry(store_dir, scenario_id, _identity(request))
+    payload = scenario_store.read_entry(
+        store_dir,
+        scenario_id,
+        _identity(request),
+        getattr(request.app.state, "converter_class", None),
+    )
     if payload is None:
         # Absent, mid-write, or belonging to another config — all "not computed"
         # from the caller's point of view, none of them a server error.

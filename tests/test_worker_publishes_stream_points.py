@@ -35,12 +35,7 @@ def test_updated_nodes_carry_the_stream_points_with_converged_thermo() -> None:
     declared_ids = {n["id"] for n in cfg["nodes"]}
 
     worker = SimulationWorker()
-    worker.start_simulation(
-        DualCanteraConverter(mechanism="gri30.yaml"),
-        cfg,
-        simulation_time=1e-4,
-        time_step=1e-4,
-    )
+    worker.start_simulation(DualCanteraConverter(mechanism="gri30.yaml"), cfg)
     deadline = time.time() + 120
     while time.time() < deadline:
         if worker.get_progress().is_complete or worker.get_progress().error_message:

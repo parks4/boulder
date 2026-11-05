@@ -552,7 +552,7 @@ def test_stream_connector_edges_in_synced_config() -> None:
     """_sync_streams_into_config adds a StreamConnector edge per source node.
 
     Asserts:
-    1. After solve_staged with stream_reservoirs=True, each source node has
+    1. After solve_staged, each source node has
        exactly one ``StreamConnector`` edge pointing to its stream-point diamond.
     2. The connector edge id follows the pattern ``{source}_to_{source}_outlet``.
     3. No duplicate StreamConnector edges are created for fan-out sources.
@@ -562,7 +562,7 @@ def test_stream_connector_edges_in_synced_config() -> None:
     cfg = _two_stage_linear_chain()
     conv = DualCanteraConverter(mechanism="gri30.yaml")
     plan = build_stage_graph(cfg)
-    solve_staged(conv, plan, cfg, stream_reservoirs=True)
+    solve_staged(conv, plan, cfg)
 
     connector_conns = [
         c for c in cfg.get("connections", []) if c.get("type") == "StreamConnector"
@@ -594,7 +594,7 @@ def test_virtual_source_to_stream_mfc_in_viz_network() -> None:
     Sankey and the graphviz Network tab to show disconnected rows.
 
     Asserts:
-    1. After BoulderRunner.build() with stream_reservoirs=True a connection
+    1. After BoulderRunner.build() a connection
        whose id matches ``_viz_{source}_to_{stream_point}`` exists in
        conv.connections for every stream-point in reactor_meta.
     2. The built flow device has the correct non-zero mass_flow_rate.
@@ -653,7 +653,7 @@ def test_sankey_stream_point_exclusion_bypasses_chain() -> None:
     cfg = _two_stage_linear_chain()
     conv = DualCanteraConverter(mechanism="gri30.yaml")
     plan = build_stage_graph(cfg)
-    solve_staged(conv, plan, cfg, stream_reservoirs=True)
+    solve_staged(conv, plan, cfg)
 
     # Collect stream-point names from reactor_meta
     stream_names = {
@@ -690,10 +690,10 @@ def test_sankey_stream_point_exclusion_bypasses_chain() -> None:
 
 @pytest.mark.slow
 def test_interface_reservoirs_appear_in_viz_network() -> None:
-    """With interface_reservoirs=True each inter-stage connection yields a diamond Reservoir.
+    """Each inter-stage connection yields a diamond Reservoir.
 
     Asserts:
-    1. solve_staged with interface_reservoirs=True completes.
+    1. solve_staged completes.
     2. Exactly one iface Reservoir is present in converter.reactors per inter-stage
        connection.
     3. The reservoir id follows the {connection_id}__iface pattern.
@@ -707,7 +707,7 @@ def test_interface_reservoirs_appear_in_viz_network() -> None:
     cfg = _two_stage_linear_chain()
     conv = DualCanteraConverter(mechanism="gri30.yaml")
     plan = build_stage_graph(cfg)
-    solve_staged(conv, plan, cfg, interface_reservoirs=True)
+    solve_staged(conv, plan, cfg)
 
     # One iface reservoir per inter-stage connection
     iface_ids = [ic.reservoir_id for ic in plan.all_inter_connections]
@@ -735,14 +735,14 @@ def test_interface_reservoirs_t_matches_upstream_after_solve() -> None:
 
     Asserts:
     The interface reservoir for a_to_b carries the same temperature as r_a
-    (the source reactor) after solve_staged completes with interface_reservoirs=True.
+    (the source reactor) after solve_staged completes.
     """
     from boulder.staged_solver import build_stage_graph, solve_staged
 
     cfg = _two_stage_linear_chain()
     conv = DualCanteraConverter(mechanism="gri30.yaml")
     plan = build_stage_graph(cfg)
-    solve_staged(conv, plan, cfg, interface_reservoirs=True)
+    solve_staged(conv, plan, cfg)
 
     ic = plan.all_inter_connections[0]
     T_source = conv.reactors[ic.source_node].phase.T

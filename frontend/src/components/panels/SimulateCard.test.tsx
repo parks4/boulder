@@ -133,12 +133,9 @@ describe("SimulateCard", () => {
   });
 
   it("sends the authored overlays even when running BASELINE (no scenario selected)", async () => {
-    // Regression: the server's `_merged_raw` uses the overlays map's presence
-    // to tell whether the base config declares `scenarios:` at all, naming
-    // the stored base entry BASELINE vs BASE accordingly (see
-    // `runset.base_entry_id`). Omitting overlays for a plain BASELINE run
-    // used to make that result land under the wrong name -- a phantom row
-    // next to the real (still "Not computed yet") BASELINE one.
+    // The server uses the overlays as the config's `scenarios:` section, which
+    // decides the stored definition: omitting them for a plain BASELINE run
+    // would store a definition without the session's scenarios.
     mockConfig = { nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }], connections: [] };
     useScenarioStore.setState({ activeId: null, overlays: { hot: { metadata: {} } } });
     render(<SimulateCard />);
@@ -146,7 +143,7 @@ describe("SimulateCard", () => {
       fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
     });
     expect(mockStartSimulation).toHaveBeenCalledOnce();
-    const [, , , scenario] = mockStartSimulation.mock.calls[0];
+    const [, , scenario] = mockStartSimulation.mock.calls[0];
     expect(scenario).toEqual({ id: "BASELINE", overlays: { hot: { metadata: {} } } });
   });
 
@@ -157,7 +154,7 @@ describe("SimulateCard", () => {
       fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
     });
     expect(mockStartSimulation).toHaveBeenCalledOnce();
-    const [, simTime, timeStep] = mockStartSimulation.mock.calls[0];
+    const [simTime, timeStep] = mockStartSimulation.mock.calls[0];
     expect(simTime).toBeUndefined();
     expect(timeStep).toBeUndefined();
   });
@@ -176,9 +173,28 @@ describe("SimulateCard", () => {
       fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
     });
     expect(mockStartSimulation).toHaveBeenCalledOnce();
-    const [, simTime, timeStep] = mockStartSimulation.mock.calls[0];
+    const [simTime, timeStep] = mockStartSimulation.mock.calls[0];
     expect(typeof simTime).toBe("number");
     expect(typeof timeStep).toBe("number");
+  });
+
+  it("sends no time override for a staged config (advance_time is per stage)", async () => {
+    // A staged config declares advance_time in each stage: an override would be
+    // rejected by the server, so the card never sends one.
+    mockConfig = {
+      nodes: [{ id: "r1", type: "IdealGasReactor", properties: {}, group: "s1" }],
+      connections: [],
+      groups: { s1: { solver: { kind: "advance", advance_time: 0.02 } } },
+      settings: { solver: { mode: "transient", kind: "advance" } },
+    };
+    render(<SimulateCard />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
+    });
+    expect(mockStartSimulation).toHaveBeenCalledOnce();
+    const [simTime, timeStep] = mockStartSimulation.mock.calls[0];
+    expect(simTime).toBeUndefined();
+    expect(timeStep).toBeUndefined();
   });
 
   it("Force Run skips cache lookup and starts a fresh simulation", async () => {
@@ -191,6 +207,33 @@ describe("SimulateCard", () => {
     });
     expect(mockCheckSimulationCache).not.toHaveBeenCalled();
     expect(mockStartSimulation).toHaveBeenCalledOnce();
+    // The server skips its own store lookup too.
+    const [, , , force] = mockStartSimulation.mock.calls[0];
+    expect(force).toBe(true);
+  });
+
+  it("hands the session's edits to the server before it runs", async () => {
+    mockConfig = { nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }], connections: [] };
+    mockSyncYaml.mockClear();
+    render(<SimulateCard />);
+    await act(async () => {});
+    mockSyncYaml.mockClear();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
+    });
+    expect(mockSyncYaml).toHaveBeenCalled();
+    expect(mockStartSimulation).toHaveBeenCalledOnce();
+  });
+
+  it("does not run a config the server could not receive", async () => {
+    mockConfig = { nodes: [{ id: "r1", type: "IdealGasReactor", properties: {} }], connections: [] };
+    render(<SimulateCard />);
+    await act(async () => {});
+    mockSyncYaml.mockRejectedValueOnce(new Error("shape mismatch"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run simulation/i }));
+    });
+    expect(mockStartSimulation).not.toHaveBeenCalled();
   });
 
   it("syncs YAML before fetching GUI actions on mount", async () => {

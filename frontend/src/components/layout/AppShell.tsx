@@ -6,6 +6,7 @@ import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 import { useSimulationSSE } from "@/hooks/useSimulationSSE";
 import { useScenarioFocus } from "@/hooks/useScenarioFocus";
 import { startSimulation } from "@/api/simulations";
+import { BASELINE_SCENARIO_ID } from "@/api/scenarios";
 import { fetchDefaultConfig, fetchPreloadedConfig } from "@/api/configs";
 import { fetchCachedResult } from "@/api/resultCache";
 import { NetworkCard } from "@/components/panels/NetworkCard";
@@ -172,9 +173,20 @@ export function AppShell() {
     if (isRunning || useSweepRunStore.getState().sweeping || config.nodes.length === 0) {
       return;
     }
+    try {
+      // The server runs its own live config: hand it this session's edits first.
+      await useConfigStore.getState().syncYaml();
+    } catch (err) {
+      toast.error(`Cannot run: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
     beginSimulationRun();
     try {
-      const resp = await startSimulation(config);
+      const { activeId, overlays } = useScenarioStore.getState();
+      const resp = await startSimulation(undefined, undefined, {
+        id: activeId && activeId !== BASELINE_SCENARIO_ID ? activeId : BASELINE_SCENARIO_ID,
+        overlays: overlays as Record<string, unknown>,
+      });
       setStarted(resp.simulation_id);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -210,7 +222,7 @@ export function AppShell() {
 
   // Top-bar links to host-served pages, registered by a Boulder plugin.
   const [headerLinks, setHeaderLinks] = useState<
-    { label: string; href: string; tooltip?: string | null; new_tab?: boolean }[]
+    { label: string; href: string; tooltip?: string | null; new_tab?: boolean; order: number }[]
   >([]);
   useEffect(() => {
     fetch("/api/ui/header-links")
@@ -315,6 +327,7 @@ export function AppShell() {
               key={`${l.label}|${l.href}`}
               href={l.href}
               title={l.tooltip ?? undefined}
+              style={{ order: l.order }}
               {...(l.new_tab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
               className="text-sm px-2 py-1 rounded border border-border hover:bg-muted"
             >

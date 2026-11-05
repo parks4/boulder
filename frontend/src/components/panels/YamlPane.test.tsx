@@ -55,7 +55,9 @@ vi.mock("@/stores/layoutStore", () => ({
 
 const mockResetForNewConfig = vi.fn();
 vi.mock("@/stores/scenarioStore", () => ({
-  useScenarioStore: { getState: () => ({ resetForNewConfig: mockResetForNewConfig }) },
+  useScenarioStore: {
+    getState: () => ({ resetForNewConfig: mockResetForNewConfig, overlays: {} }),
+  },
 }));
 
 vi.mock("@/stores/themeStore", () => ({
@@ -75,9 +77,11 @@ vi.mock("@/stores/sweepStore", () => ({
 
 const mockSyncConfig = vi.fn();
 const mockParseYaml = vi.fn();
+const mockFetchResolvedYaml = vi.fn();
 vi.mock("@/api/configs", () => ({
   syncConfig: (...args: unknown[]) => mockSyncConfig(...args),
   parseYaml: (...args: unknown[]) => mockParseYaml(...args),
+  fetchResolvedYaml: (...args: unknown[]) => mockFetchResolvedYaml(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -166,8 +170,12 @@ describe("YamlPane", () => {
     expect(saveButton()).toBeDisabled();
   });
 
-  it("Download saves the current editor content as a file", async () => {
-    const createObjectURL = vi.fn(() => "blob:mock-url");
+  it("Download serves the server's full resolved YAML, not the editor text", async () => {
+    mockFetchResolvedYaml.mockResolvedValue({
+      yaml: "resolved: from unfolded\n",
+      filename: "config.yaml",
+    });
+    const createObjectURL = vi.fn((blob: Blob) => `blob:mock-url-${blob.size}`);
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
@@ -175,10 +183,14 @@ describe("YamlPane", () => {
     render(<YamlPane />);
     const editor = await editorValue();
     await waitFor(() => expect(editor).toHaveValue("merged: yaml\n"));
+    fireEvent.change(editor, { target: { value: "unsaved edit\n" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Download" }));
 
-    expect(createObjectURL).toHaveBeenCalledOnce();
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledOnce());
+    expect(mockFetchResolvedYaml).toHaveBeenCalledWith({});
+    // The downloaded blob is the server's text (not "unsaved edit\n").
+    expect(createObjectURL.mock.calls[0][0].size).toBe("resolved: from unfolded\n".length);
     expect(clickSpy).toHaveBeenCalledOnce();
     clickSpy.mockRestore();
   });

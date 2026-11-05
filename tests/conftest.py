@@ -31,3 +31,11 @@ def _restore_boulder_logger_state():
     pkg.handlers[:] = saved[1]
     pkg.setLevel(saved[2])
     verbose_utils._boulder_logging_configured = False
+
+def default_solution(mechanism: str, **kw):
+    """Return the default converter's Solution, as the store step requires one."""
+    from boulder.cantera_converter import DualCanteraConverter
+
+    return DualCanteraConverter.create_solution(
+        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
+    )

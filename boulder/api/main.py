@@ -106,13 +106,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     #     a file *upload*, which is a new file and gets its own private
     #     location.
     #
-    # ``/api/simulations`` still takes the config from the *request body*: the
-    # browser store is the source of truth for a single run, these attrs are
-    # the server-side mirror the sweep and scenario routes work from.
+    # ``/api/simulations`` and ``/api/sweep`` both expand ``preloaded_raw``
+    # (plus the request's scenario overlays): the server's live resolved
+    # config, never one carried by the request.
     #
     # Consequences to keep in mind when adding a route:
-    #   * Content attrs reflect the last *saved* YAML -- an unsaved edit in
-    #     the editor is not yet visible here.
+    #   * Content attrs reflect the last config the browser *synced* (YAML
+    #     Save, upload, or ``/api/configs/sync`` before a run) -- an unsaved
+    #     edit in the editor is not yet visible here.
     #   * ``preloaded_raw`` is additionally the base that every scenario
     #     overlay is merged onto (Run Sweep, scenario preview), so it must
     #     stay byte-identical to the file -- never hand it to a function that
@@ -182,11 +183,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # Attempt to load a matching cache entry for the preloaded config.
             try:
                 from .. import scenario_store
-                from ..runset import resolve_store_dir
-                from ..sweep_runner import (
-                    converter_mechanism_resolver,
-                    scenario_fingerprint,
-                )
+                from ..runset import base_entry_id, resolve_store_dir
+                from ..sweep_runner import prepare_entry
 
                 store_dir = resolve_store_dir(
                     app.state.preloaded_raw or {}, str(actual_yaml_path)
@@ -197,22 +195,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     app.state.preloaded_fingerprint = None
                     print("[cache] disabled (--no-cache) — will recompute", flush=True)
                 elif store_dir is not None:
-                    fingerprint = scenario_fingerprint(
-                        validated,
-                        normalized=True,
-                        resolve_mechanism=converter_mechanism_resolver(
-                            app.state.converter_class
-                        ),
+                    # The base entry, hashed as check-cache and a run do.
+                    raw_cfg = app.state.preloaded_raw
+                    _, _, fingerprint = prepare_entry(
+                        raw_cfg,
+                        base_entry_id(raw_cfg),
+                        runner_cls=runner_cls,
+                        converter_cls=app.state.converter_class,
                     )
-                    # Which run-set entry the preloaded config is (BASE, or
-                    # BASELINE once scenarios exist) is not knowable here, so
-                    # match by fingerprint rather than guessing the name. Since
-                    # `expand_scenarios` and the startup path now agree on the
-                    # fingerprint, a sweep's BASELINE answers this too.
                     cached = scenario_store.load_matching(
                         store_dir,
                         fingerprint,
                         scenario_store.config_identity(str(actual_yaml_path)),
+                        app.state.converter_class,
                     )
                     app.state.preloaded_result = cached
                     app.state.preloaded_fingerprint = (

@@ -108,7 +108,12 @@ class TestRunContinuation:
         assert len(rows) == max_iters, f"Expected {max_iters} rows, got {len(rows)}"
 
     def test_run_continuation_parameter_decreases(self):
-        """Each iteration the multiplied parameter value decreases monotonically."""
+        """Each iteration solves with the multiplied value: strictly decreasing.
+
+        Asserts the recorded parameter is 0.001 * 0.8**step, and that the device
+        the last stage solve built carries the last recorded value: the update
+        reached the config the next stage is built from, not only the record.
+        """
         from boulder.runner import BoulderRunner
 
         config = _inert_continuation_config()
@@ -124,11 +129,13 @@ class TestRunContinuation:
 
         rows = runner._continuation_rows
         assert len(rows) >= 2, "Expected at least 2 continuation steps"
-        params = [r["parameter"] for r in rows if r["parameter"] == r["parameter"]]
+        params = [r["parameter"] for r in rows]
+        assert params == pytest.approx([0.001 * 0.8**i for i in range(len(params))])
         for i in range(1, len(params)):
-            assert params[i] <= params[i - 1] * 1.05, (
-                f"Parameter did not decrease monotonically: {params}"
-            )
+            assert params[i] < params[i - 1], f"Parameter did not decrease: {params}"
+        assert runner.converter is not None
+        device = runner.converter.connections["mfc"]
+        assert device.mass_flow_rate == pytest.approx(params[-1])
 
     def test_run_continuation_requires_parameter_key(self):
         """run_continuation raises ValueError when 'parameter' key is missing."""
@@ -393,3 +400,126 @@ class TestCombustorExtinctionSweep:
         assert len(temps) >= 5, "Expected at least 5 sweep points"
         assert temps[0] > 1500.0, f"Initial T should be burning, got {temps[0]:.1f} K"
         assert temps[-1] < temps[0], "Expected temperature to decrease over sweep"
+
+
+# ---------------------------------------------------------------------------
+# Parameter paths, list[0], and a continuation: section read from a YAML file
+# ---------------------------------------------------------------------------
+
+_YAML_CONTINUATION = """\
+phases:
+  gas:
+    mechanism: gri30.yaml
+settings:
+  solver:
+    kind: advance_to_steady_state
+network:
+  - id: inlet
+    Reservoir: {temperature: 1200 K, pressure: 1 atm, composition: "N2:1"}
+  - id: r1
+    IdealGasConstPressureMoleReactor:
+      volume: 1 L
+      initial: {temperature: 1200 K, pressure: 1 atm, composition: "N2:1"}
+  - id: exhaust
+    OutletSink: {}
+  - id: mfc
+    MassFlowController: {mass_flow_rate: 0.001}
+    source: inlet
+    target: r1
+  - id: pc
+    PressureController: {master: mfc, pressure_coeff: 0.0}
+    source: r1
+    target: exhaust
+continuation:
+  parameter: connections.mfc.mass_flow_rate
+  update: {multiply: 0.5}
+  until: {max_iters: 3}
+"""
+
+
+def test_run_continuation_rejects_a_parameter_that_is_not_a_config_property():
+    """An attribute the config does not declare raises instead of recording a no-op.
+
+    Asserts ``ValueError`` for ``connections.mfc.mass_flow_coeff`` (not a
+    property of the MFC entry): the update could never reach the rebuilt device.
+    """
+    from boulder.runner import BoulderRunner
+
+    runner = BoulderRunner(_inert_continuation_config())
+    with pytest.raises(ValueError, match="config propert"):
+        runner.run_continuation(
+            continuation={
+                "parameter": "connections.mfc.mass_flow_coeff",
+                "update": {"multiply": 0.5},
+                "until": {"max_iters": 3},
+            }
+        )
+
+
+def test_run_continuation_list_solves_its_first_value():
+    """Step 0 of a ``list`` update uses ``list[0]``, not the file's value.
+
+    Asserts the recorded parameters are the list, in order, with 7e-4 first
+    although the file holds 1e-3.
+    """
+    from boulder.runner import BoulderRunner
+
+    runner = BoulderRunner(_inert_continuation_config())
+    runner.run_continuation(
+        continuation={
+            "parameter": "connections.mfc.mass_flow_rate",
+            "update": {"list": [7e-4, 5e-4, 2.5e-4]},
+            "until": {"max_iters": 10},
+        }
+    )
+    rows = runner._continuation_rows
+    assert [r["parameter"] for r in rows] == [7e-4, 5e-4, 2.5e-4]
+    assert runner.converter.connections["mfc"].mass_flow_rate == pytest.approx(2.5e-4)
+
+
+def test_continuation_section_of_a_yaml_file_runs_and_downloads(tmp_path):
+    """A YAML file's ``continuation:`` survives validation and drives both routes.
+
+    Asserts ``BoulderRunner.from_yaml(file).run_continuation()`` runs three
+    steps (x0.5), and that the downloaded script calls ``run_continuation``
+    and, run in a subprocess, ends at the same last parameter value.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import boulder
+    from boulder.runner import BoulderRunner
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_YAML_CONTINUATION, encoding="utf-8")
+
+    runner = BoulderRunner.from_yaml(str(cfg)).run_continuation()
+    params = [r["parameter"] for r in runner._continuation_rows]
+    assert params == pytest.approx([1e-3, 5e-4, 2.5e-4])
+
+    script = tmp_path / "downloaded.py"
+    BoulderRunner.from_yaml(str(cfg)).run_headless(download_path=str(script))
+    out = tmp_path / "rows.json"
+    text = script.read_text(encoding="utf-8")
+    assert "run_continuation()" in text
+    script.write_text(
+        text
+        + "\nimport json\njson.dump([r['parameter'] for r in runner._continuation_rows],"
+        + f" open({str(out)!r}, 'w'))\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ, TMP=str(tmp_path), TEMP=str(tmp_path))
+    env["PYTHONPATH"] = str(Path(boulder.__file__).parent.parent)
+    run = subprocess.run(
+        [sys.executable, str(script)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=str(tmp_path),
+        env=env,
+    )
+    assert run.returncode == 0, run.stderr[-3000:]
+    assert json.loads(out.read_text("utf-8")) == pytest.approx(params)

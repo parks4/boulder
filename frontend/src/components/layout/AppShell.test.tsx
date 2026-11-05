@@ -221,8 +221,19 @@ describe("AppShell", () => {
     expect(screen.queryByRole("link", { name: "Reports" })).not.toBeInTheDocument();
   });
 
+  it("orders header links by the order the server sends", async () => {
+    const links = [
+      { label: "Reports", href: "/reports", order: 10 },
+      { label: "Docs", href: "/docs", order: -10 },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ links }) }));
+    render(<AppShell />);
+    expect(await screen.findByRole("link", { name: "Reports" })).toHaveStyle({ order: "10" });
+    expect(screen.getByRole("link", { name: "Docs" })).toHaveStyle({ order: "-10" });
+  });
+
   it("renders a registered header link with its href, tooltip and new-tab target", async () => {
-    const links = [{ label: "Reports", href: "/reports", tooltip: "Past runs", new_tab: true }];
+    const links = [{ label: "Reports", href: "/reports", tooltip: "Past runs", new_tab: true, order: 10 }];
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ links }) }));
     render(<AppShell />);
     const link = await screen.findByRole("link", { name: "Reports" });

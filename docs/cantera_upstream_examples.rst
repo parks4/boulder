@@ -226,7 +226,7 @@ Bundled scripts
    * - ``cantera_examples/surf_pfr.py``
      - Plug-flow reactor with catalytic surface chemistry (``FlowReactor`` +
        ``ReactorSurface``); uses ``methane_pox_on_pt.yaml``. ``--download`` is
-       ``xfail`` (not yet supported by ``download_script_emitter.py``).
+       ``xfail`` (the staged solve does not support it yet).
        `Original upstream source
        <https://github.com/Cantera/cantera/blob/main/samples/python/reactors/surf_pfr.py>`__.
 

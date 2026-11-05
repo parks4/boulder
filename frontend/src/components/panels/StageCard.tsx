@@ -7,6 +7,7 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import { SolverDetailsModal } from "./SolverDetailsModal";
 import {
   deriveMode,
+  isStagedConfig,
   KIND_TO_MODE,
   STEADY_KINDS,
   TRANSIENT_KINDS,
@@ -422,6 +423,7 @@ export function StageCard({ stageId }: Props) {
         onSimTimeChange={onSimTimeChange}
         timeStep={timeStep}
         onTimeStepChange={onTimeStepChange}
+        timeLocked={isStagedConfig(config) && !isMultiStage}
       />
     </div>
   );

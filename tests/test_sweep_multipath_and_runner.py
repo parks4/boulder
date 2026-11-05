@@ -169,17 +169,7 @@ def test_a_config_with_only_a_runner_still_counts_as_a_run_set(tmp_path: Path) -
     from boulder.api.routes.sweep import has_run_set
 
     cfg = _cfg(sweep={"runner": "pkg.mod:run"})
-    assert has_run_set(cfg, str(tmp_path / "config.yaml")) is True
-
-
-def test_a_bare_run_sweep_py_is_still_not_a_run_set(tmp_path: Path) -> None:
-    """Filename discovery stays gone -- the runner must be declared."""
-    from boulder.api.routes.sweep import has_run_set
-
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text("metadata: {}\n", encoding="utf-8")
-    (tmp_path / "run_sweep.py").write_text("", encoding="utf-8")
-    assert has_run_set({}, str(cfg)) is False
+    assert has_run_set(cfg) is True
 
 
 def test_host_runner_is_called_once_even_if_it_raises_a_type_error() -> None:

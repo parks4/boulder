@@ -1,5 +1,4 @@
 import { apiFetch } from "./client";
-import type { NormalizedConfig } from "@/types/config";
 import type { SimulationResults } from "@/types/simulation";
 
 interface StartResponse {
@@ -7,24 +6,25 @@ interface StartResponse {
 }
 
 /**
- * Start a run. When *scenario* is given, the server solves that run-set entry
- * (base config ⊕ *scenario.overlays*) instead of *config* — the same
- * expansion Run Sweep uses — and stores the result under that scenario id.
- * BASELINE is passed as-is and keeps solving *config*.
+ * Start a run. The server expands its own live config (the one the browser last
+ * synced) with *scenario.overlays* and solves the run-set entry *scenario.id*
+ * (BASELINE: the base entry) — the same pipeline Run Sweep uses — then stores
+ * the result under that id. *force* solves even when the store holds it.
  */
 export function startSimulation(
-  config: NormalizedConfig,
   simulationTime?: number,
   timeStep?: number,
   scenario?: { id: string; overlays: Record<string, unknown> },
+  force = false,
 ) {
-  const body: Record<string, unknown> = { config };
+  const body: Record<string, unknown> = {};
   if (simulationTime !== undefined) body.simulation_time = simulationTime;
   if (timeStep !== undefined) body.time_step = timeStep;
   if (scenario) {
     body.scenario_id = scenario.id;
     body.scenarios = scenario.overlays;
   }
+  if (force) body.force = true;
   return apiFetch<StartResponse>("/simulations", {
     method: "POST",
     body: JSON.stringify(body),

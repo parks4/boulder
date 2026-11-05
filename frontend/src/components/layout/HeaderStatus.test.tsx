@@ -44,12 +44,21 @@ describe("HeaderStatus", () => {
     useSimulationStore.getState().clearResults();
     useSweepRunStore.setState({ sweeping: false });
     answer({
-      status: { text: "recorded", tone: "ok", href: "/runs/1", tooltip: "in the index" },
+      status: { text: "recorded", tone: "ok", href: "/runs/1", order: 10, tooltip: "in the index" },
     });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("places the chip with the flex order the host sent", async () => {
+    const { unmount } = render(<HeaderStatus />);
+    expect(await screen.findByTestId("header-status")).toHaveStyle({ order: "10" });
+    unmount();
+    answer({ status: { text: "recorded", tone: "ok", order: -10 } });
+    render(<HeaderStatus />);
+    expect(await screen.findByTestId("header-status")).toHaveStyle({ order: "-10" });
   });
 
   it("renders the response as a link chip", async () => {
@@ -64,7 +73,7 @@ describe("HeaderStatus", () => {
   });
 
   it("renders a plain chip without href", async () => {
-    answer({ status: { text: "not recorded", tone: "warn" } });
+    answer({ status: { text: "not recorded", tone: "warn", order: 10 } });
     render(<HeaderStatus />);
     const chip = await screen.findByTestId("header-status");
     expect(chip.tagName).toBe("SPAN");
@@ -138,11 +147,11 @@ describe("HeaderStatus", () => {
     );
     render(<HeaderStatus />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    answer({ status: { text: "second", tone: "ok" } });
+    answer({ status: { text: "second", tone: "ok", order: 10 } });
     act(() => useScenarioStore.setState({ activeId: "other" }));
     expect(await screen.findByText("second")).toBeInTheDocument();
     await act(async () => {
-      releaseFirst({ ok: true, status: 200, json: async () => ({ status: { text: "first", tone: "ok" } }) });
+      releaseFirst({ ok: true, status: 200, json: async () => ({ status: { text: "first", tone: "ok", order: 10 } }) });
     });
     expect(screen.queryByText("first")).toBeNull();
     expect(screen.getByText("second")).toBeInTheDocument();
@@ -151,6 +160,7 @@ describe("HeaderStatus", () => {
   it.each([
     ["an invalid tone", { status: { text: "x", tone: "purple" } }, "invalid tone"],
     ["a missing text", { status: { tone: "ok" } }, "missing text"],
+    ["a missing order", { status: { text: "x", tone: "ok" } }, "invalid order"],
     ["a non-object", "oops", "not an object"],
   ])("shows 'status unavailable' for %s", async (_name, body, reason) => {
     answer(body);
@@ -189,7 +199,7 @@ describe("HeaderStatus", () => {
     fetchMock.mockReturnValue(new Promise(() => {})); // a slow provider
     act(() => useScenarioStore.setState({ activeId: "other" }));
     expect(screen.queryByText("recorded")).toBeNull();
-    answer({ status: { text: "again", tone: "ok" } });
+    answer({ status: { text: "again", tone: "ok", order: 10 } });
     act(() => useScenarioStore.setState({ activeId: "third" }));
     expect(await screen.findByText("again")).toBeInTheDocument();
     act(() => useSimulationStore.getState().beginSimulationRun());
@@ -205,7 +215,7 @@ describe("HeaderStatus", () => {
   });
 
   it("never renders an unsafe href as a link", async () => {
-    answer({ status: { text: "x", tone: "ok", href: "javascript:alert(1)" } });
+    answer({ status: { text: "x", tone: "ok", order: 10, href: "javascript:alert(1)" } });
     render(<HeaderStatus />);
     const chip = await screen.findByTestId("header-status");
     expect(chip).toHaveTextContent("status unavailable");
@@ -230,7 +240,7 @@ describe("safeHref", () => {
 
   it("parseHostStatus fills the optional fields", () => {
     expect(
-      parseHostStatus({ status: { text: "t", tone: "error", tooltip: "w", href: "/p" } }),
-    ).toEqual({ text: "t", tone: "error", tooltip: "w", href: "/p", new_tab: false });
+      parseHostStatus({ status: { text: "t", tone: "error", order: 10, tooltip: "w", href: "/p" } }),
+    ).toEqual({ text: "t", tone: "error", order: 10, tooltip: "w", href: "/p", new_tab: false });
   });
 });
