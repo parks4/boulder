@@ -1,5 +1,6 @@
 import importlib
 import os
+import warnings
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import (
@@ -220,17 +221,9 @@ class BoulderPlugins:
         Callable[[HeaderStatusContext], Optional[Dict[str, Any]]]
     ] = None
 
-    #: ``(config: dict) -> list[dict]`` callables that synthesize additional
-    #: display-only Cytoscape elements (nodes/edges) for
-    #: :func:`~boulder.utils.config_to_cyto_elements`, appended after its own
-    #: elements. Each callable receives the same config dict passed to
-    #: ``config_to_cyto_elements`` and must not mutate it. Lets a host
-    #: represent a concept that never becomes a real STONE node/connection
-    #: (e.g. a non-physical energy source with no meaningful composition) in
-    #: the interactive graph, without Boulder's core knowing what that
-    #: concept is. Mirrors the pattern ``config_to_cyto_elements`` already
-    #: uses internally for its own stream-point diamond synthesis, made
-    #: pluggable. Registered by an external plugin package.
+    #: Deprecated no-op, kept for one minor so hosts that still register
+    #: synthesizers keep importing. The GUI builds its own graph elements, so
+    #: nothing calls these; setting it emits a :class:`DeprecationWarning`.
     cyto_element_synthesizers: List[
         Callable[[Dict[str, Any]], List[Dict[str, Any]]]
     ] = field(default_factory=list)
@@ -722,6 +715,14 @@ def get_plugins() -> BoulderPlugins:
         )
     except ImportError as e:
         logger.debug(f"Cache contributor plugins not available: {e}")
+
+    if plugins.cyto_element_synthesizers:
+        warnings.warn(
+            "BoulderPlugins.cyto_element_synthesizers is deprecated and ignored: "
+            "the GUI builds its own graph elements. Stop registering it.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     _PLUGIN_CACHE = plugins
 

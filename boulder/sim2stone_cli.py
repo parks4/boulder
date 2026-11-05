@@ -101,10 +101,6 @@ def _execute_and_find_network(
     if script_dir and script_dir not in sys.path:
         sys.path.insert(0, script_dir)
 
-    # Set BOULDER_NO_GUI environment variable to suppress GUI output in user scripts
-    original_boulder_no_gui = os.environ.get("BOULDER_NO_GUI")
-    os.environ["BOULDER_NO_GUI"] = "true"
-
     original_mpl_backend = os.environ.get("MPLBACKEND")
     plt_show_real = None
     if headless_matplotlib:
@@ -132,11 +128,6 @@ def _execute_and_find_network(
         # Execute script in its own globals namespace
         globals_dict = runpy.run_path(script_abspath, run_name="__main__")
     finally:
-        # Restore original BOULDER_NO_GUI environment variable
-        if original_boulder_no_gui is None:
-            os.environ.pop("BOULDER_NO_GUI", None)
-        else:
-            os.environ["BOULDER_NO_GUI"] = original_boulder_no_gui
         if headless_matplotlib:
             if plt_show_real is not None:
                 import matplotlib.pyplot as plt

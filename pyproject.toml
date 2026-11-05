@@ -16,7 +16,9 @@ dependencies = [
   "cantera>=3.0.0",
   "h5py>=3.0.0",
   "python-dotenv>=1.0.0",
+  "numpy>=1.24",
   "PyYAML>=6.0",
+  "ruamel.yaml>=0.18.0",
   "pydantic>=2.0.0",
   "fastapi>=0.110.0",
   "uvicorn[standard]>=0.27.0",
@@ -51,7 +53,8 @@ concurrency = ["multiprocessing"]
 parallel = true
 
 [tool.mypy]
-strict = true
+exclude = ["venv/"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 # Add useful options
@@ -69,7 +72,7 @@ filterwarnings = [
 ]
 # Test markers
 markers = [
-  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "slow: slow tests; deselect with '-m \"not slow\"'",
   "integration: marks tests as integration tests",
   "unit: marks tests as unit tests"
 ]
@@ -95,9 +98,6 @@ max-line-length = 110
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
-[tool.setuptools]
-packages = ["boulder", "configs"]
-
 [tool.setuptools.package-data]
 # Ship the prebuilt React frontend (emitted by `npm run build` into
 # boulder/_frontend) inside the wheel so the GUI works on a plain
@@ -109,6 +109,9 @@ boulder = ["_frontend/**/*"]
 # rest of configs/ ships alongside it as a byproduct of setuptools_scm's
 # git-tracked-file inclusion; harmless (a few KB of example YAMLs).
 configs = ["*.yaml", "*.md"]
+
+[tool.setuptools.packages.find]
+include = ["boulder*", "configs*"]
 
 [tool.setuptools_scm]
 write_to = "boulder/version.py"

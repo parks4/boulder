@@ -19,16 +19,13 @@ from pathlib import Path
 
 # Load .env from the repository root so that BOULDER_PLUGINS and other
 # settings are available for both headless and GUI modes.
-try:
-    from dotenv import load_dotenv  # type: ignore
+from dotenv import load_dotenv
 
-    _env_file = Path(__file__).resolve().parent.parent / ".env"
-    if _env_file.is_file():
-        load_dotenv(dotenv_path=_env_file, override=False)
-except ImportError:
-    pass
+_env_file = Path(__file__).resolve().parent.parent / ".env"
+if _env_file.is_file():
+    load_dotenv(dotenv_path=_env_file, override=False)
 
-from boulder.graphviz_utils import ensure_graphviz_on_path
+from boulder.graphviz_utils import ensure_graphviz_on_path  # noqa: E402
 
 ensure_graphviz_on_path()
 
