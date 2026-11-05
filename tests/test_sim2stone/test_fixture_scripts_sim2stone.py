@@ -52,8 +52,8 @@ _FIXTURES: tuple[tuple[str, str], ...] = (
 # - combustor: CVODE during staged solve on the extinguished end-state.
 # - nanosecond_pulse_discharge: PlasmaPhase ``cp_mole`` not implemented when the
 #   runner rebuilds/solves (sim2stone executing the .py alone may still succeed).
-# - surf_pfr: the staged solve fails before any script is written (the surface
-#   phase is looked up in the gas mechanism file). sim2stone YAML emission and
+# - surf_pfr: the round-trip's staged solve can fail (the surface phase is
+#   looked up in the gas mechanism file). sim2stone YAML emission and
 #   headless --output-yaml + validate (exercised below, not xfail) work fully.
 _DOWNLOAD_XFAIL: frozenset[str] = frozenset(
     {"combustor.py", "nanosecond_pulse_discharge.py", "surf_pfr.py"}
