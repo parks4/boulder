@@ -1,5 +1,13 @@
 export type SolverMode = "steady" | "transient";
 
+/**
+ * True when the config declares stages (per-stage solver times). A flat
+ * config only carries the synthesised "default" group.
+ */
+export function isStagedConfig(config: { groups?: Record<string, unknown> | null }): boolean {
+  return Object.keys(config.groups ?? {}).some((id) => id !== "default");
+}
+
 export type SteadyKind = "advance_to_steady_state" | "solve_steady";
 export type TransientKind = "advance" | "advance_grid" | "micro_step";
 export type SolverKind = SteadyKind | TransientKind;

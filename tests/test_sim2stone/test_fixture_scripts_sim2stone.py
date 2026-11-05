@@ -30,7 +30,14 @@ def _subprocess_env() -> dict[str, str]:
     prev = os.environ.get("CANTERA_DATA", "").strip()
     if prev:
         parts.append(prev)
-    return {**os.environ, "CANTERA_DATA": os.pathsep.join(parts)}
+    # A downloaded script imports Boulder: it must be this checkout's, not
+    # another editable install's.
+    pythonpath = os.pathsep.join([str(_REPO_ROOT), os.environ.get("PYTHONPATH", "")])
+    return {
+        **os.environ,
+        "CANTERA_DATA": os.pathsep.join(parts),
+        "PYTHONPATH": pythonpath,
+    }
 
 
 # (script filename, default ``--mechanism`` for sim2stone phases.gas)
@@ -45,11 +52,9 @@ _FIXTURES: tuple[tuple[str, str], ...] = (
 # - combustor: CVODE during staged solve on the extinguished end-state.
 # - nanosecond_pulse_discharge: PlasmaPhase ``cp_mole`` not implemented when the
 #   runner rebuilds/solves (sim2stone executing the .py alone may still succeed).
-# - surf_pfr: FlowReactor/FlowReactorSurface are not yet supported by
-#   download_script_emitter.py's reactor-type dispatch (a separate,
-#   code-generation-only pathway from cantera_converter.py's
-#   create_reactor_from_node). sim2stone YAML emission and headless
-#   --output-yaml + validate (exercised below, not xfail) work fully.
+# - surf_pfr: the staged solve fails before any script is written (the surface
+#   phase is looked up in the gas mechanism file). sim2stone YAML emission and
+#   headless --output-yaml + validate (exercised below, not xfail) work fully.
 _DOWNLOAD_XFAIL: frozenset[str] = frozenset(
     {"combustor.py", "nanosecond_pulse_discharge.py", "surf_pfr.py"}
 )
@@ -242,13 +247,12 @@ def test_cantera_examples_headless_download_script_runs(
 
     with open(download_py, encoding="utf-8") as fh:
         body = fh.read()
-    assert "import cantera as ct" in body
-    assert "reactors = {}" in body
-    assert "DualCanteraConverter" not in body
-    assert "build_sub_network" not in body
-    assert "config = {" not in body
-    assert "BoulderRunner.from_yaml" not in body
-    assert "network_" in body or "network = ct.ReactorNet" in body
+    # The runner-based script: the solved config, the classes that run, one
+    # ``runner.solve_stage`` call per stage.
+    assert "from boulder.runner import BoulderRunner" in body
+    assert "config = {" in body
+    assert "# Classes that run, per stage" in body
+    assert "runner.solve_stage(" in body
 
     run = subprocess.run(
         [sys.executable, str(download_py)],

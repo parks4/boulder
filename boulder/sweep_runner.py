@@ -230,6 +230,14 @@ def with_time_overrides(
     for name, value in (("simulation_time", simulation_time), ("time_step", time_step)):
         if value is not None and value <= 0:
             raise ValueError(f"{name} must be > 0")
+    if raw.get("stages"):
+        # Each stage declares its own time, which wins over the global one: an
+        # override would be stored in the definition but never solved.
+        raise ValueError(
+            "A run-time/step override cannot apply to a staged config: "
+            "set advance_time per stage in the YAML."
+        )
+
     from .config import TRANSIENT_SOLVER_KINDS  # noqa: PLC0415
 
     raw = copy.deepcopy(raw)

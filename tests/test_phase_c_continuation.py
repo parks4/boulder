@@ -108,7 +108,12 @@ class TestRunContinuation:
         assert len(rows) == max_iters, f"Expected {max_iters} rows, got {len(rows)}"
 
     def test_run_continuation_parameter_decreases(self):
-        """Each iteration the multiplied parameter value decreases monotonically."""
+        """Each iteration solves with the multiplied value: strictly decreasing.
+
+        The recorded parameter is read back from the device the stage solve
+        built, so it follows the update only if the update reached the config
+        the next stage is built from (0.001 * 0.8**step).
+        """
         from boulder.runner import BoulderRunner
 
         config = _inert_continuation_config()
@@ -124,11 +129,10 @@ class TestRunContinuation:
 
         rows = runner._continuation_rows
         assert len(rows) >= 2, "Expected at least 2 continuation steps"
-        params = [r["parameter"] for r in rows if r["parameter"] == r["parameter"]]
+        params = [r["parameter"] for r in rows]
+        assert params == pytest.approx([0.001 * 0.8**i for i in range(len(params))])
         for i in range(1, len(params)):
-            assert params[i] <= params[i - 1] * 1.05, (
-                f"Parameter did not decrease monotonically: {params}"
-            )
+            assert params[i] < params[i - 1], f"Parameter did not decrease: {params}"
 
     def test_run_continuation_requires_parameter_key(self):
         """run_continuation raises ValueError when 'parameter' key is missing."""

@@ -26,7 +26,6 @@ import pytest
 
 from boulder.cantera_converter import DualCanteraConverter
 from boulder.config import load_yaml_string_with_comments, normalize_config
-from boulder.download_script_emitter import CanteraScriptEmitter
 from boulder.sim2stone import sim_to_stone_yaml
 from boulder.sim2stone_ast import _detect_wall_velocity_closures
 
@@ -223,41 +222,3 @@ def test_cantera_converter_builds_scalar_velocity_wall() -> None:
 
     wall = converter.walls["wall_0"]
     assert wall.velocity == pytest.approx(0.01)
-
-
-def test_download_script_emits_velocity_closure_for_pressure_proportional() -> None:
-    """The --download script constructs a real def+Func1 for the closure."""
-    conn = {
-        "id": "piston",
-        "type": "Wall",
-        "source": "left",
-        "target": "right",
-        "properties": {
-            "velocity": {
-                "closure": "pressure_proportional",
-                "coeff": 1e-4,
-                "start_time": 0.1,
-            },
-        },
-    }
-    emitter = CanteraScriptEmitter()
-    lines = emitter._emit_connection(conn, "_conn_piston", "_conn_piston_spec")
-    joined = "\n".join(lines)
-    assert "def _velocity__conn_piston(" in joined
-    assert "velocity=ct.Func1(_velocity__conn_piston)" in joined
-    assert "raise ValueError" not in joined
-
-
-def test_download_script_emits_scalar_velocity_kwarg() -> None:
-    """The --download script passes a plain float velocity through directly."""
-    conn = {
-        "id": "wall_0",
-        "type": "Wall",
-        "source": "left",
-        "target": "right",
-        "properties": {"velocity": 0.01},
-    }
-    emitter = CanteraScriptEmitter()
-    lines = emitter._emit_connection(conn, "_conn_wall_0", "_conn_wall_0_spec")
-    joined = "\n".join(lines)
-    assert "velocity=0.01" in joined

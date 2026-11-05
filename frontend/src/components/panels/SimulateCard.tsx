@@ -13,6 +13,7 @@ import { getSweepInfo } from "@/api/sweep";
 import { Button } from "@/components/ui/Button";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { RunControl } from "./RunControl";
+import { isStagedConfig } from "./solverShared";
 import type { GuiActionMeta } from "@/types/guiAction";
 import { toast } from "sonner";
 
@@ -65,7 +66,9 @@ export function SimulateCard() {
   // advance_grid/micro_step carry their own authoritative grid in
   // settings.solver, which these overrides would otherwise clobber (see
   // with_time_overrides in the backend).
-  const sendTimeOverride = mode === "transient" && kind === "advance";
+  // Never for a staged config: its time is per stage and the server rejects it.
+  const sendTimeOverride =
+    mode === "transient" && kind === "advance" && !isStagedConfig(config);
 
   const [guiActions, setGuiActions] = useState<GuiActionMeta[]>([]);
   const [runningActionId, setRunningActionId] = useState<string | null>(null);

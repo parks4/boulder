@@ -575,7 +575,7 @@ def solve_one_stage(
     stream_reservoirs: bool = True,
     stream_node_dicts: Optional[Dict[str, Dict[str, Any]]] = None,
     stream_conns_by_stage: Optional[Dict[str, List[Dict[str, Any]]]] = None,
-) -> None:
+) -> Dict[str, Any]:
     """Build, solve and hand off ONE stage: the single per-stage solve of Boulder.
 
     :func:`solve_staged` (every entry point), :meth:`BoulderRunner.solve_stage`
@@ -604,6 +604,12 @@ def solve_one_stage(
     stream_node_dicts, stream_conns_by_stage :
         What :func:`stream_points_for` returned for *plan*; computed here when
         omitted (the node dicts are then not shared with other calls).
+
+    Returns
+    -------
+    dict
+        ``{node_id: reactor}`` of the objects this stage built (its stream-point
+        reservoirs included), for inspection or modification between stages.
     """
     if stream_reservoirs and (
         stream_node_dicts is None or stream_conns_by_stage is None
@@ -721,8 +727,9 @@ def solve_one_stage(
             if stream_nd is not None:
                 meta = converter.reactor_meta.get(ic.stream_point_id) or {}
                 nd_props = stream_nd.setdefault("properties", {})
-                nd_props["temperature"] = float(outlet_gas.T)
-                nd_props["pressure"] = float(outlet_gas.P)
+                # Pre-switch gas, like the density, h_mass and top_Y below.
+                nd_props["temperature"] = float(outlet_gas_preswitched.T)
+                nd_props["pressure"] = float(outlet_gas_preswitched.P)
                 nd_props["mdot"] = meta.get("mdot", 0.0)
                 nd_props["density"] = meta.get("density", 0.0)
                 nd_props["h_mass"] = meta.get("h_mass", 0.0)
@@ -745,6 +752,7 @@ def solve_one_stage(
         states=states,
         mapping_losses=mapping_losses,
     )
+    return stage_reactors
 
 
 def build_stage_viz(

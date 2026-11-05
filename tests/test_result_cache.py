@@ -163,7 +163,7 @@ class TestSolverWindow:
         assert simulation_time == pytest.approx(2.5e-6)
         assert time_step == pytest.approx(2.5e-7)  # a tenth of the window
 
-    def test_solver_grid_takes_priority_over_nominal_end_time_dt(self):
+    def test_solver_grid_takes_priority_over_nominal_end_time_dt(self, caplog):
         """The window is what the solve integrates: the grid wins, with a warning."""
         config = {
             "settings": {
@@ -172,9 +172,20 @@ class TestSolverWindow:
                 "solver": {"kind": "advance_grid", "grid": {"stop": 5e-8, "dt": 1e-11}},
             }
         }
-        simulation_time, time_step = solver_window(config)
+        # Wired to the logger directly: another test's ``--verbose`` run may
+        # have switched propagation of ``boulder.*`` off.
+        sweep_log = logging.getLogger("boulder.sweep_runner")
+        sweep_log.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.WARNING, logger="boulder.sweep_runner"):
+                simulation_time, time_step = solver_window(config)
+        finally:
+            sweep_log.removeHandler(caplog.handler)
         assert simulation_time == pytest.approx(5e-8)
         assert time_step == pytest.approx(1e-11)
+        assert (
+            "settings.end_time (3) and the solver's end (5e-08) differ" in caplog.text
+        )
 
     def test_no_time_at_all_has_no_hidden_default(self):
         assert solver_window({"settings": {}}) == (0.0, 0.0)

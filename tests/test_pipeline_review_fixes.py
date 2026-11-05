@@ -284,3 +284,88 @@ def test_solver_window_follows_what_the_solve_uses() -> None:
         }
     }
     assert solver_window(cfg) == pytest.approx((0.02, 0.001))
+
+
+_STAGED_ADVANCE: Dict[str, Any] = {
+    "metadata": {},
+    "phases": {"gas": {"mechanism": "gri30.yaml"}},
+    "settings": {"solver": {"kind": "advance", "advance_time": 2.0e-2}},
+    "stages": {
+        "s1": {
+            "mechanism": "gri30.yaml",
+            "solver": {"kind": "advance", "advance_time": 2.0e-2},
+        }
+    },
+    "s1": [
+        {
+            "id": "r",
+            "IdealGasReactor": {
+                "volume": 1.0,
+                "initial": {
+                    "temperature": 500,
+                    "pressure": 101325,
+                    "composition": "N2:1",
+                },
+            },
+        }
+    ],
+}
+
+
+@pytest.mark.parametrize("override", [(5.0e-3, None), (None, 1.0e-3)])
+def test_time_override_is_rejected_for_a_staged_config(override: Any) -> None:
+    """A run-time/step override on a config with ``stages:`` raises ``ValueError``.
+
+    Each stage declares its own ``advance_time``, which wins over the global
+    one: accepting the override would store a definition that claims a time
+    that was never solved.
+    """
+    with pytest.raises(ValueError, match="advance_time per stage"):
+        with_time_overrides(copy.deepcopy(_STAGED_ADVANCE), *override)
+
+
+def test_server_rejects_a_time_override_for_a_staged_config(tmp_path: Path) -> None:
+    """``POST /api/simulations`` answers 422 for a time override on a staged config."""
+    pytest.importorskip("fastapi")
+    import yaml  # noqa: PLC0415
+
+    cfg = tmp_path / "staged.yaml"
+    cfg.write_text(yaml.safe_dump(_STAGED_ADVANCE), encoding="utf-8")
+    client, _ = _startup_app(cfg)
+    try:
+        resp = client.post("/api/simulations", json={"simulation_time": 5.0e-3})
+        assert resp.status_code == 422, resp.text
+        assert "advance_time per stage" in resp.text
+        resp = client.post(
+            "/api/simulations/check-cache", json={"simulation_time": 5.0e-3}
+        )
+        assert resp.status_code == 422, resp.text
+    finally:
+        client.__exit__(None, None, None)
+
+
+def _shift_switch(gas: Any, target: str, htol: float, Xtol: float) -> Any:
+    """Switch that moves T by +50 K: the post-switch gas differs from the pre-switch gas."""
+    out = _by_name_switch(gas, target, htol, Xtol)
+    out.TP = gas.T + 50.0, gas.P
+    return out
+
+
+def test_stream_point_node_shows_the_pre_switch_temperature() -> None:
+    """After a switch the stream node's T and P are the pre-switch gas's.
+
+    Same gas as its density, enthalpy and ``top_Y``: with a switch that shifts T
+    by 50 K, the node's ``temperature`` is the source reactor's, not the shifted one.
+    """
+    plugins = BoulderPlugins()
+    plugins.mechanism_switch_fn = _shift_switch
+    conv = DualCanteraConverter(mechanism="gri30.yaml", plugins=plugins)
+    conv.build_network(copy.deepcopy(_SWITCH))
+
+    assert conv._last_config is not None
+    node = next(n for n in conv._last_config["nodes"] if n["id"] == "r_a_outlet")
+    source_t = float(conv.reactors["r_a"].phase.T)
+    assert node["properties"]["temperature"] == pytest.approx(source_t)
+    assert node["properties"]["pressure"] == pytest.approx(
+        float(conv.reactors["r_a"].phase.P)
+    )

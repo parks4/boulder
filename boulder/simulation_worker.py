@@ -260,8 +260,8 @@ class SimulationWorker:
         self,
         converter: Any,
         config: Dict[str, Any],
-        simulation_time: float = 10.0,
-        time_step: float = 1.0,
+        simulation_time: float,
+        time_step: float,
     ) -> None:
         """Start a background simulation.
 

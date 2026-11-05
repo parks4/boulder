@@ -228,8 +228,10 @@ class BoulderRunner:
         interface_reservoirs: Optional[bool] = None,
         _iface_node_dicts: Optional[Dict[str, Any]] = None,
         _iface_conns_by_stage: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> Dict[str, Any]:
         """Build and solve one stage, updating *inlet_states* and *trajectory* in place.
+
+        Returns ``{node_id: reactor}``, the objects the stage built.
 
         A delegate to :func:`boulder.staged_solver.solve_one_stage`, the one
         per-stage solve every entry point runs (``solve_staged`` is a loop over
@@ -275,7 +277,7 @@ class BoulderRunner:
 
         from .staged_solver import solve_one_stage
 
-        solve_one_stage(
+        return solve_one_stage(
             self._ensure_converter(),
             plan,
             stage,
@@ -403,52 +405,45 @@ class BoulderRunner:
         plan = self.build_stage_graph()
         converter = self._ensure_converter()
 
-        def _get_param(path: str) -> float:
-            """Resolve dotted parameter path to current float value."""
+        def _properties(path: str) -> "tuple[Dict[str, Any], str]":
+            """Return the config ``properties`` dict and attribute *path* names.
+
+            The stage solve rebuilds every device from the config, so the config
+            is what a parameter is read from and written to.
+            """
             parts = path.split(".")
-            if parts[0] == "connections" and len(parts) >= 3:
-                conn_id = parts[1]
-                attr = ".".join(parts[2:])
-                device = converter.connections.get(conn_id)
-                if device is None:
-                    raise ValueError(
-                        f"run_continuation: connection '{conn_id}' not found."
-                    )
-                return float(getattr(device, attr))
-            if parts[0] == "nodes" and len(parts) >= 3:
-                node_id = parts[1]
-                attr = ".".join(parts[2:])
-                reactor = converter.reactors.get(node_id)
-                if reactor is None:
-                    raise ValueError(f"run_continuation: node '{node_id}' not found.")
-                return float(getattr(reactor, attr))
-            raise ValueError(
-                f"run_continuation: unsupported parameter path '{path}'. "
-                "Supported: connections.<id>.<attr> or nodes.<id>.<attr>."
+            if parts[0] not in ("connections", "nodes") or len(parts) < 3:
+                raise ValueError(
+                    f"run_continuation: unsupported parameter path '{path}'. "
+                    "Supported: connections.<id>.<attr> or nodes.<id>.<attr>."
+                )
+            entry = next(
+                (e for e in self.config.get(parts[0]) or [] if e.get("id") == parts[1]),
+                None,
             )
+            if entry is None:
+                raise ValueError(
+                    f"run_continuation: '{parts[0]}' entry '{parts[1]}' not found."
+                )
+            return entry.setdefault("properties", {}), ".".join(parts[2:])
+
+        def _get_param(path: str) -> float:
+            """Return the parameter's current value: the config's, else the device's."""
+            props, attr = _properties(path)
+            if attr in props:
+                return float(props[attr])
+            parts = path.split(".")
+            registry = (
+                converter.connections
+                if parts[0] == "connections"
+                else converter.reactors
+            )
+            return float(getattr(registry[parts[1]], attr))
 
         def _set_param(path: str, value: float) -> None:
-            """Set parameter at dotted path to *value*."""
-            parts = path.split(".")
-            if parts[0] == "connections" and len(parts) >= 3:
-                conn_id = parts[1]
-                attr = ".".join(parts[2:])
-                device = converter.connections.get(conn_id)
-                if device is None:
-                    raise ValueError(
-                        f"run_continuation: connection '{conn_id}' not found."
-                    )
-                setattr(device, attr, value)
-                return
-            if parts[0] == "nodes" and len(parts) >= 3:
-                node_id = parts[1]
-                attr = ".".join(parts[2:])
-                reactor = converter.reactors.get(node_id)
-                if reactor is None:
-                    raise ValueError(f"run_continuation: node '{node_id}' not found.")
-                setattr(reactor, attr, value)
-                return
-            raise ValueError(f"run_continuation: unsupported parameter path '{path}'.")
+            """Write *value* into the config the next stage solve is built from."""
+            props, attr = _properties(path)
+            props[attr] = value
 
         def _check_until() -> bool:
             """Return True if the stopping predicate is satisfied."""
@@ -544,6 +539,8 @@ class BoulderRunner:
                 break
 
             _set_param(parameter_path, next_val)
+            # The plan (and its stream points) is rebuilt from the updated config.
+            plan = self.build_stage_graph()
 
         self.build_viz_network(plan, trajectory)
         converter._staged_trajectory = trajectory

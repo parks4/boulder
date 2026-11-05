@@ -840,10 +840,6 @@ class DualCanteraConverter:
        :add-heading: Examples using DualCanteraConverter
     """
 
-    from .download_script_emitter import CanteraScriptEmitter as _CanteraScriptEmitter
-
-    SCRIPT_EMITTER_CLASS: type = _CanteraScriptEmitter
-
     # Tolerance for the "does this composition sum to 1.0" sanity check in
     # ``parse_composition``. Coarser than a numerical-precision tolerance on
     # purpose: legitimate rounding in a hand-written config (e.g. mole
@@ -1095,84 +1091,45 @@ class DualCanteraConverter:
     def script_load_lines(self, config_path: str, plan: Any = None) -> list:
         """Return the staged-solve script block for generated download scripts.
 
-        When a normalised config snapshot is available (``_download_config`` or
-        ``_last_config``), the Cantera-level emitter recomputes the stage plan
-        from that embedded config snapshot and delegates to
-        ``self.SCRIPT_EMITTER_CLASS`` — producing a fully self-contained
-        Cantera-native script with no runner dependency.
-
-        When no config snapshot is available, falls back to a runner-based
-        script that re-loads the YAML at runtime.
+        The one download script (CLI ``--download`` and the GUI alike): the
+        solved config, a table of the class each node runs, and one
+        ``runner.solve_stage`` call per stage, see
+        :mod:`boulder.download_script_emitter`.  The classes are read from the
+        objects this converter built, so a plugin's or a host's own reactor
+        classes appear under their own names.
 
         Parameters
         ----------
         config_path :
-            Path to the original YAML file. Used only as a fallback when no
-            normalised config is available on the converter.
+            Path of the original YAML file.  Not used by the script, which embeds
+            the config it solved; kept for subclasses that override this method.
         plan :
-            :class:`~boulder.staged_solver.StageExecutionPlan` produced by
-            ``build_stage_graph()``. Passed through to the runner-based fallback;
-            the Cantera-level emitter recomputes its own plan from the config
-            snapshot and does not use this argument.
+            :class:`~boulder.staged_solver.StageExecutionPlan` of the solved
+            config, from ``build_stage_graph()``.
         """
-        cfg = self._download_config or self._last_config
-        if cfg is not None:
-            return self._script_lines_for_cantera(
-                "from boulder.cantera_converter import DualCanteraConverter",
-                "DualCanteraConverter",
-                cfg,
+        if self._download_config is None or plan is None:
+            raise RuntimeError(
+                "script_load_lines needs a solved config and its stage plan: "
+                "call build_network() first."
             )
-        return self._script_lines_for_runner(
+        from .download_script_emitter import (
+            qualified_class_name,
+            script_lines_for_runner,
+        )
+
+        node_classes = {
+            node_id: qualified_class_name(self.reactors[node_id])
+            for stage in plan.ordered_stages
+            for node_id in stage.node_ids
+            if node_id in self.reactors
+        }
+        return script_lines_for_runner(
             "from boulder.runner import BoulderRunner",
             "BoulderRunner",
-            config_path,
+            self._download_config,
             plan,
+            node_classes,
         )
-
-    @staticmethod
-    def _script_lines_for_runner(
-        runner_import: str,
-        runner_class: str,
-        config_path: str,
-        plan: Any,
-        continuation: Any = None,
-        signals_block: Any = None,
-        bindings_block: Any = None,
-    ) -> list:
-        """Thin wrapper kept for backward compatibility with callers using this as an instance method.
-
-        Delegates entirely to :func:`boulder.download_script_emitter.script_lines_for_runner`.
-        """
-        from .download_script_emitter import script_lines_for_runner
-
-        return script_lines_for_runner(
-            runner_import,
-            runner_class,
-            config_path,
-            plan,
-            continuation,
-            signals_block,
-            bindings_block,
-        )
-
-    def _script_lines_for_cantera(
-        self,
-        converter_import: str,
-        converter_class: str,
-        config: Dict[str, Any],
-    ) -> list:
-        """Emit a Cantera-native download script.
-
-        Generates module-level ``reactors`` / ``connections`` / ``walls``
-        registries and direct ``ct.*`` construction per stage — see
-        :mod:`boulder.download_script_emitter`.
-
-        Dispatch is virtual: subclasses override ``SCRIPT_EMITTER_CLASS`` to inject
-        a custom emitter without modifying Boulder.
-        The ``converter_import`` and ``converter_class`` parameters are kept for
-        backward compatibility with existing callers but are ignored.
-        """
-        return self.SCRIPT_EMITTER_CLASS(converter=self).emit(config)
 
     def create_solution(
         self, mech_name: str, *, kinetics: bool = True, transport: bool = False
@@ -2467,10 +2424,8 @@ class DualCanteraConverter:
         )
         self._staged_trajectory = trajectory
 
-        # Generate a downloadable script mirroring the staged load+build flow.
-        # When called from BoulderRunner.build(), code_lines is overwritten
-        # afterwards with the plan-aware unrolled version. This fallback
-        # serves direct callers (e.g. SimulationWorker) that bypass the runner.
+        # The downloadable script: every caller (runner, worker, CLI) gets this
+        # same stage-by-stage one, written from the config just solved.
         download_path = getattr(self, "_download_config_path", None) or "config.yaml"
         self.code_lines = [
             "# Load configuration from YAML and build Cantera network",

@@ -29,6 +29,8 @@ interface SolverDetailsModalProps {
   onSimTimeChange: (v: string) => void;
   timeStep: string;
   onTimeStepChange: (v: string) => void;
+  /** Staged config: the time lives in each stage of the YAML, not here. */
+  timeLocked?: boolean;
 }
 
 export function SolverDetailsModal({
@@ -51,6 +53,7 @@ export function SolverDetailsModal({
   onSimTimeChange,
   timeStep,
   onTimeStepChange,
+  timeLocked = false,
 }: SolverDetailsModalProps) {
   useEffect(() => {
     if (!open) return;
@@ -174,6 +177,7 @@ export function SolverDetailsModal({
                     type="number"
                     value={startTime}
                     onChange={(e) => onStartTimeChange(e.target.value)}
+                    disabled={timeLocked}
                     className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
                     step="0.1"
                   />
@@ -186,6 +190,7 @@ export function SolverDetailsModal({
                   type="number"
                   value={simTime}
                   onChange={(e) => onSimTimeChange(e.target.value)}
+                  disabled={timeLocked}
                   className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
                   min="0.1"
                   step="0.1"
@@ -198,11 +203,17 @@ export function SolverDetailsModal({
                   type="number"
                   value={timeStep}
                   onChange={(e) => onTimeStepChange(e.target.value)}
+                  disabled={timeLocked}
                   className="block w-full mt-1 px-2 py-1.5 text-sm rounded-md bg-input text-foreground border border-border"
                   min="0.001"
                   step="0.001"
                 />
               </label>
+              {timeLocked && (
+                <p className="col-span-2 text-xs text-muted-foreground">
+                  set advance_time per stage in the YAML
+                </p>
+              )}
             </div>
           )}
         </div>
