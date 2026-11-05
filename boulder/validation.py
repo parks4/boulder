@@ -311,6 +311,9 @@ class NormalizedConfigModel(BaseModel):
     #: stops working with no error at all.
     signals: Optional[List[Dict[str, Any]]] = None
     bindings: Optional[List[Dict[str, Any]]] = None
+    #: ``BoulderRunner.run_continuation`` section (``parameter``/``update``/``until``);
+    #: carried through so a YAML file's section reaches the runner and its script.
+    continuation: Optional[Dict[str, Any]] = None
 
     def __init__(self, **data):
         super().__init__(**data)

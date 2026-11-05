@@ -105,12 +105,23 @@ def test_a_continuation_section_is_run_through_run_continuation() -> None:
     assert "runner.solve_stage(" not in text
 
 
-def test_a_config_that_is_not_a_literal_fails_loud() -> None:
-    """A value that cannot be written as a literal raises instead of emitting a broken script."""
-    config = _prepared()
-    config["settings"] = {"bad": float("nan")}
-    with pytest.raises(ValueError, match="cannot be written into a script"):
-        _script(config, {})
+def test_a_script_that_cannot_reproduce_the_run_raises_on_its_first_line() -> None:
+    """With a ``problem`` the script is a comment then a ``RuntimeError``, never a failure here."""
+    plan = build_stage_graph(_prepared())
+    lines = script_lines_for_runner(
+        "", "BoulderRunner", _prepared(), plan, problem="the config cannot be dumped"
+    )
+    text = "\n".join(lines)
+    ast.parse(text)
+    assert lines[1].startswith("raise RuntimeError(")
+    assert "the config cannot be dumped" in lines[1]
+    assert "solve_stage" not in text
+
+
+def test_a_main_or_local_class_is_not_importable() -> None:
+    """``is_importable_class`` is False for ``__main__`` and ``<locals>`` names."""
+    assert not is_importable_class("__main__.Local")
+    assert not is_importable_class("tests.mod.make.<locals>.Local")
 
 
 def test_script_load_lines_requires_a_solved_config() -> None:

@@ -13,14 +13,14 @@ import pytest
 class TestCLIHeadless:
     """Integration tests for Boulder CLI headless mode."""
 
-    def test_headless_python_generation_and_execution(self):
+    def test_headless_python_generation_and_execution(self, tmp_path):
         """Test that headless mode generates runnable Python code from YAML configuration.
 
         This test verifies the complete headless workflow:
         1. CLI command execution succeeds (returncode == 0)
         2. Success messages appear in stdout ("Python code generated:", output path)
         3. Output Python file is created and exists on disk
-        4. Generated code is the runner-based script: it embeds the solved config,
+        4. Generated code is the runner-based script: it embeds the resolved YAML,
            lists the class each node runs and solves stage by stage:
            - "from boulder.runner import BoulderRunner"
            - one ``runner.solve_stage`` call per stage
@@ -40,11 +40,9 @@ class TestCLIHeadless:
         )
         assert config_path.exists(), f"Test config file not found: {config_path}"
 
-        # Create a temporary file for the generated Python code
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as tmp_file:
-            output_path = tmp_file.name
+        # The generated script goes to pytest's own directory: a script run from
+        # the system temp dir would import whatever stray module sits there.
+        output_path = str(tmp_path / "generated.py")
 
         try:
             # Run Boulder in headless mode to generate Python code
@@ -87,7 +85,7 @@ class TestCLIHeadless:
             # The download is the runner-based script: the solved config, a class
             # table per stage and one ``runner.solve_stage`` call per stage.
             assert "from boulder.runner import BoulderRunner" in generated_code
-            assert "config = {" in generated_code
+            assert "CONFIG_YAML = '''" in generated_code
             assert "runner.solve_stage(" in generated_code
             assert "# Classes that run, per stage" in generated_code
             assert "cantera.reactor." in generated_code

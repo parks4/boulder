@@ -1083,6 +1083,19 @@ def load_config_file(config_path: str) -> Dict[str, Any]:
     return load_yaml_with_inheritance(config_path)
 
 
+def load_config_text(text: str) -> Dict[str, Any]:
+    """Load a resolved STONE YAML *text* (what a run stores) as a raw config dict.
+
+    The text-side twin of :func:`load_config_file`, same loader settings (plain
+    containers and scalars), for configs that hold no ``from:``: a downloaded
+    script embeds the run's resolved YAML and loads it here.
+    """
+    from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
+
+    data = YAML(typ="safe").load(text)
+    return dict(data) if data is not None else {}
+
+
 def load_config_file_with_comments(config_path: str):
     """Load configuration from YAML file preserving comments with 🪨 STONE standard."""
     _assert_stone_yaml_extension(config_path)
@@ -1992,6 +2005,8 @@ def validate_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
     model = validate_normalized_config(config)
     as_dict = model.dict()
+    if as_dict.get("continuation") is None:
+        as_dict.pop("continuation", None)  # absent stays absent (fingerprints)
     # Drop None-valued optional metadata fields so downstream consumers that
     # use ``metadata.get(key, default)`` still see their fallback instead of
     # the explicit ``None`` produced by Pydantic's default serialization.

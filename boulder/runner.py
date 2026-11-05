@@ -7,6 +7,7 @@ the base class; other entrypoints may pass ``runner_class=MyRunner``.
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional, Type, Union
 
@@ -42,6 +43,8 @@ class BoulderRunner:
     """
 
     converter_class: Type["DualCanteraConverter"] = None  # type: ignore[assignment]
+    #: The raw config :meth:`from_yaml` loaded; the download script embeds it.
+    _raw_config: Optional[Dict[str, Any]] = None
 
     def __init__(
         self,
@@ -127,8 +130,11 @@ class BoulderRunner:
     @classmethod
     def from_yaml(cls, path: str) -> "BoulderRunner":
         """Load, normalise, and validate a YAML file, returning a runner instance."""
-        cfg = cls.validate(cls.normalize(cls.load(path)))
-        return cls(config=cfg, config_path=path)
+        raw = cls.load(path)
+        cfg = cls.validate(cls.normalize(copy.deepcopy(raw)))
+        runner = cls(config=cfg, config_path=path)
+        runner._raw_config = raw
+        return runner
 
     @staticmethod
     def load(path: str) -> Dict[str, Any]:
@@ -175,6 +181,7 @@ class BoulderRunner:
             plugins=self.plugins,
         )
         c.runner_class = type(self)
+        c._download_raw = self._raw_config
         if self.config_path is not None:
             c._download_config_path = self.config_path
         self.converter = c
@@ -426,20 +433,20 @@ class BoulderRunner:
                 raise ValueError(
                     f"run_continuation: '{parts[0]}' entry '{parts[1]}' not found."
                 )
-            return entry.setdefault("properties", {}), ".".join(parts[2:])
+            props = entry.setdefault("properties", {})
+            attr = ".".join(parts[2:])
+            if attr not in props:
+                raise ValueError(
+                    f"run_continuation: '{path}' is not a config property of "
+                    f"'{parts[1]}' (it varies config properties only; declared: "
+                    f"{sorted(props)})."
+                )
+            return props, attr
 
         def _get_param(path: str) -> float:
-            """Return the parameter's current value: the config's, else the device's."""
+            """Return the parameter's current value in the config."""
             props, attr = _properties(path)
-            if attr in props:
-                return float(props[attr])
-            parts = path.split(".")
-            registry = (
-                converter.connections
-                if parts[0] == "connections"
-                else converter.reactors
-            )
-            return float(getattr(registry[parts[1]], attr))
+            return float(props[attr])
 
         def _set_param(path: str, value: float) -> None:
             """Write *value* into the config the next stage solve is built from."""
@@ -497,6 +504,12 @@ class BoulderRunner:
         trajectory = self.new_trajectory()
         inlet_states: Dict[str, Any] = {}
 
+        _get_param(parameter_path)  # fail before any solve if the path is wrong
+        if "list" in update_spec:
+            # Step 0 solves list[0]; step n solves list[n].
+            _set_param(parameter_path, float(update_spec["list"][0]))
+            plan = self.build_stage_graph()
+
         for step_idx in range(max_iters):
             # Re-solve all stages with the current parameter value
             inlet_states = {}
@@ -507,10 +520,7 @@ class BoulderRunner:
             alias_inter_connection_mfcs(converter, plan)
 
             # Record current parameter value + reactor temperatures
-            try:
-                param_val = _get_param(parameter_path)
-            except Exception:
-                param_val = float("nan")
+            param_val = _get_param(parameter_path)
 
             row: Dict[str, Any] = {"step": step_idx, "parameter": param_val}
             import cantera as ct  # noqa: PLC0415
@@ -569,7 +579,7 @@ class BoulderRunner:
         - ``self.network`` is a raw visualization :class:`~cantera.ReactorNet`
           (upgraded to the :class:`~boulder.staged_network.StagedReactorNet`
           facade after :meth:`solve` is called).
-        - ``self.code`` is the generated standalone Python script string.
+        - ``self.code`` is the generated Python script string (it needs Boulder and the host's plugins).
         """
         converter = self._ensure_converter()
         converter.build_network(self.config)
@@ -644,7 +654,7 @@ class BoulderRunner:
         Parameters
         ----------
         download_path :
-            Path to write the standalone Python script.  Skipped when ``None``.
+            Path to write the Python script (needs Boulder to run).  Skipped when ``None``.
         simulate :
             When ``True``, run ``run_streaming_simulation`` to append the
             reactor-state reporting section to the generated code (the staged

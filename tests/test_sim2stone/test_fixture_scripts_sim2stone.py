@@ -48,25 +48,34 @@ _FIXTURES: tuple[tuple[str, str], ...] = (
     ("surf_pfr.py", "methane_pox_on_pt.yaml"),
 )
 
-# Headless ``--download`` can still fail for some upstream examples:
-# - combustor: CVODE during staged solve on the extinguished end-state.
-# - nanosecond_pulse_discharge: PlasmaPhase ``cp_mole`` not implemented when the
-#   runner rebuilds/solves (sim2stone executing the .py alone may still succeed).
-# - surf_pfr: the round-trip's staged solve can fail (the surface phase is
-#   looked up in the gas mechanism file). sim2stone YAML emission and
-#   headless --output-yaml + validate (exercised below, not xfail) work fully.
-_DOWNLOAD_XFAIL: frozenset[str] = frozenset(
-    {"combustor.py", "nanosecond_pulse_discharge.py", "surf_pfr.py"}
-)
+# Headless ``--download`` still fails for these examples, for the observed reasons
+# (strict: a fix must remove the mark).  Per test, as observed:
+# - combustor (both tests): the solve itself stops on the example's unresolved
+#   ``{{residence_time}}`` placeholder ("could not convert string to float").
+# - surf_pfr (round-trip only): the staged solve looks the ``Pt_surf`` surface
+#   phase up in gri30.yaml (InputFileError: no map where name = Pt_surf).
+# sim2stone YAML emission and headless --output-yaml + validate (exercised
+# below, not xfail) work fully.
+_DOWNLOAD_XFAIL: dict[str, str] = {
+    "combustor.py": "the example's {{residence_time}} placeholder is not a float",
+}
+_ROUNDTRIP_XFAIL: dict[str, str] = {
+    **_DOWNLOAD_XFAIL,
+    "surf_pfr.py": "Pt_surf is looked up in gri30.yaml (InputFileError)",
+}
 
-_DOWNLOAD_PARAMS: list = []
-for _n, _m in _FIXTURES:
-    if _n in _DOWNLOAD_XFAIL:
-        _DOWNLOAD_PARAMS.append(
-            pytest.param(_n, _m, marks=pytest.mark.xfail(strict=False))
-        )
-    else:
-        _DOWNLOAD_PARAMS.append((_n, _m))
+
+def _params(xfail: dict[str, str]) -> list:
+    return [
+        pytest.param(n, m, marks=pytest.mark.xfail(strict=True, reason=xfail[n]))
+        if n in xfail
+        else (n, m)
+        for n, m in _FIXTURES
+    ]
+
+
+_DOWNLOAD_PARAMS = _params(_DOWNLOAD_XFAIL)
+_ROUNDTRIP_PARAMS = _params(_ROUNDTRIP_XFAIL)
 
 
 @pytest.mark.parametrize("script_name,mechanism", _FIXTURES)
@@ -250,7 +259,7 @@ def test_cantera_examples_headless_download_script_runs(
     # The runner-based script: the solved config, the classes that run, one
     # ``runner.solve_stage`` call per stage.
     assert "from boulder.runner import BoulderRunner" in body
-    assert "config = {" in body
+    assert "CONFIG_YAML = '''" in body
     assert "# Classes that run, per stage" in body
     assert "runner.solve_stage(" in body
 
@@ -331,7 +340,7 @@ def test_boulder_headless_py_writes_valid_stone_yaml(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("script_name,mechanism", _DOWNLOAD_PARAMS)
+@pytest.mark.parametrize("script_name,mechanism", _ROUNDTRIP_PARAMS)
 def test_boulder_headless_py_yaml_validate_download_run_roundtrip(
     tmp_path: Path, script_name: str, mechanism: str
 ) -> None:

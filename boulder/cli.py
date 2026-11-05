@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import io
 import os
 import socket
@@ -245,9 +246,10 @@ def run_headless_mode(
 ) -> None:
     """Run Boulder in headless mode to generate Python code from YAML configuration.
 
-    This function provides a command-line interface for generating standalone Python
-    scripts from Boulder YAML configurations without launching the web UI. The generated
-    Python code contains a complete Cantera simulation that can be executed independently.
+    This function provides a command-line interface for generating Python scripts
+    from Boulder YAML configurations without launching the web UI. The generated
+    script embeds the run's resolved YAML and solves it through the runner class
+    that solved it, stage by stage; it needs Boulder (and the host's plugins) to run.
 
     CLI Usage Examples:
     ------------------
@@ -332,6 +334,7 @@ def run_headless_mode(
         config, actual_yaml_path = load_config_file_with_py_support(
             config_path, verbose
         )
+        raw_config = copy.deepcopy(config)
         normalized_config = normalize_config(config)
         validated_config = validate_config(normalized_config)
 
@@ -346,6 +349,7 @@ def run_headless_mode(
         # Create converter instance
         converter = DualCanteraConverter()
         converter._download_config_path = config_path
+        converter._download_raw = raw_config
 
         if verbose:
             print("Building Cantera network...")
