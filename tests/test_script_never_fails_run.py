@@ -84,16 +84,15 @@ def _config(solver_extra: str = "", top_extra: str = "") -> str:
 
 def _states(runner: BoulderRunner) -> Dict[str, Any]:
     assert runner.converter is not None
-    return {
-        rid: [r.phase.T, r.phase.P] for rid, r in runner.converter.reactors.items()
-    }
+    return {rid: [r.phase.T, r.phase.P] for rid, r in runner.converter.reactors.items()}
 
 
 def _run_script(root: Path, script: Path, out: Optional[Path] = None):
     """Run *script* in a subprocess with a clean temp dir and this checkout's Boulder."""
     if out is not None:
         script.write_text(
-            script.read_text("utf-8") + _DUMP.replace("{out!r}", repr(str(out))), encoding="utf-8"
+            script.read_text("utf-8") + _DUMP.replace("{out!r}", repr(str(out))),
+            encoding="utf-8",
         )
     boulder_root = str(Path(cantera_converter.__file__).parent.parent)
     env = dict(os.environ, TMP=str(root), TEMP=str(root), TMPDIR=str(root))
@@ -135,7 +134,9 @@ def test_valid_config_solves_and_its_script_reproduces_the_states(
     script = tmp_path / "downloaded.py"
 
     runner = runner_cls.from_yaml(str(cfg)).build()
-    cli.main([str(cfg), "--headless", "--download", str(script)], runner_class=runner_cls)
+    cli.main(
+        [str(cfg), "--headless", "--download", str(script)], runner_class=runner_cls
+    )
 
     out = tmp_path / "states.json"
     run = _run_script(tmp_path, script, out)
