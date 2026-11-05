@@ -110,9 +110,9 @@ class TestRunContinuation:
     def test_run_continuation_parameter_decreases(self):
         """Each iteration solves with the multiplied value: strictly decreasing.
 
-        The recorded parameter is read back from the device the stage solve
-        built, so it follows the update only if the update reached the config
-        the next stage is built from (0.001 * 0.8**step).
+        Asserts the recorded parameter is 0.001 * 0.8**step, and that the device
+        the last stage solve built carries the last recorded value: the update
+        reached the config the next stage is built from, not only the record.
         """
         from boulder.runner import BoulderRunner
 
@@ -133,6 +133,9 @@ class TestRunContinuation:
         assert params == pytest.approx([0.001 * 0.8**i for i in range(len(params))])
         for i in range(1, len(params)):
             assert params[i] < params[i - 1], f"Parameter did not decrease: {params}"
+        assert runner.converter is not None
+        device = runner.converter.connections["mfc"]
+        assert device.mass_flow_rate == pytest.approx(params[-1])
 
     def test_run_continuation_requires_parameter_key(self):
         """run_continuation raises ValueError when 'parameter' key is missing."""

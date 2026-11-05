@@ -2428,7 +2428,7 @@ class DualCanteraConverter:
         # same stage-by-stage one, written from the config just solved.
         download_path = getattr(self, "_download_config_path", None) or "config.yaml"
         self.code_lines = [
-            "# Load configuration from YAML and build Cantera network",
+            "# Boulder staged solve: the solved config, then one solve per stage",
             "import cantera as ct",
             *self.script_load_lines(download_path, plan),
         ]
