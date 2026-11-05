@@ -182,6 +182,7 @@ async def start_simulation(
                 source=source,
                 progress_cb=lambda _sid, _cfg, progress: handle.publish(progress),
                 stop_event=handle.stop_event,
+                keep_payload=True,
             )
             if not outcomes:  # stopped before the entry started
                 handle.stopped()

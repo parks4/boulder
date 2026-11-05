@@ -861,6 +861,7 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
                     only={base_entry_id(raw)},
                     use_cache=not os.environ.get("BOULDER_NO_CACHE"),
                     runner_cls=runner_class,
+                    keep_payload=bool(args.download),
                 )
                 if args.download:
                     # The script the solve generated (stored with the entry).
