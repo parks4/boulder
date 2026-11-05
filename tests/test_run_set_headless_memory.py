@@ -228,6 +228,7 @@ def test_cached_chain_step_and_gui_read_use_the_solving_converter(
     solved = run_set(copy.deepcopy(raw), cfg, converter_cls=host)
     again = run_set(copy.deepcopy(raw), cfg, converter_cls=host)
     assert [o.cached for o in again] == [True] * len(solved)
+    assert ctutils._PARSED_SOLUTIONS == {}
 
     app = create_app()
     with TestClient(app) as client:

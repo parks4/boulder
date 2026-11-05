@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+from conftest import default_solution
 
 from boulder import result_cache, scenario_store, sweep_runner
 from boulder.runset import (
@@ -89,7 +90,7 @@ class _NoSolution:
     """A solved-converter stand-in whose Solution is the default converter's."""
 
     def create_solution(self, mechanism: str, **kw: Any) -> Any:
-        return _default_solution(mechanism, **kw)
+        return default_solution(mechanism, **kw)
 
 
 def _write(tmp_path: Path, leaf: str = _LEAF_YAML) -> Path:
@@ -554,12 +555,3 @@ def test_a_sweep_whose_source_cannot_be_built_is_refused_with_422(
         assert "base.yaml" in detail
     finally:
         client.__exit__(None, None, None)
-
-
-def _default_solution(mechanism: str, **kw: Any) -> Any:
-    """Return the default converter's Solution, as the store step requires one."""
-    from boulder.cantera_converter import DualCanteraConverter
-
-    return DualCanteraConverter.create_solution(
-        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
-    )

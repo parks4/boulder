@@ -20,6 +20,7 @@ from typing import Any, Dict, List
 from unittest.mock import patch
 
 import pytest
+from conftest import default_solution
 
 from boulder import runset as runset_module
 from boulder.runset import (
@@ -528,7 +529,7 @@ def test_run_sweep_executes_a_while_chain_point_by_point(tmp_path: Path) -> None
             return name
 
         def create_solution(self, mechanism: str, **kw: Any) -> Any:
-            return _default_solution(mechanism, **kw)
+            return default_solution(mechanism, **kw)
 
     cfg = tmp_path / "chain.yaml"
     cfg.write_text(_CHAIN_YAML, encoding="utf-8")
@@ -623,12 +624,3 @@ def test_headless_sweep_runner_executes_a_while_chain_too(tmp_path: Path) -> Non
         "BASELINE__tau_s=0.09",
         "BASELINE__tau_s=0.081",
     ]
-
-
-def _default_solution(mechanism: str, **kw: Any) -> Any:
-    """Return the default converter's Solution, as the store step requires one."""
-    from boulder.cantera_converter import DualCanteraConverter
-
-    return DualCanteraConverter.create_solution(
-        DualCanteraConverter.__new__(DualCanteraConverter), mechanism, **kw
-    )
