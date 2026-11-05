@@ -27,7 +27,6 @@ import pytest
 from fastapi import FastAPI
 
 from boulder import scenario_store
-from boulder.api.routes.simulations import _resolve_run_grid
 from boulder.result_cache import (
     CacheContributorPlugin,
     CacheContributorRegistry,
@@ -37,10 +36,31 @@ from boulder.result_cache import (
     run_contributors,
 )
 from boulder.runset import resolve_store_dir
+from boulder.sweep_runner import solver_window, with_time_overrides
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+#: The server's live config (``app.state.preloaded_raw``): what a run expands and
+#: the cache check fingerprints.
+LIVE_RAW: Dict[str, Any] = {
+    "phases": {"gas": {"mechanism": "gri30.yaml"}},
+    "settings": {"solver": {"kind": "advance_to_steady_state"}},
+    "network": [
+        {
+            "id": "r1",
+            "IdealGasReactor": {
+                "volume": 1.0,
+                "initial": {
+                    "temperature": 1000,
+                    "pressure": 101325,
+                    "composition": "N2:1",
+                },
+            },
+        }
+    ],
+}
 
 SIMPLE_CONFIG: Dict[str, Any] = {
     "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {"T": 1000}}],
@@ -109,23 +129,22 @@ class TestComputeFingerprint:
 
 
 # ---------------------------------------------------------------------------
-# _resolve_run_grid
+# solver_window / with_time_overrides
 # ---------------------------------------------------------------------------
 
 
-class TestResolveRunGrid:
-    """_resolve_run_grid's settings-derived fallback (no body override).
+class TestSolverWindow:
+    """``solver_window``: the one time-grid rule, read from the prepared config.
 
-    Regression coverage for a bug where an advance_grid/advance config's
-    real settings.solver.grid.{stop,dt} (or advance_time) was ignored in
-    favor of a hard-coded 10.0/1.0 default, because the fallback only ever
-    looked at the legacy top-level settings.end_time/max_time/dt/time_step
-    keys. That wrong total_time/time_step fed the "Using config parameters"
-    log line and progress.total_time (the run itself, driven by
+    Regression coverage for a bug where an advance_grid/advance config's real
+    settings.solver.grid.{stop,dt} (or advance_time) was ignored in favor of a
+    hard-coded default, because the fallback only ever looked at the top-level
+    settings.end_time/dt keys. That wrong total_time fed the "Using config
+    parameters" log line and progress.total_time (the run itself, driven by
     groups.<stage>.solver, was unaffected).
     """
 
-    def test_advance_grid_stop_dt_used_when_no_legacy_keys_or_override(self):
+    def test_advance_grid_stop_dt_used_when_no_nominal_window(self):
         config = {
             "settings": {
                 "solver": {
@@ -134,23 +153,18 @@ class TestResolveRunGrid:
                 }
             }
         }
-        simulation_time, time_step = _resolve_run_grid(config, None, None)
+        simulation_time, time_step = solver_window(config)
         assert simulation_time == pytest.approx(5e-8)
         assert time_step == pytest.approx(1e-11)
-        # No override was passed, so the grid must be left untouched.
-        assert config["settings"]["solver"]["grid"] == {
-            "start": 0.0,
-            "stop": 5e-8,
-            "dt": 1e-11,
-        }
 
     def test_advance_time_used_for_flat_advance_kind(self):
         config = {"settings": {"solver": {"kind": "advance", "advance_time": 2.5e-6}}}
-        simulation_time, time_step = _resolve_run_grid(config, None, None)
+        simulation_time, time_step = solver_window(config)
         assert simulation_time == pytest.approx(2.5e-6)
-        assert time_step == pytest.approx(1.0)  # no dt concept for "advance"
+        assert time_step == pytest.approx(2.5e-7)  # a tenth of the window
 
-    def test_legacy_end_time_dt_still_take_priority_over_grid(self):
+    def test_solver_grid_takes_priority_over_nominal_end_time_dt(self, caplog):
+        """The window is what the solve integrates: the grid wins, with a warning."""
         config = {
             "settings": {
                 "end_time": 3.0,
@@ -158,21 +172,57 @@ class TestResolveRunGrid:
                 "solver": {"kind": "advance_grid", "grid": {"stop": 5e-8, "dt": 1e-11}},
             }
         }
-        simulation_time, time_step = _resolve_run_grid(config, None, None)
-        assert simulation_time == pytest.approx(3.0)
-        assert time_step == pytest.approx(0.1)
+        # Wired to the logger directly: another test's ``--verbose`` run may
+        # have switched propagation of ``boulder.*`` off.
+        sweep_log = logging.getLogger("boulder.sweep_runner")
+        sweep_log.addHandler(caplog.handler)
+        try:
+            with caplog.at_level(logging.WARNING, logger="boulder.sweep_runner"):
+                simulation_time, time_step = solver_window(config)
+        finally:
+            sweep_log.removeHandler(caplog.handler)
+        assert simulation_time == pytest.approx(5e-8)
+        assert time_step == pytest.approx(1e-11)
+        assert (
+            "settings.end_time (3) and the solver's end (5e-08) differ" in caplog.text
+        )
 
-    def test_body_override_still_takes_priority_over_grid(self):
-        config = {
-            "settings": {
-                "solver": {"kind": "advance_grid", "grid": {"stop": 5e-8, "dt": 1e-11}}
-            }
+    def test_no_time_at_all_has_no_hidden_default(self):
+        assert solver_window({"settings": {}}) == (0.0, 0.0)
+
+
+class TestWithTimeOverrides:
+    """The GUI's time fields are written into ``settings.solver`` of a copy."""
+
+    _GRID = {"kind": "advance_grid", "grid": {"stop": 5e-8, "dt": 1e-11}}
+
+    def test_no_override_returns_the_config_itself(self):
+        config = {"settings": {"solver": copy.deepcopy(self._GRID)}}
+        assert with_time_overrides(config, None, None) is config
+
+    def test_override_is_written_to_a_copy_and_the_original_is_kept(self):
+        config = {"settings": {"solver": copy.deepcopy(self._GRID)}}
+        result = with_time_overrides(config, 20.0, 0.5)
+        assert result["settings"]["solver"]["grid"]["stop"] == pytest.approx(20.0)
+        assert result["settings"]["solver"]["grid"]["dt"] == pytest.approx(0.5)
+        assert config["settings"]["solver"]["grid"] == self._GRID["grid"]
+        assert solver_window(result) == (20.0, 0.5)
+
+    def test_a_missing_grid_is_synthesised_with_the_default_kind(self):
+        result = with_time_overrides({"settings": {}}, 5.0, 0.5)
+        assert result["settings"]["solver"] == {
+            "kind": "advance_grid",
+            "grid": {"stop": 5.0, "dt": 0.5},
         }
-        simulation_time, time_step = _resolve_run_grid(config, 20.0, 0.5)
-        assert simulation_time == pytest.approx(20.0)
-        assert time_step == pytest.approx(0.5)
-        # An explicit override IS authoritative and does get written back.
-        assert config["settings"]["solver"]["grid"]["stop"] == pytest.approx(20.0)
+
+    def test_an_explicit_list_grid_is_left_untouched(self):
+        solver = {"kind": "advance_grid", "grid": [0.0, 1.0, 2.0]}
+        result = with_time_overrides({"settings": {"solver": solver}}, 5.0, 0.5)
+        assert result["settings"]["solver"]["grid"] == [0.0, 1.0, 2.0]
+
+    def test_a_non_positive_override_is_refused(self):
+        with pytest.raises(ValueError, match="time_step must be > 0"):
+            with_time_overrides({"settings": {}}, 5.0, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -360,20 +410,15 @@ def _seed_store(
 ) -> str:
     """Solve-and-store *config* for *cfg*, the way a real run leaves it behind.
 
-    Fingerprints through the same normalisation ``check-cache`` applies, so a
+    Fingerprints through the same preparation ``check-cache`` applies (the live
+    config, with any time override written in, then the base entry's key), so a
     seeded entry is one the endpoint can actually match.
     """
-    from boulder.api.routes.simulations import normalize_config_for_fingerprint
-    from boulder.sweep_runner import converter_mechanism_resolver, scenario_fingerprint
+    from boulder.sweep_runner import prepare_entry
 
-    normalized = normalize_config_for_fingerprint(config, simulation_time, time_step)
     mechanism = "gri30.yaml"
-    # The app's converter class (the base class when unset) resolves the mechanism.
-    fingerprint = scenario_fingerprint(
-        normalized,
-        normalized=True,
-        resolve_mechanism=converter_mechanism_resolver(None),
-    )
+    raw = with_time_overrides(copy.deepcopy(config), simulation_time, time_step)
+    fingerprint = prepare_entry(raw, "BASELINE")[2]
     store_dir = resolve_store_dir({}, str(cfg))
     assert store_dir is not None
     scenario_store.write_entry(
@@ -410,12 +455,13 @@ class TestCachedEndpoint:
         """
         cfg = tmp_path / "model.yaml"
         cfg.write_text("x: 1", encoding="utf-8")
-        fingerprint = _seed_store(cfg, SIMPLE_CONFIG, SIMPLE_PAYLOAD)
+        fingerprint = _seed_store(cfg, LIVE_RAW, SIMPLE_PAYLOAD)
 
         app = create_app()
         with TestClient(app) as client:
             # Inject after lifespan startup, exactly as the startup check does.
             app.state.preloaded_config_path = str(cfg)
+            app.state.preloaded_raw = copy.deepcopy(LIVE_RAW)
             app.state.preloaded_result = scenario_store.load_matching(
                 resolve_store_dir({}, str(cfg)),
                 fingerprint,
@@ -455,11 +501,12 @@ class TestCachedEndpoint:
 
         cfg = tmp_path / "case.yaml"
         cfg.write_text("x: 1", encoding="utf-8")
-        fingerprint = _seed_store(cfg, SIMPLE_CONFIG, poisoned_payload)
+        fingerprint = _seed_store(cfg, LIVE_RAW, poisoned_payload)
 
         app = create_app()
         with TestClient(app) as client:
             app.state.preloaded_config_path = str(cfg)
+            app.state.preloaded_raw = copy.deepcopy(LIVE_RAW)
             app.state.preloaded_result = scenario_store.load_matching(
                 resolve_store_dir({}, str(cfg)),
                 fingerprint,
@@ -473,9 +520,7 @@ class TestCachedEndpoint:
             assert "NaN" not in body
             assert resp.json()["result"]["reactors_series"]["r1"]["k"] == [None]
 
-            resp2 = client.post(
-                "/api/simulations/check-cache", json={"config": SIMPLE_CONFIG}
-            )
+            resp2 = client.post("/api/simulations/check-cache", json={})
         assert resp2.status_code == 200
         assert "NaN" not in resp2.text
         assert resp2.json()["result"]["reactors_series"]["r1"]["k"] == [None]
@@ -514,9 +559,7 @@ class TestCachedEndpoint:
         handler, messages = self._capture_boulder_log()
         pkg.addHandler(handler)
         try:
-            resp = client_with_cache.post(
-                "/api/simulations/check-cache", json={"config": SIMPLE_CONFIG}
-            )
+            resp = client_with_cache.post("/api/simulations/check-cache", json={})
         finally:
             pkg.removeHandler(handler)
         assert resp.status_code == 200
@@ -537,18 +580,16 @@ class TestCachedEndpoint:
         cfg.write_text("x: 1", encoding="utf-8")
         # Stored as a run with these overrides applied -- the grid they imply
         # is part of what gets fingerprinted.
-        _seed_store(
-            cfg, SIMPLE_CONFIG, SIMPLE_PAYLOAD, simulation_time=5.0, time_step=0.5
-        )
+        _seed_store(cfg, LIVE_RAW, SIMPLE_PAYLOAD, simulation_time=5.0, time_step=0.5)
 
         app = create_app()
         with TestClient(app) as client:
             app.state.preloaded_config_path = str(cfg)
+            app.state.preloaded_raw = copy.deepcopy(LIVE_RAW)
 
             hit = client.post(
                 "/api/simulations/check-cache",
                 json={
-                    "config": SIMPLE_CONFIG,
                     "simulation_time": 5.0,
                     "time_step": 0.5,
                 },
@@ -559,7 +600,6 @@ class TestCachedEndpoint:
             miss = client.post(
                 "/api/simulations/check-cache",
                 json={
-                    "config": SIMPLE_CONFIG,
                     "simulation_time": 7.0,
                     "time_step": 0.5,
                 },
@@ -568,20 +608,15 @@ class TestCachedEndpoint:
             assert miss.json()["cached"] is False
 
     def test_check_cache_logs_miss(self, client_with_cache: TestClient, tmp_path: Path):
-        """POST /check-cache announces a MISS when the config differs."""
-        other = {
-            **SIMPLE_CONFIG,
-            "nodes": [
-                {"id": "r1", "type": "IdealGasReactor", "properties": {"T": 2000}}
-            ],
-        }
+        """POST /check-cache announces a MISS when the live config differs."""
+        edited = copy.deepcopy(LIVE_RAW)
+        edited["network"][0]["IdealGasReactor"]["initial"]["temperature"] = 2000
+        cast(FastAPI, client_with_cache.app).state.preloaded_raw = edited
         pkg = logging.getLogger("boulder")
         handler, messages = self._capture_boulder_log()
         pkg.addHandler(handler)
         try:
-            resp = client_with_cache.post(
-                "/api/simulations/check-cache", json={"config": other}
-            )
+            resp = client_with_cache.post("/api/simulations/check-cache", json={})
         finally:
             pkg.removeHandler(handler)
         assert resp.status_code == 200

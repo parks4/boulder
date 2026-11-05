@@ -7,6 +7,7 @@ export interface HostStatus {
   href: string | null;
   tooltip: string | null;
   new_tab: boolean;
+  order: number;
 }
 
 const TONES: readonly string[] = ["ok", "warn", "error", "neutral"];
@@ -40,6 +41,7 @@ export function parseHostStatus(data: unknown): HostStatus | null {
   if (tooltip !== null && typeof tooltip !== "string") {
     throw new Error("tooltip is not a string");
   }
+  if (typeof s.order !== "number") throw new Error("invalid order");
   let href: string | null = null;
   if (s.href !== undefined && s.href !== null) {
     href = safeHref(s.href);
@@ -51,5 +53,6 @@ export function parseHostStatus(data: unknown): HostStatus | null {
     href,
     tooltip,
     new_tab: s.new_tab === true,
+    order: s.order,
   };
 }

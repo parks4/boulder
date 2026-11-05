@@ -33,12 +33,10 @@ def _config(solver: dict) -> dict:
     )
 
 
-def _run(config: dict, sim_time: float, step: float) -> dict:
+def _run(config: dict) -> dict:
     conv = DualCanteraConverter(mechanism="gri30.yaml")
     conv.build_network(config)
-    results, _ = conv.run_streaming_simulation(
-        simulation_time=sim_time, time_step=step, config=config
-    )
+    results, _ = conv.run_streaming_simulation(config=config)
     return results
 
 
@@ -47,7 +45,7 @@ def test_transient_run_yields_multipoint_trajectory():
     config = _config(
         {"kind": "advance_grid", "grid": {"start": 0.0, "stop": 0.1, "dt": 0.002}}
     )
-    results = _run(config, 0.1, 0.002)
+    results = _run(config)
     s = results["reactors"]["reactor"]
     assert len(s["T"]) > 5  # a real T(t), not a single converged point
     assert len(s["t"]) == len(s["T"])
@@ -66,7 +64,7 @@ def test_transient_run_yields_multipoint_trajectory():
 
 def test_steady_run_stays_single_point():
     config = _config({"kind": "advance_to_steady_state"})
-    results = _run(config, 1.0, 0.1)
+    results = _run(config)
     # No transient stepping → recorder empty → the converged snapshot is kept.
     assert len(results["reactors"]["reactor"]["T"]) == 1
 

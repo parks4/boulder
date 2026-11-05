@@ -52,6 +52,21 @@ logger = logging.getLogger(__name__)
 _LIVE_CONFIG_DIR_ATTR = "_live_config_dir"
 
 
+def resolve_live_yaml(
+    request: Request, yaml_str: str, path: Optional[str] = None
+) -> Dict[str, Any]:
+    """Return the resolved config (``from:`` unfolded) of the browser's *yaml_str*.
+
+    Through the one loader, :func:`boulder.runset.load_yaml_with_inheritance`:
+    the text replaces the leaf file's content, its parents are read from disk
+    next to *path* (default: the session's config path).
+    """
+    from ..runset import load_yaml_with_inheritance  # noqa: PLC0415 — avoid cycle
+
+    path = path or getattr(request.app.state, "preloaded_config_path", None)
+    return load_yaml_with_inheritance(path or "config.yaml", leaf_text=yaml_str)
+
+
 def adopt_live_config(
     request: Request,
     raw: Dict[str, Any],
@@ -97,35 +112,36 @@ def adopt_live_config(
 
     canonicalize_run_set_keys(raw)
     state = request.app.state
-    live_dir = getattr(state, _LIVE_CONFIG_DIR_ATTR, None)
-    if live_dir is None:
-        # First adoption this session with a *real* CLI-provided config path
-        # already set: an in-place edit. Take the content, keep the location
-        # (see the module docstring for why the two are split). Once we've
-        # adopted once, `_LIVE_CONFIG_DIR_ATTR` is set and every later call is
-        # known to be updating our own ephemeral file, so this branch is
-        # skipped on subsequent calls -- otherwise the very first adoption
-        # would set preloaded_config_path and route every later edit here.
-        if getattr(state, "preloaded_config_path", None) and not replace:
-            state.preloaded_config = validated
-            state.preloaded_raw = raw
-            state.preloaded_yaml = yaml_str
-            logger.info(
-                "Updated live config content; location stays %s",
-                state.preloaded_config_path,
-            )
-            return
-        live_dir = tempfile.mkdtemp(prefix="boulder-live-config-")
-        setattr(state, _LIVE_CONFIG_DIR_ATTR, live_dir)
-
-    path = Path(live_dir) / (
-        filename or getattr(state, "preloaded_filename", None) or "config.yaml"
-    )
-    path.write_text(yaml_str, encoding="utf-8")
-
+    # The content is the session's live config, whatever its location: every run,
+    # sweep and download expands it, never a file.
     state.preloaded_config = validated
     state.preloaded_raw = raw
     state.preloaded_yaml = yaml_str
-    state.preloaded_filename = path.name
-    state.preloaded_config_path = str(path)
-    logger.info("Adopted browser-authored config as preloaded config: %s", path)
+
+    live_dir = getattr(state, _LIVE_CONFIG_DIR_ATTR, None)
+    # A *real* CLI-provided config path, adopted for the first time: an in-place
+    # edit. The location stays (see the module docstring for why the two are
+    # split). Once we've adopted a temp file, `_LIVE_CONFIG_DIR_ATTR` is set and
+    # every later call updates that ephemeral file -- otherwise the very first
+    # adoption would set preloaded_config_path and route every later edit here.
+    keeps_location = (
+        live_dir is None
+        and getattr(state, "preloaded_config_path", None)
+        and not replace
+    )
+    if keeps_location:
+        logger.info(
+            "Updated live config content; location stays %s",
+            state.preloaded_config_path,
+        )
+    else:
+        if live_dir is None:
+            live_dir = tempfile.mkdtemp(prefix="boulder-live-config-")
+            setattr(state, _LIVE_CONFIG_DIR_ATTR, live_dir)
+        path = Path(live_dir) / (
+            filename or getattr(state, "preloaded_filename", None) or "config.yaml"
+        )
+        path.write_text(yaml_str, encoding="utf-8")
+        state.preloaded_filename = path.name
+        state.preloaded_config_path = str(path)
+        logger.info("Adopted browser-authored config as preloaded config: %s", path)

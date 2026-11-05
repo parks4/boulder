@@ -26,8 +26,8 @@ class GuiActionRunRequest(BaseModel):
 def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None) -> Any:
     from ... import scenario_store
     from ...gui_actions import GuiActionContext
-    from ...runset import resolve_store_dir
-    from ...sweep_runner import converter_mechanism_resolver, scenario_fingerprint
+    from ...runset import base_entry_id, resolve_store_dir
+    from ...sweep_runner import prepare_entry
 
     preloaded_config = getattr(request.app.state, "preloaded_config", None)
     preloaded_yaml = getattr(request.app.state, "preloaded_yaml", None)
@@ -59,23 +59,17 @@ def _build_context(request: Request, body: Optional[GuiActionRunRequest] = None)
     has_cached_result = preloaded_result is not None
     cache_fingerprint = preloaded_fingerprint
 
-    if body is not None and body.config is not None and isinstance(config, dict):
-        from .simulations import normalize_config_for_fingerprint
-
-        # Fingerprint the config exactly as check-cache and the run do —
-        # a raw-config lookup would disagree with them for any config the
-        # normalization transforms.
-        fingerprint = scenario_fingerprint(
-            normalize_config_for_fingerprint(config),
-            normalized=True,
-            resolve_mechanism=converter_mechanism_resolver(
-                getattr(request.app.state, "converter_class", None)
-            ),
+    live = getattr(request.app.state, "preloaded_raw", None)
+    if body is not None and body.config is not None and live is not None:
+        # Fingerprint the live config's base entry exactly as check-cache and the
+        # run do (the browser syncs its edits to the server before asking).
+        _, _, fingerprint = prepare_entry(
+            live,
+            base_entry_id(live),
+            runner_cls=getattr(request.app.state, "runner_class", None),
+            converter_cls=getattr(request.app.state, "converter_class", None),
         )
-        store_dir = resolve_store_dir(
-            getattr(request.app.state, "preloaded_raw", None) or {},
-            preloaded_config_path,
-        )
+        store_dir = resolve_store_dir(live, preloaded_config_path)
         # Attrs only: an action just needs to know whether a result exists, so
         # this must not pay for reading the payload it may never use.
         cache_fingerprint = fingerprint

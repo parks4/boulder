@@ -16,6 +16,7 @@ from typing import Any, Callable, List
 from unittest.mock import patch
 
 import pytest
+from conftest import default_solution
 
 pytest.importorskip("fastapi")
 
@@ -96,6 +97,9 @@ class _StubConverter:
 
     def resolve_mechanism(self, name: str) -> str:
         return name
+
+    def create_solution(self, mechanism: str, **kw: Any) -> Any:
+        return default_solution(mechanism, **kw)
 
 
 def test_sweep_run_reuses_the_cache_when_unchanged(tmp_path: Path) -> None:
@@ -229,8 +233,14 @@ def test_sweep_run_stores_a_resolved_mechanism_not_convs_raw_attribute(
     """
 
     class _PrefixResolvingConverter(_StubConverter):
+        """Resolve names to a fictitious path; build the Solution from the bare name."""
+
         def resolve_mechanism(self, name: str) -> str:
             return f"/resolved/{name}"
+
+        def create_solution(self, mechanism: str, **kw: Any) -> Any:
+            # The resolved path is fictitious: build the Solution from the bare name.
+            return default_solution(mechanism.removeprefix("/resolved/"), **kw)
 
     client, app = _client_with_config(tmp_path)
     app.state.converter_class = _PrefixResolvingConverter

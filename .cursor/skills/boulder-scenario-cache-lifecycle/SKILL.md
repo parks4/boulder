@@ -131,7 +131,7 @@ worker could not know either the base's name *or* a declared
 `metadata.extra.cache_store` location.
 
 **Fix:** `runset.base_entry_id` is the one place the naming rule lives, and
-`POST /api/simulations` always hands the worker the raw config.
+`POST /api/simulations` expands the server live resolved config through `run_set`.
 
 ### Clear Cache left the graph blue (fixed)
 

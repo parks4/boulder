@@ -6,6 +6,8 @@ from memory to prevent unbounded retention of result payloads.
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 httpx = pytest.importorskip("httpx")
@@ -16,32 +18,37 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from boulder.api.main import create_app  # noqa: E402
 from boulder.api.routes.simulations import _simulations  # noqa: E402
 
+#: A minimal valid reactor network: the server's live config, which a run expands.
+_LIVE_RAW = {
+    "network": [
+        {
+            "id": "reactor1",
+            "IdealGasReactor": {
+                "volume": 1.0,
+                "initial": {
+                    "temperature": 1000,
+                    "pressure": 101325,
+                    "composition": "CH4:1,O2:2,N2:7.52",
+                },
+            },
+        }
+    ],
+    "settings": {"end_time": 0.1, "dt": 0.05},
+}
+
 
 def _make_client():
-    """Return an AsyncClient bound to a fresh FastAPI app."""
+    """Return an AsyncClient bound to a fresh FastAPI app holding a live config."""
     app = create_app()
+    app.state.preloaded_raw = copy.deepcopy(_LIVE_RAW)
     transport = ASGITransport(app=app)
     return AsyncClient(transport=transport, base_url="http://test")
 
 
 @pytest.fixture
 def minimal_config():
-    """Return a minimal valid reactor network config."""
-    return {
-        "nodes": [
-            {
-                "id": "reactor1",
-                "type": "IdealGasReactor",
-                "properties": {
-                    "temperature": 1000,
-                    "pressure": 101325,
-                    "composition": "CH4:1,O2:2,N2:7.52",
-                },
-            }
-        ],
-        "connections": [],
-        "settings": {"end_time": 0.1, "dt": 0.05},
-    }
+    """Return the minimal live config the client's server holds."""
+    return copy.deepcopy(_LIVE_RAW)
 
 
 class TestSimulationCleanup:
@@ -63,7 +70,6 @@ class TestSimulationCleanup:
             resp = await client.post(
                 "/api/simulations",
                 json={
-                    "config": minimal_config,
                     "simulation_time": 0.1,
                     "time_step": 0.05,
                 },
@@ -79,7 +85,9 @@ class TestSimulationCleanup:
             assert sim_id in _simulations
 
             worker, _ = _simulations[sim_id]
-            for _ in range(20):
+            # The run winds down at its next checkpoint; the first one can come
+            # after the converter's one-time mechanism load, a few seconds in.
+            for _ in range(150):
                 if not worker.get_progress().is_running:
                     break
                 await asyncio.sleep(0.1)
@@ -100,7 +108,6 @@ class TestSimulationCleanup:
             resp = await client.post(
                 "/api/simulations",
                 json={
-                    "config": minimal_config,
                     "simulation_time": 0.1,
                     "time_step": 0.05,
                 },
@@ -141,7 +148,6 @@ class TestSimulationCleanup:
                 resp = await client.post(
                     "/api/simulations",
                     json={
-                        "config": minimal_config,
                         "simulation_time": 0.1,
                         "time_step": 0.05,
                     },
@@ -184,7 +190,6 @@ class TestSimulationCleanup:
             resp = await client.post(
                 "/api/simulations",
                 json={
-                    "config": minimal_config,
                     "simulation_time": 0.1,
                     "time_step": 0.05,
                 },
@@ -234,7 +239,6 @@ class TestSimulationCleanup:
                 resp = await client.post(
                     "/api/simulations",
                     json={
-                        "config": minimal_config,
                         "simulation_time": 0.1,
                         "time_step": 0.05,
                     },
@@ -272,7 +276,6 @@ class TestSimulationCleanup:
             resp = await client.post(
                 "/api/simulations",
                 json={
-                    "config": minimal_config,
                     "simulation_time": 0.1,
                     "time_step": 0.05,
                 },

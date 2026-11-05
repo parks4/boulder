@@ -12,7 +12,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { NetworkCard } from "./NetworkCard";
 
-let mockFileName: string | null = "SPRING_A4_C1X_20260326.yaml";
+let mockFileName: string | null = "example_20260326.yaml";
 let mockActiveId: string | null = null;
 
 const mockSetConfig = vi.fn();
@@ -49,13 +49,13 @@ vi.mock("sonner", () => ({
 describe("NetworkCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFileName = "SPRING_A4_C1X_20260326.yaml";
+    mockFileName = "example_20260326.yaml";
     mockActiveId = null;
   });
 
   it("shows the current filename", () => {
     render(<NetworkCard onEditYaml={vi.fn()} />);
-    expect(screen.getByText("SPRING_A4_C1X_20260326.yaml")).toBeInTheDocument();
+    expect(screen.getByText("example_20260326.yaml")).toBeInTheDocument();
   });
 
   it("falls back to a placeholder filename when none is loaded", () => {

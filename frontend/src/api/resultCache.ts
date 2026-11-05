@@ -28,16 +28,14 @@ export function fetchCachedResult() {
 }
 
 /**
- * Check whether a cached result exists for the given config.
+ * Check whether a cached result exists for the run the same arguments would start.
  *
  * Unlike fetchCachedResult (which reads the server-side preloaded fingerprint),
- * this function submits the *current* in-memory config so the fingerprint is
- * computed from the same data the worker would hash — ensuring a hit even when
- * the config was updated by the SSE handler after a previous solve.
+ * the server fingerprints the entry exactly as the run would — its live config,
+ * these overlays and time overrides — so a hit means the run would store the
+ * same result.
  */
 export function checkSimulationCache(
-  config: Record<string, unknown>,
-  mechanism?: string | null,
   simulationTime?: number,
   timeStep?: number,
   scenario?: { id: string; overlays: Record<string, unknown> },
@@ -46,11 +44,9 @@ export function checkSimulationCache(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      config,
-      mechanism: mechanism ?? null,
-      // Transient run overrides: the server injects these into
+      // Transient run overrides: the server writes these into
       // settings.solver exactly like a run would, so the fingerprint
-      // matches what the worker saved.
+      // matches what the run stores.
       simulation_time: simulationTime ?? null,
       time_step: timeStep ?? null,
       // Same scenario selection the run itself sends (see startSimulation) —

@@ -129,9 +129,7 @@ def test_flow_reactor_builds_and_solves_distance_profile() -> None:
         rid for rid, r in converter.reactors.items() if isinstance(r, ct.ReactorSurface)
     ]
 
-    results, _code = converter.run_streaming_simulation(
-        simulation_time=1.0, time_step=0.1, config=normalized
-    )
+    results, _code = converter.run_streaming_simulation(config=normalized)
     series = results["reactors"]["pfr"]
     assert series.get("is_spatial") is True
     assert len(series["x"]) > 1

@@ -79,11 +79,3 @@ def build_reactor_with_energy(
     if energy is not None:
         kwargs["energy"] = energy
     return reactor_cls(gas, **kwargs)
-
-
-def energy_ctor_suffix(props: dict[str, Any]) -> str:
-    r"""Return ``', energy=\"on\"'`` / ``', energy=\"off\"'`` or empty for emitters."""
-    energy, explicit = parse_energy_prop(props)
-    if not explicit or energy is None:
-        return ""
-    return f", energy={energy!r}"

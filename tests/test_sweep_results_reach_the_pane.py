@@ -15,6 +15,7 @@ from typing import Any, Dict
 from unittest.mock import patch
 
 import pytest
+from conftest import default_solution
 
 pytest.importorskip("fastapi")
 pytest.importorskip("h5py")
@@ -49,7 +50,7 @@ class _FakeWorker:
     def __init__(self) -> None:
         self.progress = SimulationProgress(is_complete=True)
 
-    def start_simulation(self, *a: Any, **kw: Any) -> None:
+    def start_simulation(self, *a: Any, **kw: Any) -> Any:
         pass
 
     def get_progress(self) -> SimulationProgress:
@@ -62,6 +63,9 @@ class _StubConverter:
 
     def resolve_mechanism(self, name: str) -> str:
         return name
+
+    def create_solution(self, mechanism: str, **kw: Any) -> Any:
+        return default_solution(mechanism, **kw)
 
 
 def _client(tmp_path: Path):

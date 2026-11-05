@@ -154,7 +154,8 @@ stored as natively-to-Cantera as possible; everything else rides alongside as JS
 There is a single store, `boulder/scenario_store.py`. Every solve lands in it —
 a whole sweep or a single run — because `expand_scenarios` always yields at
 least one entry, so "single-shot" and "sweep" are the same code path at N=1 and
-N=3. One HDF5 file per run-set entry:
+N=3: `sweep_runner.run_set` (below) is the one pipeline, and a single run is
+`run_set(..., only={entry_id})`. One HDF5 file per run-set entry:
 
 ```
 <config_dir>/.boulder-cache/<stem>/
@@ -216,7 +217,7 @@ is expressed. **Not implemented.**
   matters — a built-in is locatable by scanning `cantera.get_data_directories()` for the name — but it
   would only strengthen the recorded provenance, not cache correctness.
 
-#### Run-set expansion and the sweep runners (GUI in-process, CLI out-of-process)
+#### Run-set expansion and the one run pipeline
 
 `runset.py` is the reference implementation of the STONE `scenarios:`/`sweep:` semantics
 (STONE_SPECIFICATIONS.md §14): `expand_scenarios` (union run-set, id-keyed `deep_merge`, sweep-path
@@ -225,30 +226,65 @@ endpoint uses — same module, so the count can never drift from the expansion),
 `sweep_axis_values`, `resolve_store_path`, and `load_yaml_with_inheritance` (`from:` chains;
 `scenarios:` is deliberately not inherited, `sweep:` is).
 
-The GUI's Run Sweep button (`api/routes/sweep.py`) runs **in-process**, in a background thread:
-`expand_scenarios` the caller's base-config snapshot ⊕ its current `scenarios` (the frontend's
-in-memory `scenarioStore.overlays` — scenario authoring never touches disk, see
-`boulder/scenario_editor.py`) → skip runs whose per-scenario fingerprint is unchanged (incremental
-cache; `no_cache` in the request recreates the store) → solve each one through the exact same
-`SimulationWorker` a plain "Run Simulation" uses (no separate solve implementation) →
-`write_payload` one group per scenario → prune groups whose id left the run-set.
+**One pipeline.** All entry points (CLI run, CLI sweep, GUI run, GUI sweep, Python API) call one
+solve-and-store pipeline, `sweep_runner.run_set(raw, config_path, only=..., use_cache=...)`;
+downloaded scripts and `run_continuation` run the same per-stage solve. A single run is a run set of
+one entry (`only={entry_id}`).
+**One per-stage solve.** `staged_solver.solve_one_stage` builds, solves, switches mechanism, fills the
+stream points and records the trajectory of one stage; `solve_staged` is a plain loop over it followed by
+`build_stage_viz`, the one visualization step. Downloaded scripts and `BoulderRunner.run_continuation`
+step the stages themselves through `BoulderRunner.solve_stage` / `build_viz_network`, thin delegates to
+those two functions, so they run the same code as the GUI. `solve_stage` returns the objects the stage
+built.
+**One download script.** `--download` and the GUI's Download Python write the same runner-based script
+(`download_script_emitter.script_lines_for_runner`, called by `DualCanteraConverter.script_load_lines`):
+the run's resolved YAML text (the text the run stores: one resolved YAML, stored, downloaded and
+embedded), loaded with `config.load_config_text` and passed through the solving runner class's
+`normalize` + `validate`; the script imports that class (`converter.runner_class`, `BoulderRunner` when
+unset). It then holds a per-stage table of the fully qualified class each node was built as (read from
+the built objects, so plugin and host subclasses show under their own names), one `runner.solve_stage`
+call per stage that keeps the built objects in `stages`, and a check of those objects against the
+table. There is no separate Cantera-native script. Writing the script never fails a solve: when it
+cannot reproduce the run (the runner class is not importable, the config cannot be dumped to YAML) it
+is still written and its first executable line raises a `RuntimeError` naming the cause. Time
+overrides are rejected on staged configs (`with_time_overrides`; the server answers 422). A config with a `continuation:` section runs it with
+`runner.run_continuation()`, which writes each parameter update into the config the next stage solve is
+built from.
+Per entry: prepare the config with the runner's `normalize` + `validate` → fingerprint → store hit
+(`on_scenario_cached`) or solve through the staged solver (`converter.build_network`, the one staged
+driver) → write the entry (`store_solved_scenario`, the one store writer) → contributors and host hooks.
+Without `only`, entries whose id left the run set are pruned afterwards.
 
-`sweep_runner.py` (`python -m boulder.sweep_runner <config.yaml>`) is a separate, disk-based,
-out-of-process runner for headless/CLI use — the GUI route above does not call it. `boulder --sweep --headless` invokes it by default; `plugins.sweep_runner` overrides that argv for a host whose CLI
-sweep is genuinely different. Sweep-id naming is customized via `plugins.sweep_symbols`.
+- **One loader.** Every config is read through `runset.load_yaml_with_inheritance` (`BoulderRunner.load`
+  delegates to it), so `from:` works on every path.
+- **One config.** The GUI routes expand the server's live resolved config
+  (`app.state.preloaded_raw`, kept current by YAML Save, upload and `/configs/sync`) ⊕ the request's
+  scenario overlays (the frontend's in-memory `scenarioStore.overlays`) — never the request's own
+  config. The GUI's run time/step fields are written into the `settings.solver` of that copy before
+  expansion. The stored run definition (`scenario_store.definition_text`) is that resolved config, dumped
+  one way on every path; the YAML pane's Download serves the same text (`POST /api/configs/resolved`).
+- **One time-grid rule.** `sweep_runner.solver_window` reads the prepared config only: the solver's
+  end (`grid.stop`, a list grid's last time, or `advance_time`) wins over `settings.end_time`, which
+  is only a fallback; a transient stage with no grid is an error, not a hidden default duration.
+- **Not in a process of its own.** The GUI sweep runs in a background thread and the GUI run in a
+  route-held thread (`simulation_worker.RunHandle` serves its progress, complete only once the entry is
+  stored); the CLI sweep runs in the calling process, so the runner class reaches it. `plugins.sweep_runner`
+  still overrides the CLI sweep with a command run in its own process, for a host whose sweep is genuinely
+  different. Sweep-id naming is customized via `plugins.sweep_symbols`.
+- **The user's file is never written** by a run, a sweep or a download; only a save does.
 
-**Per-scenario host hooks fire on both sweep paths.** Three seams let a host attach to a scenario:
-`scenario_attrs` and `on_scenario_solved` for each freshly solved sweep scenario (cache hits fire
-neither), and `on_scenario_cached` for each scenario served from the result store on a re-run:
+**Per-scenario host hooks fire on every path.** Three seams let a host attach to a scenario:
+`scenario_attrs` and `on_scenario_solved` for each freshly solved entry — single runs included (cache hits
+fire neither) — and `on_scenario_cached` for each entry served from the result store on a re-run:
 
 | Plugin field | Signature | Purpose |
 |---|---|---|
 | `scenario_attrs` | `(scenario_id, merged_config, gui_payload) -> dict` | Extra **scalar** attrs on the scenario's HDF5 group — the per-run KPIs the Scenario pane's Sweep Results plot offers as axes |
 | `on_scenario_solved` | `(scenario_id, config, converter, simulation_result, fingerprint, gui_payload, mechanism) -> None` | Persist per-scenario artifacts keyed by the same fingerprint — e.g. writing each scenario into the single-run result cache so a later "Export" reuses the sweep's work instead of re-solving |
-| `on_scenario_cached` | `(scenario_id, config, fingerprint, artifacts_dir, computed_at) -> None` | Fires on every re-run served from the store (headless sweep, GUI sweep, and the single-run cache check behind the Run button), so a host-side index stays complete when a model is re-run unchanged. It does not fire when the GUI merely opens a config with a stored result, and it may fire repeatedly for the same entry, so a host must handle repeated calls idempotently. A fresh single-run solve never reaches `on_scenario_solved` (only sweeps do); a host sees it through its result-cache contributors. `computed_at` is the entry's original solve time |
+| `on_scenario_cached` | `(scenario_id, config, fingerprint, artifacts_dir, computed_at) -> None` | Fires on every re-run served from the store (headless sweep, GUI sweep, and the single-run cache check behind the Run button), so a host-side index stays complete when a model is re-run unchanged. It does not fire when the GUI merely opens a config with a stored result, and it may fire repeatedly for the same entry, so a host must handle repeated calls idempotently. `computed_at` is the entry's original solve time |
 
-`sweep_runner.run()` also accepts the hooks as arguments (an explicit argument wins; otherwise it falls
-back to the plugin fields), so the CLI and the GUI record identical attributes. All three are best-effort:
+`sweep_runner.run_set()` reads the hooks from the plugin fields only (`run()` and `run_set()` take no hook
+arguments), so the CLI and the GUI record identical attributes. All three are best-effort:
 a raising hook is caught and logged, never aborting the run.
 
 These were originally `run()` parameters only, which meant a host could reach them *solely* through
@@ -564,7 +600,7 @@ header's only entry point.
 The route answers `{"status": null}` (no provider, or the provider returned `None`), or
 
 ```json
-{"status": {"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": null, "new_tab": false}}
+{"status": {"text": "recorded", "tone": "ok", "href": "/runs/1", "tooltip": null, "new_tab": false, "order": 10}}
 ```
 
 `tone` is `ok`, `warn`, `error` or `neutral`; `href` follows the header-link rule
@@ -577,6 +613,10 @@ scenario changes or a run starts. There
 is no timer: `HeaderStatus.tsx` asks again when `scenarioStore.activeId`
 changes, when `simulationStore.results` changes while nothing is running, when a
 sweep ends, and when `config.metadata` changes.
+
+Both links and the status chip take an optional integer `order` (default 10, the
+theme toggle is 0, lower comes first; a non-integer is an error), applied by the
+GUI as a CSS flex `order`.
 
 **Custom connection kinds.** `plugins.connection_builders["MyEdgeKind"]`
 registers a builder `(converter, conn_dict) -> device` dispatched before the

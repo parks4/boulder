@@ -14,20 +14,22 @@ from typing import Any, Dict
 from unittest.mock import patch
 
 import pytest
+from conftest import default_solution
 
 pytest.importorskip("h5py")
 pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from boulder import cantera_converter, sweep_runner  # noqa: E402
 from boulder import scenario_store as store  # noqa: E402
 from boulder.api.main import create_app  # noqa: E402
-from boulder.config import normalize_config  # noqa: E402
+from boulder.cantera_converter import BoulderPlugins  # noqa: E402
 from boulder.runset import resolve_store_dir  # noqa: E402
-from boulder.simulation_worker import SimulationWorker  # noqa: E402
 from boulder.sweep_runner import (  # noqa: E402
     converter_mechanism_resolver,
     prepare_scenario,
+    run_set,
     scenario_fingerprint,
 )
 
@@ -67,6 +69,13 @@ _NETWORK: Dict[str, Any] = {
 }
 
 
+class _NoSolution:
+    """A solved-converter stand-in whose Solution is the default converter's."""
+
+    def create_solution(self, mechanism: str, **kw: Any) -> Any:
+        return default_solution(mechanism, **kw)
+
+
 def _raw(mechanism: str | None) -> Dict[str, Any]:
     raw = copy.deepcopy(_NETWORK)
     if mechanism:
@@ -74,39 +83,31 @@ def _raw(mechanism: str | None) -> Dict[str, Any]:
     return raw
 
 
-class _StubConverter:
-    """What `_persist_to_cache` reads off the converter; no Cantera."""
-
-    def __init__(self, config_path: Path, mechanism: str | None) -> None:
-        self.mechanism = mechanism
-        self._download_config_path = str(config_path)
-
-        class _Plugins:
-            cache_contributors = ()
-
-        self.plugins = _Plugins()
-
-    def resolve_mechanism(self, name: str) -> str:
-        return name
+_PAYLOAD: Dict[str, Any] = {
+    "status": "complete",
+    "times": [0.0],
+    "reactors_series": {},
+    "reactor_reports": {},
+    "connection_reports": {},
+    "code_str": "# code",
+}
 
 
-def _single_run_key(raw: Dict[str, Any], cfg: Path, mechanism: str | None) -> str:
-    """Persist ``raw`` the way the worker does after a run; return its stored key."""
-    worker = SimulationWorker()
-    # The GUI holds (and posts back) the normalized config.
-    config = normalize_config(copy.deepcopy(raw))
-    with patch(
-        "boulder.simulation_result.make_simulation_result", return_value=object()
+@pytest.fixture(autouse=True)
+def bare_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No discovered host plugin: the default converter and its resolver."""
+    monkeypatch.setattr(cantera_converter, "_PLUGIN_CACHE", BoulderPlugins())
+
+
+def _single_run_key(raw: Dict[str, Any], cfg: Path) -> str:
+    """Run ``raw`` as a run set of one entry (no Cantera); return its stored key."""
+    with patch.object(
+        sweep_runner,
+        "solve_scenario",
+        return_value=(_PAYLOAD, "gri30.yaml", _NoSolution()),
     ):
-        worker._persist_to_cache(
-            _StubConverter(cfg, mechanism),
-            config,
-            {"is_complete": True},
-            {},
-            {},
-            "# code",
-            pre_build_config=copy.deepcopy(config),
-        )
+        outcomes = run_set(copy.deepcopy(raw), cfg, only={"BASELINE"})
+    assert [o.sid for o in outcomes] == ["BASELINE"]
     store_dir = resolve_store_dir({}, cfg)
     return next(
         iter(store.fingerprints(store_dir, store.config_identity(cfg)).values())
@@ -122,14 +123,13 @@ def cfg(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize("mechanism", ["gri30.yaml", None])
 def test_single_run_key_equals_sweep_key(cfg: Path, mechanism: str | None) -> None:
-    """The worker stores the key `scenario_fingerprint` gives.
+    """A single run stores the key `scenario_fingerprint` gives.
 
     With or without an explicit mechanism, so a sweep of the same scenario
     finds it current.
     """
     raw = _raw(mechanism)
-    # The converter a run builds always carries a mechanism (route default).
-    stored = _single_run_key(raw, cfg, mechanism or "gri30.yaml")
+    stored = _single_run_key(raw, cfg)
 
     # Same resolver on both sides: a host plugin may remap mechanism names.
     resolve = converter_mechanism_resolver(None)
@@ -148,18 +148,15 @@ def test_single_run_key_equals_sweep_key(cfg: Path, mechanism: str | None) -> No
 def test_check_cache_route_hits_a_stored_single_run(
     cfg: Path, mechanism: str | None
 ) -> None:
-    """POST /check-cache fingerprints like the worker: a stored run is a hit."""
+    """POST /check-cache fingerprints like the run: a stored run is a hit."""
     raw = _raw(mechanism)
-    _single_run_key(raw, cfg, mechanism or "gri30.yaml")
+    _single_run_key(raw, cfg)
 
     app = create_app()
     with TestClient(app) as client:
         app.state.preloaded_config_path = str(cfg)
-        app.state.preloaded_raw = {}
-        resp = client.post(
-            "/api/simulations/check-cache",
-            json={"config": normalize_config(copy.deepcopy(raw))},
-        )
+        app.state.preloaded_raw = copy.deepcopy(raw)
+        resp = client.post("/api/simulations/check-cache", json={})
     assert resp.status_code == 200
     assert resp.json()["cached"] is True
 
@@ -171,16 +168,14 @@ def test_single_run_then_sweep_is_a_cache_hit(
     """A stored single run is skipped, not re-solved, by a sweep of the same YAML."""
     import yaml
 
-    from boulder import sweep_runner
-
     raw = _raw(mechanism)
     cfg.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    _single_run_key(raw, cfg, mechanism or "gri30.yaml")
+    _single_run_key(raw, cfg)
 
     with patch.object(
         sweep_runner, "solve_scenario", side_effect=AssertionError("re-solved")
     ):
-        sweep_runner.run(cfg, resolve_mechanism=converter_mechanism_resolver(None))
+        sweep_runner.run(cfg)
 
     assert "cached, skipped" in capsys.readouterr().out
 
@@ -207,9 +202,6 @@ def test_cache_check_resolver_error_is_not_swallowed(cfg: Path) -> None:
     with TestClient(app, raise_server_exceptions=True) as client:
         app.state.converter_class = _Broken
         app.state.preloaded_config_path = str(cfg)
-        app.state.preloaded_raw = {}
+        app.state.preloaded_raw = _raw("gri30.yaml")
         with pytest.raises(FileNotFoundError):
-            client.post(
-                "/api/simulations/check-cache",
-                json={"config": normalize_config(_raw("gri30.yaml"))},
-            )
+            client.post("/api/simulations/check-cache", json={})

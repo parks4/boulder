@@ -6,6 +6,7 @@ that POST /api/gui-actions/{id}/run returns a downloadable file response.
 
 from __future__ import annotations
 
+import copy
 import time
 from typing import Any, Dict
 
@@ -234,32 +235,50 @@ class TestGuiActionsApi:
         assert after == before
 
 
+#: The server's live config (``app.state.preloaded_raw``): what runs, the cache
+#: check and the GUI actions' cache context all fingerprint.
+_LIVE_RAW: Dict[str, Any] = {
+    "phases": {"gas": {"mechanism": "gri30.yaml"}},
+    "settings": {"solver": {"kind": "advance_to_steady_state"}},
+    "network": [
+        {
+            "id": "r1",
+            "IdealGasReactor": {
+                "volume": 1.0,
+                "initial": {
+                    "temperature": 1000,
+                    "pressure": 101325,
+                    "composition": "N2:1",
+                },
+            },
+        }
+    ],
+}
+
+
+class _Req:
+    """The slice of a request ``_build_context`` reads."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+
 class TestGuiActionCacheContext:
     def test_build_context_matches_check_cache(self, tmp_path):
-        """_build_context and check-cache agree on has_cached_result for body.config."""
-        from boulder.api.routes.gui_actions import _build_context
-        from boulder.api.routes.simulations import normalize_config_for_fingerprint
-        from boulder.sweep_runner import (
-            converter_mechanism_resolver,
-            scenario_fingerprint,
-        )
+        """_build_context and check-cache agree on has_cached_result for the live config."""
+        from boulder.api.routes.gui_actions import GuiActionRunRequest, _build_context
+        from boulder.sweep_runner import prepare_entry
 
         yaml_path = tmp_path / "model.yaml"
         yaml_path.write_text("nodes: []\n", encoding="utf-8")
-        # Write the entry the way a real run does: the worker fingerprints
-        # the normalized (default-group-synthesized) config, not the raw one.
-        snapshot = normalize_config_for_fingerprint(SIMPLE_CONFIG)
-        mechanism = "gri30.yaml"
-        fingerprint = scenario_fingerprint(
-            snapshot,
-            normalized=True,
-            resolve_mechanism=converter_mechanism_resolver(None),
-        )
+        # Write the entry the way a real run does: its fingerprint is the one
+        # the pipeline gives the live config's base entry.
+        fingerprint = prepare_entry(copy.deepcopy(_LIVE_RAW), "BASELINE")[2]
         scenario_store.write_entry(
             resolve_store_dir({}, str(yaml_path)),
-            "BASE",
+            "BASELINE",
             gui_payload=SIMPLE_PAYLOAD,
-            mechanism=mechanism,
+            mechanism="gri30.yaml",
             fingerprint=fingerprint,
             identity=scenario_store.config_identity(str(yaml_path)),
         )
@@ -267,27 +286,21 @@ class TestGuiActionCacheContext:
         app = create_app()
         with TestClient(app) as client:
             app.state.preloaded_config_path = str(yaml_path)
+            app.state.preloaded_raw = copy.deepcopy(_LIVE_RAW)
             app.state.preloaded_result = None
             app.state.preloaded_fingerprint = None
 
-            body = {
-                "config": SIMPLE_CONFIG,
-                "mechanism": "gri30.yaml",
-            }
-            cache_resp = client.post("/api/simulations/check-cache", json=body)
+            cache_resp = client.post("/api/simulations/check-cache", json={})
             assert cache_resp.json()["cached"] is True
 
-            from boulder.api.routes.gui_actions import GuiActionRunRequest
-
-            class _Req:
-                app = client.app
-
-            ctx = _build_context(_Req(), GuiActionRunRequest(**body))
+            ctx = _build_context(
+                _Req(client.app), GuiActionRunRequest(config=SIMPLE_CONFIG)
+            )
             assert ctx.has_cached_result is True
-            assert ctx.cache_fingerprint is not None
+            assert ctx.cache_fingerprint == fingerprint
 
     def test_build_context_rejects_stale_preloaded_fingerprint(self, tmp_path):
-        """Edited body.config must not inherit startup cache state."""
+        """An edited live config must not inherit startup cache state."""
         from boulder.api.routes.gui_actions import GuiActionRunRequest, _build_context
 
         yaml_path = tmp_path / "model.yaml"
@@ -301,26 +314,21 @@ class TestGuiActionCacheContext:
             "artifacts_dir": tmp_path / ".boulder-cache" / fingerprint / "artifacts",
         }
 
-        edited_config = dict(SIMPLE_CONFIG)
-        edited_config["nodes"] = [
-            {"id": "r2", "type": "IdealGasReactor", "properties": {"T": 2000}}
-        ]
+        edited = copy.deepcopy(_LIVE_RAW)
+        edited["network"][0]["IdealGasReactor"]["initial"]["temperature"] = 2000
 
         app = create_app()
         with TestClient(app) as client:
             app.state.preloaded_config_path = str(yaml_path)
+            app.state.preloaded_raw = edited
             app.state.preloaded_result = cached
             app.state.preloaded_fingerprint = fingerprint
 
-            class _Req:
-                app = client.app
-
             ctx = _build_context(
-                _Req(),
-                GuiActionRunRequest(config=edited_config, mechanism="gri30.yaml"),
+                _Req(client.app), GuiActionRunRequest(config=SIMPLE_CONFIG)
             )
             assert ctx.has_cached_result is False
-            assert ctx.cache_fingerprint is not None
+            assert ctx.cache_fingerprint not in (None, fingerprint)
 
 
 class TestGuiActionNetworkImage:

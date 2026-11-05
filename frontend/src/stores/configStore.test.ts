@@ -4,9 +4,19 @@
  * so an out-of-band disk write (e.g. scenario authoring) can refresh what
  * the YAML pane displays without discarding any unsaved node/connection
  * edits sitting in `config`.
+ *
+ * Also asserts `syncYaml` on a `from:` leaf with a canvas edit: the server's
+ * merged YAML is adopted and the session is clean; a sync the server rejects
+ * rejects (so Run/Sweep stop) and leaves the session dirty.
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+
+const mockSyncConfig = vi.fn();
+vi.mock("@/api/configs", () => ({
+  syncConfig: (...args: unknown[]) => mockSyncConfig(...args),
+}));
+
 import { useConfigStore } from "./configStore";
 
 describe("configStore", () => {
@@ -41,5 +51,29 @@ describe("configStore", () => {
     const state = useConfigStore.getState();
     expect(state.dirty).toBe(false);
     expect(state.config.nodes).toHaveLength(0);
+  });
+
+  it("syncYaml on a from: leaf adopts the server's merged YAML and clears dirty", async () => {
+    useConfigStore.setState({ originalYaml: "from: base.yaml\nmetadata: {}\n" });
+    mockSyncConfig.mockResolvedValueOnce({ yaml: "merged: yaml" });
+
+    await useConfigStore.getState().syncYaml();
+
+    expect(mockSyncConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ nodes: expect.any(Array) }),
+      "from: base.yaml\nmetadata: {}\n",
+    );
+    const state = useConfigStore.getState();
+    expect(state.originalYaml).toBe("merged: yaml");
+    expect(state.dirty).toBe(false);
+  });
+
+  it("syncYaml rejects when the edit cannot be merged back, and stays dirty", async () => {
+    useConfigStore.setState({ originalYaml: "from: base.yaml\nmetadata: {}\n" });
+    mockSyncConfig.mockRejectedValueOnce(new Error("dirty from: leaf"));
+
+    await expect(useConfigStore.getState().syncYaml()).rejects.toThrow("dirty from: leaf");
+
+    expect(useConfigStore.getState().dirty).toBe(true);
   });
 });

@@ -44,29 +44,16 @@ def test_empty_is_zero():
 
 
 def test_has_run_set_true_for_scenario_block():
-    assert has_run_set({"scenarios": {"a": {}}}, None) is True
+    assert has_run_set({"scenarios": {"a": {}}}) is True
 
 
 def test_has_run_set_true_for_sweep_block():
-    assert has_run_set({"sweep": {"T": {"values": [1]}}}, None) is True
-    assert has_run_set({"sweeps": {"T": {"values": [1]}}}, None) is True
+    assert has_run_set({"sweep": {"T": {"values": [1]}}}) is True
+    assert has_run_set({"sweeps": {"T": {"values": [1]}}}) is True
 
 
 def test_has_run_set_false_without_a_block():
-    assert has_run_set({}, None) is False
-
-
-def test_has_run_set_ignores_a_local_run_sweep_script(tmp_path: Path):
-    """Run Sweep runs in-process now (no subprocess).
-
-    A host's own `run_sweep.py` script next to the config is no longer a
-    run-set source on its own; only an inline `scenarios:`/`sweep:`/`sweeps:`
-    block counts.
-    """
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text("metadata: {}\n", encoding="utf-8")
-    (tmp_path / "run_sweep.py").write_text("", encoding="utf-8")
-    assert has_run_set({}, str(cfg)) is False
+    assert has_run_set({}) is False
 
 
 def test_store_dir_defaults_under_the_cache_root(tmp_path: Path):

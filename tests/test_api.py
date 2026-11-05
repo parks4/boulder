@@ -6,6 +6,9 @@ to validate all API endpoints without starting a real server.
 
 from __future__ import annotations
 
+import asyncio
+import copy
+
 import pytest
 
 httpx = pytest.importorskip("httpx")
@@ -213,234 +216,236 @@ class TestPluginRoutes:
 # Simulation routes
 # ---------------------------------------------------------------------------
 
+#: The server's live config: what every run expands (``app.state.preloaded_raw``).
+_LIVE_RAW = {
+    "metadata": {},
+    "phases": {"gas": {"mechanism": "gri30.yaml"}},
+    "settings": {"end_time": 12.5, "dt": 0.25},
+    "network": [
+        {
+            "id": "r",
+            "IdealGasReactor": {"initial": {"temperature": 300.0}},
+        }
+    ],
+}
+
+
+def _stub_run_set(monkeypatch, captured: dict) -> None:
+    """Replace the pipeline behind the routes: record its arguments, solve nothing."""
+    from boulder.sweep_runner import EntryOutcome
+
+    def fake_run_set(raw, config_path, **kwargs):
+        captured.update(raw=raw, config_path=config_path, **kwargs)
+        (sid,) = kwargs["only"]
+        return [EntryOutcome(sid, "fp", False, {"times": [0.0]})]
+
+    monkeypatch.setattr(simulation_routes, "run_set", fake_run_set)
+
+
+async def _start(client, body: dict, expect: int = 200):
+    """POST a run and wait for the background thread; return the response."""
+    resp = await client.post("/api/simulations", json=body)
+    assert resp.status_code == expect, resp.text
+    if expect == 200:
+        sim_id = resp.json()["simulation_id"]
+        for _ in range(100):
+            res = (await client.get(f"/api/simulations/{sim_id}/results")).json()
+            if res["status"] != "running":
+                assert res["status"] == "complete", res
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise TimeoutError("run did not finish")
+    return resp
+
+
+def _live_app():
+    app = create_app()
+    app.state.preloaded_raw = copy.deepcopy(_LIVE_RAW)
+    return app
+
 
 class TestSimulationRoutes:
+    """``POST /api/simulations`` runs a run set of one entry of the live config."""
+
     @pytest.mark.asyncio
-    async def test_start_simulation_uses_settings_when_fields_omitted(
+    async def test_start_leaves_the_live_config_alone_when_time_fields_omitted(
         self, monkeypatch
     ):
-        """Start route must use config settings when time fields are omitted."""
-        simulation_routes._simulations.clear()
-        captured: dict[str, float] = {}
-
-        class DummyConverter:
-            def __init__(self, mechanism: str):
-                self.mechanism = mechanism
-
-        class DummyWorker:
-            def set_run_identity(self, scenario_id, **kwargs):
-                # The route names the run-set entry before starting it; a stub
-                # without this hides that call entirely.
-                self.scenario_id = scenario_id
-
-            def start_simulation(
-                self, converter, config, simulation_time, time_step, **kwargs
-            ):
-                captured["simulation_time"] = simulation_time
-                captured["time_step"] = time_step
-
-        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
-        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
-
-        config = {
-            "nodes": [],
-            "connections": [],
-            "settings": {"end_time": 12.5, "dt": 0.25},
-        }
-        async with _make_client() as client:
-            resp = await client.post("/api/simulations", json={"config": config})
-
-        assert resp.status_code == 200
-        assert captured["simulation_time"] == 12.5
-        assert captured["time_step"] == 0.25
-
-        simulation_routes._simulations.clear()
-
-    @pytest.mark.asyncio
-    async def test_start_simulation_prefers_explicit_request_values(self, monkeypatch):
-        """Start route must prefer explicit request values over config settings."""
-        simulation_routes._simulations.clear()
-        captured: dict[str, float] = {}
-
-        class DummyConverter:
-            def __init__(self, mechanism: str):
-                self.mechanism = mechanism
-
-        class DummyWorker:
-            def set_run_identity(self, scenario_id, **kwargs):
-                # The route names the run-set entry before starting it; a stub
-                # without this hides that call entirely.
-                self.scenario_id = scenario_id
-
-            def start_simulation(
-                self, converter, config, simulation_time, time_step, **kwargs
-            ):
-                captured["simulation_time"] = simulation_time
-                captured["time_step"] = time_step
-
-        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
-        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
-
-        config = {
-            "nodes": [],
-            "connections": [],
-            "settings": {"end_time": 99.0, "dt": 9.0},
-        }
-        payload = {
-            "config": config,
-            "simulation_time": 3.0,
-            "time_step": 0.05,
-        }
-        async with _make_client() as client:
-            resp = await client.post("/api/simulations", json=payload)
-
-        assert resp.status_code == 200
-        assert captured["simulation_time"] == 3.0
-        assert captured["time_step"] == 0.05
-
-        simulation_routes._simulations.clear()
-
-    @pytest.mark.asyncio
-    async def test_start_simulation_names_the_base_BASELINE_for_gui_authored_scenarios(
-        self, monkeypatch
-    ):
-        """Assert a plain run resolves the base entry to BASELINE for GUI scenarios.
-
-        A scenario authored only in the GUI (never written into the YAML's
-        `scenarios:` block) must still make the plain run's base entry resolve
-        to BASELINE, matching what Run Sweep of the same overlays would name it.
-
-        Regression for the phantom-`BASE`-row bug re-appearing via
-        `body.scenarios` (the in-memory overlay map) instead of a hand-edited
-        YAML `scenarios:` block — see boulder.runset.base_entry_id.
-        """
-        from boulder.runset import BASELINE_SCENARIO_ID, base_entry_id
-
+        """No time override: the pipeline gets the live config as it is."""
         simulation_routes._simulations.clear()
         captured: dict = {}
+        _stub_run_set(monkeypatch, captured)
+        app = _live_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await _start(client, {})
 
-        class DummyConverter:
-            def __init__(self, mechanism: str):
-                self.mechanism = mechanism
+        assert captured["raw"] == _LIVE_RAW
+        assert captured["only"] == {"BASELINE"}
+        simulation_routes._simulations.clear()
 
-        class DummyWorker:
-            def set_run_identity(self, scenario_id, **kwargs):
-                captured["scenario_id"] = scenario_id
-                captured["raw_config"] = kwargs.get("raw_config")
+    @pytest.mark.asyncio
+    async def test_start_writes_explicit_time_overrides_into_the_solver_section(
+        self, monkeypatch
+    ):
+        """Overrides land in ``settings.solver`` of a copy, before the run set expands."""
+        simulation_routes._simulations.clear()
+        captured: dict = {}
+        _stub_run_set(monkeypatch, captured)
+        app = _live_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await _start(client, {"simulation_time": 3.0, "time_step": 0.05})
 
-            def start_simulation(self, *args, **kwargs):
-                pass
-
-        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
-        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
-
-        config = {"nodes": [], "connections": [], "settings": {}}
-        payload = {
-            "config": config,
-            # No scenario_id: this is the base ("Run Simulation" / BASELINE
-            # row), the same request shape the frontend sends when the pane's
-            # active selection is BASELINE.
-            "scenarios": {"hot": {}},
+        settings = captured["raw"]["settings"]
+        assert settings["solver"] == {
+            "kind": "advance_grid",
+            "grid": {"stop": 3.0, "dt": 0.05},
         }
-        async with _make_client() as client:
-            resp = await client.post("/api/simulations", json=payload)
+        # The nominal window follows, so it never disagrees with the grid.
+        assert (settings["end_time"], settings["dt"]) == (3.0, 0.05)
+        # The session's own config is not changed by one run's override.
+        assert app.state.preloaded_raw == _LIVE_RAW
+        simulation_routes._simulations.clear()
 
-        assert resp.status_code == 200
-        assert captured["scenario_id"] is None
-        assert base_entry_id(captured["raw_config"]) == BASELINE_SCENARIO_ID
+    @pytest.mark.asyncio
+    async def test_start_names_the_base_BASELINE_for_gui_authored_scenarios(
+        self, monkeypatch
+    ):
+        """A scenario authored only in the GUI still makes the run the BASELINE entry.
 
+        The overlays the request carries become the config's ``scenarios:`` section
+        (see ``boulder.runset.merge_overlays``); no ``scenario_id`` runs the base.
+        """
+        simulation_routes._simulations.clear()
+        captured: dict = {}
+        _stub_run_set(monkeypatch, captured)
+        app = _live_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await _start(client, {"scenarios": {"hot": {}}})
+
+        assert captured["only"] == {"BASELINE"}
+        assert captured["raw"]["scenarios"] == {"hot": {}}
         simulation_routes._simulations.clear()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("invalid_time_step", [0.0, -1.0])
-    async def test_start_simulation_rejects_non_positive_time_step(
+    async def test_start_rejects_non_positive_time_step(
         self, monkeypatch, invalid_time_step: float
     ):
         """Start route must reject zero/negative time_step to avoid non-progress loops."""
         simulation_routes._simulations.clear()
-        worker_called = False
+        captured: dict = {}
+        _stub_run_set(monkeypatch, captured)
+        app = _live_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await _start(
+                client,
+                {"simulation_time": 1.0, "time_step": invalid_time_step},
+                expect=422,
+            )
 
-        class DummyConverter:
-            def __init__(self, mechanism: str):
-                self.mechanism = mechanism
-
-        class DummyWorker:
-            def set_run_identity(self, scenario_id, **kwargs):
-                # The route names the run-set entry before starting it; a stub
-                # without this hides that call entirely.
-                self.scenario_id = scenario_id
-
-            def start_simulation(
-                self, converter, config, simulation_time, time_step, **kwargs
-            ):
-                nonlocal worker_called
-                worker_called = True
-
-        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
-        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
-
-        config = {
-            "nodes": [],
-            "connections": [],
-            "settings": {"end_time": 10.0, "dt": 1.0},
-        }
-        payload = {"config": config, "time_step": invalid_time_step}
-
-        async with _make_client() as client:
-            resp = await client.post("/api/simulations", json=payload)
-
-        assert resp.status_code == 422
         assert resp.json()["detail"] == "time_step must be > 0"
-        assert worker_called is False
+        assert captured == {}
         simulation_routes._simulations.clear()
 
     @pytest.mark.asyncio
-    async def test_start_simulation_synthesizes_default_group_when_absent(
-        self, monkeypatch
-    ):
-        """Start route must call synthesize_default_group before build_network.
-
-        So build_network always receives a config with a 'groups' section. The frontend
-        sends already-normalized configs (satellites already expanded); the route must
-        NOT call normalize_config again (expand_composite_kinds is not idempotent).
-        synthesize_default_group is the only idempotent step needed to satisfy
-        build_stage_graph.
-        """
+    async def test_force_run_bypasses_the_store(self, monkeypatch):
+        """Force Run asks the pipeline to re-solve; a plain run lets it use the store."""
         simulation_routes._simulations.clear()
-        received_config: dict = {}
+        captured: dict = {}
+        _stub_run_set(monkeypatch, captured)
+        app = _live_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await _start(client, {})
+            assert captured["use_cache"] is True
+            await _start(client, {"force": True})
+            assert captured["use_cache"] is False
+        simulation_routes._simulations.clear()
 
-        class DummyConverter:
-            def __init__(self, mechanism: str):
-                self.mechanism = mechanism
+    @pytest.mark.asyncio
+    async def test_a_run_is_complete_only_once_it_is_stored(self, monkeypatch):
+        """``is_complete`` must not go true while the pipeline is still storing.
 
-        class DummyWorker:
-            def set_run_identity(self, scenario_id, **kwargs):
-                # The route names the run-set entry before starting it; a stub
-                # without this hides that call entirely.
-                self.scenario_id = scenario_id
+        The frontend reacts to completion by re-listing the GUI actions, which
+        asks the store whether a result exists. The solve reports complete
+        before the store step: the handle must hold that back.
+        """
+        from boulder.simulation_worker import SimulationProgress
+        from boulder.sweep_runner import EntryOutcome
 
-            def start_simulation(
-                self, converter, config, simulation_time, time_step, **kwargs
-            ):
-                received_config.update(config)
+        simulation_routes._simulations.clear()
+        seen: dict = {}
 
-        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
-        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
+        def fake_run_set(raw, config_path, **kwargs):
+            kwargs["progress_cb"]("BASELINE", {}, SimulationProgress(is_complete=True))
+            ((handle, _),) = simulation_routes._simulations.values()
+            seen["during_store"] = handle.get_progress().is_complete
+            return [EntryOutcome("BASELINE", "fp", False, {"times": [0.0]})]
 
-        # Already-normalized config without an explicit 'groups' key.
-        internal_config = {
-            "nodes": [{"id": "r1", "type": "IdealGasReactor", "properties": {}}],
-            "connections": [],
-            "settings": {"end_time": 5.0, "dt": 0.5},
-        }
+        monkeypatch.setattr(simulation_routes, "run_set", fake_run_set)
+        app = _live_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await _start(client, {})
+
+        assert seen["during_store"] is False
+        ((handle, _),) = simulation_routes._simulations.values()
+        assert handle.get_progress().is_complete is True
+        simulation_routes._simulations.clear()
+
+    @pytest.mark.asyncio
+    async def test_a_run_needs_the_servers_live_config(self, monkeypatch):
+        """With no config on the server there is nothing to expand: a clear 409."""
+        simulation_routes._simulations.clear()
+        _stub_run_set(monkeypatch, {})
         async with _make_client() as client:
-            resp = await client.post(
-                "/api/simulations", json={"config": internal_config}
-            )
+            resp = await _start(client, {}, expect=409)
+        assert "no config" in resp.json()["detail"]
 
-        assert resp.status_code == 200, resp.json()
-        assert "groups" in received_config, "synthesize_default_group should add groups"
+    @pytest.mark.asyncio
+    async def test_the_request_cannot_carry_its_own_config(self, monkeypatch):
+        """The live config is the server's: a body ``config`` is refused, not ignored."""
+        simulation_routes._simulations.clear()
+        _stub_run_set(monkeypatch, {})
+        app = _live_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            await _start(client, {"config": {"nodes": []}}, expect=422)
 
+    @pytest.mark.asyncio
+    async def test_a_failed_solve_is_reported_as_an_error(self, monkeypatch):
+        """An exception in the pipeline reaches the client as an error status."""
+        simulation_routes._simulations.clear()
+
+        def boom(raw, config_path, **kwargs):
+            raise RuntimeError("solver blew up")
+
+        monkeypatch.setattr(simulation_routes, "run_set", boom)
+        app = _live_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post("/api/simulations", json={})
+            sim_id = resp.json()["simulation_id"]
+            for _ in range(100):
+                res = (await client.get(f"/api/simulations/{sim_id}/results")).json()
+                if res["status"] != "running":
+                    break
+                await asyncio.sleep(0.05)
+        assert res["status"] == "error"
+        assert "solver blew up" in res["error_message"]
         simulation_routes._simulations.clear()
 
 
@@ -811,135 +816,61 @@ class TestStaticFrontend:
 
 
 class TestRunSelectedScenario:
-    """``POST /api/simulations`` solves ``scenario_id``, not the baseline."""
-
-    _RAW = {
-        "metadata": {},
-        "phases": {"gas": {"mechanism": "gri30.yaml"}},
-        "settings": {"end_time": 1.0, "dt": 0.1},
-        "nodes": [
-            {
-                "id": "r",
-                "type": "IdealGasReactor",
-                "properties": {"temperature": 300.0},
-            }
-        ],
-        "connections": [],
-    }
-
-    @staticmethod
-    def _stub(monkeypatch, captured):
-        class DummyConverter:
-            def __init__(self, mechanism: str):
-                self.mechanism = mechanism
-
-        class DummyWorker:
-            def set_run_identity(self, scenario_id, **kwargs):
-                captured["scenario_id"] = scenario_id
-                captured["label"] = kwargs.get("label")
-
-            def start_simulation(self, converter, config, *_args, **_kwargs):
-                captured["config"] = config
-
-        monkeypatch.setattr(simulation_routes, "DualCanteraConverter", DummyConverter)
-        monkeypatch.setattr(simulation_routes, "SimulationWorker", DummyWorker)
-
-    @staticmethod
-    def _temperature(config):
-        return config["nodes"][0]["properties"]["temperature"]
+    """``POST /api/simulations`` runs the entry ``scenario_id`` names."""
 
     @pytest.mark.asyncio
-    async def test_selected_scenario_overrides_the_base_config(self, monkeypatch):
+    async def test_selected_scenario_is_the_entry_that_runs(self, monkeypatch):
         simulation_routes._simulations.clear()
         captured: dict = {}
-        self._stub(monkeypatch, captured)
+        _stub_run_set(monkeypatch, captured)
 
-        app = create_app()
-        app.state.preloaded_raw = dict(self._RAW)
+        app = _live_app()
+        overlays = {
+            "hot": {
+                "metadata": {"description": "Hot feed"},
+                "network": [{"id": "r", "IdealGasReactor": {"volume": 2.0}}],
+            }
+        }
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
-            resp = await client.post(
-                "/api/simulations",
-                json={
-                    # The config the GUI holds is the *baseline* one -- if the
-                    # route used it, the override below would be ignored.
-                    "config": {"nodes": [], "connections": []},
-                    "scenario_id": "hot",
-                    "scenarios": {
-                        "hot": {
-                            "metadata": {"description": "Hot feed"},
-                            "nodes": [
-                                {"id": "r", "properties": {"temperature": 900.0}}
-                            ],
-                        }
-                    },
-                },
-            )
+            await _start(client, {"scenario_id": "hot", "scenarios": overlays})
 
-        assert resp.status_code == 200
-        assert self._temperature(captured["config"]) == 900.0
         # Named after the scenario, so the result lands in that entry rather
-        # than overwriting the baseline's. The id is the scenario's only name,
-        # so it is the label too -- `metadata.description` is a subtitle.
-        assert captured["scenario_id"] == "hot"
-        assert captured["label"] == "hot"
+        # than overwriting the baseline's; the overlays are the run set's.
+        assert captured["only"] == {"hot"}
+        assert captured["raw"]["scenarios"] == overlays
         simulation_routes._simulations.clear()
 
     @pytest.mark.asyncio
-    async def test_baseline_and_no_selection_keep_the_submitted_config(
-        self, monkeypatch
-    ):
-        """Only the submitted config carries this session's base-network edits."""
+    async def test_baseline_and_no_selection_run_the_base_entry(self, monkeypatch):
         simulation_routes._simulations.clear()
         captured: dict = {}
-        self._stub(monkeypatch, captured)
+        _stub_run_set(monkeypatch, captured)
 
-        edited = {
-            "nodes": [
-                {
-                    "id": "r",
-                    "type": "IdealGasReactor",
-                    "properties": {"temperature": 500.0},
-                }
-            ],
-            "connections": [],
-            "settings": {"end_time": 1.0, "dt": 0.1},
-        }
-        app = create_app()
-        app.state.preloaded_raw = dict(self._RAW)
+        app = _live_app()
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
             for scenario_id in ("BASELINE", None):
-                resp = await client.post(
-                    "/api/simulations",
-                    json={"config": edited, "scenario_id": scenario_id},
-                )
-                assert resp.status_code == 200
-                assert self._temperature(captured["config"]) == 500.0
-                assert captured["scenario_id"] is None
+                await _start(client, {"scenario_id": scenario_id})
+                assert captured["only"] == {"BASELINE"}
 
         simulation_routes._simulations.clear()
 
     @pytest.mark.asyncio
     async def test_unknown_scenario_is_a_404(self, monkeypatch):
         simulation_routes._simulations.clear()
-        self._stub(monkeypatch, {})
+        _stub_run_set(monkeypatch, {})
 
-        app = create_app()
-        app.state.preloaded_raw = dict(self._RAW)
+        app = _live_app()
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
-            resp = await client.post(
-                "/api/simulations",
-                json={
-                    "config": {"nodes": [], "connections": []},
-                    "scenario_id": "nope",
-                    "scenarios": {"hot": {}},
-                },
+            await _start(
+                client,
+                {"scenario_id": "nope", "scenarios": {"hot": {}}},
+                expect=404,
             )
 
-        assert resp.status_code == 404
         simulation_routes._simulations.clear()

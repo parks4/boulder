@@ -6,7 +6,7 @@ import { useLayoutStore } from "@/stores/layoutStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
-import { parseYaml, syncConfig } from "@/api/configs";
+import { fetchResolvedYaml, parseYaml, syncConfig } from "@/api/configs";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
@@ -143,14 +143,23 @@ export function YamlPane() {
     closeYamlPane();
   };
 
-  const handleDownload = () => {
-    const blob = new Blob([value], { type: "text/yaml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName || "config.yaml";
-    a.click();
-    URL.revokeObjectURL(url);
+  // Always the server's full resolved YAML (what a run stores, `from:` unfolded,
+  // scenarios included) -- never the text as written in the editor.
+  const handleDownload = async () => {
+    try {
+      const resp = await fetchResolvedYaml(
+        useScenarioStore.getState().overlays as Record<string, unknown>,
+      );
+      const blob = new Blob([resp.yaml], { type: "text/yaml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName || resp.filename || "config.yaml";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(`Download failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   return (

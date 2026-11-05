@@ -13,18 +13,18 @@ import pytest
 class TestCLIHeadless:
     """Integration tests for Boulder CLI headless mode."""
 
-    def test_headless_python_generation_and_execution(self):
+    def test_headless_python_generation_and_execution(self, tmp_path):
         """Test that headless mode generates runnable Python code from YAML configuration.
 
         This test verifies the complete headless workflow:
         1. CLI command execution succeeds (returncode == 0)
         2. Success messages appear in stdout ("Python code generated:", output path)
         3. Output Python file is created and exists on disk
-        4. Generated code contains required Cantera-level imports and setup:
-           - "import cantera as ct"
-           - "from boulder.cantera_converter import DualCanteraConverter"
-           - "converter = DualCanteraConverter"
-           - "ct.ReactorNet" construction through the emitted stage builder
+        4. Generated code is the runner-based script: it embeds the resolved YAML,
+           lists the class each node runs and solves stage by stage:
+           - "from boulder.runner import BoulderRunner"
+           - one ``runner.solve_stage`` call per stage
+           - a per-stage class table and the ``check_classes`` check
         5. Generated code reports the converged per-reactor states
            (``build_network`` always routes through the staged solver, so the
            downloadable script does not re-advance the network; instead it
@@ -40,11 +40,9 @@ class TestCLIHeadless:
         )
         assert config_path.exists(), f"Test config file not found: {config_path}"
 
-        # Create a temporary file for the generated Python code
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False
-        ) as tmp_file:
-            output_path = tmp_file.name
+        # The generated script goes to pytest's own directory: a script run from
+        # the system temp dir would import whatever stray module sits there.
+        output_path = str(tmp_path / "generated.py")
 
         try:
             # Run Boulder in headless mode to generate Python code
@@ -84,28 +82,15 @@ class TestCLIHeadless:
             with open(output_path, "r", encoding="utf-8") as f:
                 generated_code = f.read()
 
-            # Verify the generated code has expected content.  The headless
-            # generator fully unrolls each stage into explicit Cantera-native
-            # steps (create reactors, wire connections, assemble + solve a
-            # ReactorNet) without embedding the YAML config or calling
-            # build_sub_network / reloading through a Runner.
-            assert "import cantera as ct" in generated_code
-            assert "reactors = {}" in generated_code
-            assert "DualCanteraConverter" not in generated_code
-            assert "build_sub_network" not in generated_code
-            assert "config = {" not in generated_code
-            assert "BoulderRunner.from_yaml" not in generated_code
-            assert (
-                "network_" in generated_code
-                or "network = ct.ReactorNet" in generated_code
-            )
-            assert (
-                ".advance(" in generated_code
-                or "advance_to_steady_state" in generated_code
-                or "solve_steady" in generated_code
-            )
-            # The execution section builds a reporting ReactorNet at the end.
-            assert "network = ct.ReactorNet" in generated_code
+            # The download is the runner-based script: the solved config, a class
+            # table per stage and one ``runner.solve_stage`` call per stage.
+            assert "from boulder.runner import BoulderRunner" in generated_code
+            assert "CONFIG_YAML = '''" in generated_code
+            assert "runner.solve_stage(" in generated_code
+            assert "# Classes that run, per stage" in generated_code
+            assert "cantera.reactor." in generated_code
+            assert "check_classes(stages[" in generated_code
+            assert "reactors = {}" not in generated_code
 
             # Test that the generated Python code can be executed
             exec_result = subprocess.run(
@@ -115,10 +100,21 @@ class TestCLIHeadless:
                 encoding="utf-8",
                 errors="replace",
                 timeout=30,  # 30 second timeout for execution
+                # The script imports Boulder: this checkout's, not another install's.
+                env={
+                    **os.environ,
+                    "PYTHONPATH": os.pathsep.join(
+                        [
+                            str(Path(__file__).resolve().parents[1]),
+                            os.environ.get("PYTHONPATH", ""),
+                        ]
+                    ),
+                },
             )
 
             # The generated code should report the converged reactor states
             exec_stdout = exec_result.stdout or ""
+            assert exec_result.returncode == 0, exec_result.stderr
             assert "Reactor" in exec_stdout, "No reactor output header found"
             assert "T [K]" in exec_stdout, "No temperature column found"
 

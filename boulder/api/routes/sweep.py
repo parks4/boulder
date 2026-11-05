@@ -35,27 +35,16 @@ from pydantic import BaseModel, Field
 from ruamel.yaml.error import YAMLError
 
 from ... import scenario_store
-from ...cantera_converter import DualCanteraConverter, get_plugins
 from ...runset import (
     SEQUENTIAL_KINDS,
-    RunSetCursor,
-    expand_scenarios,
-    iter_run_set,
+    merge_overlays,
     resolve_store_dir,
     run_set_block,
     run_set_size,
     sweep_runner_of,
     sweeps_of,
 )
-from ...sweep_runner import (
-    converter_mechanism_resolver,
-    final_states_of,
-    notify_cached,
-    prepare_scenario,
-    solve_scenario,
-    store_solved_scenario,
-    stored_final_states,
-)
+from ...sweep_runner import run_set
 
 __all__ = ["has_run_set", "router"]
 
@@ -73,7 +62,7 @@ class SweepRunRequest(BaseModel):
     no_cache: bool = False
 
 
-def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
+def has_run_set(raw: Dict[str, Any]) -> bool:
     """Return whether *raw* (the inheritance-resolved config) declares a run-set.
 
     True when it declares one **in the config**: a ``scenarios:`` mapping, a
@@ -81,12 +70,8 @@ def has_run_set(raw: Dict[str, Any], config_path: Optional[str]) -> bool:
     a ``scenarios_sweep.runner`` dotted path naming a host function that
     produces the run-set itself.
 
-    Pure function of ``raw`` so both the request-scoped sweep routes and the
-    app-startup lifespan share one detection rule. ``config_path`` is accepted
-    for signature compatibility; it is deliberately *not* consulted — Boulder
-    used to treat any file named ``run_sweep.py`` next to the config as a
-    run-set source, which coupled behaviour to a filename and was invisible in
-    the config itself. Declare the run-set in the config instead.
+    Pure function of ``raw``: a file named ``run_sweep.py`` next to the config
+    is not a run-set source; declare the run-set in the config.
     """
     chain = any(kind in run_set_block(raw) for kind in SEQUENTIAL_KINDS)
     return bool(raw.get("scenarios") or sweeps_of(raw) or sweep_runner_of(raw) or chain)
@@ -186,12 +171,6 @@ class _LastLineHandler(logging.Handler):
             pass
 
 
-def _has_run_set(request: Request) -> bool:
-    return has_run_set(
-        _raw(request), getattr(request.app.state, "preloaded_config_path", None)
-    )
-
-
 def _raw(request: Request) -> Dict[str, Any]:
     return getattr(request.app.state, "preloaded_raw", None) or {}
 
@@ -203,8 +182,7 @@ def _merged_raw(request: Request, scenarios: Dict[str, Any]) -> Dict[str, Any]:
     re-read from disk), same as every other scenario route (see
     ``boulder.api.routes.scenarios._raw_base_config``).
     """
-    base = {k: v for k, v in _raw(request).items() if k != "scenarios"}
-    return {**base, "scenarios": scenarios}
+    return merge_overlays(_raw(request), scenarios)
 
 
 @router.get("")
@@ -216,7 +194,7 @@ async def sweep_info(request: Request) -> Dict[str, Any]:
     informational; the actual run in :func:`sweep_run` always uses whatever
     overlays the caller sends).
     """
-    has = _has_run_set(request)
+    has = has_run_set(_raw(request))
     n = run_set_size(_raw(request))
     job = getattr(request.app.state, "sweep_job", None)
     running = bool(job and job.get("status") == "running")
@@ -272,7 +250,6 @@ async def sweep_run(
         raise HTTPException(
             status_code=400, detail="Could not resolve a result store directory"
         )
-    identity = scenario_store.config_identity(cfg_path)
     assert cfg_path is not None  # a store directory implies a config path
     # The definition as the session holds it: the browser's text and the
     # name the user loaded the file under, not the file on disk.
@@ -317,17 +294,11 @@ async def sweep_run(
 
     def _worker() -> None:
         try:
-            store_dir.mkdir(parents=True, exist_ok=True)
-            if body.no_cache:
-                # Force a full recompute of *this run-set*. Scoped to the whole
-                # store because a no-cache sweep covers every entry; a
-                # force-run of a single entry just overwrites that one file
-                # (see `simulation_worker._persist_to_cache`) and must never
-                # clear its siblings.
-                scenario_store.clear(store_dir)
-                store_dir.mkdir(parents=True, exist_ok=True)
-
             if host_runner:
+                store_dir.mkdir(parents=True, exist_ok=True)
+                if body.no_cache:
+                    scenario_store.clear(store_dir)
+                    store_dir.mkdir(parents=True, exist_ok=True)
                 # A host-produced run-set: points that no declarative axis can
                 # express (solved sequentially, each warm-started from the
                 # last, or of a length not known until extinction). The host
@@ -348,201 +319,86 @@ async def sweep_run(
                 print("[sweep] complete — host runner finished", flush=True)
                 return
 
-            cached_fps = (
-                {}
-                if body.no_cache
-                else scenario_store.fingerprints(store_dir, identity)
-            )
-
-            # Bound once: the host's KPI/artifact hooks are read per scenario
-            # below, and the registry is fixed for the process lifetime.
-            plugins = get_plugins()
-
-            # Points arrive lazily: a chain's next point is built from the
-            # previous step's converged state, which this loop records in
-            # `cursor` after each step (solved or read back from the cache).
-            cursor = RunSetCursor()
-            visited: "set[str]" = set()
-            n_cached = 0
-            # The active converter class -- e.g. a host's own subclass with
-            # its own mechanism search convention -- lives on `app.state`
-            # (set once by the CLI at startup; see `boulder/api/main.py`),
-            # the same source `/api/simulations` reads. `get_plugins()` is a
-            # *different*, entry-point/env-var-driven registry that a host
-            # need not populate the same way, so it can't be relied on here.
-            converter_cls = (
-                getattr(request.app.state, "converter_class", None)
-                or DualCanteraConverter
-            )
-            resolve_mechanism = converter_mechanism_resolver(converter_cls)
-            for i, (sid, cfg) in enumerate(iter_run_set(raw, cursor)):
-                visited.add(sid)
-                if stop_event.is_set():
-                    # A stop was requested while the previous scenario was
-                    # in flight (or between scenarios) -- don't start
-                    # another one. The scenario that *was* solving raises
-                    # out of `solve_scenario` below and is handled there;
-                    # this only guards the ones that haven't started yet.
-                    break
-
-                config, mech_name, fingerprint = prepare_scenario(
-                    cfg, resolve_mechanism
-                )
-                # The `scenarios:` key is a scenario's only name -- no label.
-                label = sid
+            def _on_entry(
+                i: int, n: int, sid: str, config: Dict[str, Any], cached: bool
+            ) -> None:
                 state["current"] = i + 1
-                if not total:
+                if not n:
                     # Open-ended chain: the total grows with the chain.
                     state["total"] = i + 1
-                shown_total = total or "?"
-
-                if cached_fps.get(sid) == fingerprint:
-                    n_cached += 1
-                    line = f"scenario {i + 1}/{shown_total} ({sid}): cached, skipped"
+                line = f"scenario {i + 1}/{n or '?'} ({sid})"
+                if cached:
+                    line += ": cached, skipped"
                     state["scenario_progress"] = {}
-                    state["message"] = line
-                    state["last_line"] = line
-                    print(f"[sweep] {line}", flush=True)
-                    # Display attrs still track the YAML (a reordered run-set)
-                    # even though the solve itself is skipped.
-                    scenario_store.update_display_attrs(
-                        store_dir, sid, label=label, order=i
-                    )
-                    # A skipped chain step still seeds the next one.
-                    cursor.previous_states = stored_final_states(
-                        store_dir, sid, identity
-                    )
-                    notify_cached(
-                        plugins.on_scenario_cached,
-                        store_dir,
-                        sid,
-                        config,
-                        fingerprint,
-                        identity=identity,
-                        warn=lambda msg: print(f"[sweep]{msg}", flush=True),
-                    )
-                    continue
-
-                line = f"scenario {i + 1}/{shown_total} ({sid})"
-                # Stage counts are unknown until the solver reports them (see
-                # `_publish` below), but the stage now running is already known:
-                # nothing has completed, so it is the first one.
-                state["scenario_progress"] = {
-                    sid: {
-                        "stage": None,
-                        "stage_total": None,
-                        "stage_id": next(iter(config.get("groups") or {}), None),
+                else:
+                    # Stage counts are unknown until the solver reports them
+                    # (see `_publish`), but the stage now running is already
+                    # known: nothing has completed, so it is the first one.
+                    state["scenario_progress"] = {
+                        sid: {
+                            "stage": None,
+                            "stage_total": None,
+                            "stage_id": next(iter(config.get("groups") or {}), None),
+                        }
                     }
-                }
                 state["message"] = line
                 state["last_line"] = line
-                print(f"[sweep] {line}", flush=True)
 
-                # One solve path shared with the CLI runner -- same
-                # SimulationWorker a plain "Run Simulation" uses, and one
-                # payload builder, so a scenario's stored result does not
-                # depend on which button produced it. `progress_cb` is how this
-                # route stays able to publish per-stage progress while the
-                # solve runs.
-                # Both fields describe the stage *currently solving*, not the
-                # last one that finished: `SimulationProgress` counts completed
-                # stages, so the running stage is `stages_done + 1` -- matching
-                # the solver's own "stage 'x' (3/3)" log line shown underneath,
-                # which is 1-based over stages *started*. Its id is the first
-                # stage not yet completed; `config["groups"]` is already in
-                # topological (== solve) order, see `config.py`.
-                def _publish(
-                    progress: Any, _sid: str = sid, _cfg: Any = config
-                ) -> None:
-                    if progress.n_stages:
-                        done = set(progress.completed_stage_ids)
-                        state["scenario_progress"] = {
-                            _sid: {
-                                "stage": min(
-                                    progress.stages_done + 1, progress.n_stages
+            # Both fields describe the stage *currently solving*, not the last
+            # one that finished: `SimulationProgress` counts completed stages,
+            # so the running stage is `stages_done + 1` -- matching the solver's
+            # own "stage 'x' (3/3)" log line shown underneath, which is 1-based
+            # over stages *started*. Its id is the first stage not yet
+            # completed; `config["groups"]` is already in topological (== solve)
+            # order, see `config.py`.
+            def _publish(sid: str, config: Dict[str, Any], progress: Any) -> None:
+                if progress.n_stages:
+                    done = set(progress.completed_stage_ids)
+                    state["scenario_progress"] = {
+                        sid: {
+                            "stage": min(progress.stages_done + 1, progress.n_stages),
+                            "stage_total": progress.n_stages,
+                            "stage_id": next(
+                                (
+                                    g
+                                    for g in (config.get("groups") or {})
+                                    if g not in done
                                 ),
-                                "stage_total": progress.n_stages,
-                                "stage_id": next(
-                                    (
-                                        g
-                                        for g in (_cfg.get("groups") or {})
-                                        if g not in done
-                                    ),
-                                    None,
-                                ),
-                            }
+                                None,
+                            ),
                         }
+                    }
 
-                gui, conv_mechanism, conv = solve_scenario(
-                    config,
-                    mech_name,
-                    converter_cls=converter_cls,
-                    progress_cb=_publish,
-                    stop_event=stop_event,
-                )
-                # `conv.mechanism` is whatever bare name/spec the converter was
-                # constructed with -- resolving it (again) to a real, absolute
-                # path is exactly what `resolve_mechanism` is for; `conv`
-                # itself never updates `.mechanism` after resolving it
-                # internally to load its own `ct.Solution`, so skipping this
-                # would hand `write_payload` an unresolved name it can't load.
-                stored_mech = resolve_mechanism(conv_mechanism)
-                # Attrs, the store write and the host hooks are the same
-                # tail the headless runner uses -- shared so the two cannot
-                # drift again (they had: one assigned the host hook's return
-                # over the sweep's own axis values where the other merged).
-                store_solved_scenario(
-                    store_dir,
-                    sid,
-                    cfg,
-                    config,
-                    gui,
-                    conv,
-                    order=i,
-                    label=label,
-                    fingerprint=fingerprint,
-                    identity=identity,
-                    mechanism=stored_mech,
-                    scenario_attrs=plugins.scenario_attrs,
-                    on_solved=plugins.on_scenario_solved,
-                    source=source,
-                    warn=lambda msg: print(f"[sweep]{msg}", flush=True),
-                )
-                cursor.previous_states = final_states_of(gui)
-
-            if not chain:
-                # The full intended set is known up front regardless of how
-                # far the loop got, so pruning stays correct even for a
-                # stopped sweep.
-                intended = {sid for sid, _ in expand_scenarios(raw)}
-                stale = scenario_store.prune_entries(store_dir, intended)
-            elif not stop_event.is_set():
-                # A chain's intended set is only known once it has run to its
-                # end; a stopped chain keeps every entry.
-                stale = scenario_store.prune_entries(store_dir, visited)
-            else:
-                stale = []
-            if stale:
-                print(
-                    f"[sweep] pruned {len(stale)} stale entr(ies): {', '.join(stale)}",
-                    flush=True,
-                )
-            # No store-level finalisation to do: each entry already carries its
-            # own mechanism, units and computed_at, written the moment it solved.
+            # The one pipeline every entry point calls. The active converter
+            # class -- e.g. a host's own subclass with its own mechanism search
+            # convention -- lives on `app.state` (set once by the CLI at
+            # startup), the same source `/api/simulations` reads.
+            outcomes = run_set(
+                raw,
+                cfg_path,
+                use_cache=not body.no_cache,
+                converter_cls=getattr(request.app.state, "converter_class", None),
+                runner_cls=getattr(request.app.state, "runner_class", None),
+                source=source,
+                on_entry=_on_entry,
+                progress_cb=_publish,
+                stop_event=stop_event,
+                log=lambda msg: print(f"[sweep] {msg}", flush=True),
+            )
 
             state["scenario_progress"] = {}
             state["last_line"] = None
             if stop_event.is_set():
-                # The loop above broke on the stop check before starting the
-                # next scenario -- the in-flight one (if any) is handled by
-                # the except branch below, which raises out of solve_scenario.
+                # run_set stopped before starting the next scenario -- the
+                # in-flight one (if any) is handled by the except branch below,
+                # which run_set's solve raises into.
                 state["status"] = "cancelled"
                 state["message"] = "Sweep stopped"
                 print("[sweep] cancelled", flush=True)
             else:
                 state["status"] = "done"
                 state["message"] = "Sweep complete"
-                print(f"[sweep] complete — {len(visited)} run(s)", flush=True)
+                print(f"[sweep] complete — {len(outcomes)} run(s)", flush=True)
         except Exception as exc:  # noqa: BLE001
             state["scenario_progress"] = {}
             state["last_line"] = None

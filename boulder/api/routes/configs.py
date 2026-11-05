@@ -18,17 +18,22 @@ from pydantic import BaseModel
 from ...config import (
     convert_to_stone_format,
     get_initial_config_with_comments,
-    load_yaml_string_with_comments,
     merge_config_into_yaml,
     migrate_stone_config,
     normalize_config,
     validate_config,
     yaml_to_string_with_comments,
 )
-from ..live_config import adopt_live_config
+from ..live_config import adopt_live_config, resolve_live_yaml
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class ResolvedYamlRequest(BaseModel):
+    """The session's scenario overlays, which the browser holds."""
+
+    scenarios: Dict[str, Any] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +78,15 @@ async def get_default_config(request: Request) -> Dict[str, Any]:
         if runner_cls is not None:
             config = runner_cls.normalize(config)
             config = runner_cls.validate(config)
+        if getattr(request.app.state, "preloaded_raw", None) is None:
+            # A browser-only session starts from this config: it is the live one
+            # that runs expand, so the server must hold it too.
+            adopt_live_config(
+                request,
+                raw=resolve_live_yaml(request, original_yaml),
+                validated=config,
+                yaml_str=original_yaml,
+            )
         return {"config": config, "yaml": original_yaml}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -110,9 +124,8 @@ async def parse_yaml(request: Request, body: YAMLParseRequest) -> Dict[str, Any]
     Returns the validated internal-format config dict.
     """
     try:
-        data = load_yaml_string_with_comments(body.yaml)
-        # Convert ruamel CommentedMap to plain dict for normalisation
-        plain = _to_plain_dict(data)
+        # The resolved config (`from:` unfolded), as plain containers.
+        plain = resolve_live_yaml(request, body.yaml)
         # `normalize()` mutates its argument in place (pressure propagation,
         # unit coercion) -- deep-copy so `plain`, adopted below as the
         # *un-normalized* base for Run Sweep, stays exactly the authored file.
@@ -164,8 +177,29 @@ async def export_config(body: ConfigExportRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.post("/resolved")
+async def resolved_yaml(body: ResolvedYamlRequest, request: Request) -> Dict[str, Any]:
+    """Return the session's full resolved config as YAML: what a run stores.
+
+    The server's live config (``from:`` unfolded) with the browser's scenario
+    overlays merged in, dumped the one way every run's stored definition is.
+    Re-running this text alone reproduces the run.
+    """
+    from ...runset import merge_overlays
+    from ...scenario_store import definition_text
+
+    live = getattr(request.app.state, "preloaded_raw", None)
+    if live is None:
+        raise HTTPException(status_code=409, detail="The server holds no config yet")
+    return {
+        "yaml": definition_text(merge_overlays(live, body.scenarios)),
+        "filename": getattr(request.app.state, "preloaded_filename", None)
+        or "config.yaml",
+    }
+
+
 @router.post("/sync")
-async def sync_config(body: ConfigSyncRequest) -> Dict[str, Any]:
+async def sync_config(body: ConfigSyncRequest, request: Request) -> Dict[str, Any]:
     """Merge an updated config back into the original YAML, preserving comments and units.
 
     Accepts the live (normalized, SI) config from the frontend together with
@@ -179,6 +213,14 @@ async def sync_config(body: ConfigSyncRequest) -> Dict[str, Any]:
     """
     try:
         yaml_str, warnings = merge_config_into_yaml(body.config, body.original_yaml)
+        # The merged text is the session's new live config: runs, sweeps and the
+        # download expand it, so a canvas edit reaches them without a YAML Save.
+        adopt_live_config(
+            request,
+            raw=resolve_live_yaml(request, yaml_str),
+            validated=body.config,
+            yaml_str=yaml_str,
+        )
         return {"yaml": yaml_str, "warnings": warnings}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -244,8 +286,7 @@ async def upload_config(
         else:
             yaml_str = decoded
 
-        data = load_yaml_string_with_comments(yaml_str)
-        plain = _to_plain_dict(data)
+        plain = resolve_live_yaml(request, yaml_str, path=file.filename)
         # Deep-copy, migrate, normalize -- see `parse_yaml`.
         to_normalize = copy.deepcopy(plain)
         notices = migrate_stone_config(to_normalize)
