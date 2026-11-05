@@ -174,6 +174,7 @@ class BoulderRunner:
             mechanism=self._default_mechanism_name(),
             plugins=self.plugins,
         )
+        c.runner_class = type(self)
         if self.config_path is not None:
             c._download_config_path = self.config_path
         self.converter = c

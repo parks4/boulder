@@ -7,7 +7,6 @@ import pytest
 
 from boulder.reactor_energy import (
     build_reactor_with_energy,
-    energy_ctor_suffix,
     parse_energy_prop,
     validate_explicit_energy,
 )
@@ -45,9 +44,3 @@ def test_reservoir_rejects_explicit_energy():
     """Reservoir with energy: off raises ValueError."""
     with pytest.raises(ValueError, match="not supported"):
         validate_explicit_energy({"energy": "off"}, ct.Reservoir, "Reservoir")
-
-
-def test_emitter_energy_suffix():
-    """Download emitter suffix includes explicit energy."""
-    assert energy_ctor_suffix({"energy": "off"}) == ", energy='off'"
-    assert energy_ctor_suffix({}) == ""

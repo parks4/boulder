@@ -423,7 +423,7 @@ export function StageCard({ stageId }: Props) {
         onSimTimeChange={onSimTimeChange}
         timeStep={timeStep}
         onTimeStepChange={onTimeStepChange}
-        timeLocked={isStagedConfig(config)}
+        timeLocked={isStagedConfig(config) && !isMultiStage}
       />
     </div>
   );
