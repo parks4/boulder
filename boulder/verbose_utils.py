@@ -41,8 +41,9 @@ def _ensure_boulder_package_logging() -> None:
 def ensure_boulder_console_logging() -> None:
     """Enable INFO (or DEBUG if verbose) console output for all ``boulder.*`` loggers.
 
-    Call once from the ASGI lifespan or CLI so package loggers work before any
-    module imports :func:`get_verbose_logger`.
+    Call once from an application entry point (the CLI, the ASGI lifespan).
+    Library modules never call it: they use plain ``logging.getLogger`` so an
+    embedding application keeps control of its own logging.
     """
     _ensure_boulder_package_logging()
 
@@ -82,9 +83,3 @@ def quiet_polling_access_logs() -> None:
     if any(isinstance(f, _PollingAccessFilter) for f in access_logger.filters):
         return
     access_logger.addFilter(_PollingAccessFilter())
-
-
-def get_verbose_logger(name: str) -> logging.Logger:
-    """Return a logger under ``boulder.*`` with guaranteed console output."""
-    _ensure_boulder_package_logging()
-    return logging.getLogger(name)

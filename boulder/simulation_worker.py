@@ -1,6 +1,7 @@
 """Background simulation worker for streaming updates."""
 
 import dataclasses
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -8,9 +9,7 @@ from typing import Any, Dict, List, Mapping, Optional
 
 import cantera as ct  # type: ignore
 
-from .verbose_utils import get_verbose_logger
-
-logger = get_verbose_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _copy_reactors_series(

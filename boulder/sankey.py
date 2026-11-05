@@ -6,17 +6,17 @@ Generic Sankey builder and renderer operating on any solved
 link/node extraction logic.
 """
 
+import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional
 
 import numpy as np
 
 from .ctutils import collect_all_reactors_and_reservoirs
-from .verbose_utils import get_verbose_logger
 
 if TYPE_CHECKING:
     from .cantera_converter import BoulderPlugins
 
-logger = get_verbose_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _species_sankey_hex_colors(

@@ -1,4 +1,5 @@
 import importlib
+import logging
 import os
 import warnings
 from dataclasses import dataclass, field
@@ -30,9 +31,9 @@ from .reactor_energy import (
 from .sankey import generate_sankey_input_from_sim, sankey_links_for_api
 from .spatial_inference import try_infer_spatial_reactor_series
 from .staged_solver import SolveCancelled, _order_stage_nodes_for_flow
-from .verbose_utils import get_verbose_logger, is_verbose_mode
+from .verbose_utils import is_verbose_mode
 
-logger = get_verbose_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # Custom builder/hook types

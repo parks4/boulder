@@ -606,6 +606,13 @@ def main(argv: list[str] | None = None, *, runner_class=None) -> None:
     if argv is None:
         argv = sys.argv[1:]
 
+    # Library modules only use plain ``logging.getLogger``; the CLI is where
+    # Boulder's console logging gets configured (the ASGI lifespan does the
+    # same for the server).
+    from .verbose_utils import ensure_boulder_console_logging
+
+    ensure_boulder_console_logging()
+
     # Subcommand dispatch (kept outside argparse to preserve backward-compat
     # with the flag-based invocation ``boulder path/to.yaml``).
     if argv and argv[0] in {"plugins", "validate", "describe", "results"}:
