@@ -68,6 +68,13 @@ _NETWORK: Dict[str, Any] = {
 }
 
 
+class _NoSolution:
+    """A solved-converter stand-in with no template: the writer falls back to the plugin."""
+
+    def create_solution(self, mechanism: str, **_: Any) -> None:
+        return None
+
+
 def _raw(mechanism: str | None) -> Dict[str, Any]:
     raw = copy.deepcopy(_NETWORK)
     if mechanism:
@@ -96,7 +103,7 @@ def _single_run_key(raw: Dict[str, Any], cfg: Path) -> str:
     with patch.object(
         sweep_runner,
         "solve_scenario",
-        return_value=(_PAYLOAD, "gri30.yaml", object()),
+        return_value=(_PAYLOAD, "gri30.yaml", _NoSolution()),
     ):
         outcomes = run_set(copy.deepcopy(raw), cfg, only={"BASELINE"})
     assert [o.sid for o in outcomes] == ["BASELINE"]

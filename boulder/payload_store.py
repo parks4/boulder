@@ -106,19 +106,23 @@ def _resolve_mechanism(mechanism: str) -> Tuple[str, str]:
     return mechanism, ""
 
 
-def _solution_for(mechanism: str) -> Optional[ct.Solution]:
-    """Return a state-independent template phase for *mechanism* (or None).
+def solution_for(
+    mechanism: str, *, kinetics: bool = False, converter_cls: Optional[type] = None
+) -> Optional[ct.Solution]:
+    """Return a state-independent phase for *mechanism* (or None).
 
-    Loading a large mechanism is the dominant cost of a restore, so the parse
-    is shared process-wide (:func:`~boulder.ctutils.load_solution`); the
-    template itself is a cheap kinetics-free derivation that this module may
-    freely set the state of.
+    Goes through the converter class's ``create_solution`` hook (the plugin's
+    converter when *converter_cls* is None), the one way Boulder gets a
+    Solution, so a host that serves parsed mechanisms from its own cache is
+    not parsed a second time. Called on a ``__new__`` instance, like
+    :func:`boulder.sweep_runner.converter_mechanism_resolver`.
     """
     if not mechanism:
         return None
-    from .ctutils import derive_solution, load_solution
+    from .cantera_converter import select_converter_class  # noqa: PLC0415
 
-    return derive_solution(load_solution(mechanism), kinetics=False)
+    cls = select_converter_class(converter_cls)
+    return cls.__new__(cls).create_solution(mechanism, kinetics=kinetics)
 
 
 # --------------------------------------------------------------------------- #
@@ -292,6 +296,7 @@ def write_payload(
     mechanism: str,
     group: Optional[str] = None,
     fresh: bool = True,
+    solution: Optional[ct.Solution] = None,
 ) -> None:
     """Serialize *gui_payload* to a composite HDF5 file.
 
@@ -304,6 +309,9 @@ def write_payload(
         When set, the result is written under ``<group>/…`` (one composite per
         scenario in a *collection* file). When ``None``, written at the top level
         (a single-result *cache* file).
+    solution:
+        A template phase for *mechanism* (the solving converter's own); when
+        ``None`` it comes from :func:`solution_for`.
     fresh:
         When ``True`` (and no ``group``), any existing file is replaced. For a
         collection (``group`` set) pass ``fresh=False`` to append without wiping
@@ -326,7 +334,7 @@ def write_payload(
     lean = dict(gui_payload)
     series_map: Dict[str, Any] = lean.pop("reactors_series", None) or {}
 
-    gas = _solution_for(mechanism)
+    gas = solution if solution is not None else solution_for(mechanism)
 
     index: Dict[str, Dict[str, Any]] = {}
     solution_groups: List[Tuple[str, ct.SolutionArray]] = []
@@ -436,6 +444,7 @@ def read_payload(
     h5_path: Path,
     mechanism_override: Optional[str] = None,
     group: Optional[str] = None,
+    converter_cls: Optional[type] = None,
 ) -> Dict[str, Any]:
     """Inverse of :func:`write_payload` → the full ``gui_payload``.
 
@@ -463,7 +472,9 @@ def read_payload(
         return gui  # defensive: nothing to rehydrate
 
     needs_solution = any(e.get("kind") == "solution" for e in index.values())
-    gas = _solution_for(mechanism) if needs_solution else None
+    gas = (
+        solution_for(mechanism, converter_cls=converter_cls) if needs_solution else None
+    )
 
     series: Dict[str, Any] = {}
     array_entries = []

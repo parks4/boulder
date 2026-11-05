@@ -80,6 +80,9 @@ class _Solved:
     def __init__(self, last_config: Dict[str, Any] | None = None) -> None:
         self._last_config = last_config
 
+    def create_solution(self, mechanism: str, **_: Any) -> None:
+        return None  # no template: the writer falls back to the plugin converter
+
 
 def _solve(
     raw: Dict[str, Any],

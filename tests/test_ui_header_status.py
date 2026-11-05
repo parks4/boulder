@@ -94,6 +94,9 @@ def _store_single_run(cfg: Path) -> tuple:
     class _Solved:
         _last_config = post_config
 
+        def create_solution(self, mechanism, **_):
+            return None  # no template: the writer falls back to the plugin converter
+
     payload = {"times": [0.0], "reactors_series": {}}
     with patch.object(
         sweep_runner, "solve_scenario", return_value=(payload, "gri30.yaml", _Solved())

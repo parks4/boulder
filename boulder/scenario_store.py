@@ -302,6 +302,7 @@ def write_entry(
     units: Optional[Dict[str, str]] = None,
     extra_attrs: Optional[Dict[str, Any]] = None,
     source: Optional[RunSource] = None,
+    solution: Any = None,
 ) -> Path:
     """Write one solved entry, atomically, recording ``fingerprint`` last.
 
@@ -331,7 +332,7 @@ def write_entry(
     tmp = scratch_path(path)
     source_sha = _write_source(store_dir, source) if source is not None else None
     try:
-        write_payload(tmp, gui_payload, mechanism, fresh=False)
+        write_payload(tmp, gui_payload, mechanism, fresh=False, solution=solution)
         with h5py.File(str(tmp), "a") as handle:
             attrs = handle.attrs
             attrs[_ATTR_VERSION] = STORE_VERSION
@@ -442,7 +443,10 @@ def list_entries(store_dir: Optional[Path], identity: str = "") -> List[Dict[str
 
 
 def read_entry(
-    store_dir: Path, scenario_id: str, identity: str = ""
+    store_dir: Path,
+    scenario_id: str,
+    identity: str = "",
+    converter_cls: Optional[type] = None,
 ) -> Optional[Dict[str, Any]]:
     """Return one entry's GUI payload, or ``None`` if absent/unusable."""
     if h5py is None:
@@ -459,7 +463,7 @@ def read_entry(
     from .payload_store import read_payload  # noqa: PLC0415 — heavy import
 
     try:
-        return read_payload(path)
+        return read_payload(path, converter_cls=converter_cls)
     except (OSError, KeyError, ValueError):
         return None
 

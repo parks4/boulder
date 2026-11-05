@@ -179,9 +179,11 @@ class ScenarioSet(Mapping[str, "Scenario"]):
     def _solution(self, attrs: Dict[str, Any]) -> ct.Solution:
         path = self._resolve_mechanism(attrs)
         if path not in self._solutions:
-            from .ctutils import derive_solution, load_solution  # noqa: PLC0415
+            from .payload_store import solution_for  # noqa: PLC0415
 
-            self._solutions[path] = derive_solution(load_solution(path), kinetics=True)
+            solution = solution_for(path, kinetics=True)
+            assert solution is not None  # path is a resolved mechanism file
+            self._solutions[path] = solution
         return self._solutions[path]
 
     def _resolve_mechanism(self, attrs: Dict[str, Any]) -> str:

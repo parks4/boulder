@@ -58,6 +58,7 @@ from typing import (
 from . import scenario_store
 from .cantera_converter import DualCanteraConverter, get_plugins, select_converter_class
 from .config import normalize_config, synthesize_default_group
+from .live_simulation import clear_live_simulation
 from .result_cache import get_cache_contributor_registry, run_contributors
 from .runset import (
     RUN_SET_KEYS,
@@ -339,6 +340,8 @@ def solve_scenario(
     conv.runner_class = runner_cls
     conv._download_raw = raw
     sim_t, dt = solver_window(config)
+    # The previous entry's network would otherwise stay alive through this build.
+    clear_live_simulation()
     worker = SimulationWorker()
     worker.start_simulation(conv, config, sim_t, dt)
     while True:
@@ -508,6 +511,8 @@ def store_solved_scenario(
         extra_attrs=entry_attrs,
         source=source,
         alt_fingerprints=alt_fingerprints,
+        # The solving converter's own Solution: one parse of the mechanism.
+        solution=conv.create_solution(mechanism, kinetics=False) if mechanism else None,
     )
 
     contributors = get_cache_contributor_registry().contributors
@@ -586,6 +591,7 @@ class EntryOutcome:
     fingerprint: str
     cached: bool
     gui: Dict[str, Any]
+    elapsed_s: float = 0.0  # solve wall time; 0.0 for a cached entry
 
 
 def _classes(
@@ -662,9 +668,11 @@ def run_set(
     between entries and, in-flight, raises like a failed solve. ``log`` receives
     the progress lines (default: print). ``keep_payload`` makes each outcome carry
     its GUI payload (``EntryOutcome.gui``: read back from the store for a cached
-    entry); headless callers leave it off, so no entry's payload, converter or
-    network outlives its own iteration and peak memory does not grow with the
-    number of entries. Returns one :class:`EntryOutcome` per
+    entry); headless callers leave it off, so no entry's payload or converter
+    outlives its own iteration. The previous entry's network is released at the
+    start of the next solve (:func:`solve_scenario`), so peak memory does not
+    grow with the number of entries; the last entry's network stays reachable
+    through :mod:`boulder.live_simulation`. Returns one :class:`EntryOutcome` per
     entry, in order.
     """
     say = log or (lambda msg: print(msg, flush=True))
@@ -728,7 +736,10 @@ def run_set(
                 warn=say,
             )
             payload = (
-                scenario_store.read_entry(store_dir, sid, identity) or {}
+                scenario_store.read_entry(
+                    store_dir, sid, identity, converter_cls=converter_cls
+                )
+                or {}
                 if keep_payload
                 else {}
             )
@@ -742,6 +753,7 @@ def run_set(
             assert progress_cb is not None
             progress_cb(_sid, _cfg, progress)
 
+        t0 = time.perf_counter()
         gui, resolved_mech, conv = solve_scenario(
             config,
             mech_name,
@@ -752,6 +764,7 @@ def run_set(
             runner_cls=runner_cls,
             raw=cfg,
         )
+        elapsed = time.perf_counter() - t0
         if store_dir is not None:
             # The post-build config (stream points the staged solver added)
             # describes the same solve: the entry answers to its key too.
@@ -787,7 +800,7 @@ def run_set(
         if chain:
             cursor.previous_states = final_states_of(gui)
         outcomes.append(
-            EntryOutcome(sid, fingerprint, False, gui if keep_payload else {})
+            EntryOutcome(sid, fingerprint, False, gui if keep_payload else {}, elapsed)
         )
         del gui, conv  # free the entry's payload and converter before the next
 

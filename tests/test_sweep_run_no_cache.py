@@ -97,6 +97,9 @@ class _StubConverter:
     def resolve_mechanism(self, name: str) -> str:
         return name
 
+    def create_solution(self, mechanism: str, **_: Any) -> None:
+        return None  # no template: the writer falls back to the plugin converter
+
 
 def test_sweep_run_reuses_the_cache_when_unchanged(tmp_path: Path) -> None:
     """A second run of the same config skips every scenario (fingerprint match)."""
