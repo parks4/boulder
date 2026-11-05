@@ -207,7 +207,12 @@ def test_an_unchanged_entry_is_served_from_the_store(cfg: Path) -> None:
     with patch.object(
         sweep_runner, "solve_scenario", side_effect=AssertionError("re-solved")
     ):
-        (outcome,) = run_set(copy.deepcopy(_RAW), cfg, only={BASELINE_SCENARIO_ID})
+        (outcome,) = run_set(
+            copy.deepcopy(_RAW),
+            cfg,
+            only={BASELINE_SCENARIO_ID},
+            keep_payload=True,
+        )
 
     assert outcome.cached is True
     assert outcome.gui["times"] == [0.0]

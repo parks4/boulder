@@ -578,7 +578,8 @@ def notify_cached(
 class EntryOutcome:
     """What one run-set entry produced: solved now, or read back from the store.
 
-    ``gui`` is the stored payload (what the Scenario pane renders).
+    ``gui`` is the stored payload (what the Scenario pane renders); it is empty
+    unless :func:`run_set` was asked to ``keep_payload``.
     """
 
     sid: str
@@ -635,6 +636,7 @@ def run_set(
     progress_cb: Optional[Callable[[str, Dict[str, Any], Any], None]] = None,
     stop_event: Optional[threading.Event] = None,
     log: Optional[Callable[[str], None]] = None,
+    keep_payload: bool = False,
 ) -> List[EntryOutcome]:
     """Solve and store a config's run-set: THE pipeline every entry point calls.
 
@@ -658,7 +660,11 @@ def run_set(
     starts (``total`` is 0 for an open-ended chain); ``progress_cb(sid, config,
     progress)`` on each poll of a running solve; ``stop_event`` stops the run
     between entries and, in-flight, raises like a failed solve. ``log`` receives
-    the progress lines (default: print). Returns one :class:`EntryOutcome` per
+    the progress lines (default: print). ``keep_payload`` makes each outcome carry
+    its GUI payload (``EntryOutcome.gui``: read back from the store for a cached
+    entry); headless callers leave it off, so no entry's payload, converter or
+    network outlives its own iteration and peak memory does not grow with the
+    number of entries. Returns one :class:`EntryOutcome` per
     entry, in order.
     """
     say = log or (lambda msg: print(msg, flush=True))
@@ -710,7 +716,8 @@ def run_set(
             # when the solve itself is skipped.
             scenario_store.update_display_attrs(store_dir, sid, label=sid, order=index)
             # A skipped chain step still seeds the next one.
-            cursor.previous_states = stored_final_states(store_dir, sid, identity)
+            if chain:  # no other run set reads the stored payload back
+                cursor.previous_states = stored_final_states(store_dir, sid, identity)
             notify_cached(
                 on_cached,
                 store_dir,
@@ -720,7 +727,11 @@ def run_set(
                 identity=identity,
                 warn=say,
             )
-            payload = scenario_store.read_entry(store_dir, sid, identity) or {}
+            payload = (
+                scenario_store.read_entry(store_dir, sid, identity) or {}
+                if keep_payload
+                else {}
+            )
             outcomes.append(EntryOutcome(sid, fingerprint, True, payload))
             continue
         say(shown)
@@ -773,8 +784,12 @@ def run_set(
                 source=source,
                 alt_fingerprints=(alt,) if alt != fingerprint else None,
             )
-        cursor.previous_states = final_states_of(gui)
-        outcomes.append(EntryOutcome(sid, fingerprint, False, gui))
+        if chain:
+            cursor.previous_states = final_states_of(gui)
+        outcomes.append(
+            EntryOutcome(sid, fingerprint, False, gui if keep_payload else {})
+        )
+        del gui, conv  # free the entry's payload and converter before the next
 
     stopped = stop_event is not None and stop_event.is_set()
     if store_dir is not None and only is None:
