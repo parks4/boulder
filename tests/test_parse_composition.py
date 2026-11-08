@@ -24,9 +24,12 @@ CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 
 
 @pytest.fixture(autouse=True)
-def _forget_warned_compositions() -> None:
+def _forget_warned_compositions(monkeypatch: pytest.MonkeyPatch) -> None:
     # The sum warning is deduplicated per process; start each test clean.
     cantera_converter._WARNED_COMPOSITIONS.clear()
+    # An earlier test module can leave the app's console logging set up
+    # (``propagate = False`` on ``boulder``), which hides records from caplog.
+    monkeypatch.setattr(logging.getLogger("boulder"), "propagate", True)
 
 
 @pytest.fixture()
