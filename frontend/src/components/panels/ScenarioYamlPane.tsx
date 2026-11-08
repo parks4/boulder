@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import { FileCode, X } from "lucide-react";
 import { fetchScenarioSource, renderFullYaml } from "@/api/scenarios";
+import { ApiError } from "@/api/client";
 import { useThemeStore } from "@/stores/themeStore";
 import { useScenarioStore } from "@/stores/scenarioStore";
 import { Button } from "@/components/ui/Button";
@@ -86,9 +87,9 @@ export function ScenarioYamlPane({ scenarioId, baseScenarioId, onClose, onSaved 
       onSaved?.(scenarioId);
       onClose();
     } catch (err) {
-      toast.error(
-        `Could not update scenario: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      // `detail`, not `message`: no raw "API 422: " prefix in the toast.
+      const msg = err instanceof ApiError ? err.detail : err instanceof Error ? err.message : String(err);
+      toast.error(`Could not update scenario: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -185,7 +186,7 @@ export function ScenarioYamlPane({ scenarioId, baseScenarioId, onClose, onSaved 
         )}
       </div>
 
-      <div className="flex justify-end gap-2 p-3 border-t border-border shrink-0">
+      <div className="flex flex-wrap justify-end gap-2 p-3 border-t border-border shrink-0">
         <Button
           id="download-full-scenario-yaml-btn"
           onClick={() => void handleDownloadFullYaml()}

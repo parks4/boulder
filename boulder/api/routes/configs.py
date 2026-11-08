@@ -14,6 +14,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
+from ruamel.yaml.error import YAMLError
 
 from ...config import (
     convert_to_stone_format,
@@ -149,6 +150,10 @@ async def parse_yaml(request: Request, body: YAMLParseRequest) -> Dict[str, Any]
         adopt_live_config(request, raw=plain, validated=validated, yaml_str=body.yaml)
 
         return {"config": validated, "yaml": body.yaml, "warnings": notices}
+    except YAMLError as exc:
+        # Same "Invalid YAML: " prefix as the scenario editor, so the GUI can
+        # tell a syntax error from valid YAML that the model rules reject.
+        raise HTTPException(status_code=422, detail=f"Invalid YAML: {exc}")
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

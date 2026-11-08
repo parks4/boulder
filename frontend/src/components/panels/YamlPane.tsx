@@ -7,10 +7,23 @@ import { useThemeStore } from "@/stores/themeStore";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
 import { fetchResolvedYaml, parseYaml, syncConfig } from "@/api/configs";
+import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui/Button";
 import { toast } from "sonner";
 
 const MonacoEditor = lazy(() => import("@monaco-editor/react"));
+
+/** Toast text for a failed Save. `/configs/parse` answers 422 both for a YAML
+ * syntax error (detail already prefixed "Invalid YAML: ") and for valid YAML
+ * the model rules reject -- only the first is a YAML problem. */
+function saveErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.detail.startsWith("Invalid YAML")) return err.detail;
+    if (err.status === 422) return `Model rejected: ${err.detail}`;
+    return `Could not save YAML: ${err.detail}`;
+  }
+  return `Could not save YAML: ${err instanceof Error ? err.message : String(err)}`;
+}
 
 /**
  * Full-height pane (replaces the old YAML modal) docked right of the
@@ -116,7 +129,7 @@ export function YamlPane() {
       void useScenarioStore.getState().resetForNewConfig();
       toast.success("YAML config updated");
     } catch (err) {
-      toast.error(`Invalid YAML: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(saveErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -239,7 +252,7 @@ export function YamlPane() {
         )}
       </div>
 
-      <div className="flex justify-end gap-2 p-3 border-t border-border shrink-0">
+      <div className="flex flex-wrap justify-end gap-2 p-3 border-t border-border shrink-0">
         <Button onClick={handleDownload} variant="muted" size="sm">
           Download
         </Button>

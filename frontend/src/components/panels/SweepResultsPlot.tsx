@@ -49,10 +49,9 @@ const FRIENDLY_LABELS: Record<string, string> = {
 
 function friendlyLabel(key: string): string {
   if (FRIENDLY_LABELS[key]) return FRIENDLY_LABELS[key];
-  return key
-    .replace(/^final_/, "")
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  // No title-casing: a host KPI key often carries its unit ("rate (kg/day)"),
+  // which "Kg/Day" would mangle.
+  return key.replace(/^final_/, "").replace(/_/g, " ");
 }
 
 /** Auto-walked node/connection input attrs are always keyed `in.<node_id>.<property>`
@@ -88,7 +87,9 @@ function describeKey(
 /** `describeKey` rendered as one string, e.g. "downstream.pressure (Pa, input)". */
 function displayLabel(key: string, units: Record<string, string> | undefined): string {
   const { label, unit, kind } = describeKey(key, units);
-  return unit ? `${label} (${unit}, ${kind})` : `${label} (${kind})`;
+  // A label that already ends with its unit, e.g. "rate (kg/day)", shows it once.
+  const showUnit = unit && !label.endsWith(`(${unit})`);
+  return showUnit ? `${label} (${unit}, ${kind})` : `${label} (${kind})`;
 }
 
 /** Numeric attr keys present on at least one scenario, excluding bookkeeping fields. */

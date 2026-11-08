@@ -192,7 +192,12 @@ export const useSweepRunStore = create<SweepRunState>((set, get) => {
     scenarioProgress: {},
     lastLine: null,
     pinnedId: null,
-    pin: (id: string) => set({ pinnedId: id }),
+    // Clicking the scenario being solved means "show me the live one": it
+    // unpins, so the pane keeps following the sweep onto the next scenario
+    // once this one finishes. Clicking any other scenario pins the view there
+    // until the user clicks the live one again or the sweep ends.
+    pin: (id: string) =>
+      set({ pinnedId: id === followedScenarioId(null, get().scenarioProgress) ? null : id }),
 
     run: (options) => {
       if (get().sweeping) {

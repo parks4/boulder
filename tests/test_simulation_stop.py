@@ -53,10 +53,10 @@ _LIVE_RAW = {
 }
 
 
-def _make_client(config_path=None):
+def _make_client(config_path=None, raw=None):
     """Return an AsyncClient bound to a fresh app holding a live config."""
     app = create_app()
-    app.state.preloaded_raw = copy.deepcopy(_LIVE_RAW)
+    app.state.preloaded_raw = copy.deepcopy(_LIVE_RAW if raw is None else raw)
     if config_path is not None:
         app.state.preloaded_config_path = str(config_path)
     transport = ASGITransport(app=app)
@@ -370,3 +370,252 @@ class TestStopSimulationEndpoint:
             assert list((tmp_path / ".boulder-cache").rglob("*.h5")) == []
 
         _simulations.clear()
+
+
+# Two stages over HTTP (parks4/boulder#241): a fast steady first stage, then a
+# transient last stage whose per-step loop is where a mid-stage stop must land.
+_TWO_STAGE_LIVE_RAW = {
+    "phases": {"gas": {"mechanism": "gri30.yaml"}},
+    "stages": {
+        "first": {
+            "mechanism": "gri30.yaml",
+            "solve": "advance",
+            "advance_time": 1.0e-3,
+        },
+        "second": {
+            "mechanism": "gri30.yaml",
+            "solver": {"kind": "advance_grid", "grid": {"stop": 1.0, "dt": 1.0e-3}},
+        },
+    },
+    "first": [
+        {
+            "id": "feed",
+            "Reservoir": {
+                "temperature": "1000 K",
+                "pressure": "101325 Pa",
+                "composition": "O2:0.21,N2:0.79",
+            },
+        },
+        {
+            "id": "reactor",
+            "IdealGasConstPressureMoleReactor": {
+                "volume": "1.0e-5 m**3",
+                "initial": {
+                    "temperature": "1200 K",
+                    "pressure": "101325 Pa",
+                    "composition": "O2:0.21,N2:0.79",
+                },
+            },
+        },
+        {
+            "id": "feed_to_reactor",
+            "MassFlowController": {"mass_flow_rate": "1.0e-4 kg/s"},
+            "source": "feed",
+            "target": "reactor",
+        },
+    ],
+    "second": [
+        {
+            "id": "outlet",
+            "IdealGasConstPressureMoleReactor": {
+                "volume": "1.0e-5 m**3",
+                "initial": {
+                    "temperature": "900 K",
+                    "pressure": "101325 Pa",
+                    "composition": "O2:0.21,N2:0.79",
+                },
+            },
+        },
+        {
+            "id": "reactor_to_outlet",
+            "source": "reactor",
+            "target": "outlet",
+            "mass_flow_rate": "1.0e-4 kg/s",
+        },
+    ],
+}
+
+
+async def _poll_results(client, sim_id, until, timeout=30.0):
+    """Poll ``GET /results`` until ``until(body)`` holds; return the last body."""
+    deadline = time.perf_counter() + timeout
+    while True:
+        body = (await client.get(f"/api/simulations/{sim_id}/results")).json()
+        if until(body) or time.perf_counter() > deadline:
+            return body
+        await asyncio.sleep(0.05)
+
+
+def _terminal(body):
+    return body["status"] not in ("running", "stopping")
+
+
+class TestResultsStatusAfterStop:
+    """``GET /results`` reports a stopped run as terminal (parks4/boulder#241)."""
+
+    @pytest.mark.asyncio
+    async def test_results_reports_stopped_after_delete(self, monkeypatch):
+        """After DELETE, ``/results`` reaches ``status == "stopped"``, not ``"running"`` forever.
+
+        Asserted: the terminal status is ``"stopped"`` with ``is_complete``
+        false, no error message and ``is_running`` false. The build is held
+        until the stop lands so the DELETE always arrives mid-run.
+        """
+        original_build_network = DualCanteraConverter.build_network
+
+        def _build_after_stop(self, *args, **kwargs):
+            assert self.cancel_token.wait(timeout=30)
+            return original_build_network(self, *args, **kwargs)
+
+        monkeypatch.setattr(DualCanteraConverter, "build_network", _build_after_stop)
+        _simulations.clear()
+
+        async with _make_client() as client:
+            resp = await client.post("/api/simulations", json={})
+            sim_id = resp.json()["simulation_id"]
+            await client.delete(f"/api/simulations/{sim_id}")
+            body = await _poll_results(client, sim_id, _terminal)
+
+        assert body["status"] == "stopped", body
+        assert body["is_complete"] is False
+        assert body["is_running"] is False
+        assert body["error_message"] is None
+        _simulations.clear()
+
+    @pytest.mark.asyncio
+    async def test_stop_inside_the_last_stage_ends_the_run_unstored(
+        self, tmp_path, monkeypatch
+    ):
+        """A stop sent while the last stage integrates ends that stage between steps.
+
+        The last stage's transient loop is held until the stop lands, then runs
+        for real: its per-step checkpoint must end it. Asserted: ``/results``
+        reports ``"stopped"`` only once the solve has actually unwound (no
+        terminal status while the worker still integrates), the first stage is
+        the only completed one, not a single grid step of the last stage ran,
+        and the result store holds nothing for the run.
+        """
+        cfg = tmp_path / "model.yaml"
+        cfg.write_text("network: []\n", encoding="utf-8")
+        original = DualCanteraConverter._run_transient_solver
+        in_last_stage = threading.Event()
+        unwound = threading.Event()
+        advanced: list[float] = []
+
+        def _held_transient_solver(self, network, kind, solver, stage_id):
+            real_advance = network.advance
+
+            class _CountingNet:
+                def __getattr__(self, name):
+                    return getattr(network, name)
+
+                def advance(self, t):
+                    advanced.append(t)
+                    return real_advance(t)
+
+            in_last_stage.set()
+            try:
+                assert self.cancel_token.wait(timeout=30)
+                # Let the stop request reach the worker before the loop resumes,
+                # so a terminal status reported meanwhile would be caught below.
+                time.sleep(0.3)
+                return original(self, _CountingNet(), kind, solver, stage_id)
+            finally:
+                unwound.set()
+
+        monkeypatch.setattr(
+            DualCanteraConverter, "_run_transient_solver", _held_transient_solver
+        )
+        _simulations.clear()
+
+        async with _make_client(cfg, raw=_TWO_STAGE_LIVE_RAW) as client:
+            resp = await client.post("/api/simulations", json={})
+            sim_id = resp.json()["simulation_id"]
+            for _ in range(600):
+                if in_last_stage.is_set():
+                    break
+                await asyncio.sleep(0.05)
+            assert in_last_stage.is_set(), "the last stage never started"
+
+            await client.delete(f"/api/simulations/{sim_id}")
+            body = await _poll_results(client, sim_id, _terminal)
+            assert body["status"] == "stopped", body
+            assert unwound.is_set(), "reported stopped while still solving"
+
+        assert body["is_complete"] is False
+        assert body["completed_stage_ids"] == ["first"]
+        assert advanced == []
+        assert list(tmp_path.rglob("*.h5")) == []
+        _simulations.clear()
+
+
+class TestSolveScenarioStopRace:
+    """``solve_scenario`` never hands back a payload once a stop was requested."""
+
+    def test_stop_seen_with_a_complete_snapshot_still_raises(self, monkeypatch):
+        """A stop observed on the poll that also sees completion must not return a result.
+
+        The poll takes its snapshot before it checks the stop flag; a snapshot
+        that is already complete used to be returned (and stored by
+        ``run_set``). Asserted: ``solve_scenario`` raises instead.
+        """
+        import boulder.simulation_worker as sw
+        from boulder.sweep_runner import solve_scenario
+
+        class _DoneWorker:
+            def start_simulation(self, converter, config):
+                pass
+
+            def stop_simulation(self):
+                pass
+
+            def join(self):
+                pass
+
+            def get_progress(self):
+                return SimulationProgress(is_running=False, is_complete=True)
+
+        class _Converter:
+            mechanism = "gri30.yaml"
+
+            def __init__(self, **kwargs):
+                pass
+
+        monkeypatch.setattr(sw, "SimulationWorker", _DoneWorker)
+        stop = threading.Event()
+        stop.set()
+        with pytest.raises(RuntimeError, match="stop"):
+            solve_scenario({}, "gri30.yaml", converter_cls=_Converter, stop_event=stop)
+
+
+class TestMicroStepStopsBetweenSteps:
+    """``micro_step`` checks the stop flag between its inner advance steps."""
+
+    def test_stop_inside_a_chunk_ends_it_before_the_next_step(self):
+        """A stop set by the first inner step of a chunk ends the chunk right there.
+
+        Asserted: one ``advance`` call, then ``SolveCancelled``: the chunk's
+        remaining steps (nine here) never run.
+        """
+        conv = DualCanteraConverter.__new__(DualCanteraConverter)
+        conv._schedule_callbacks = []
+        conv.cancel_token = threading.Event()
+        calls: list[float] = []
+
+        class _Net:
+            time = 0.0
+
+            def advance(self, t):
+                calls.append(t)
+                _Net.time = t
+                conv.cancel_token.set()
+
+        solver = {
+            "kind": "micro_step",
+            "t_total": 1e-8,
+            "chunk_dt": 1e-8,
+            "max_dt": 1e-9,
+        }
+        with pytest.raises(SolveCancelled):
+            conv._run_transient_solver(_Net(), "micro_step", solver, "s1")
+        assert len(calls) == 1

@@ -528,9 +528,14 @@ class SolveCancelled(Exception):
     """Raised to unwind a staged solve when a stop was requested mid-run.
 
     Checked cooperatively — Cantera's own solver calls cannot be interrupted,
-    so this can only take effect at a stage boundary (or, for transient runs,
-    inside the per-step loops in :mod:`boulder.cantera_converter`) rather than
-    immediately.
+    so this takes effect at the finest loop Boulder drives, never mid-call:
+    before each stage; before each grid point of an ``advance_grid`` stage;
+    before each chunk and each ``max_dt`` step of a ``micro_step`` stage
+    (:meth:`~boulder.cantera_converter.DualCanteraConverter._run_transient_solver`).
+    ``advance``, ``advance_to_steady_state`` and ``solve_steady`` are one
+    blocking Cantera call each, and so is any loop inside a custom
+    ``network_class``: a stop requested during one lands when it returns, and
+    the worker's finalize guard then refuses to complete the run.
     """
 
 

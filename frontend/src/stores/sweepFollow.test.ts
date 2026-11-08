@@ -47,6 +47,31 @@ describe("sweep follow", () => {
     expect(followedId(useSweepRunStore.getState().pinnedId, { hot: { stage: 2 } })).toBe("hot");
   });
 
+  it("keeps following the sweep after the user clicks the scenario being solved", async () => {
+    useSweepRunStore.setState({
+      sweeping: true,
+      scenarioProgress: { hot: { stage: 2, stageTotal: 3, stageId: null } },
+    });
+    await useScenarioStore.getState().setActive("hot");
+
+    const pinned = useSweepRunStore.getState().pinnedId;
+    expect(pinned).toBeNull();
+    // `hot` finished, `cold` started: the pane moves on with the sweep.
+    expect(followedId(pinned, { cold: { stage: 1 } })).toBe("cold");
+  });
+
+  it("stays on another clicked scenario as the sweep moves on", async () => {
+    useSweepRunStore.setState({
+      sweeping: true,
+      scenarioProgress: { hot: { stage: 2, stageTotal: 3, stageId: null } },
+    });
+    await useScenarioStore.getState().setActive("already_done");
+
+    const pinned = useSweepRunStore.getState().pinnedId;
+    expect(pinned).toBe("already_done");
+    expect(followedId(pinned, { cold: { stage: 1 } })).toBeNull();
+  });
+
   it("does not pin a selection made outside a sweep", async () => {
     useSweepRunStore.setState({ sweeping: false });
     await useScenarioStore.getState().setActive("whatever");

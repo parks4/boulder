@@ -194,7 +194,7 @@ describe("SweepResultsPlot", () => {
 
       expect(
         screen.getByTestId("active-series-chip-efficiency"),
-      ).toHaveTextContent("Efficiency (%, output)");
+      ).toHaveTextContent("efficiency (%, output)");
     });
 
     it("omits an empty unit parenthetical when no unit is known", () => {
@@ -202,7 +202,25 @@ describe("SweepResultsPlot", () => {
 
       expect(
         screen.getByTestId("active-series-chip-efficiency"),
-      ).toHaveTextContent("Efficiency (output)");
+      ).toHaveTextContent("efficiency (output)");
+    });
+
+    it("keeps a host KPI key as written and shows its unit once", () => {
+      const key = "product rate (kg/day)";
+      render(
+        <SweepResultsPlot
+          scenarios={[
+            makeKpiScenario(800, { [key]: 12 }),
+            makeKpiScenario(900, { [key]: 14 }),
+          ]}
+          units={{ [key]: "kg/day" }}
+        />,
+      );
+
+      // Not "Product Rate (Kg/Day) (kg/day, output)".
+      expect(plotCalls.at(-1)?.layout?.yaxis?.title?.text).toBe(
+        "product rate (kg/day) (output)",
+      );
     });
   });
 

@@ -35,6 +35,9 @@ from .verbose_utils import is_verbose_mode
 
 logger = logging.getLogger(__name__)
 
+#: Composition strings already warned about (see ``parse_composition``).
+_WARNED_COMPOSITIONS: Set[str] = set()
+
 
 # Custom builder/hook types
 ReactorBuilder = Callable[["DualCanteraConverter", Dict[str, Any]], ct.Reactor]
@@ -932,7 +935,9 @@ class DualCanteraConverter:
         Logs a warning (without raising) if the parsed fractions don't sum to
         1.0 within ``_COMPOSITION_SUM_TOL`` — Cantera silently renormalizes a
         composition when it's assigned to a gas state, so an omission or typo
-        here would otherwise pass unnoticed.
+        here would otherwise pass unnoticed. Once per distinct string per
+        process: every solve re-parses each node's composition, and percent or
+        ratio input (``N2:79,O2:21``) is legitimate, so repeating it is noise.
         """
         comp_dict: Dict[str, float] = {}
         buf: Optional[str] = None
@@ -950,7 +955,11 @@ class DualCanteraConverter:
             raise ValueError(f"Malformed composition string: {comp_str!r}")
 
         total = sum(comp_dict.values())
-        if abs(total - 1.0) > self._COMPOSITION_SUM_TOL:
+        if (
+            abs(total - 1.0) > self._COMPOSITION_SUM_TOL
+            and comp_str not in _WARNED_COMPOSITIONS
+        ):
+            _WARNED_COMPOSITIONS.add(comp_str)
             logger.warning(
                 f"Composition {comp_str!r} sums to {total:g}, not 1.0; "
                 "Cantera will silently renormalize it."
@@ -2227,6 +2236,8 @@ class DualCanteraConverter:
                     network.reinitialize()
                 position = network.distance if axis == "distance" else network.time
                 while position < t_end:
+                    if cancel_token is not None and cancel_token.is_set():
+                        raise SolveCancelled(f"cancelled during stage '{stage_id}'")
                     network.advance(position + max_dt)
                     position = network.distance if axis == "distance" else network.time
                 if _scope_recorder is not None:

@@ -160,11 +160,25 @@ class TestConfigRoutes:
 
     @pytest.mark.asyncio
     async def test_parse_yaml_invalid(self):
+        """A YAML syntax error is a 422 whose detail says "Invalid YAML"."""
         async with _make_client() as client:
             resp = await client.post(
-                "/api/configs/parse", json={"yaml": "{{not yaml}}"}
+                "/api/configs/parse", json={"yaml": "a: [1, 2\nb: 3"}
             )
             assert resp.status_code == 422
+            assert resp.json()["detail"].startswith("Invalid YAML: ")
+
+    @pytest.mark.asyncio
+    async def test_parse_yaml_valid_but_rejected_model(self):
+        """Valid YAML that the model rules reject is a 422 not called invalid YAML.
+
+        The editor words the two differently ("Invalid YAML" vs "Model
+        rejected"), so the detail must not carry the syntax-error prefix.
+        """
+        async with _make_client() as client:
+            resp = await client.post("/api/configs/parse", json={"yaml": "nodes: 5\n"})
+            assert resp.status_code == 422
+            assert not resp.json()["detail"].startswith("Invalid YAML")
 
     @pytest.mark.asyncio
     async def test_export_config(self):

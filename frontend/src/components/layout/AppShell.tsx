@@ -337,14 +337,17 @@ export function AppShell() {
         </div>
       </header>
 
-      {/* Main layout: collapsible + draggable left/right sidebars around a flex center. */}
+      {/* Main layout: collapsible + draggable left/right sidebars around a flex center.
+          The sidebars shrink below their set width (down to their min-w) when
+          the window is too narrow, so the graph keeps its own min width and the
+          page never scrolls sideways (all panes open still fit at 1024 px). */}
       <div className="flex w-full max-w-[1600px] mx-auto p-4 items-start">
         {/* Left sidebar (Network / Simulate / Properties) */}
         {!leftCollapsed && (
           <>
             <aside
               style={{ width: leftWidth }}
-              className="shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-5rem)] pr-1"
+              className="min-w-[200px] space-y-4 overflow-y-auto max-h-[calc(100vh-5rem)] pr-1"
             >
               <NetworkCard onEditYaml={openYamlPane} />
               <SimulateCard />
@@ -355,7 +358,7 @@ export function AppShell() {
         )}
 
         {/* Center panel (graph + results) */}
-        <main className="flex-1 min-w-0 space-y-4 px-1">
+        <main className="flex-1 min-w-[280px] space-y-4 px-1">
           <ReactorGraph />
           <ResultsTabs />
         </main>
@@ -366,7 +369,7 @@ export function AppShell() {
             <PaneResizer side="right" />
             <aside
               style={{ width: rightWidth }}
-              className="shrink-0 space-y-4 overflow-y-auto max-h-[calc(100vh-5rem)] pl-1"
+              className="min-w-[160px] space-y-4 overflow-y-auto max-h-[calc(100vh-5rem)] pl-1"
             >
               <ScenarioPane />
             </aside>
@@ -382,7 +385,7 @@ export function AppShell() {
         {(yamlPaneOpen || scenarioYamlEditorId) && (
           <>
             <PaneResizer side="yaml" />
-            <aside style={{ width: yamlWidth }} className="shrink-0 pl-1">
+            <aside style={{ width: yamlWidth }} className="min-w-[260px] pl-1">
               {scenarioYamlEditorId ? (
                 <ScenarioYamlPane
                   scenarioId={scenarioYamlEditorId}
