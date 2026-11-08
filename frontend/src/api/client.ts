@@ -30,7 +30,9 @@ export async function apiFetch<T>(
     const body = await res.text();
     let detail: string;
     try {
-      detail = JSON.parse(body).detail ?? body;
+      const parsed = JSON.parse(body).detail ?? body;
+      // FastAPI's own 422s carry a list of validation errors, not a string.
+      detail = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
     } catch {
       detail = body;
     }
