@@ -55,4 +55,28 @@ describe("hiddenCompositeNodeIds", () => {
     ];
     expect(hiddenCompositeNodeIds(nodes, conns).size).toBe(0);
   });
+
+  it("hides a composite parent whose connections were all moved to its children", () => {
+    // Port rewriting points every inbound/outbound connection at the
+    // children, so the parent keeps no edge of its own: drawn, it would be an
+    // orphan box stretching its stage.
+    const nodes = [
+      { id: "feed" },
+      { id: "tube", metadata: skip },
+      { id: "tube_seg1" },
+      { id: "tube_seg2" },
+      { id: "sink" },
+    ];
+    const conns = [
+      { source: "feed", target: "tube_seg1", type: "MassFlowController" },
+      { source: "tube_seg1", target: "tube_seg2", type: "MassFlowController" },
+      { source: "tube_seg2", target: "sink", type: "MassFlowController" },
+    ];
+    expect(hiddenCompositeNodeIds(nodes, conns)).toEqual(new Set(["tube"]));
+  });
+
+  it("keeps an unconnected skip_viz node that has no child node", () => {
+    const nodes = [{ id: "tube", metadata: skip }, { id: "other" }];
+    expect(hiddenCompositeNodeIds(nodes, []).size).toBe(0);
+  });
 });
