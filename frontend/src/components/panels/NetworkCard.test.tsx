@@ -92,6 +92,20 @@ describe("NetworkCard", () => {
     expect(onEditYaml).not.toHaveBeenCalled();
   });
 
+  it("ellipsizes a long scenario id inside the button and keeps it in the tooltip", () => {
+    // jsdom does not lay out, so this checks the CSS contract: the label is
+    // its own truncating element and the button may shrink below its content.
+    const longId = "a_very_long_scenario_identifier_that_does_not_fit_the_button";
+    mockActiveId = longId;
+    render(<NetworkCard onEditYaml={vi.fn()} />);
+    const btn = screen.getByRole("button", { name: `Edit YAML (${longId})` });
+    expect(btn).toHaveClass("min-w-0");
+    expect(btn.title).toContain(longId);
+    const label = btn.querySelector("span");
+    expect(label).toHaveTextContent(`Edit YAML (${longId})`);
+    expect(label).toHaveClass("truncate");
+  });
+
   it("resets the scenario store to the new config's own scenarios after an upload", async () => {
     mockUploadConfigFile.mockResolvedValue({
       config: { nodes: [], connections: [] },

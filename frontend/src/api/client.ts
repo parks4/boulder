@@ -1,6 +1,20 @@
 /** Base URL for the API – proxied in development via Vite. */
 const BASE_URL = "/api";
 
+/** A non-2xx API response: `message` is "API <status>: <detail>", and the
+ * parts are kept so the UI can word errors without the raw status prefix. */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly detail: string;
+
+  constructor(status: number, detail: string) {
+    super(`API ${status}: ${detail}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 /** Typed fetch wrapper with automatic JSON parsing and error handling. */
 export async function apiFetch<T>(
   endpoint: string,
@@ -20,7 +34,7 @@ export async function apiFetch<T>(
     } catch {
       detail = body;
     }
-    throw new Error(`API ${res.status}: ${detail}`);
+    throw new ApiError(res.status, detail);
   }
 
   return res.json() as Promise<T>;

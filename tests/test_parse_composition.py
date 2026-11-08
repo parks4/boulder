@@ -13,10 +13,20 @@ misparsed any composition string containing such a species and raised
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 
+from boulder import cantera_converter
 from boulder.cantera_converter import DualCanteraConverter
+
+CONFIGS = Path(__file__).resolve().parents[1] / "configs"
+
+
+@pytest.fixture(autouse=True)
+def _forget_warned_compositions() -> None:
+    # The sum warning is deduplicated per process; start each test clean.
+    cantera_converter._WARNED_COMPOSITIONS.clear()
 
 
 @pytest.fixture()
@@ -90,3 +100,28 @@ def test_parse_composition_non_normalized_warns(
     ]
     assert len(warnings) == 1
     assert "H2:0.5,O2:0.3" in warnings[0]
+
+
+def test_percent_composition_warns_once_across_solves(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A feed written in percent warns once, not on every node build of every solve.
+
+    Percent input is legitimate, and each solve builds a fresh converter that
+    parses the same strings again (once per node), so the warning is logged
+    once per distinct composition per process. Two solves here, five nodes
+    using two distinct strings: exactly one record per string.
+    """
+    from boulder.runner import BoulderRunner
+
+    text = (CONFIGS / "staged_psr_pfr.yaml").read_text()
+    cfg = tmp_path / "percent_feed.yaml"
+    cfg.write_text(text.replace('"CH4:1,O2:2,N2:7.52"', '"CH4:9.5,O2:19,N2:71.5"'))
+
+    with caplog.at_level(logging.WARNING, logger="boulder.cantera_converter"):
+        for _ in range(2):
+            BoulderRunner.from_yaml(str(cfg)).build()
+
+    warned = [r.message for r in caplog.records if "sums to" in r.message]
+    assert len(warned) == 2, warned
+    assert sum("CH4:9.5,O2:19,N2:71.5" in m for m in warned) == 1

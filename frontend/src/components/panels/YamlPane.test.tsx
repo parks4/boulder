@@ -11,6 +11,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { toast } from "sonner";
+import { ApiError } from "@/api/client";
 import { YamlPane } from "./YamlPane";
 
 vi.mock("@monaco-editor/react", () => ({
@@ -156,6 +158,23 @@ describe("YamlPane", () => {
     // The base config was just replaced -- drops stale scenario overlays and
     // re-seeds from the new config's own `scenarios:` block.
     expect(mockResetForNewConfig).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    // Valid YAML, rejected by the model rules: not a YAML problem.
+    ["Unknown node type 'Foo'", "Model rejected: Unknown node type 'Foo'"],
+    // A real syntax error: the backend already prefixes it.
+    ["Invalid YAML: mapping values are not allowed", "Invalid YAML: mapping values are not allowed"],
+  ])("words a 422 save error %j without the raw API prefix", async (detail, shown) => {
+    render(<YamlPane />);
+    const editor = await editorValue();
+    await waitFor(() => expect(editor).toHaveValue("merged: yaml\n"));
+    fireEvent.change(editor, { target: { value: "merged: yaml\nextra: 1\n" } });
+
+    mockParseYaml.mockRejectedValue(new ApiError(422, detail));
+    fireEvent.click(saveButton());
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(shown));
   });
 
   it("Cancel reverts unsaved edits back to the last synced value", async () => {

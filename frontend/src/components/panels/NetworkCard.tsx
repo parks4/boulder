@@ -81,14 +81,19 @@ export function NetworkCard({ onEditYaml }: Props) {
           id="edit-yaml-btn"
           onClick={handleEditYaml}
           variant="muted"
-          className="w-full truncate"
+          // min-w-0 + an inner truncating span: text-overflow does not apply
+          // to a flex container's bare text, which instead overflowed and was
+          // clipped on both sides by justify-center with a long scenario id.
+          className="w-full min-w-0"
           title={
             editingScenario
               ? `Edit this scenario's overlay only (${editingScenario})`
               : "Edit the full base config"
           }
         >
-          {editingScenario ? `Edit YAML (${editingScenario})` : "Edit YAML"}
+          <span className="truncate">
+            {editingScenario ? `Edit YAML (${editingScenario})` : "Edit YAML"}
+          </span>
         </Button>
         <Button
           id="config-upload-btn"

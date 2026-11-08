@@ -1499,7 +1499,31 @@ export function ReactorGraph() {
 
     cyRef.current = cy;
 
+    // Re-fit when the container changes size (window resize, a side pane
+    // opened/closed/dragged, graph height drag), debounced so a drag fits
+    // once at the end. Ignores the observer's initial callback (unchanged
+    // size): the first layout does its own fit. Nothing tracks a manual
+    // zoom/pan, so a resize always re-fits.
+    let refitTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastSize = `${container.clientWidth}x${container.clientHeight}`;
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            const size = `${container.clientWidth}x${container.clientHeight}`;
+            if (size === lastSize) return;
+            lastSize = size;
+            clearTimeout(refitTimer);
+            refitTimer = setTimeout(() => {
+              cy.resize();
+              if (cy.elements().length > 0) cy.fit(undefined, 30);
+            }, 150);
+          });
+    resizeObserver?.observe(container);
+
     return () => {
+      resizeObserver?.disconnect();
+      clearTimeout(refitTimer);
       if (tapTimeoutRef.current) {
         clearTimeout(tapTimeoutRef.current);
         tapTimeoutRef.current = null;
