@@ -230,7 +230,7 @@ class SimulationProgress:
     error_message: Optional[str] = None
     #: A stop has been requested (``stop_simulation()`` was called) but the
     #: worker thread hasn't exited yet -- cooperative, so it can lag behind
-    #: the request by up to one stage. "Stopped" (as opposed to "stopping")
+    #: the request by up to one blocking solver call (see SolveCancelled). "Stopped"
     #: is derived, not tracked separately: ``is_stopping and not is_running``.
     is_stopping: bool = False
 
@@ -298,6 +298,11 @@ class SimulationWorker:
             if self.progress.is_running:
                 self.progress.is_stopping = True
         logger.info("Simulation stop requested")
+
+    def join(self) -> None:
+        """Block until the worker thread has exited (for a caller off the event loop)."""
+        if self._worker_thread is not None:
+            self._worker_thread.join()
 
     def get_progress(self) -> SimulationProgress:
         """Get current simulation progress (thread-safe copy)."""

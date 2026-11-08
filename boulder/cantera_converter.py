@@ -2236,6 +2236,8 @@ class DualCanteraConverter:
                     network.reinitialize()
                 position = network.distance if axis == "distance" else network.time
                 while position < t_end:
+                    if cancel_token is not None and cancel_token.is_set():
+                        raise SolveCancelled(f"cancelled during stage '{stage_id}'")
                     network.advance(position + max_dt)
                     position = network.distance if axis == "distance" else network.time
                 if _scope_recorder is not None:

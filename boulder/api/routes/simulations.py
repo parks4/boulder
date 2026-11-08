@@ -249,8 +249,13 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
     Useful for late-joiners or page refreshes after the simulation
     has completed.
 
+    ``status`` is ``"running"``, ``"stopping"`` (a stop was requested and the
+    solve has not unwound yet), or a terminal ``"complete"``, ``"error"`` or
+    ``"stopped"`` (ended on request, nothing stored; same word as the SSE
+    stream's terminal ``stopped`` event).
+
     Query parameter ``cleanup=true`` will remove the simulation from
-    memory after retrieving results (only if complete or errored).
+    memory after retrieving results (only once it is terminal).
     """
     entry = _simulations.get(sim_id)
     if entry is None:
@@ -259,11 +264,25 @@ async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str
     worker, _ = entry
     progress = worker.get_progress()
 
-    if not progress.is_complete and not progress.error_message:
+    # Checked first, as in the SSE stream: a stopped run is terminal and is
+    # never reported as errored or complete.
+    stopped = progress.is_stopping and not progress.is_running
+    if stopped or (not progress.is_complete and not progress.error_message):
+        if stopped:
+            status = "stopped"
+            if cleanup:
+                del _simulations[sim_id]
+        elif progress.is_stopping:
+            status = "stopping"
+        else:
+            status = "running"
         return sanitize_for_json(
             {
-                "status": "running",
+                "status": status,
                 "is_complete": False,
+                "is_running": progress.is_running,
+                "is_stopping": progress.is_stopping,
+                "error_message": None,
                 "times": progress.times,
                 "reactors_series": progress.reactors_series,
                 "total_time": progress.total_time,
@@ -307,6 +326,13 @@ async def stop_simulation(sim_id: str) -> Dict[str, Any]:
     *not* removed here -- the open SSE stream (or a late ``/results`` poll)
     still needs to reach it to report the wind-down; it's reaped once the
     thread has actually exited, by :func:`cleanup_completed_simulations`.
+
+    ``/results`` reports ``"stopping"`` until the solve has unwound, then
+    ``"stopped"``. How soon that happens depends on the stage's solver kind:
+    ``advance_grid`` and ``micro_step`` check the stop between integrator
+    steps, while ``advance``, ``advance_to_steady_state`` and ``solve_steady``
+    are single blocking Cantera calls, so the stop lands when that call
+    returns (the run is still not completed nor stored).
     """
     entry = _simulations.get(sim_id)
     if entry is None:

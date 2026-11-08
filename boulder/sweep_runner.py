@@ -323,6 +323,8 @@ def solve_scenario(
     ``SimulationWorker.stop_simulation``), not a second cancellation design.
     Raises, same as a genuine solve failure: the caller (the GUI sweep route)
     distinguishes the two by checking whether it itself requested the stop.
+    It raises only once the worker thread has exited, so a caller that then
+    reports the run stopped never does so while the solve still runs.
     """
     from .simulation_worker import SimulationWorker  # noqa: PLC0415 — cycle
 
@@ -347,10 +349,16 @@ def solve_scenario(
             progress_cb(progress)
         if stop_event is not None and stop_event.is_set():
             worker.stop_simulation()
+            # Wait for the solve to unwind: the caller reports "stopped" once
+            # this raises, and nothing may still be integrating by then.
+            worker.join()
             break
         if progress.is_complete or progress.error_message:
             break
         time.sleep(poll_interval)
+    if stop_event is not None and stop_event.is_set():
+        # Even when the last snapshot was complete: a stopped run is not stored.
+        raise RuntimeError("scenario solve stopped on request")
     if not progress.is_complete:
         raise RuntimeError(progress.error_message or "scenario solve failed")
 
