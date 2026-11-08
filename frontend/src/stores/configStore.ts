@@ -11,6 +11,8 @@ interface ConfigState {
 
   // Actions
   setConfig: (config: NormalizedConfig, fileName?: string | null, yaml?: string) => void;
+  /** Like `setConfig` without a YAML, for a GUI edit of the whole config: marks it `dirty`. */
+  editConfig: (config: NormalizedConfig, fileName?: string | null) => void;
   /**
    * Replace only the on-disk YAML snapshot, leaving the live graph/dirty
    * state untouched — for edits made out-of-band (e.g. scenario authoring
@@ -57,6 +59,9 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
       originalYaml: yaml ?? get().originalYaml,
       dirty: false,
     }),
+
+  editConfig: (config, fileName) =>
+    set({ config, fileName: fileName ?? get().fileName, dirty: true }),
 
   setOriginalYaml: (yaml, fileName) =>
     set((s) => ({ originalYaml: yaml, fileName: fileName ?? s.fileName })),
