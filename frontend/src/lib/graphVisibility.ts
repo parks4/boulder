@@ -19,7 +19,11 @@
  *   drawn during the build and disappear the moment results land, with its
  *   edges rerouted through the outlet diamond.
  *
- * A `skip_viz` node with no such child edge is rendered normally.
+ * A `skip_viz` node with no edge at all but with a child node (`<id>_…`, not a
+ * stream point) is hidden too: port rewriting moved all its connections to
+ * the children, so drawn it would be an orphan stretching its stage box.
+ *
+ * Any other `skip_viz` node is rendered normally.
  */
 
 type GraphNode = { id: string; metadata?: Record<string, unknown> | null };
@@ -47,7 +51,12 @@ export function hiddenCompositeNodeIds(
     const hasChildConn = connections.some(
       (c) => c.source === node.id && c.target.startsWith(prefix) && isChildWiring(c),
     );
-    if (hasChildConn) hidden.add(node.id);
+    // Port rewriting can move every connection to the children, leaving the
+    // parent with no edge at all: it is then a placeholder, not a reactor.
+    const replaced =
+      !connections.some((c) => c.source === node.id || c.target === node.id) &&
+      nodes.some((n) => n.id.startsWith(prefix) && !n.metadata?.stream_point);
+    if (hasChildConn || replaced) hidden.add(node.id);
   }
   return hidden;
 }
