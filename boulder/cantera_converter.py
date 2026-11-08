@@ -1957,7 +1957,7 @@ class DualCanteraConverter:
                     if compo is not None:
                         gas_for_node.TPX = (t_use, p_use, self.parse_composition(compo))
                     elif mass_compo is not None:
-                        gas_for_node.TPX = (
+                        gas_for_node.TPY = (
                             t_use,
                             p_use,
                             self.parse_composition(mass_compo),

@@ -1291,3 +1291,24 @@ def test_runner_terminal_outlet_sink_reached_through_network(entry):
     assert reactor.T > 1000.0
     assert sink.T == pytest.approx(reactor.T, abs=1e-6)
     assert sink.Y == pytest.approx(reactor.Y, abs=1e-12)
+
+
+def test_staged_node_mass_composition_is_read_as_mass_fractions():
+    """A staged node's ``mass_composition`` sets mass fractions, not mole fractions.
+
+    N2 and AR, equal masses: mass fractions 0.5 / 0.5, mole fractions about
+    0.59 / 0.41. Both are inert, so the solved state keeps the initial one.
+    """
+    import copy
+
+    cfg = copy.deepcopy(_INERT_TWO_STAGE)
+    props = cfg["nodes"][0]["properties"]
+    del props["composition"]
+    props["mass_composition"] = "N2:1,AR:1"
+
+    conv = DualCanteraConverter(mechanism="gri30.yaml")
+    conv.build_network(cfg)
+
+    phase = conv.reactors["r_a"].phase
+    assert phase.Y[phase.species_index("N2")] == pytest.approx(0.5, rel=1e-6)
+    assert phase.Y[phase.species_index("AR")] == pytest.approx(0.5, rel=1e-6)
