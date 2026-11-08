@@ -28,7 +28,7 @@ let mockConfig: Record<string, unknown> = {
 
 vi.mock("@/stores/configStore", () => ({
   useConfigStore: (selector: (s: unknown) => unknown) =>
-    selector({ config: mockConfig, setConfig: mockSetConfig, fileName: "test.yaml" }),
+    selector({ config: mockConfig, editConfig: mockSetConfig, fileName: "test.yaml" }),
 }));
 
 const mockOpenAddReactor = vi.fn();

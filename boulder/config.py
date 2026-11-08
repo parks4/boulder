@@ -2614,7 +2614,11 @@ def merge_config_into_yaml(
     #    Keys like ``settings`` and ``output`` are injected by
     #    ``convert_to_stone_format`` from normalization artifacts; if the user
     #    didn't write them they must not appear in the merged output.
-    stone_for_merge = {k: v for k, v in stone.items() if k in original_data}
+    #    ``scenarios`` is authored text only: a config that still carries it
+    #    holds the overlays normalized to SI, which must not overwrite the file.
+    stone_for_merge = {
+        k: v for k, v in stone.items() if k in original_data and k != "scenarios"
+    }
 
     # 7b. Mirror original solver syntax.
     #     convert_to_stone_format emits either a compact solver: <kind> scalar

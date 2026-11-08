@@ -1,5 +1,7 @@
 /**
- * Asserts YamlPane: syncs the merged YAML on mount, gates Save on an actual
+ * Asserts YamlPane: syncs the merged YAML on mount when the canvas has
+ * unsynced edits (and shows the original YAML as is, with no sync, when it
+ * has none), gates Save on an actual
  * edit, applies Save via parseYaml -> setConfig, Cancel reverts unsaved
  * edits, Download triggers a client-side file download, Ctrl+S saves, and
  * closing confirms only when there's something to lose. Also covers the
@@ -35,6 +37,7 @@ let mockConfig: Record<string, unknown> = {
 };
 let mockOriginalYaml = "original: yaml\n";
 let mockFileName: string | null = "test.yaml";
+let mockDirty = true;
 const mockSetConfig = vi.fn();
 
 vi.mock("@/stores/configStore", () => ({
@@ -43,6 +46,7 @@ vi.mock("@/stores/configStore", () => ({
       config: mockConfig,
       originalYaml: mockOriginalYaml,
       fileName: mockFileName,
+      dirty: mockDirty,
       setConfig: mockSetConfig,
     }),
 }));
@@ -105,6 +109,7 @@ describe("YamlPane", () => {
     };
     mockOriginalYaml = "original: yaml\n";
     mockFileName = "test.yaml";
+    mockDirty = true;
     mockSyncConfig.mockResolvedValue({ yaml: "merged: yaml\n", warnings: [] });
     mockIsRunning = false;
     mockSweeping = false;
@@ -115,6 +120,16 @@ describe("YamlPane", () => {
     const editor = await editorValue();
     await waitFor(() => expect(editor).toHaveValue("merged: yaml\n"));
     expect(mockSyncConfig).toHaveBeenCalledWith(mockConfig, mockOriginalYaml);
+  });
+
+  it("shows the original YAML without syncing when the canvas has no unsynced edit", async () => {
+    mockDirty = false;
+    render(<YamlPane />);
+    const editor = await editorValue();
+    await waitFor(() => expect(editor).toHaveValue("original: yaml\n"));
+    // A sync would make the server adopt the merged text as its live config.
+    expect(mockSyncConfig).not.toHaveBeenCalled();
+    expect(saveButton()).toBeDisabled();
   });
 
   it("shows non-blocking sync warnings", async () => {
