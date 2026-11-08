@@ -52,7 +52,7 @@ function deriveLocalSolverState(solver: Record<string, unknown> | undefined) {
 export function StageCard({ stageId }: Props) {
   const nodes = useConfigStore((s) => s.config.nodes);
   const config = useConfigStore((s) => s.config);
-  const setConfig = useConfigStore((s) => s.setConfig);
+  const editConfig = useConfigStore((s) => s.editConfig);
   const fileName = useConfigStore((s) => s.fileName);
   const openAddReactor = useAddEntityModalStore((s) => s.openAddReactor);
   const openAddConnection = useAddEntityModalStore((s) => s.openAddConnection);
@@ -134,7 +134,7 @@ export function StageCard({ stageId }: Props) {
         const currentGroups = config.groups ?? {};
         const currentGroup = currentGroups[stageId] ?? {};
         const currentSolver = currentGroup.solver ?? {};
-        setConfig(
+        editConfig(
           {
             ...config,
             groups: {
@@ -153,7 +153,7 @@ export function StageCard({ stageId }: Props) {
       setGlobalKind(newKind);
       const currentSettings = (config.settings as Record<string, unknown>) ?? {};
       const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
-      setConfig(
+      editConfig(
         {
           ...config,
           settings: {
@@ -164,7 +164,7 @@ export function StageCard({ stageId }: Props) {
         fileName,
       );
     },
-    [config, fileName, isMultiStage, stageId, setConfig, setGlobalMode, setGlobalKind],
+    [config, fileName, isMultiStage, stageId, editConfig, setGlobalMode, setGlobalKind],
   );
 
   const handleKindChange = useCallback(
@@ -175,7 +175,7 @@ export function StageCard({ stageId }: Props) {
         const currentGroups = config.groups ?? {};
         const currentGroup = currentGroups[stageId] ?? {};
         const currentSolver = currentGroup.solver ?? {};
-        setConfig(
+        editConfig(
           {
             ...config,
             groups: {
@@ -193,7 +193,7 @@ export function StageCard({ stageId }: Props) {
       setGlobalKind(newKind);
       const currentSettings = (config.settings as Record<string, unknown>) ?? {};
       const currentSolver = (currentSettings.solver as Record<string, unknown>) ?? {};
-      setConfig(
+      editConfig(
         {
           ...config,
           settings: {
@@ -204,7 +204,7 @@ export function StageCard({ stageId }: Props) {
         fileName,
       );
     },
-    [config, fileName, isMultiStage, stageId, setConfig, setGlobalKind],
+    [config, fileName, isMultiStage, stageId, editConfig, setGlobalKind],
   );
 
   // Builds the transient-specific fields, merging into (not replacing) an
@@ -255,7 +255,7 @@ export function StageCard({ stageId }: Props) {
       ...buildTransientExtra(currentSolver),
     };
     if (isMultiStage) {
-      setConfig(
+      editConfig(
         {
           ...config,
           groups: {
@@ -266,7 +266,7 @@ export function StageCard({ stageId }: Props) {
         fileName,
       );
     } else {
-      setConfig(
+      editConfig(
         {
           ...config,
           settings: { ...currentSettings, solver: { ...currentSolver, ...extra } },
@@ -284,7 +284,7 @@ export function StageCard({ stageId }: Props) {
     buildTransientExtra,
     isMultiStage,
     stageId,
-    setConfig,
+    editConfig,
     setDetailsOpen,
   ]);
 

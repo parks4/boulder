@@ -46,6 +46,11 @@ UnitEntry = Tuple[str, str, float, type]
 # {(item_id_or_none, key_path_tuple) -> UnitEntry}
 UnitMap = Dict[Tuple[Optional[str], tuple], UnitEntry]
 
+# Scenario overlays are authored text, never values of the live config. Their
+# items reuse base ids (an overlay for node ``outlet`` has the same map key as
+# the base ``outlet``), so walking them would mix the two up.
+_SKIPPED_TOP_KEY = "scenarios"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -145,6 +150,8 @@ def build_unit_map(ruamel_tree: Any) -> UnitMap:
 
     # Walk top-level network or stages lists, plus top-level scalar keys.
     for top_key, top_val in ruamel_tree.items():
+        if top_key == _SKIPPED_TOP_KEY:
+            continue
         if isinstance(top_val, list):
             # Could be network: or a stage list.
             _walk_item(top_val, None, (top_key,))
@@ -280,6 +287,8 @@ def apply_unit_map_inplace(
         """Recursively walk *node* and replace unit scalars in place."""
         if isinstance(node, dict):
             for k in list(node.keys()):
+                if item_id is None and not path and k == _SKIPPED_TOP_KEY:
+                    continue
                 child_path = path + (k,)
                 map_key = (item_id, child_path)
                 if map_key in unit_map:

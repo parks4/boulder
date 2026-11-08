@@ -94,7 +94,7 @@ export function ReactorGraph() {
   const lastTappedRef = useRef<{ nodeId: string; time: number } | null>(null);
   const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const config = useConfigStore((s) => s.config);
-  const setConfig = useConfigStore((s) => s.setConfig);
+  const editConfig = useConfigStore((s) => s.editConfig);
 
   // Node ids that are truly hidden from the visualisation: composite parents
   // whose unfolder produced visible child nodes. The heuristic (and why Wall
@@ -1730,8 +1730,8 @@ export function ReactorGraph() {
       return n;
     });
     topoFingerprintRef.current = ""; // force full re-layout on next effect
-    setConfig({ ...currentConfig, nodes: clearedNodes });
-  }, [setConfig]);
+    editConfig({ ...currentConfig, nodes: clearedNodes });
+  }, [editConfig]);
 
   return (
     <div

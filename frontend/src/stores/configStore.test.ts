@@ -8,6 +8,9 @@
  * Also asserts `syncYaml` on a `from:` leaf with a canvas edit: the server's
  * merged YAML is adopted and the session is clean; a sync the server rejects
  * rejects (so Run/Sweep stop) and leaves the session dirty.
+ *
+ * Also asserts `editConfig`: a GUI edit of the whole config replaces it and
+ * marks the session dirty, so the YAML pane and `syncYaml` pick it up.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -51,6 +54,17 @@ describe("configStore", () => {
     const state = useConfigStore.getState();
     expect(state.dirty).toBe(false);
     expect(state.config.nodes).toHaveLength(0);
+  });
+
+  it("editConfig replaces config and marks it dirty, keeping the YAML snapshot", () => {
+    useConfigStore.setState({ dirty: false });
+    useConfigStore.getState().editConfig({ nodes: [], connections: [] });
+
+    const state = useConfigStore.getState();
+    expect(state.dirty).toBe(true);
+    expect(state.config.nodes).toHaveLength(0);
+    expect(state.originalYaml).toBe("old: yaml");
+    expect(state.fileName).toBe("original.yaml");
   });
 
   it("syncYaml on a from: leaf adopts the server's merged YAML and clears dirty", async () => {

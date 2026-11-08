@@ -7,6 +7,8 @@ when values differ, and correct handling of offset units (degC/degF).
 
 import math
 
+import pytest
+
 from boulder.config import load_yaml_string_with_comments
 from boulder.yaml_unit_map import apply_unit_map_inplace, build_unit_map
 
@@ -235,3 +237,94 @@ class TestApplyUnitMapInplace:
         warnings = apply_unit_map_inplace(tree, umap, config)
         assert len(warnings) == 1
         assert "xyzzy" in warnings[0] or "back-conversion" in warnings[0].lower()
+
+
+_SCENARIO_OVERLAY_YAML = """\
+metadata:
+  stone_version: "2.2"
+phases:
+  gas:
+    mechanism: gri30.yaml
+stages:
+  first:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1.0e-3
+  second:
+    mechanism: gri30.yaml
+    solve: advance
+    advance_time: 1.0e-3
+first:
+- id: feed
+  Reservoir:
+    temperature: 300 K
+    pressure: 101325 Pa
+    composition: "CH4:1,O2:2,N2:7.52"
+- id: reactor
+  IdealGasConstPressureMoleReactor:
+    volume: 1.0e-5 m**3
+- id: feed_to_reactor
+  MassFlowController:
+    mass_flow_rate: 1.0e-4 kg/s
+  source: feed
+  target: reactor
+second:
+- id: cell
+  IdealGasConstPressureMoleReactor:
+    volume: 2.5e-6 m**3
+- id: reactor_to_cell
+  source: reactor
+  target: cell
+  mass_flow_rate: 1.0e-4 kg/s
+- id: outlet
+  OutletSink:
+    pressure: 101325 Pa
+- id: cell_to_outlet
+  MassFlowController:
+    mass_flow_rate: 1.0e-4 kg/s
+  source: cell
+  target: outlet
+scenarios:
+  low_p:
+    second:
+    - id: outlet
+      OutletSink:
+        pressure: 0.3 bar
+"""
+
+
+class TestScenarioOverlaysSurviveSync:
+    @pytest.mark.parametrize(
+        "validated", [True, False], ids=["validated", "normalized"]
+    )
+    def test_unchanged_round_trip_keeps_scenario_and_base_values(self, validated):
+        """Asserts a sync of the unchanged config leaves ``scenarios:`` untouched.
+
+        A scenario overlay sets ``pressure`` on node ``outlet``, which also
+        exists in the base network. After ``merge_config_into_yaml`` on the
+        unchanged config:
+
+        * the scenario keeps ``0.3 bar`` (it must not take the base value);
+        * the base node keeps ``101325 Pa`` (it must not take the scenario unit).
+
+        Checked for a validated config (no ``scenarios`` key) and for a merely
+        normalized one, which still carries the overlays in SI.
+        """
+        import yaml
+
+        from boulder.config import (
+            merge_config_into_yaml,
+            normalize_config,
+            validate_config,
+        )
+
+        config = normalize_config(yaml.safe_load(_SCENARIO_OVERLAY_YAML))
+        if validated:
+            config = validate_config(config)
+        merged_yaml, _ = merge_config_into_yaml(config, _SCENARIO_OVERLAY_YAML)
+        merged = load_yaml_string_with_comments(merged_yaml)
+
+        overlay = merged["scenarios"]["low_p"]["second"][0]
+        assert overlay["OutletSink"]["pressure"] == "0.3 bar"
+        base = next(item for item in merged["second"] if item["id"] == "outlet")
+        assert base["OutletSink"]["pressure"] == "101325 Pa"

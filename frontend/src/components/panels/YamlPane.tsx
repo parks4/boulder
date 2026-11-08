@@ -37,6 +37,7 @@ function saveErrorMessage(err: unknown): string {
 export function YamlPane() {
   const config = useConfigStore((s) => s.config);
   const originalYaml = useConfigStore((s) => s.originalYaml);
+  const configDirty = useConfigStore((s) => s.dirty);
   const fileName = useConfigStore((s) => s.fileName);
   const setConfig = useConfigStore((s) => s.setConfig);
   const closeYamlPane = useLayoutStore((s) => s.closeYamlPane);
@@ -61,10 +62,12 @@ export function YamlPane() {
 
   const refresh = useCallback(() => {
     setSyncError(null);
-    // No graph to sync (e.g. Boulder started with no preloaded config): show
-    // whatever original YAML there is — possibly "", which mounts an empty
-    // but editable pane rather than blocking on a "nothing to edit" error.
-    if (config.nodes.length === 0) {
+    // Nothing to sync: either no graph (e.g. Boulder started with no
+    // preloaded config) or no canvas edit since the YAML was loaded. Show the
+    // original YAML as is — possibly "", which mounts an empty but editable
+    // pane. Posting /configs/sync here would make the server adopt a merged
+    // text as its live config although nothing changed.
+    if (config.nodes.length === 0 || !configDirty) {
       setValue(originalYaml);
       setBaseline(originalYaml);
       setSyncWarnings([]);
@@ -93,7 +96,7 @@ export function YamlPane() {
         // Do NOT fall back to stale originalYaml — saving it would overwrite GUI edits.
       })
       .finally(() => setSyncing(false));
-  }, [config, originalYaml]);
+  }, [config, originalYaml, configDirty]);
 
   // Refresh on open, and whenever the config changes elsewhere (add/edit a
   // node, etc.) — but never while there's an unsaved edit sitting in the
