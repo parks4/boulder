@@ -64,7 +64,8 @@ export const useSolverStore = create<SolverState>((set, get) => ({
   setTimeStep: (timeStep) => set({ timeStep }),
 
   syncFromConfig: (settings) => {
-    const solver = (settings as Record<string, unknown> | null | undefined)?.solver as
+    const s = settings as Record<string, unknown> | null | undefined;
+    const solver = s?.solver as
       | Record<string, unknown>
       | undefined;
     const grid = solver?.grid as Record<string, unknown> | undefined;
@@ -78,8 +79,12 @@ export const useSolverStore = create<SolverState>((set, get) => ({
       atol: solver?.atol != null ? String(solver.atol) : state.atol,
       maxSteps: solver?.max_steps != null ? String(solver.max_steps) : state.maxSteps,
       startTime: grid?.start != null ? String(grid.start) : state.startTime,
-      simTime: String(grid?.stop ?? solver?.advance_time ?? state.simTime),
-      timeStep: grid?.dt != null ? String(grid.dt) : state.timeStep,
+      // Same precedence as the backend's solver_window: the solver's own end
+      // and step, then the nominal settings.end_time / settings.dt.
+      simTime: String(
+        grid?.stop ?? solver?.advance_time ?? s?.end_time ?? state.simTime,
+      ),
+      timeStep: String(grid?.dt ?? s?.dt ?? state.timeStep),
     });
   },
 }));
