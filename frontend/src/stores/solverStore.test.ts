@@ -21,4 +21,12 @@ describe("solverStore.syncFromConfig time fields", () => {
     const s = useSolverStore.getState();
     expect([s.simTime, s.timeStep]).toEqual(["2", "0.5"]);
   });
+
+  it("falls back to a tenth of the window when no step is declared", () => {
+    useSolverStore.getState().syncFromConfig({
+      solver: { kind: "advance", advance_time: 2 },
+    });
+    const s = useSolverStore.getState();
+    expect([s.simTime, s.timeStep]).toEqual(["2", "0.2"]);
+  });
 });

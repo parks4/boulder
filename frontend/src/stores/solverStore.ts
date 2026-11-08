@@ -65,13 +65,12 @@ export const useSolverStore = create<SolverState>((set, get) => ({
 
   syncFromConfig: (settings) => {
     const s = settings as Record<string, unknown> | null | undefined;
-    const solver = s?.solver as
-      | Record<string, unknown>
-      | undefined;
+    const solver = s?.solver as Record<string, unknown> | undefined;
     const grid = solver?.grid as Record<string, unknown> | undefined;
     const k = solver?.kind as string | undefined;
     const m = solver?.mode as SolverMode | undefined;
     const state = get();
+    const simTime = grid?.stop ?? solver?.advance_time ?? s?.end_time ?? state.simTime;
     set({
       mode: m ?? deriveMode(k),
       kind: k && k in KIND_TO_MODE ? (k as SolverKind) : state.kind,
@@ -80,11 +79,9 @@ export const useSolverStore = create<SolverState>((set, get) => ({
       maxSteps: solver?.max_steps != null ? String(solver.max_steps) : state.maxSteps,
       startTime: grid?.start != null ? String(grid.start) : state.startTime,
       // Same precedence as the backend's solver_window: the solver's own end
-      // and step, then the nominal settings.end_time / settings.dt.
-      simTime: String(
-        grid?.stop ?? solver?.advance_time ?? s?.end_time ?? state.simTime,
-      ),
-      timeStep: String(grid?.dt ?? s?.dt ?? state.timeStep),
+      // and step, then settings.end_time / settings.dt, then a tenth of the window.
+      simTime: String(simTime),
+      timeStep: String(grid?.dt ?? s?.dt ?? Number(simTime) / 10),
     });
   },
 }));

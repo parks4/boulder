@@ -11,6 +11,8 @@ import pytest
 pytest.importorskip("httpx")
 pytest.importorskip("fastapi")
 
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+
 from boulder.api.main import create_app  # noqa: E402
 from boulder.api.routes import simulations as simulation_routes  # noqa: E402
 from boulder.sweep_runner import (  # noqa: E402
@@ -18,7 +20,6 @@ from boulder.sweep_runner import (  # noqa: E402
     prepare_entry,
     with_time_overrides,
 )
-from httpx import ASGITransport, AsyncClient  # noqa: E402
 
 
 def _config(solver: Dict[str, Any], **settings: Any) -> Dict[str, Any]:
@@ -88,10 +89,11 @@ async def _post(
 async def test_untouched_card_fields_solve_the_headless_config(
     name, monkeypatch
 ) -> None:
-    """Card fields equal to what the config resolves to leave the fingerprint unchanged.
+    """Card values equal to the config's own leave the run definition unchanged.
 
-    The card sends its simulation time and step with every flat ``advance`` run;
-    sent as the config's own values (a, b, c) the run is the headless one.
+    Cases (a) ``advance_time`` and (b) ``settings.dt`` are regression guards on
+    the route; (b) was a frontend bug, proven by ``solverStore.test.ts``. The
+    backend guard is needed for (c), ``settings.end_time`` only.
     """
     raw, sim_time, step = _CASES[name]
     headless = prepare_entry(copy.deepcopy(raw), "BASELINE")[2]
