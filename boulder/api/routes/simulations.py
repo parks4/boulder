@@ -11,6 +11,7 @@ sweep route, the CLI and the Python API share.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import threading
 import time
@@ -212,7 +213,10 @@ async def start_simulation(
                 handle.fail(str(exc))
 
     _simulations[sim_id] = (handle, time.time())
-    threading.Thread(target=_run, daemon=True).start()
+    # In the request's context: host middleware can pass request-scoped values
+    # (contextvars) to the plugins and cache contributors this solve runs.
+    ctx = contextvars.copy_context()
+    threading.Thread(target=ctx.run, args=(_run,), daemon=True).start()
     return {"simulation_id": sim_id}
 
 

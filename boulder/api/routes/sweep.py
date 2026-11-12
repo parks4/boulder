@@ -25,6 +25,7 @@ Endpoints (prefix ``/api/sweep``):
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import threading
 from pathlib import Path
@@ -431,7 +432,11 @@ async def sweep_run(
         finally:
             pkg_logger.removeHandler(handler)
 
-    threading.Thread(target=_worker_logging_to_status, daemon=True).start()
+    # In the request's context, as a single run (see simulations.py).
+    ctx = contextvars.copy_context()
+    threading.Thread(
+        target=ctx.run, args=(_worker_logging_to_status,), daemon=True
+    ).start()
     return {"status": "running", "total": total}
 
 
