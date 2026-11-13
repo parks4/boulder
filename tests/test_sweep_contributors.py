@@ -191,3 +191,67 @@ def test_gui_sweep_runs_contributors_once_per_entry(tmp_path, recorder) -> None:
         rec.calls.clear()
         _run()
         assert rec.calls == [], "a cache hit must not run contributors"
+
+
+def test_contributors_see_the_request_context_on_gui_runs_and_sweeps(
+    tmp_path, recorder
+) -> None:
+    """A contextvar set by request middleware reaches the contributors.
+
+    Both GUI routes start their solve thread in a copy of the request's
+    context, so a host can pass request-scoped data (e.g. who asked for the
+    run) to its plugins without touching the config.
+    """
+    import contextvars
+
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from boulder.api.main import create_app
+    from boulder.runner import BoulderRunner
+
+    requester: contextvars.ContextVar[str] = contextvars.ContextVar("requester")
+    seen: List[str] = []
+    rec = recorder()
+    record = rec.contribute
+
+    def contribute(*args, **kwargs):
+        seen.append(requester.get("unset"))
+        return record(*args, **kwargs)
+
+    rec.contribute = contribute  # type: ignore[method-assign]
+
+    async def set_requester(request, call_next):
+        requester.set(request.headers.get("x-requester", "anonymous"))
+        return await call_next(request)
+
+    cfg = _config(tmp_path)
+    app = create_app()
+    app.add_middleware(BaseHTTPMiddleware, dispatch=set_requester)
+    with TestClient(app) as client:
+        app.state.preloaded_config_path = str(cfg)
+        app.state.preloaded_raw = BoulderRunner.load(str(cfg))
+        headers = {"x-requester": "alice"}
+
+        resp = client.post("/api/simulations", json={}, headers=headers)
+        assert resp.status_code == 200, resp.text
+        sim_id = resp.json()["simulation_id"]
+        deadline = time.time() + 120
+        while (
+            client.get(f"/api/simulations/{sim_id}/results").json()["status"]
+            == "running"
+        ):
+            assert time.time() < deadline, "run did not finish"
+            time.sleep(0.05)
+        assert seen == ["alice"]
+
+        headers = {"x-requester": "bob"}
+        resp = client.post(
+            "/api/sweep/run", json={"scenarios": {"hot": _HOT}}, headers=headers
+        )
+        assert resp.status_code == 200, resp.text
+        deadline = time.time() + 120
+        while app.state.sweep_job.get("status") not in ("done", "error"):
+            assert time.time() < deadline, "sweep did not finish"
+            time.sleep(0.05)
+        assert app.state.sweep_job.get("status") == "done", app.state.sweep_job
+        assert seen == ["alice", "bob"]  # BASELINE is a cache hit; hot is new
