@@ -237,6 +237,18 @@ def with_time_overrides(
             "set advance_time per stage in the YAML."
         )
 
+    # A value the config already resolves to is no override: writing it back
+    # would change the stored definition and fingerprint (a key the file never
+    # declared, a `grid` where it had none) for a run that is otherwise the
+    # headless one.
+    current_time, current_step = solver_window(raw)
+    if simulation_time == current_time:
+        simulation_time = None
+    if time_step == current_step:
+        time_step = None
+    if simulation_time is None and time_step is None:
+        return raw
+
     from .config import TRANSIENT_SOLVER_KINDS  # noqa: PLC0415
 
     raw = copy.deepcopy(raw)
