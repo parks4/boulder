@@ -3,6 +3,7 @@ import Plot from "react-plotly.js";
 import { coerceNumericSeries, pressureYAxis } from "@/lib/plotAxis";
 import { useSelectionStore } from "@/stores/selectionStore";
 import { useThemeStore } from "@/stores/themeStore";
+import { conservationFails, energyChecked } from "@/lib/conservation";
 import type { NodeConservation, SimulationProgress } from "@/types/simulation";
 
 interface Props {
@@ -12,8 +13,10 @@ interface Props {
 /** Compact mass/energy conservation summary, shown above the per-kind convergence view. */
 function ConservationSummary({ conservation }: { conservation: NodeConservation }) {
   const massOk = conservation.mass_closes;
+  const checked = energyChecked(conservation);
   const energyOk = conservation.energy_closes;
-  const allOk = massOk && energyOk;
+  const allOk = !conservationFails(conservation);
+  const impliedKw = conservation.implied_heat_kw;
   return (
     <div
       className={`rounded border p-3 text-sm ${
@@ -23,7 +26,11 @@ function ConservationSummary({ conservation }: { conservation: NodeConservation 
       }`}
     >
       <p className="font-medium mb-1">
-        {allOk ? "✓ Mass & energy conservation OK" : "⚠ Conservation check failed"}
+        {!allOk
+          ? "⚠ Conservation check failed"
+          : checked
+            ? "✓ Mass & energy conservation OK"
+            : "✓ Mass conservation OK"}
       </p>
       <table className="w-full max-w-sm text-sm">
         <tbody>
@@ -39,9 +46,16 @@ function ConservationSummary({ conservation }: { conservation: NodeConservation 
             <td className="pr-4 text-muted-foreground">Energy</td>
             <td className="pr-2">{conservation.energy_in_kw.toFixed(2)} kW in</td>
             <td className="pr-2">{conservation.energy_out_kw.toFixed(2)} kW out</td>
-            <td className={energyOk ? "text-emerald-600" : "text-amber-600 font-medium"}>
-              {energyOk ? "OK" : "FAILED"}
-            </td>
+            {checked ? (
+              <td className={energyOk ? "text-emerald-600" : "text-amber-600 font-medium"}>
+                {energyOk ? "OK" : "FAILED"}
+              </td>
+            ) : (
+              <td className="text-muted-foreground">
+                not checked (imposed temperature)
+                {typeof impliedKw === "number" && `, implied heat ${impliedKw.toFixed(2)} kW`}
+              </td>
+            )}
           </tr>
         </tbody>
       </table>

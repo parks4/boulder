@@ -370,6 +370,10 @@ def generate_sankey_input_from_sim(
         assert set(node_order) == set([reactor.name for reactor in all_reactors])
 
     links = {"source": [], "target": [], "value": [], "color": [], "label": []}
+    # One scratch Solution for every heating value of this call: building it
+    # per outlet made the Sankey cost minutes on networks with thousands of
+    # flow devices.
+    hv_gas = None
 
     # Create nodes for each reactor
     # ... sort all_reactors list using the reactor.name key, and the order defined in node_order
@@ -403,10 +407,14 @@ def generate_sankey_input_from_sim(
                 elif flow_type == "hhv":
                     # Add a first link with HHV
                     # -------------------------
-                    from .ctutils import heating_values
+                    from cantera import Solution
 
+                    from .ctutils import get_mechanism_path, heating_values
+
+                    if hv_gas is None:
+                        hv_gas = Solution(get_mechanism_path(mechanism))
                     lhv, hhv = heating_values(
-                        outlet.upstream.phase, mechanism=mechanism
+                        outlet.upstream.phase, mechanism=mechanism, gas=hv_gas
                     )  # J/kg
                     # TODO define temperature reference when computing HHV
                     # (and make it consistent with the one used in sensible enthalpy)
@@ -420,12 +428,12 @@ def generate_sankey_input_from_sim(
 
                         if s == "H2":
                             lhv_s, hhv_s = heating_values(
-                                ct.Hydrogen(), mechanism=mechanism
+                                ct.Hydrogen(), mechanism=mechanism, gas=hv_gas
                             )  # J/kg
                             links["color"] += ["H2"]
                         elif s == "CH4":
                             lhv_s, hhv_s = heating_values(
-                                ct.Methane(), mechanism=mechanism
+                                ct.Methane(), mechanism=mechanism, gas=hv_gas
                             )  # J/kg
                             links["color"] += ["CH4"]
                         elif s == "C(s)":  # Carbon

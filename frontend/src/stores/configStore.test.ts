@@ -7,7 +7,8 @@
  *
  * Also asserts `syncYaml` on a `from:` leaf with a canvas edit: the server's
  * merged YAML is adopted and the session is clean; a sync the server rejects
- * rejects (so Run/Sweep stop) and leaves the session dirty.
+ * rejects (so Run/Sweep stop) and leaves the session dirty; a burst of
+ * syncYaml calls on an unchanged config posts once.
  *
  * Also asserts `editConfig`: a GUI edit of the whole config replaces it and
  * marks the session dirty, so the YAML pane and `syncYaml` pick it up.
@@ -80,6 +81,17 @@ describe("configStore", () => {
     const state = useConfigStore.getState();
     expect(state.originalYaml).toBe("merged: yaml");
     expect(state.dirty).toBe(false);
+  });
+
+  it("syncYaml called in a burst posts once while the config stays unchanged", async () => {
+    mockSyncConfig.mockClear();
+    mockSyncConfig.mockResolvedValue({ yaml: "merged: yaml" });
+
+    const { syncYaml } = useConfigStore.getState();
+    await Promise.all([syncYaml(), syncYaml(), syncYaml()]);
+
+    expect(mockSyncConfig).toHaveBeenCalledTimes(1);
+    expect(useConfigStore.getState().dirty).toBe(false);
   });
 
   it("syncYaml rejects when the edit cannot be merged back, and stays dirty", async () => {

@@ -51,7 +51,7 @@ async def list_plugins() -> List[Dict[str, Any]]:
 
 
 @router.post("/{plugin_id}/render")
-async def render_plugin(
+def render_plugin(
     plugin_id: str,
     body: PluginRenderRequest,
 ) -> Dict[str, Any]:
@@ -59,6 +59,9 @@ async def render_plugin(
 
     The frontend receives structured data (images, tables, HTML snippets)
     and renders it in a generic ``PluginTab`` component.
+
+    A plain ``def``: FastAPI runs it in a worker thread, so a slow plugin (a
+    Graphviz layout of a large network) does not block every other request.
     """
     try:
         from ...output_pane_plugins import (

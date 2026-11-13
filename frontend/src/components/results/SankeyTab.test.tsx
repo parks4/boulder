@@ -3,12 +3,14 @@
  *
  * Asserts:
  * - Sankey node bars use Cytoscape temperature colors, not Plotly defaults.
+ * - Above SANKEY_MAX_LINKS links, no plot is drawn and the reason is shown.
  */
 
-import { render } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { temperatureToNodeColor } from "@/lib/cytoscapeNodeColor";
+import { SANKEY_MAX_LINKS } from "@/lib/sankeyData";
 import type { SimulationResults } from "@/types/simulation";
 import { SankeyTab } from "./SankeyTab";
 
@@ -74,5 +76,18 @@ describe("SankeyTab", () => {
       temperatureToNodeColor(1500, "light"),
       temperatureToNodeColor(1200, "light"),
     ]);
+  });
+
+  it("draws no plot above the link limit and says why", () => {
+    const n = SANKEY_MAX_LINKS + 1;
+    const zeros = Array<number>(n).fill(0);
+    render(
+      <SankeyTab
+        results={{ ...baseResults, sankey_links: { source: zeros, target: zeros, value: zeros } }}
+      />,
+    );
+
+    expect(plotCalls).toHaveLength(0);
+    expect(screen.getByText(/Sankey not drawn/)).toHaveTextContent(String(n));
   });
 });

@@ -199,15 +199,18 @@ def inheritance_chain(
     """
     from ruamel.yaml import YAML  # noqa: PLC0415 — heavy import kept lazy
 
+    # Safe loader: only `from:` is read, and the round-trip loader (comments,
+    # marks) is ~7x slower, 10 s on a 1 MB generated network.
+    yaml = YAML(typ="safe")
     chain: List[Path] = []
     current = Path(path).resolve()
     seen = {current}
     while True:
         if leaf_text is not None and not chain:
-            data = YAML().load(leaf_text)
+            data = yaml.load(leaf_text)
         else:
             with open(current, "r", encoding="utf-8", errors="replace") as f:
-                data = YAML().load(f)
+                data = yaml.load(f)
         from_path = data.get("from") if isinstance(data, dict) else None
         if not from_path:
             return chain

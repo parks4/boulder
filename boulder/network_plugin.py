@@ -5,11 +5,16 @@ structure using the network.draw() method.
 """
 
 import base64
+import subprocess
 from typing import Any, Dict, List, Optional
 
 from .graphviz_utils import ensure_graphviz_on_path
 from .live_simulation import get_live_simulation
 from .output_pane_plugins import OutputPaneContext, OutputPanePlugin
+
+#: Graphviz gets this long to lay out the diagram: ``dot`` did not finish in
+#: 20 min on a 1200-reactor network with recirculation and exchange pairs.
+DOT_TIMEOUT_S = 20.0
 
 
 class NetworkPlugin(OutputPanePlugin):
@@ -145,7 +150,21 @@ class NetworkPlugin(OutputPanePlugin):
                 edge_attr=edge_attr,
             )
 
-            png_data = diagram.pipe(format="png")
+            try:
+                png_data = subprocess.run(
+                    [str(dot_path), "-Tpng"],
+                    input=diagram.source.encode("utf-8"),
+                    capture_output=True,
+                    timeout=DOT_TIMEOUT_S,
+                    check=True,
+                ).stdout
+            except subprocess.TimeoutExpired:
+                return (
+                    None,
+                    f"Graphviz could not lay out this network within {DOT_TIMEOUT_S:.0f} s "
+                    "(too many reactors or connections for a diagram); the network graph "
+                    "shows its structure.",
+                )
             encoded_image = base64.b64encode(png_data).decode("utf-8")
             return encoded_image, None
 

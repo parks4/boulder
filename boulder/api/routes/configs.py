@@ -204,7 +204,7 @@ async def resolved_yaml(body: ResolvedYamlRequest, request: Request) -> Dict[str
 
 
 @router.post("/sync")
-async def sync_config(body: ConfigSyncRequest, request: Request) -> Dict[str, Any]:
+def sync_config(body: ConfigSyncRequest, request: Request) -> Dict[str, Any]:
     """Merge an updated config back into the original YAML, preserving comments and units.
 
     Accepts the live (normalized, SI) config from the frontend together with
@@ -215,7 +215,16 @@ async def sync_config(body: ConfigSyncRequest, request: Request) -> Dict[str, An
 
     * The original YAML used inline port shortcuts (``inlet:`` / ``outlet:``).
     * Top-level shape mismatch between original YAML and current config.
+
+    A plain ``def`` (worker thread): the comment-preserving merge parses the
+    whole YAML, ~25 s for a 1 MB generated network. Nothing to merge when the
+    config and YAML are the session's live ones: the YAML is returned as is.
     """
+    state = request.app.state
+    if body.original_yaml == getattr(
+        state, "preloaded_yaml", None
+    ) and body.config == getattr(state, "preloaded_config", None):
+        return {"yaml": body.original_yaml, "warnings": []}
     try:
         yaml_str, warnings = merge_config_into_yaml(body.config, body.original_yaml)
         # The merged text is the session's new live config: runs, sweeps and the

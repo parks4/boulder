@@ -70,6 +70,14 @@ export interface NodeConservation {
   energy_out_kw: number;
   mass_closes: boolean;
   energy_closes: boolean;
+  /**
+   * `false` for a node whose temperature is imposed (energy equation off):
+   * its energy balance is not a check, `energy_closes` is ignored and the
+   * imbalance is reported as `implied_heat_kw`. Absent means checked.
+   */
+  energy_checked?: boolean;
+  /** Heat [kW] the imposed temperature implies (out − in), with `energy_checked: false`. */
+  implied_heat_kw?: number;
 }
 
 /** Connection (e.g. MFC) report from backend: mass and volumetric flow rates. */

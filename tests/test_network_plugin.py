@@ -1,5 +1,7 @@
 """Tests for the Network plugin functionality."""
 
+import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -136,13 +138,23 @@ class TestNetworkPlugin:
         """Test successful network diagram generation."""
         mock_network = MagicMock()
 
-        # Mock the draw method to return a mock diagram
+        # Mock the draw method to return a mock diagram, and dot's output
         mock_diagram = MagicMock()
-        mock_diagram.pipe.return_value = b"fake_png_data"
+        mock_diagram.source = "digraph {}"
         mock_network.draw.return_value = mock_diagram
 
         # Mock the graphviz import inside the method
-        with patch("builtins.__import__") as mock_import:
+        with (
+            patch(
+                "boulder.network_plugin.ensure_graphviz_on_path",
+                return_value=Path("dot"),
+            ),
+            patch(
+                "boulder.network_plugin.subprocess.run",
+                return_value=MagicMock(stdout=b"fake_png_data"),
+            ),
+            patch("builtins.__import__") as mock_import,
+        ):
             # Make import succeed
             mock_import.return_value = MagicMock()
 
@@ -177,3 +189,25 @@ class TestNetworkPlugin:
             assert encoded_image is None
             assert "Network diagram generation failed" in error_message
             assert "Network drawing failed" in error_message
+
+    def test_generate_network_diagram_dot_timeout(self):
+        """A dot run over DOT_TIMEOUT_S returns an error message, not a hang."""
+        mock_network = MagicMock()
+        mock_network.draw.return_value = MagicMock(source="digraph {}")
+
+        with (
+            patch(
+                "boulder.network_plugin.ensure_graphviz_on_path",
+                return_value=Path("dot"),
+            ),
+            patch(
+                "boulder.network_plugin.subprocess.run",
+                side_effect=subprocess.TimeoutExpired("dot", 20.0),
+            ),
+        ):
+            encoded_image, error_message = self.plugin._generate_network_diagram(
+                mock_network
+            )
+
+        assert encoded_image is None
+        assert "could not lay out this network within 20 s" in error_message

@@ -28,7 +28,7 @@ Files that mix `stages:` and `network:` at the same level are rejected.
 
 ```yaml
 metadata:
-  stone_version: "2.2"   # quoted string, MAJOR.MINOR
+  stone_version: "2.3"   # quoted string, MAJOR.MINOR
 ```
 
 - Versioned independently of the Boulder package version. **MAJOR** bumps when old files stop
@@ -53,6 +53,7 @@ Reader rules (Boulder at `STONE_FORMAT_VERSION = M.m`, file at `stone_version = 
 
 Version history:
 
+- **2.3**: node `metadata.layout_position` (absolute diagram position, Section 6).
 - **2.2**: optional top-level `references:` mapping (Section 3).
 - **2.1**: sequential `for:`/`while:` chains in `scenarios_sweep`.
 - **2.0**: first versioned format (`metadata.stone_version`), never released.
@@ -395,6 +396,19 @@ A node item has exactly one **node kind key** (`Reservoir`, `IdealGasReactor`,
 - id: my_reactor
   IdealGasReactor:
     volume: 1 L
+```
+
+A node may carry a free-form `metadata:` mapping. It has no effect on the solve; the GUI reads
+display keys from it. `layout_position: {x: <number>, y: <number>}` is the node's absolute position
+on the network diagram, in canvas units with `y` pointing down; a network whose nodes all carry it
+is drawn at those positions (no automatic layout). See `frontend/SPECIFICATIONS.md` GRAPH-07.
+
+```yaml
+- id: cell_12
+  IdealGasReactor:
+    volume: 1 L
+  metadata:
+    layout_position: {x: 480, y: 160}
 ```
 
 ### Connection

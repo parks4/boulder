@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import time
 from typing import Any, AsyncGenerator, Dict
 
 from ..simulation_worker import RunHandle
@@ -32,57 +33,67 @@ async def simulation_event_stream(
         SSE-formatted ``event: …\\ndata: …\\n\\n`` strings.
     """
     while True:
-        progress = worker.get_progress()
+        # Snapshot + JSON in a worker thread: on a thousand-reactor network one
+        # event is ~7 MB and ~0.3 s of Python, which on the event loop held up
+        # every other request (and this run's own `complete`) for minutes.
+        started = time.perf_counter()
+        kind, event = await asyncio.to_thread(_next_event, worker)
+        yield event
+        if kind != "progress":
+            return
+        # Progress events are spaced by ten times their own cost.
+        await asyncio.sleep(max(poll_interval, 9 * (time.perf_counter() - started)))
 
-        # Build a JSON-serialisable snapshot (omit non-serialisable objects)
-        snapshot: Dict[str, Any] = {
-            "is_running": progress.is_running,
-            "is_complete": progress.is_complete,
-            "is_stopping": progress.is_stopping,
-            "error_message": progress.error_message,
-            "stages_done": progress.stages_done,
-            "n_stages": progress.n_stages,
-            "completed_stage_ids": progress.completed_stage_ids,
-            "times": progress.times,
-            "reactors_series": progress.reactors_series,
-            "reactor_reports": _serialise_reports(progress.reactor_reports),
-            "connection_reports": progress.connection_reports.copy(),
-            "total_time": progress.total_time,
+
+def _next_event(worker: RunHandle) -> "tuple[str, str]":
+    """Return ``(event type, SSE text)`` for the worker's current state."""
+    progress = worker.get_progress()
+
+    # Build a JSON-serialisable snapshot (omit non-serialisable objects)
+    snapshot: Dict[str, Any] = {
+        "is_running": progress.is_running,
+        "is_complete": progress.is_complete,
+        "is_stopping": progress.is_stopping,
+        "error_message": progress.error_message,
+        "stages_done": progress.stages_done,
+        "n_stages": progress.n_stages,
+        "completed_stage_ids": progress.completed_stage_ids,
+        "times": progress.times,
+        "reactors_series": progress.reactors_series,
+        "reactor_reports": _serialise_reports(progress.reactor_reports),
+        "connection_reports": progress.connection_reports.copy(),
+        "total_time": progress.total_time,
+    }
+
+    # A stopped run: is_stopping was set by stop_simulation() and the
+    # solve thread has since exited without completing or erroring.
+    # Checked before the error/complete branches below since without a
+    # terminal event of its own here, this state matches neither of
+    # them and the loop would otherwise poll "progress" forever.
+    if progress.is_stopping and not progress.is_running:
+        return "stopped", _sse_event("stopped", snapshot)
+
+    if progress.error_message and not progress.is_running:
+        return "error", _sse_event("error", {"message": progress.error_message})
+
+    if progress.is_complete:
+        # Final complete event with full results
+        complete_data: Dict[str, Any] = {
+            **snapshot,
+            "code_str": progress.code_str,
+            "summary": progress.summary,
+            "sankey_links": progress.sankey_links,
+            "sankey_nodes": progress.sankey_nodes,
+            "elapsed_time": progress.get_calculation_time(),
+            # Full nodes + connections after post-build hooks and staged
+            # solver synthesis — single source of truth for the graph.
+            "updated_nodes": progress.updated_nodes,
+            "updated_connections": progress.updated_connections,
         }
+        return "complete", _sse_event("complete", complete_data)
 
-        # A stopped run: is_stopping was set by stop_simulation() and the
-        # solve thread has since exited without completing or erroring.
-        # Checked before the error/complete branches below since without a
-        # terminal event of its own here, this state matches neither of
-        # them and the loop would otherwise poll "progress" forever.
-        if progress.is_stopping and not progress.is_running:
-            yield _sse_event("stopped", snapshot)
-            return
-
-        if progress.error_message and not progress.is_running:
-            yield _sse_event("error", {"message": progress.error_message})
-            return
-
-        if progress.is_complete:
-            # Final complete event with full results
-            complete_data: Dict[str, Any] = {
-                **snapshot,
-                "code_str": progress.code_str,
-                "summary": progress.summary,
-                "sankey_links": progress.sankey_links,
-                "sankey_nodes": progress.sankey_nodes,
-                "elapsed_time": progress.get_calculation_time(),
-                # Full nodes + connections after post-build hooks and staged
-                # solver synthesis — single source of truth for the graph.
-                "updated_nodes": progress.updated_nodes,
-                "updated_connections": progress.updated_connections,
-            }
-            yield _sse_event("complete", complete_data)
-            return
-
-        # Intermediate progress event
-        yield _sse_event("progress", snapshot)
-        await asyncio.sleep(poll_interval)
+    # Intermediate progress event
+    return "progress", _sse_event("progress", snapshot)
 
 
 def _sse_event(event_type: str, data: dict) -> str:
