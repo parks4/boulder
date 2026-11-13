@@ -234,6 +234,19 @@ ______________________________________________________________________
 | Composite group box | "Click on individual segments for convergence." |
 | Nothing / no data | "Select a reactor node to view convergence data." |
 
+### Conservation summary
+
+A node's `reactors_series[id].conservation`, when the backend provides it, is
+`{mass_in_kg_s, mass_out_kg_s, energy_in_kw, energy_out_kw, mass_closes, energy_closes}` plus two
+optional fields for a reactor whose temperature is imposed (energy equation off):
+
+- `energy_checked: false`: the energy balance is not a check. The tab shows energy as "not checked
+  (imposed temperature)" instead of OK/FAILED, and neither the graph warning badge nor the
+  post-run conservation toast counts it.
+- `implied_heat_kw`: the heat the imposed temperature implies (out minus in), shown with it.
+
+Without `energy_checked`, `energy_closes` is checked as before.
+
 ______________________________________________________________________
 
 ## PANEL-03 — Node colour coding

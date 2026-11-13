@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useSimulationStore } from "@/stores/simulationStore";
 import { useConfigStore } from "@/stores/configStore";
 import { fetchSimulationResults } from "@/api/simulations";
+import { conservationFails } from "@/lib/conservation";
 import type { SimulationProgress, SimulationResults } from "@/types/simulation";
 // useConfigStore is accessed via .getState() inside callbacks to avoid stale closures.
 
@@ -15,7 +16,7 @@ function conservationFailingNodes(data: SimulationResults): string[] {
   return Object.entries(data.reactors_series ?? {})
     .filter(([, series]) => {
       const c = series.conservation;
-      return c && (!c.mass_closes || !c.energy_closes);
+      return c && conservationFails(c);
     })
     .map(([id]) => id);
 }

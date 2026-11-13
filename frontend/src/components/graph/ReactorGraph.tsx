@@ -19,6 +19,7 @@ import {
   presetNodeSize,
 } from "@/lib/graphLayout";
 import { nodeColorGradient, temperatureToNodeColor } from "@/lib/cytoscapeNodeColor";
+import { conservationFails } from "@/lib/conservation";
 
 /**
  * Per-node problem badges (top-right corner), drawn as self-contained SVG
@@ -1582,9 +1583,7 @@ export function ReactorGraph() {
           const T = temps.get(n.id());
           n.data("fill", T !== undefined && range ? temperatureToNodeColor(T, theme, ...range) : undefined);
           const conservation = results.reactors_series?.[n.id()]?.conservation;
-          const failed = conservation
-            ? !conservation.mass_closes || !conservation.energy_closes
-            : false;
+          const failed = conservation ? conservationFails(conservation) : false;
           const designWarnings = (
             results.reactor_reports?.[n.id()] as { warnings?: unknown } | undefined
           )?.warnings;
