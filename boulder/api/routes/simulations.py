@@ -134,7 +134,7 @@ def _check_entry(raw: Dict[str, Any], entry_id: str) -> None:
 
 
 @router.post("")
-async def start_simulation(
+def start_simulation(
     body: StartSimulationRequest,
     request: Request,
 ) -> Dict[str, Any]:
@@ -142,6 +142,10 @@ async def start_simulation(
 
     Returns a ``simulation_id`` that can be used to stream progress
     or fetch final results.
+
+    A plain ``def``, like the other routes whose work grows with the network
+    (results, cache check): FastAPI runs them in a worker thread, so dumping a
+    large config does not stall the event loop that streams progress.
     """
     sim_id = str(uuid.uuid4())
     state = request.app.state
@@ -188,20 +192,24 @@ async def start_simulation(
                 handle.stopped()
                 return
             outcome = outcomes[0]
-            # What the startup check publishes, so GUI actions and `/cached` see
-            # this entry without a server restart.
+            # Report completion first: reading the entry back below takes ~10 s
+            # on a thousand-reactor network, and the browser already has the
+            # payload. GUI actions look the stored entry up themselves.
             store_dir = resolve_store_dir(raw, config_path)
+            if store_dir is not None:
+                state.preloaded_fingerprint = outcome.fingerprint
+            handle.finish(outcome.gui)
+            # What the startup check publishes, so `/cached` serves this entry
+            # without a server restart.
             if store_dir is not None:
                 from ... import scenario_store  # noqa: PLC0415
 
-                state.preloaded_fingerprint = outcome.fingerprint
                 state.preloaded_result = scenario_store.load_matching(
                     store_dir,
                     outcome.fingerprint,
                     scenario_store.config_identity(config_path),
                     getattr(state, "converter_class", None),
                 )
-            handle.finish(outcome.gui)
         except Exception as exc:  # noqa: BLE001 -- reported to the client
             if handle.stop_event.is_set():
                 # A cancellation raised out of the solve: an intentional stop.
@@ -243,7 +251,7 @@ async def stream_simulation(sim_id: str) -> StreamingResponse:
 
 
 @router.get("/{sim_id}/results")
-async def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str, Any]:
+def get_simulation_results(sim_id: str, cleanup: bool = False) -> Dict[str, Any]:
     """Return the full simulation results (non-streaming).
 
     Useful for late-joiners or page refreshes after the simulation
@@ -344,7 +352,7 @@ async def stop_simulation(sim_id: str) -> Dict[str, Any]:
 
 
 @router.post("/check-cache")
-async def check_simulation_cache(
+def check_simulation_cache(
     body: StartSimulationRequest,
     request: Request,
 ) -> Dict[str, Any]:

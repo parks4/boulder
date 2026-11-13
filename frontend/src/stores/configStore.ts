@@ -27,9 +27,16 @@ interface ConfigState {
   addConnection: (conn: ConfigConnection, group?: string | null) => void;
   updateConnection: (id: string, updates: Partial<ConfigConnection>) => void;
   removeConnection: (id: string) => void;
-  /** Merge the live config into `originalYaml` (via /configs/sync) and refresh it. No-op if not dirty. */
+  /**
+   * Merge the live config into `originalYaml` (via /configs/sync) and refresh it.
+   * No-op if not dirty. Calls made while a sync is in flight wait for it and
+   * sync again only if the config is still dirty, so a burst of callers posts
+   * at most twice (the merge costs seconds on a large network).
+   */
   syncYaml: () => Promise<void>;
 }
+
+let syncInFlight: Promise<void> | null = null;
 
 const EMPTY_CONFIG: NormalizedConfig = {
   nodes: [],
@@ -148,9 +155,20 @@ export const useConfigStore = create<ConfigState>((set, get) => ({
   },
 
   syncYaml: async () => {
+    if (syncInFlight) {
+      await syncInFlight.catch(() => undefined);
+      return get().syncYaml();
+    }
     const { config, originalYaml, dirty } = get();
     if (!dirty || !originalYaml) return;
-    const resp = await syncConfig(config, originalYaml);
-    set({ originalYaml: resp.yaml, dirty: false });
+    syncInFlight = syncConfig(config, originalYaml).then((resp) => {
+      // An edit made while this sync ran keeps the store dirty.
+      set({ originalYaml: resp.yaml, dirty: get().config !== config });
+    });
+    try {
+      await syncInFlight;
+    } finally {
+      syncInFlight = null;
+    }
   },
 }));

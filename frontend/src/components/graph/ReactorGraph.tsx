@@ -16,6 +16,7 @@ import {
   LARGE_GRAPH_ELEMENTS,
   LAYOUT_LANE_MAIN,
   layoutPosition,
+  presetNodeSize,
 } from "@/lib/graphLayout";
 import { nodeColorGradient, temperatureToNodeColor } from "@/lib/cytoscapeNodeColor";
 
@@ -120,6 +121,27 @@ export function ReactorGraph() {
     return m;
   }, [config.nodes]);
   const isLargeGraph = config.nodes.length + config.connections.length > LARGE_GRAPH_ELEMENTS;
+  // Smaller nodes when given positions are closer than the default node size
+  // (GRAPH-07); only used by a preset (all-positioned) layout.
+  const denseNodeSize = useMemo(
+    () => presetNodeSize([...absolutePositions.values()]),
+    [absolutePositions],
+  );
+  // Every drawn reactor/reservoir carries metadata.layout_position: draw them
+  // there, no dagre or lane pass (GRAPH-07). Groups and stream points are
+  // ignored, the same filter as computeFingerprint, so a solve that adds
+  // stream points does not switch the graph back to dagre.
+  const allPositioned = useMemo(
+    () =>
+      config.nodes.every(
+        (n) =>
+          trulyHiddenNodeIds.has(n.id) ||
+          Boolean(n.properties?.stream_point || n.metadata?.stream_point) ||
+          absolutePositions.has(n.id),
+      ),
+    [config.nodes, trulyHiddenNodeIds, absolutePositions],
+  );
+
   // Solved temperature range of the coloured nodes, for the legend.
   const [tempRange, setTempRange] = useState<[number, number] | null>(null);
   const setSelectedElement = useSelectionStore((s) => s.setSelectedElement);
@@ -652,8 +674,23 @@ export function ReactorGraph() {
             { selector: "node", style: { "min-zoomed-font-size": 10 } },
           ]
         : []),
+      ...(allPositioned && denseNodeSize !== null
+        ? [
+            {
+              // Positions closer than the default node size (GRAPH-07).
+              selector: "node[^isGroup]",
+              style: {
+                width: denseNodeSize,
+                height: denseNodeSize,
+                "font-size": Math.max(1, denseNodeSize / 6),
+                "text-max-width": `${denseNodeSize}px`,
+                "text-outline-width": 0,
+              },
+            },
+          ]
+        : []),
     ];
-  }, [theme, isLargeGraph]);
+  }, [theme, isLargeGraph, allPositioned, denseNodeSize]);
 
   // Dagre LR layout stacks sibling stages bottom-to-top; mirror Y so flow reads top-to-bottom.
   const flipLayoutVertical = useCallback((cy: Core): void => {
@@ -1122,21 +1159,6 @@ export function ReactorGraph() {
       }
     },
     [config],
-  );
-
-  // Every drawn reactor/reservoir carries metadata.layout_position: draw them
-  // there, no dagre or lane pass (GRAPH-07). Groups and stream points are
-  // ignored, the same filter as computeFingerprint, so a solve that adds
-  // stream points does not switch the graph back to dagre.
-  const allPositioned = useMemo(
-    () =>
-      config.nodes.every(
-        (n) =>
-          trulyHiddenNodeIds.has(n.id) ||
-          Boolean(n.properties?.stream_point || n.metadata?.stream_point) ||
-          absolutePositions.has(n.id),
-      ),
-    [config.nodes, trulyHiddenNodeIds, absolutePositions],
   );
 
   // dagre + lane alignment, unless positions are given or the graph is

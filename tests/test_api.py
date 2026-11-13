@@ -535,6 +535,32 @@ class TestSyncConfigRoute:
         assert "kg/h" in body["yaml"]
 
     @pytest.mark.asyncio
+    async def test_sync_of_the_live_config_returns_its_yaml_without_merging(
+        self, monkeypatch
+    ):
+        """The session's own config and YAML come back as is; no merge runs."""
+        from boulder.api.routes import configs as config_routes
+
+        def no_merge(*_args, **_kwargs):
+            raise AssertionError(
+                "merge_config_into_yaml called for an unchanged config"
+            )
+
+        monkeypatch.setattr(config_routes, "merge_config_into_yaml", no_merge)
+        app = create_app()
+        app.state.preloaded_yaml = _SYNC_YAML
+        app.state.preloaded_config = copy.deepcopy(_SYNC_CONFIG)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/api/configs/sync",
+                json={"config": _SYNC_CONFIG, "original_yaml": _SYNC_YAML},
+            )
+        assert resp.status_code == 200
+        assert resp.json() == {"yaml": _SYNC_YAML, "warnings": []}
+
+    @pytest.mark.asyncio
     async def test_sync_updates_changed_pressure_in_original_unit(self):
         """Assert doubled pressure appears as '2 atm', not as a bare SI float.
 

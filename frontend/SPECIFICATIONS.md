@@ -184,7 +184,9 @@ thousands of nodes and connections, with recirculation loops and exchange pairs 
 
 - **Every drawn node carries it** (composite placeholders and stream-point diamonds aside): the
   graph is drawn at those positions with a `preset` layout; no dagre pass, no lane alignment, no
-  overlap nudge. Stream-point diamonds are centred on the nodes they connect.
+  overlap nudge. Stream-point diamonds are centred on the nodes they connect. When the given
+  positions are closer than the default node size (80), nodes are drawn at 80 % of the median
+  nearest-neighbour distance (at least 4) so that they do not merge (`presetNodeSize`).
 - **Some nodes carry it**: today's dagre + lane layout runs, then the nodes that carry it are moved
   to their position.
 - `layout_offset` (drag) applies on top, as for any node; Reset layout keeps `layout_position`.

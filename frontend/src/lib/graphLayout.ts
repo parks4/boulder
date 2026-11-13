@@ -18,6 +18,31 @@ export function layoutPosition(
   return { x: p.x, y: p.y };
 }
 
+/**
+ * Node diameter for a preset layout whose nodes sit closer than the default
+ * size: 80 % of the median nearest-neighbour distance, at least `floor`.
+ * `null` when the default size already fits (or fewer than two positions).
+ */
+export function presetNodeSize(
+  positions: { x: number; y: number }[],
+  defaultSize = 80,
+  floor = 4,
+): number | null {
+  if (positions.length < 2) return null;
+  // ponytail: O(n^2) nearest neighbour, ~10 ms at 1200 nodes; a grid index
+  // if networks reach ~10k nodes.
+  const nearest = positions.map((p, i) => {
+    let best = Infinity;
+    positions.forEach((q, j) => {
+      if (i !== j) best = Math.min(best, Math.hypot(p.x - q.x, p.y - q.y));
+    });
+    return best;
+  });
+  nearest.sort((a, b) => a - b);
+  const size = 0.8 * nearest[Math.floor(nearest.length / 2)];
+  return size < defaultSize ? Math.max(floor, size) : null;
+}
+
 type LaneNode = { id: string };
 type LaneConnection = { source: string; target: string };
 

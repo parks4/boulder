@@ -7,11 +7,17 @@
  * - So does a cyclic grid declared from the outlet back to the inlet.
  * - On an acyclic chain, the whole chain (minus the feed) is the spine.
  * - metadata.layout_position is read only when both coordinates are finite.
+ * - Dense preset layouts shrink nodes to 80 % of the median neighbour spacing.
  */
 
 import cytoscape from "cytoscape";
 import { describe, expect, it } from "vitest";
-import { inferLanesFromTopology, LAYOUT_LANE_MAIN, layoutPosition } from "./graphLayout";
+import {
+  inferLanesFromTopology,
+  LAYOUT_LANE_MAIN,
+  layoutPosition,
+  presetNodeSize,
+} from "./graphLayout";
 
 type Conn = { id: string; source: string; target: string };
 
@@ -106,5 +112,13 @@ describe("inferLanesFromTopology", () => {
     expect(layoutPosition({ layout_position: { x: "10", y: 5 } })).toBeNull();
     expect(layoutPosition({ layout_position: { x: Infinity, y: 5 } })).toBeNull();
     expect(layoutPosition(null)).toBeNull();
+  });
+
+  it("sizes nodes from the median neighbour spacing only when they would overlap", () => {
+    const grid = (step: number) =>
+      [0, 1, 2].flatMap((i) => [0, 1, 2].map((j) => ({ x: i * step, y: j * step })));
+    expect(presetNodeSize(grid(40))).toBeCloseTo(32);
+    expect(presetNodeSize(grid(160))).toBeNull();
+    expect(presetNodeSize(grid(1))).toBe(4);
   });
 });

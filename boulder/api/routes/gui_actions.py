@@ -138,7 +138,7 @@ async def list_actions(request: Request) -> list[Dict[str, Any]]:
 
 
 @router.post("")
-async def list_actions_for_context(
+def list_actions_for_context(
     body: GuiActionRunRequest,
     request: Request,
 ) -> list[Dict[str, Any]]:

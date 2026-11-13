@@ -63,13 +63,15 @@ export function ResultsTabs() {
     resultsVersionRef.current += 1;
   }
 
-  // Fetch available plugins when simulation results arrive
+  // Fetch available plugins when a run starts and when its results arrive —
+  // not on every progress event (one per poll, hundreds on a long solve).
+  const hasProgress = progress != null;
   useEffect(() => {
-    if (!results && !progress) return;
+    if (!results && !hasProgress) return;
     fetchPlugins()
       .then(setPlugins)
       .catch(() => setPlugins([]));
-  }, [results, progress]);
+  }, [results, hasProgress]);
 
   // After a run completes with nothing selected and no explicit tab choice,
   // open a plugin pane flagged `preferred` instead of the generic default —
