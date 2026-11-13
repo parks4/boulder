@@ -11,6 +11,13 @@ import { useAddEntityModalStore } from "@/stores/addEntityModalStore";
 import { useSweepRunStore } from "@/stores/sweepStore";
 import { currentStageId } from "@/lib/simulationProgress";
 import { hiddenCompositeNodeIds } from "@/lib/graphVisibility";
+import {
+  inferLanesFromTopology as inferLanes,
+  LARGE_GRAPH_ELEMENTS,
+  LAYOUT_LANE_MAIN,
+  layoutPosition,
+} from "@/lib/graphLayout";
+import { nodeColorGradient, temperatureToNodeColor } from "@/lib/cytoscapeNodeColor";
 
 /**
  * Per-node problem badges (top-right corner), drawn as self-contained SVG
@@ -62,7 +69,6 @@ const GRAPH_HEIGHT_STORAGE_KEY = "boulder-graph-height";
 // "main_flow" is the horizontal baseline; all other lanes are placed at a
 // Y offset defined in each node's metadata.layout_y_offset (negative = above
 // in screen space after flipLayoutVertical has mirrored the dagre output).
-const LAYOUT_LANE_MAIN = "main_flow";
 const LAYOUT_LANE_DEFAULT_OFFSET = -160; // fallback when layout_y_offset absent
 
 function getMaxGraphHeight(): number {
@@ -104,6 +110,18 @@ export function ReactorGraph() {
     () => hiddenCompositeNodeIds(config.nodes, config.connections),
     [config.nodes, config.connections],
   );
+  // Absolute canvas positions (metadata.layout_position) by node id.
+  const absolutePositions = useMemo(() => {
+    const m = new Map<string, { x: number; y: number }>();
+    for (const n of config.nodes) {
+      const p = layoutPosition(n.metadata);
+      if (p) m.set(n.id, p);
+    }
+    return m;
+  }, [config.nodes]);
+  const isLargeGraph = config.nodes.length + config.connections.length > LARGE_GRAPH_ELEMENTS;
+  // Solved temperature range of the coloured nodes, for the legend.
+  const [tempRange, setTempRange] = useState<[number, number] | null>(null);
   const setSelectedElement = useSelectionStore((s) => s.setSelectedElement);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const setActiveTab = useResultsTabStore((s) => s.setActiveTab);
@@ -278,7 +296,8 @@ export function ReactorGraph() {
         ...(!isStreamPoint && group ? { parent: `group:${group}` } : {}),
       };
       if (isStreamPoint) nodeData.stream_point = true;
-      elements.push({ data: nodeData });
+      const position = absolutePositions.get(node.id);
+      elements.push(position ? { data: nodeData, position: { ...position } } : { data: nodeData });
       renderedNodeIds.add(node.id);
     }
 
@@ -405,7 +424,7 @@ export function ReactorGraph() {
     }
 
     return elements;
-  }, [config, trulyHiddenNodeIds]);
+  }, [config, trulyHiddenNodeIds, absolutePositions]);
 
   // Build stylesheet
   const buildStylesheet = useCallback((): any => {
@@ -463,6 +482,13 @@ export function ReactorGraph() {
         style: {
           "background-color": "#3b82f6",
         },
+      },
+      {
+        // Solved temperature (results-sync effect below, PANEL-03): replaces
+        // the plain "computed" blue once the node's report carries one. Drawn
+        // under a warning badge too: the badge stays readable on top.
+        selector: "node[^isGroup][fill]",
+        style: { "background-color": "data(fill)" },
       },
       {
         // Non-group nodes default to ellipse (round).
@@ -610,8 +636,24 @@ export function ReactorGraph() {
           "border-color": "#0d6efd",
         },
       },
+      ...(isLargeGraph
+        ? [
+            {
+              // Large graph (GRAPH-07): label and bezier bundling cost per
+              // edge is what makes thousands of edges slow to draw.
+              selector: "edge",
+              style: {
+                label: "",
+                "curve-style": "straight",
+                width: 1,
+                "arrow-scale": 0.6,
+              },
+            },
+            { selector: "node", style: { "min-zoomed-font-size": 10 } },
+          ]
+        : []),
     ];
-  }, [theme]);
+  }, [theme, isLargeGraph]);
 
   // Dagre LR layout stacks sibling stages bottom-to-top; mirror Y so flow reads top-to-bottom.
   const flipLayoutVertical = useCallback((cy: Core): void => {
@@ -633,241 +675,9 @@ export function ReactorGraph() {
     });
   }, []);
 
-  // Infer swim-lane assignments from network topology when no explicit
-  // layout_lane metadata is present in the config.
-  //
-  // Algorithm:
-  //   1. Build a DAG over all rendered non-group, non-stream-point nodes using
-  //      config.connections (same _outlet alias collapsing as alignLayoutLanes).
-  //   2. Find the longest source-to-sink path (DP on topo order).  Tie-break:
-  //      prefer reactor-type nodes (non-Reservoir / non-OutletSink) over boundary
-  //      nodes; then stable declaration order.  Feed Reservoirs on that path are
-  //      demoted to branches so parallel inlets (e.g. air + fuel → mixer) do not
-  //      share the horizontal spine.
-  //   3. All other nodes are "auto_branch".  Each branch node is anchored to its
-  //      closest spine neighbor: prefer the spine node it connects INTO; fall back
-  //      to the spine node that connects INTO it.
-  //
-  // Stream-point diamonds and group compound nodes are excluded — they are handled
-  // separately by Steps 3.6 and 5 of alignLayoutLanes.
-  //
-  // Returns { lanes: Map<id,lane>, anchors: Map<branchId, spineId> }.
-  // Both maps are empty if the graph has no nodes.
+  // Topology-inferred lanes (no explicit layout_lane): see lib/graphLayout.ts.
   const inferLanesFromTopology = useCallback(
-    (cy: Core): { lanes: Map<string, string>; anchors: Map<string, string> } => {
-      const empty = { lanes: new Map<string, string>(), anchors: new Map<string, string>() };
-
-      // Collect candidate nodes: leaf, non-group, non-stream-point.
-      const candidateIds = new Set<string>();
-      cy.nodes().forEach((n) => {
-        if (n.data("isGroup") || n.data("stream_point")) return;
-        candidateIds.add(n.id());
-      });
-      if (candidateIds.size === 0) return empty;
-
-      // Truly hidden (composite placeholder) node ids: used to short-circuit
-      // topology traversal so that predecessors connect directly to successors,
-      // making hidden unfolded composites transparent to layout inference.
-      const skipVizIds = trulyHiddenNodeIds;
-
-      // Build adjacency lists over candidate nodes.
-      // Collapse "_outlet" source aliases to the base node id.
-      // Connections passing through skip_viz nodes are short-circuited:
-      //   A → [hidden] → B  becomes  A → B.
-      const outEdges = new Map<string, string[]>();
-      const inDegree = new Map<string, number>();
-      for (const id of candidateIds) {
-        outEdges.set(id, []);
-        inDegree.set(id, 0);
-      }
-      const addEdge = (rawSrc: string, tgt: string) => {
-        const src = rawSrc.endsWith("_outlet") ? rawSrc.slice(0, -"_outlet".length) : rawSrc;
-        if (!candidateIds.has(src) || !candidateIds.has(tgt) || src === tgt) return;
-        // Avoid duplicate edges.
-        if (!outEdges.get(src)!.includes(tgt)) {
-          outEdges.get(src)!.push(tgt);
-          inDegree.set(tgt, (inDegree.get(tgt) ?? 0) + 1);
-        }
-      };
-
-      // Build a raw adjacency map over ALL config.connections (including those
-      // involving hidden nodes) so we can resolve transitive paths.
-      const rawOut = new Map<string, string[]>();
-      for (const conn of config.connections) {
-        const src = conn.source.endsWith("_outlet")
-          ? conn.source.slice(0, -"_outlet".length)
-          : conn.source;
-        if (!rawOut.has(src)) rawOut.set(src, []);
-        rawOut.get(src)!.push(conn.target);
-      }
-
-      // Helper: walk forward from `start` through skip_viz nodes and collect
-      // all reachable non-skip_viz nodes (i.e. candidate nodes).
-      const resolveSuccessors = (start: string): string[] => {
-        const visited = new Set<string>();
-        const result: string[] = [];
-        const stack = [start];
-        while (stack.length > 0) {
-          const cur = stack.pop()!;
-          if (visited.has(cur)) continue;
-          visited.add(cur);
-          for (const nb of rawOut.get(cur) ?? []) {
-            if (candidateIds.has(nb)) {
-              result.push(nb);
-            } else if (skipVizIds.has(nb)) {
-              stack.push(nb);
-            }
-          }
-        }
-        return result;
-      };
-
-      for (const conn of config.connections) {
-        const srcRaw = conn.source.endsWith("_outlet")
-          ? conn.source.slice(0, -"_outlet".length)
-          : conn.source;
-        const tgtRaw = conn.target;
-        if (candidateIds.has(srcRaw)) {
-          if (candidateIds.has(tgtRaw)) {
-            addEdge(srcRaw, tgtRaw);
-          } else if (skipVizIds.has(tgtRaw)) {
-            // Short-circuit: connect srcRaw directly to all visible successors
-            // reachable through hidden nodes.
-            for (const succ of resolveSuccessors(tgtRaw)) {
-              addEdge(srcRaw, succ);
-            }
-          }
-        }
-      }
-      cy.edges().forEach((e) => {
-        addEdge(e.source().id(), e.target().id());
-      });
-
-      // Kahn's topological sort over candidate nodes.
-      const topoOrder: string[] = [];
-      const tempDeg = new Map(inDegree);
-      const queue: string[] = [];
-      for (const id of candidateIds) {
-        if ((tempDeg.get(id) ?? 0) === 0) queue.push(id);
-      }
-      // Stable initial ordering by declaration order in config.nodes.
-      const declOrder = new Map<string, number>();
-      config.nodes.forEach((n, i) => declOrder.set(n.id, i));
-      queue.sort((a, b) => (declOrder.get(a) ?? 999) - (declOrder.get(b) ?? 999));
-      while (queue.length > 0) {
-        const cur = queue.shift()!;
-        topoOrder.push(cur);
-        const next: string[] = [];
-        for (const nb of outEdges.get(cur) ?? []) {
-          const deg = (tempDeg.get(nb) ?? 0) - 1;
-          tempDeg.set(nb, deg);
-          if (deg === 0) next.push(nb);
-        }
-        next.sort((a, b) => (declOrder.get(a) ?? 999) - (declOrder.get(b) ?? 999));
-        queue.push(...next);
-      }
-      // Append any remaining (cycle remnants) in declaration order.
-      for (const id of candidateIds) {
-        if (!topoOrder.includes(id)) topoOrder.push(id);
-      }
-
-      // Determine node "spine weight": reactor-type and sink nodes score 1
-      // (preferred on the main spine); pure feed nodes (Reservoir) score 0 so
-      // that feed branches don't drag the spine out of its natural direction.
-      // OutletSink is the terminal main-flow node — weight 1 ensures the spine
-      // always extends all the way to the outlet.
-      const spineWeight = (id: string): number => {
-        const t = cy.getElementById(id).data("type") as string | undefined;
-        if (!t || t === "Reservoir") return 0;
-        return 1;
-      };
-
-      // DP: longest weighted path ending at each node.
-      // pathLen[n] = max over predecessors p of (pathLen[p] + spineWeight(n)).
-      const pathLen = new Map<string, number>();
-      const pathPrev = new Map<string, string | null>();
-      for (const id of topoOrder) {
-        let best = 0;
-        let bestPrev: string | null = null;
-        // Walk all predecessors (nodes with an edge to id).
-        for (const pred of topoOrder) {
-          if ((outEdges.get(pred) ?? []).includes(id)) {
-            const val = (pathLen.get(pred) ?? 0) + spineWeight(id);
-            if (val > best || (val === best && bestPrev === null)) {
-              best = val;
-              bestPrev = pred;
-            }
-          }
-        }
-        pathLen.set(id, best + spineWeight(id));
-        pathPrev.set(id, bestPrev);
-      }
-
-      // Find the sink with the longest path (tie-break: prefer spine weight, then
-      // declaration order).
-      let bestSink: string | null = null;
-      let bestLen = -1;
-      for (const id of topoOrder) {
-        const len = pathLen.get(id) ?? 0;
-        const w = spineWeight(id);
-        const decl = declOrder.get(id) ?? 999;
-        if (
-          bestSink === null ||
-          len > bestLen ||
-          (len === bestLen && w > spineWeight(bestSink)) ||
-          (len === bestLen && w === spineWeight(bestSink) && decl < (declOrder.get(bestSink) ?? 999))
-        ) {
-          bestSink = id;
-          bestLen = len;
-        }
-      }
-      if (bestSink === null) return empty;
-
-      // Trace back the spine path from bestSink.
-      const spineSet = new Set<string>();
-      let cur: string | null = bestSink;
-      while (cur !== null) {
-        spineSet.add(cur);
-        cur = pathPrev.get(cur) ?? null;
-      }
-
-      // Assign lanes.  Feed reservoirs never sit on the main-flow spine even when
-      // they appear on the longest path (parallel MFC inlets anchor as branches).
-      const lanes = new Map<string, string>();
-      for (const id of candidateIds) {
-        const t = cy.getElementById(id).data("type") as string | undefined;
-        const onSpine = spineSet.has(id) && t !== "Reservoir";
-        lanes.set(id, onSpine ? LAYOUT_LANE_MAIN : "auto_branch");
-      }
-
-      // Assign anchors: for each branch node, find the closest spine neighbor.
-      // Priority: a spine node this branch feeds INTO (downstream); else a spine
-      // node that feeds INTO this branch (upstream).
-      const anchors = new Map<string, string>();
-      for (const id of candidateIds) {
-        if (spineSet.has(id)) continue;
-        // Downstream spine neighbors (id → spine).
-        for (const nb of outEdges.get(id) ?? []) {
-          if (spineSet.has(nb) && !anchors.has(id)) {
-            anchors.set(id, nb);
-          }
-        }
-        if (anchors.has(id)) continue;
-        // Upstream spine neighbors (spine → id).
-        for (const pred of candidateIds) {
-          if (spineSet.has(pred) && (outEdges.get(pred) ?? []).includes(id)) {
-            anchors.set(id, pred);
-            break;
-          }
-        }
-        // Last resort: any spine node.
-        if (!anchors.has(id) && spineSet.size > 0) {
-          anchors.set(id, [...spineSet][0]);
-        }
-      }
-
-      return { lanes, anchors };
-    },
+    (cy: Core) => inferLanes(cy, config.nodes, config.connections, trulyHiddenNodeIds),
     [config.nodes, config.connections, trulyHiddenNodeIds],
   );
 
@@ -1314,6 +1124,52 @@ export function ReactorGraph() {
     [config],
   );
 
+  // Every drawn reactor/reservoir carries metadata.layout_position: draw them
+  // there, no dagre or lane pass (GRAPH-07). Groups and stream points are
+  // ignored, the same filter as computeFingerprint, so a solve that adds
+  // stream points does not switch the graph back to dagre.
+  const allPositioned = useMemo(
+    () =>
+      config.nodes.every(
+        (n) =>
+          trulyHiddenNodeIds.has(n.id) ||
+          Boolean(n.properties?.stream_point || n.metadata?.stream_point) ||
+          absolutePositions.has(n.id),
+      ),
+    [config.nodes, trulyHiddenNodeIds, absolutePositions],
+  );
+
+  // dagre + lane alignment, unless positions are given or the graph is
+  // too large for dagre (minutes at a thousand nodes; GRAPH-07).
+  const autoLanes = !allPositioned && !isLargeGraph;
+
+  const applyAbsolutePositions = useCallback(
+    (cy: Core) => {
+      cy.batch(() => {
+        absolutePositions.forEach((p, id) => {
+          const n = cy.getElementById(id);
+          if (n.length && !n.data("isGroup")) n.position({ ...p });
+        });
+        if (!allPositioned) return;
+        // Stream-point diamonds carry no position and the preset path skips
+        // the lane pass that places them: centre each on its neighbours.
+        cy.nodes("[?stream_point]").forEach((n) => {
+          if (absolutePositions.has(n.id())) return;
+          const ends = n.incomers("node").union(n.outgoers("node"));
+          if (ends.length === 0) return;
+          let x = 0;
+          let y = 0;
+          ends.forEach((e) => {
+            x += e.position().x;
+            y += e.position().y;
+          });
+          n.position({ x: x / ends.length, y: y / ends.length });
+        });
+      });
+    },
+    [absolutePositions, allPositioned],
+  );
+
   const runGraphLayout = useCallback(
     (cy: Core, animate = false) => {
       // Run dagre on leaf nodes only — exclude compound group nodes from rank
@@ -1321,7 +1177,11 @@ export function ReactorGraph() {
       // assignment so cross-stage edges do not force groups into a staircase.
       // We collect X positions from the dagre pass, then alignLayoutLanes does
       // the Y snapping and our post-pass re-centers the group boxes.
-      const layout = cy.layout({
+      const layout = allPositioned
+        ? cy.layout({ name: "preset", fit: false })
+        : !autoLanes
+        ? cy.layout({ name: "breadthfirst", directed: true, fit: false })
+        : cy.layout({
         name: "dagre",
         rankDir: "LR",
         nodeSep: 120,
@@ -1337,11 +1197,16 @@ export function ReactorGraph() {
       // capture never races an in-flight re-layout.
       const w = window as unknown as { __boulderLayoutSettledFor?: number };
       w.__boulderLayoutSettledFor = undefined;
+      // Subscribe before run(): a preset layout stops synchronously inside it.
+      const stopped = layout.promiseOn("layoutstop");
       layout.run();
-      return layout.promiseOn("layoutstop").then(() => {
-        flipLayoutVertical(cy);
-        alignLayoutLanes(cy);
-        nudgeOverlappingNodes(cy);
+      return stopped.then(() => {
+        if (autoLanes) {
+          flipLayoutVertical(cy);
+          alignLayoutLanes(cy);
+          nudgeOverlappingNodes(cy);
+        }
+        applyAbsolutePositions(cy);
         // Snapshot the pin-free algorithmic positions before applying any
         // manual offsets.  dragfree reads this to compute layout_offset;
         // applyPinnedPositions reads it to reconstruct absolute position.
@@ -1368,7 +1233,15 @@ export function ReactorGraph() {
         });
       });
     },
-    [flipLayoutVertical, alignLayoutLanes, nudgeOverlappingNodes, applyPinnedPositions],
+    [
+      flipLayoutVertical,
+      alignLayoutLanes,
+      nudgeOverlappingNodes,
+      applyPinnedPositions,
+      allPositioned,
+      autoLanes,
+      applyAbsolutePositions,
+    ],
   );
 
   // Initialize cytoscape
@@ -1380,7 +1253,8 @@ export function ReactorGraph() {
       container,
       elements: buildElements(),
       style: buildStylesheet() as any,
-      minZoom: 0.3,
+      // Low enough to fit a large network (GRAPH-07) in the pane.
+      minZoom: 0.02,
       maxZoom: 3,
       userPanningEnabled: true,
       userZoomingEnabled: true,
@@ -1598,7 +1472,8 @@ export function ReactorGraph() {
         if (nat) n.position({ x: nat.x, y: nat.y });
       });
       // Re-run lane alignment (handles any new transient nodes not in naturalPosRef).
-      alignLayoutLanes(cy);
+      if (autoLanes) alignLayoutLanes(cy);
+      applyAbsolutePositions(cy);
       // Re-apply manual drag offsets from metadata.layout_offset.
       applyPinnedPositions(cy);
       cy.nodes("[isGroup]").removeStyle("width height");
@@ -1663,25 +1538,45 @@ export function ReactorGraph() {
     };
 
     if (results) {
-      // Stage boxes are only tinted while actively solving (see the
-      // sweeping branch below) — clear any leftover 'calculating' tint now
-      // that results are in.
-      cy.nodes("[isGroup]").forEach((n) => {
-        n.data("calc_status", null);
-      });
+      // Colour by solved temperature over the solved range (PANEL-03).
+      const temps = new Map<string, number>();
       cy.nodes("[^isGroup]").forEach((n) => {
-        const conservation = results.reactors_series?.[n.id()]?.conservation;
-        const failed = conservation
-          ? !conservation.mass_closes || !conservation.energy_closes
-          : false;
-        const designWarnings = (
-          results.reactor_reports?.[n.id()] as { warnings?: unknown } | undefined
-        )?.warnings;
-        const flagged = Array.isArray(designWarnings) && designWarnings.length > 0;
-        setStatus(n, failed || flagged ? "warning" : "computed");
+        const T = (results.reactor_reports?.[n.id()] as { T?: unknown } | undefined)?.T;
+        if (typeof T === "number" && Number.isFinite(T)) temps.set(n.id(), T);
+      });
+      const values = [...temps.values()];
+      const range: [number, number] | null = values.length
+        ? [Math.min(...values), Math.max(...values)]
+        : null;
+      setTempRange(range);
+      cy.batch(() => {
+        // Stage boxes are only tinted while actively solving (see the
+        // sweeping branch below) — clear any leftover 'calculating' tint now
+        // that results are in.
+        cy.nodes("[isGroup]").forEach((n) => {
+          n.data("calc_status", null);
+        });
+        cy.nodes("[^isGroup]").forEach((n) => {
+          const T = temps.get(n.id());
+          n.data("fill", T !== undefined && range ? temperatureToNodeColor(T, theme, ...range) : undefined);
+          const conservation = results.reactors_series?.[n.id()]?.conservation;
+          const failed = conservation
+            ? !conservation.mass_closes || !conservation.energy_closes
+            : false;
+          const designWarnings = (
+            results.reactor_reports?.[n.id()] as { warnings?: unknown } | undefined
+          )?.warnings;
+          const flagged = Array.isArray(designWarnings) && designWarnings.length > 0;
+          setStatus(n, failed || flagged ? "warning" : "computed");
+        });
       });
       return;
     }
+
+    setTempRange(null);
+    cy.nodes("[fill]").forEach((n) => {
+      n.data("fill", undefined);
+    });
 
     if (error && !isRunning) {
       const failedStageId = currentStageId(config.groups, progress?.completed_stage_ids);
@@ -1709,7 +1604,9 @@ export function ReactorGraph() {
     }
 
     cy.nodes().forEach((n) => setStatus(n, null));
-  }, [results, progress, isRunning, error, config.groups, sweeping, scenarioProgress]);
+    // buildElements: a config update replaces every element (and its data),
+    // so the status and fill are set again after it.
+  }, [results, progress, isRunning, error, config.groups, sweeping, scenarioProgress, theme, buildElements]);
 
   // Keep Cytoscape canvas in sync when the pane is resized
   useEffect(() => {
@@ -1746,6 +1643,19 @@ export function ReactorGraph() {
         style={{ background: "var(--color-cytoscape-bg)" }}
         data-cy="graph"
       />
+      {tempRange && (
+        <div
+          data-testid="graph-temperature-legend"
+          className="absolute bottom-4 left-2 z-10 rounded border border-border bg-background/80 px-2 py-1 text-xs text-muted-foreground"
+        >
+          <div>Temperature [K]</div>
+          <div className="my-1 h-2 w-32 rounded" style={{ background: nodeColorGradient(theme) }} />
+          <div className="flex justify-between">
+            <span>{tempRange[0].toFixed(0)}</span>
+            <span>{tempRange[1].toFixed(0)}</span>
+          </div>
+        </div>
+      )}
       {/* Reset layout button — only shown when manual drag offsets exist */}
       {config.nodes.some(
         (n) => n.metadata && ("layout_offset" in n.metadata || "layout_pos" in n.metadata),

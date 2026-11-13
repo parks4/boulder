@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from "react";
 import Plot from "react-plotly.js";
 import { mapSankeyNodeColors } from "@/lib/cytoscapeNodeColor";
-import { hasSankeyData } from "@/lib/sankeyData";
+import { hasSankeyData, SANKEY_MAX_LINKS } from "@/lib/sankeyData";
 import { useThemeStore } from "@/stores/themeStore";
 import type { SimulationResults } from "@/types/simulation";
 
@@ -80,6 +80,13 @@ export const SankeyTab = memo(function SankeyTab({ results }: Props) {
   const target = links["target"] ?? [];
   const value = links["value"] ?? [];
   const n = source.length;
+  if (n > SANKEY_MAX_LINKS) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Sankey not drawn: {n} links, above the {SANKEY_MAX_LINKS}-link limit.
+      </p>
+    );
+  }
 
   const rawLabel = links["label"];
   const linkLabels =

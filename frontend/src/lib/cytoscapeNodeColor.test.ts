@@ -25,6 +25,11 @@ describe("cytoscapeNodeColor", () => {
     expect(temperatureToNodeColor(CYTOSCAPE_TEMP_MAX_K, "dark")).toBe("#e94b3c");
   });
 
+  it("spans the cold-hot colours over a given temperature range", () => {
+    expect(temperatureToNodeColor(400, "light", 400, 500)).toBe("#00bfff");
+    expect(temperatureToNodeColor(500, "light", 400, 500)).toBe("#ff6347");
+  });
+
   it("uses the cold-end color when no temperature is available for a node", () => {
     const colors = mapSankeyNodeColors(["unknown"], undefined, undefined, "light");
     expect(colors).toEqual([temperatureToNodeColor(CYTOSCAPE_TEMP_MIN_K, "light")]);

@@ -32,12 +32,25 @@ function lerpHex(a: string, b: string, t: number): string {
   );
 }
 
-/** Match Cytoscape ``mapData(temperature, 300, 2273, low, high)`` node fill. */
-export function temperatureToNodeColor(tempK: number, theme: Theme): string {
+/**
+ * Node fill for a temperature: linear from the cold to the hot colour over
+ * ``[minK, maxK]`` (default 300-2273 K, the Sankey's fixed scale), clamped.
+ */
+export function temperatureToNodeColor(
+  tempK: number,
+  theme: Theme,
+  minK: number = CYTOSCAPE_TEMP_MIN_K,
+  maxK: number = CYTOSCAPE_TEMP_MAX_K,
+): string {
   const { low, high } = NODE_COLORS[theme];
-  const span = CYTOSCAPE_TEMP_MAX_K - CYTOSCAPE_TEMP_MIN_K;
-  const t = (tempK - CYTOSCAPE_TEMP_MIN_K) / span;
+  const t = maxK > minK ? (tempK - minK) / (maxK - minK) : 0;
   return lerpHex(low, high, t);
+}
+
+/** CSS gradient of the node colour scale, cold to hot (graph legend). */
+export function nodeColorGradient(theme: Theme): string {
+  const { low, high } = NODE_COLORS[theme];
+  return `linear-gradient(to right, ${low}, ${high})`;
 }
 
 interface ReactorReport {
