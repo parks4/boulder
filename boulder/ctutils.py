@@ -230,7 +230,7 @@ def collect_all_reactors_and_reservoirs(sim):
     return all_reactors
 
 
-def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg"):
+def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg", gas=None):
     """Return the Lower & Higher heating values (LHV, HHV) for the specified fuel, in J/kg.
 
     References: https://cantera.org/examples/jupyter/thermo/heating_value.ipynb.html
@@ -240,6 +240,10 @@ def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg"):
     mechanism: str, optional
         kinetic mechanism including the thermodynamic data used to do the calculations.
         Uses schem.config['mechanism'] if not given
+    gas: ct.Solution, optional
+        Scratch ``Solution`` of ``mechanism`` to compute in; its state is
+        overwritten. Built from ``mechanism`` when not given: pass one when
+        computing many heating values, building it costs far more than the rest.
 
     If O2 is not defined in mechanism, return nan.
 
@@ -251,9 +255,8 @@ def heating_values(fuel, mechanism="gri30.yaml", return_unit="J/kg"):
     nor heat recovery below 150°C.
     """
     # TODO: validate we get correct LHV; HHV values; add a test for known fuels.
-    mechanism_path = get_mechanism_path(mechanism)
-
-    gas = ct.Solution(mechanism_path)
+    if gas is None:
+        gas = ct.Solution(get_mechanism_path(mechanism))
     gas.TP = 298, ct.one_atm
     try:
         gas.set_equivalence_ratio(1.0, fuel.mole_fraction_dict(), "O2:1.0")
