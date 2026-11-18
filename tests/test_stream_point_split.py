@@ -47,6 +47,7 @@ def _build(tmp_path, a: str, b: str):
     path.write_text(FAN_OUT.format(a=a, b=b), encoding="utf-8")
     runner = BoulderRunner.from_yaml(str(path))
     runner.build()
+    assert runner.converter is not None
     return runner.converter.connections
 
 

@@ -1077,7 +1077,7 @@ def _split_stream_flow(
             f"{fixed:.6g} kg/s, but it receives {outlet_mdot:.6g} kg/s from "
             f"'{ics[0].source_node}'."
         )
-    return [(x, float(m)) for x, m in declared]
+    return [(x, float(m)) for x, m in declared if m is not None]
 
 
 _FLOW_DEVICE_TYPES = frozenset({"MassFlowController", "PressureController", "Valve"})
