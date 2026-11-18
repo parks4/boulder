@@ -700,6 +700,11 @@ def solve_one_stage(
             outlet_mechanism,
             converter,
             stream_conns_by_stage.get(ic.target_stage, []),
+            siblings=[
+                x
+                for x in stage.inter_connections_out
+                if x.source_node == ic.source_node
+            ],
             stage_intra_connections=list(stage.intra_connections),
             display_gas=outlet_gas_preswitched,
             display_mechanism=stage.mechanism,
@@ -895,6 +900,7 @@ def _update_stream_point(
     stage_intra_connections: Optional[List[Dict[str, Any]]] = None,
     display_gas: Optional[Any] = None,
     display_mechanism: Optional[str] = None,
+    siblings: Optional[List["InterStageConnection"]] = None,
 ) -> None:
     """Refresh the stream-point reservoir for *ic* with the converged upstream state.
 
@@ -930,6 +936,10 @@ def _update_stream_point(
         :func:`_measure_outlet_mdot` as a fallback for plugin-built reactors
         that do not register a standard ``ct.MassFlowController`` in
         ``converter.connections``.
+    siblings :
+        Every inter-stage connection leaving the same source node, *ic*
+        included (default: *ic* alone).  The upstream flow is split between
+        them by :func:`_split_stream_flow`.
     """
     props_gas = display_gas if display_gas is not None else outlet_gas
     stream_id = ic.stream_point_id
@@ -996,16 +1006,19 @@ def _update_stream_point(
         }
     )
 
-    # Propagate mdot into ALL inlet MFC dicts that draw from this stream-point
-    # (fan-out: multiple downstreams may pull from the same reservoir).
+    # Each inlet MFC drawing from this stream point gets its own share of the
+    # upstream flow (fan-out: several downstreams may pull from one reservoir).
+    shares = _split_stream_flow(siblings or [ic], outlet_mdot, stream_id)
+    by_inlet = {x.inlet_mfc_id: mdot for x, mdot in shares}
     for cd in stream_inlet_mfc_dicts:
-        if cd.get("source") == stream_id or cd["id"] == ic.inlet_mfc_id:
-            cd.setdefault("properties", {})["mass_flow_rate"] = outlet_mdot
+        if cd["id"] in by_inlet:
+            cd.setdefault("properties", {})["mass_flow_rate"] = by_inlet[cd["id"]]
 
     # Keep the original inter-stage connection ID accessible in _mfc_flow_rates so
     # callers can query ``conv._mfc_flow_rates["a_to_b"]`` using the YAML-declared
     # name rather than the internal stream-point inlet MFC id.
-    converter._mfc_flow_rates[ic.id] = outlet_mdot
+    for x, mdot in shares:
+        converter._mfc_flow_rates[x.id] = mdot
 
     logger.debug(
         "Stream-point reservoir '%s' updated: T=%.1f K, mdot=%.4g kg/s",
@@ -1017,6 +1030,55 @@ def _update_stream_point(
 
 # Backward-compatible alias
 _update_iface_reservoir = _update_stream_point
+
+#: Relative tolerance on declared inter-stage rates against the upstream flow.
+STREAM_SPLIT_RTOL = 1e-6
+
+
+def _split_stream_flow(
+    ics: List["InterStageConnection"], outlet_mdot: float, stream_id: str
+) -> List[Tuple["InterStageConnection", float]]:
+    """Split the upstream flow *outlet_mdot* [kg/s] between connections *ics*.
+
+    One connection without a declared ``mass_flow_rate`` takes the whole flow.
+    Otherwise declared rates are kept and must add up to *outlet_mdot* (within
+    :data:`STREAM_SPLIT_RTOL`); one connection may stay undeclared and takes
+    the remainder.  Anything else would create or destroy mass at the stream
+    point, so it raises ``ValueError``.  A closed upstream reactor has no
+    measured outflow (*outlet_mdot* is 0): every hand-off carries 0, as
+    before this split existed.
+    """
+    declared = [(x, x.properties.get("mass_flow_rate")) for x in ics]
+    open_ = [x for x, m in declared if m is None]
+    if len(ics) == 1 and open_:
+        return [(ics[0], outlet_mdot)]
+    names = ", ".join(f"'{x.id}'" for x in ics)
+    if len(open_) > 1:
+        raise ValueError(
+            f"Stream point '{stream_id}' feeds {len(ics)} connections ({names}) "
+            f"carrying {outlet_mdot:.6g} kg/s: declare mass_flow_rate on all of "
+            "them, or on all but one (which then takes the remainder)."
+        )
+    if outlet_mdot <= 0.0:
+        return [(x, 0.0) for x in ics]
+    fixed = sum(float(m) for _, m in declared if m is not None)
+    tol = STREAM_SPLIT_RTOL * max(abs(outlet_mdot), 1e-30)
+    if open_:
+        rest = outlet_mdot - fixed
+        if rest < -tol:
+            raise ValueError(
+                f"Stream point '{stream_id}': declared rates of {names} add up to "
+                f"{fixed:.6g} kg/s, more than the {outlet_mdot:.6g} kg/s it receives."
+            )
+        return [(x, max(rest, 0.0) if m is None else float(m)) for x, m in declared]
+    if abs(fixed - outlet_mdot) > tol:
+        raise ValueError(
+            f"Stream point '{stream_id}': declared rates of {names} add up to "
+            f"{fixed:.6g} kg/s, but it receives {outlet_mdot:.6g} kg/s from "
+            f"'{ics[0].source_node}'."
+        )
+    return [(x, float(m)) for x, m in declared if m is not None]
+
 
 _FLOW_DEVICE_TYPES = frozenset({"MassFlowController", "PressureController", "Valve"})
 _TERMINAL_SINK_TYPES = frozenset({"OutletSink"})
