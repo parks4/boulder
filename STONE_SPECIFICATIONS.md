@@ -137,6 +137,13 @@ synthesised by the staged solver. A `ct.Reservoir` and one inlet
 that all flow rates are honoured at solve time and the full topology is visible to
 the Sankey and Network visualisations.
 
+When one source feeds several downstream targets, each inlet `MassFlowController`
+carries its own declared `mass_flow_rate`; one of them may omit it and takes the
+remainder. The declared rates must add up to the flow the source receives, or the
+solve fails: a stream point neither creates nor destroys mass. A single downstream
+target without a declared rate carries the whole upstream flow. A source with no
+outflow in its own stage (a closed reactor) hands off nothing.
+
 The former `settings.staged.stream_reservoirs` YAML key is no longer recognised;
 remove it from any existing configs. The `stream_reservoirs` and
 `interface_reservoirs` parameters of `solve_staged()` are removed.
